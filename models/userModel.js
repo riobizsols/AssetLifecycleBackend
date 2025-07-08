@@ -20,7 +20,8 @@ const createUser = async ({
     job_role_id,
     password,
     created_by,
-    time_zone
+    time_zone,
+    dept_id
 }) => {
     const result = await db.query(
         `INSERT INTO tblUsers (
@@ -29,14 +30,14 @@ const createUser = async ({
             job_role_id, password,
             created_by, created_on,
             changed_by, changed_on,
-            time_zone
+            time_zone, dept_id
         ) VALUES (
             $1, $2, $3,
             $4, $5, $6,
             $7, $8,
             $9, CURRENT_DATE,
             $9, CURRENT_DATE,
-            $10
+            $10, $11
         ) RETURNING *`,
         [
             ext_id,      
@@ -48,7 +49,8 @@ const createUser = async ({
             job_role_id,  
             password,     
             created_by,   
-            time_zone || 'IST' 
+            time_zone || 'IST',
+            dept_id
         ]
     );
 
@@ -91,6 +93,40 @@ const updatePassword = async ({ ext_id, org_id, user_id }, hashedPassword, chang
     );
 };
 
+// Get all users
+const getAllUsers = async () => {
+    const result = await db.query(`SELECT * FROM tblUsers`);
+    return result.rows;
+};
+
+// Delete one or more users
+const deleteUsers = async (userIds = []) => {
+    if (!userIds.length) return;
+
+    const result = await db.query(
+        `DELETE FROM tblUsers WHERE user_id = ANY($1::text[])`,
+        [userIds]
+    );
+    return result.rowCount; // number of rows deleted
+};
+
+// Update user by user_id
+const updateUser = async (user_id, fieldsToUpdate = {}) => {
+    const keys = Object.keys(fieldsToUpdate);
+    if (!keys.length) return;
+
+    const setClause = keys.map((key, idx) => `${key} = $${idx + 2}`).join(", ");
+    const values = [user_id, ...keys.map((key) => fieldsToUpdate[key])];
+
+    const result = await db.query(
+        `UPDATE tblUsers SET ${setClause} WHERE user_id = $1 RETURNING *`,
+        values
+    );
+
+    return result.rows[0];
+};
+
+
 
 module.exports = {
     findUserByEmail,
@@ -98,18 +134,7 @@ module.exports = {
     setResetToken,
     findUserByResetToken,
     updatePassword,
+    getAllUsers,
+    deleteUsers,
+    updateUser,
 };
-
-
-
-
-
-
-
-
-
-
-
-
-
-

@@ -64,37 +64,38 @@ const register = async (req, res) => {
         password,
         job_role_id,
         user_id,
-        time_zone // optional field from frontend
+        time_zone,
+        dept_id // optional field from frontend
     } = req.body;
 
-    // ✅ Only super_admin can register new users
+    // Only super_admin can register new users
     if (req.user.job_role_id !== 'super_admin') {
         return res.status(403).json({ message: 'Access denied' });
     }
 
-    // 🔍 Check if the email already exists
+    // Check if the email already exists
     const existing = await findUserByEmail(email);
     if (existing) {
         return res.status(400).json({ message: 'Email already exists' });
     }
 
-    // 🔗 Fetch ext_id for the given org_id from tblOrgs
+    // Fetch ext_id for the given org_id from tblOrgs
     const extResult = await db.query(
         'SELECT ext_id FROM tblOrgs WHERE org_id = $1',
         [req.user.org_id]
     );
 
-    // ❌ If no org found, reject
+    // If no org found, reject
     if (extResult.rowCount === 0) {
         return res.status(400).json({ message: 'Invalid organization ID' });
     }
 
     const ext_id = extResult.rows[0].ext_id;
 
-    // 🔒 Hash the password securely
+    //  Hash the password securely
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 👤 Create the user in tblUsers
+    //  Create the user in tblUsers
     const user = await createUser({
         ext_id,
         org_id: req.user.org_id,
@@ -105,7 +106,8 @@ const register = async (req, res) => {
         job_role_id,
         password: hashedPassword,
         created_by: req.user.user_id,
-        time_zone: time_zone || 'IST'
+        time_zone: time_zone || 'IST',
+        dept_id
     });
 
     // ✅ Return success response
@@ -115,7 +117,8 @@ const register = async (req, res) => {
             user_id: user.user_id,
             full_name: user.full_name,
             email: user.email,
-            job_role_id: user.job_role_id
+            job_role_id: user.job_role_id,
+            dept_id: user.dept_id
         }
     });
 };
