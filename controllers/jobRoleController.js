@@ -12,7 +12,7 @@ const fetchJobRoles = async (req, res) => {
         console.error("Error fetching job roles:", error);
         res.status(500).json({ message: "Failed to fetch job roles" });
     }
-  };
+};
 
 const addJobRole = async (req, res) => {
     try {
@@ -41,4 +41,4 @@ const addJobRole = async (req, res) => {
 module.exports = {
     fetchJobRoles,
     addJobRole,
-  };
+};
