@@ -9,8 +9,10 @@ const departmentRoutes = require('./routes/departmentRoutes');
 const branchRoutes = require('./routes/branchRoutes');
 const deptAdminRoutes = require('./routes/deptAdminRoutes');
 const assetTypeRoutes = require('./routes/assetTypeRoutes');
+const orgRoutes = require('./routes/orgRoutes');
 
 const app = express();
+app.use(express.json());
 
 app.use(
     cors({
@@ -29,7 +31,7 @@ app.use('/api/branches', branchRoutes);
 app.use('/api/admin', deptAdminRoutes);
 app.use("/api/dept-assets", assetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
-
+app.use("/api/orgs", orgRoutes);
 
 
 app.get('/', (req, res) => {
