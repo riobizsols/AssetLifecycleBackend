@@ -35,7 +35,7 @@ const addDeptAsset = async (req, res) => {
 const getAllAssetTypes = async (req, res) => {
     try {
         const result = await db.query(
-            "SELECT asset_type_id, text FROM tblAssetTypes"
+            "SELECT asset_type_id, text FROM \"tblAssetTypes\""
         );
         res.status(200).json(result.rows);
     } catch (err) {

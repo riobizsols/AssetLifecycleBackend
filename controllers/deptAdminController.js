@@ -60,7 +60,7 @@ const createDeptAdmin = async (req, res) => {
 
         // Generate the next DPTA ID
         const idResult = await db.query(
-            `SELECT id FROM tblDeptAdmins WHERE id LIKE 'DPTA%' ORDER BY id DESC LIMIT 1`
+            `SELECT id FROM "tblDeptAdmins" WHERE id LIKE 'DPTA%' ORDER BY id DESC LIMIT 1`
         );
 
        
@@ -68,7 +68,7 @@ const createDeptAdmin = async (req, res) => {
 
         // Insert into tblDeptAdmins
         const insertResult = await db.query(
-            `INSERT INTO tblDeptAdmins (ext_id, id, org_id, dept_id, user_id, created_by, created_on)
+            `INSERT INTO "tblDeptAdmins" (ext_id, id, org_id, dept_id, user_id, created_by, created_on)
          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
          RETURNING *`,
             [ext_id, newId, org_id, dept_id, user_id, created_by]
@@ -77,7 +77,7 @@ const createDeptAdmin = async (req, res) => {
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"
         const updatedRoleId = `admin/${dept_id}`;
         await db.query(
-            `UPDATE tblUsers SET job_role_id = $1 WHERE user_id = $2`,
+            `UPDATE "tblUsers" SET job_role_id = $1 WHERE user_id = $2`,
             [updatedRoleId, user_id]
         );
 
@@ -103,9 +103,9 @@ const fetchAllAdmins = async (req, res) => {
     try {
         const result = await db.query(
             `SELECT d.dept_id, d.text AS dept_name, da.user_id, u.full_name
-         FROM tblDeptAdmins da
-         JOIN tblUsers u ON da.user_id = u.user_id
-         JOIN tblDepartments d ON da.dept_id = d.dept_id`
+         FROM "tblDeptAdmins" da
+         JOIN "tblUsers" u ON da.user_id = u.user_id
+         JOIN "tblDepartments" d ON da.dept_id = d.dept_id`
         );
         res.json(result.rows);
     } catch (err) {

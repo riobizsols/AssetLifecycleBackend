@@ -15,7 +15,7 @@ const createDepartment = async (req, res) => {
 
         // 🔹 Get ext_id from tblOrgs
         const orgResult = await db.query(
-            'SELECT ext_id FROM tblOrgs WHERE org_id = $1',
+            'SELECT ext_id FROM "tblOrgs" WHERE org_id = $1',
             [org_id]
         );
 
@@ -31,7 +31,7 @@ const createDepartment = async (req, res) => {
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
         const deptIdResult = await db.query(
-            "SELECT dept_id FROM tblDepartments WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
+            "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
             [org_id]
         );
 
@@ -62,7 +62,7 @@ const getNextDepartmentId = async (req, res) => {
         const org_id = req.user.org_id;
 
         const result = await db.query(
-            "SELECT dept_id FROM tblDepartments WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
+            "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
             [org_id]
         );
 
