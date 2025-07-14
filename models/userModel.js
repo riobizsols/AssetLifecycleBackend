@@ -3,7 +3,7 @@ const db = require('../config/db');
 //  Find user by email (used for login)
 const findUserByEmail = async (email) => {
     const result = await db.query(
-        'SELECT * FROM tblUsers WHERE email = $1',
+        'SELECT * FROM "tblUsers" WHERE email = $1',
         [email]
     );
     return result.rows[0];
@@ -24,7 +24,7 @@ const createUser = async ({
     dept_id
 }) => {
     const result = await db.query(
-        `INSERT INTO tblUsers (
+        `INSERT INTO "tblUsers" (
             ext_id, org_id, user_id,
             full_name, email, phone,
             job_role_id, password,
@@ -62,7 +62,7 @@ const createUser = async ({
 // Set reset token for password reset
 const setResetToken = async (email, token, expiry) => {
     await db.query(
-        `UPDATE tblUsers
+        `UPDATE "tblUsers"
          SET reset_token = $1, reset_token_expiry = $2
          WHERE email = $3`,
         [token, expiry, email]
@@ -72,7 +72,7 @@ const setResetToken = async (email, token, expiry) => {
 // Find user by valid reset token
 const findUserByResetToken = async (token) => {
     const result = await db.query(
-        `SELECT * FROM tblUsers
+        `SELECT * FROM "tblUsers"
          WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
         [token]
     );
@@ -82,7 +82,7 @@ const findUserByResetToken = async (token) => {
 // Update user password after reset
 const updatePassword = async ({ ext_id, org_id, user_id }, hashedPassword, changed_by) => {
     await db.query(
-        `UPDATE tblUsers
+        `UPDATE "tblUsers"
          SET password = $1,
              reset_token = NULL,
              reset_token_expiry = NULL,
@@ -95,7 +95,7 @@ const updatePassword = async ({ ext_id, org_id, user_id }, hashedPassword, chang
 
 // Get all users
 const getAllUsers = async () => {
-    const result = await db.query(`SELECT * FROM tblUsers`);
+    const result = await db.query(`SELECT * FROM "tblUsers"`);
     return result.rows;
 };
 
@@ -104,7 +104,7 @@ const deleteUsers = async (userIds = []) => {
     if (!userIds.length) return;
 
     const result = await db.query(
-        `DELETE FROM tblUsers WHERE user_id = ANY($1::text[])`,
+        `DELETE FROM "tblUsers" WHERE user_id = ANY($1::text[])`,
         [userIds]
     );
     return result.rowCount; // number of rows deleted
@@ -119,7 +119,7 @@ const updateUser = async (user_id, fieldsToUpdate = {}) => {
     const values = [user_id, ...keys.map((key) => fieldsToUpdate[key])];
 
     const result = await db.query(
-        `UPDATE tblUsers SET ${setClause} WHERE user_id = $1 RETURNING *`,
+        `UPDATE "tblUsers" SET ${setClause} WHERE user_id = $1 RETURNING *`,
         values
     );
 

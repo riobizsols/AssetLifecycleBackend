@@ -35,7 +35,7 @@ const login = async (req, res) => {
 
     // Update last_accessed field
     await db.query(
-        `UPDATE tblUsers 
+        `UPDATE "tblUsers" 
          SET last_accessed = CURRENT_DATE 
          WHERE ext_id = $1 AND org_id = $2 AND user_id = $3`,
         [user.ext_id, user.org_id, user.user_id]
@@ -81,7 +81,7 @@ const register = async (req, res) => {
 
     // Fetch ext_id for the given org_id from tblOrgs
     const extResult = await db.query(
-        'SELECT ext_id FROM tblOrgs WHERE org_id = $1',
+        'SELECT ext_id FROM "tblOrgs" WHERE org_id = $1',
         [req.user.org_id]
     );
 
@@ -166,7 +166,7 @@ const updateOwnPassword = async (req, res) => {
     const { ext_id, org_id, user_id } = req.user;
 
     const result = await db.query(
-        'SELECT * FROM tblUsers WHERE ext_id = $1 AND org_id = $2 AND user_id = $3',
+        'SELECT * FROM "tblUsers" WHERE ext_id = $1 AND org_id = $2 AND user_id = $3',
         [ext_id, org_id, user_id]
     );
     const user = result.rows[0];
@@ -183,7 +183,7 @@ const updateOwnPassword = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await db.query(
-        'UPDATE tblUsers SET password = $1 WHERE ext_id = $2 AND org_id = $3 AND user_id = $4',
+        'UPDATE "tblUsers" SET password = $1 WHERE ext_id = $2 AND org_id = $3 AND user_id = $4',
         [hashedPassword, ext_id, org_id, user_id]
     );
 
