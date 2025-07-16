@@ -10,6 +10,9 @@ const branchRoutes = require("./routes/branchRoutes");
 const deptAdminRoutes = require("./routes/deptAdminRoutes");
 const assetTypeRoutes = require("./routes/assetTypeRoutes");
 const vendorsRoutes = require("./routes/vendorsRoutes");
+const prodServRoutes = require("./routes/prodServRoutes");
+const asset_typeRoutes = require("./routes/asset_typeRoute");
+const assetRoutes = require("./routes/assetRoutes");
 
 const app = express();
 
@@ -30,7 +33,10 @@ app.use("/api/branches", branchRoutes);
 app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", assetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
-app.use("/api/vendors", vendorsRoutes);
+app.use("/api/", vendorsRoutes);
+app.use("/api/", prodServRoutes);
+app.use("/api/", asset_typeRoutes);
+app.use("/api/assets", assetRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

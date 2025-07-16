@@ -20,7 +20,7 @@ const createBranch = async (req, res) => {
         const newId = await generateCustomId("branch", 2); 
 
         const newBranch = await branchModel.addBranch({
-            id: newId,
+            branch_id: newId,
             ext_id,
             org_id,
             text,
