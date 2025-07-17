@@ -8,15 +8,22 @@ const userRoutes = require("./routes/userRoutes");
 const departmentRoutes = require("./routes/departmentRoutes");
 const branchRoutes = require("./routes/branchRoutes");
 const deptAdminRoutes = require("./routes/deptAdminRoutes");
-const assetTypeRoutes = require("./routes/assetTypeRoutes");
+const deptAssetTypeRoutes = require("./routes/deptAssetTypeRoutes");
 const vendorsRoutes = require("./routes/vendorsRoutes");
 const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
 const orgRoutes = require('./routes/orgRoutes');
+const propertiesRoutes = require('./routes/propertiesRoutes');
 
 const app = express();
 app.use(express.json());
+
+// Log every incoming request
+app.use((req, res, next) => {
+  console.log(`[INCOMING REQUEST] ${req.method} ${req.originalUrl}`);
+  next();
+});
 
 app.use(
   cors({
@@ -33,13 +40,14 @@ app.use("/api", jobRoleRoutes, departmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/admin", deptAdminRoutes);
-app.use("/api/dept-assets", assetTypeRoutes);
+app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
 app.use("/api/", vendorsRoutes);
 app.use("/api/", prodServRoutes);
 app.use("/api/", asset_typeRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/orgs", orgRoutes);
+app.use("/api/properties", propertiesRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

@@ -147,7 +147,6 @@ const getAssetWithDetails = async (asset_id) => {
 const insertAsset = async (assetData) => {
   const {
     asset_type_id,
-    ext_id,
     asset_id,
     text,
     serial_number,
@@ -169,18 +168,22 @@ const insertAsset = async (assetData) => {
   } = assetData;
 
   const query = `
-        INSERT INTO "tblAssets" (
-            asset_type_id, ext_id, asset_id, text, serial_number, description,
-            branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
-        RETURNING *
-    `;
+    INSERT INTO "tblAssets" (
+      asset_type_id, ext_id, asset_id, text, serial_number, description,
+      branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+      purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+      parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+    ) VALUES (
+      $1, gen_random_uuid(), $2, $3, $4, $5,
+      $6, $7, $8, $9, $10,
+      $11, $12, $13, $14, $15,
+      $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
+    )
+    RETURNING *;
+  `;
 
   const values = [
     asset_type_id,
-    ext_id,
     asset_id,
     text,
     serial_number,
@@ -204,6 +207,7 @@ const insertAsset = async (assetData) => {
   return await db.query(query, values);
 };
 
+
 const checkAssetExists = async (ext_id, org_id) => {
   const query = `
         SELECT asset_id FROM "tblAssets"
@@ -222,6 +226,65 @@ const checkAssetIdExists = async (asset_id) => {
   return await db.query(query, [asset_id]);
 };
 
+const checkVendorExists = async (vendor_id) => {
+  const query = `
+        SELECT vendor_id FROM "tblVendors"
+        WHERE vendor_id = $1
+    `;
+
+  return await db.query(query, [vendor_id]);
+};
+
+const checkProdServExists = async (prod_serv_id) => {
+  const query = `
+        SELECT prod_serv_id FROM "tblProdServs"
+        WHERE prod_serv_id = $1
+    `;
+
+  return await db.query(query, [prod_serv_id]);
+};
+
+const insertAssetPropValue = async (propValueData) => {
+  const {
+    asset_id,
+    ext_id,
+    org_id,
+    asset_type_prop_id,
+    value
+  } = propValueData;
+
+  // Generate a unique apv_id if sequence doesn't exist
+  const timestamp = Date.now().toString().slice(-6);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  const apvId = `APV${timestamp}${random}`;
+
+  const query = `
+        INSERT INTO "tblAssetPropValues" (
+            apv_id, asset_id, ext_id, org_id, asset_type_prop_id, value
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING *
+    `;
+
+  const values = [apvId, asset_id, ext_id, org_id, asset_type_prop_id, value];
+  return await db.query(query, values);
+};
+
+const generateAssetId = async () => {
+  // Generate a unique asset ID with format: AST + timestamp + random number
+  const timestamp = Date.now().toString().slice(-6);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  const assetId = `AST${timestamp}${random}`;
+  
+  // Check if this ID already exists
+  const existing = await checkAssetIdExists(assetId);
+  if (existing.rows.length > 0) {
+    // If exists, generate a new one recursively
+    return generateAssetId();
+  }
+  
+  return assetId;
+};
+
 module.exports = {
   getAllAssets,
   getAssetById,
@@ -235,4 +298,8 @@ module.exports = {
   insertAsset,
   checkAssetExists,
   checkAssetIdExists,
+  checkVendorExists,
+  checkProdServExists,
+  insertAssetPropValue,
+  generateAssetId,
 };

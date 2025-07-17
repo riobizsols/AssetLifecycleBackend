@@ -9,6 +9,7 @@ router.use(protect);
 // POST /api/assets - Add new asset
 router.post("/", controller.addAsset);
 
+router.get("/all-assets", controller.getAllAssets);
 // GET /api/assets - Get all assets (with optional query filters)
 router.get("/", controller.getAssetsWithFilters);
 

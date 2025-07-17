@@ -34,9 +34,11 @@ const addDeptAsset = async (req, res) => {
 
 const getAllAssetTypes = async (req, res) => {
     try {
+        console.log('Fetching all asset types...');
         const result = await db.query(
-            "SELECT asset_type_id, text FROM \"tblAssetTypes\""
+            "SELECT asset_type_id, text FROM \"tblAssetTypes\" WHERE int_status = 1"
         );
+        console.log(`Found ${result.rows.length} asset types:`, result.rows);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);
