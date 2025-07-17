@@ -257,6 +257,73 @@ const getAssetsWithFilters = async (req, res) => {
     }
 };
 
+// DELETE /api/assets/:id - Delete single asset
+const deleteAsset = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Check if asset exists
+        const existingAsset = await model.getAssetById(id);
+        if (existingAsset.rows.length === 0) {
+            return res.status(404).json({ error: "Asset not found" });
+        }
+
+        // Delete the asset
+        const result = await model.deleteAsset(id);
+
+        res.status(200).json({
+            message: "Asset deleted successfully",
+            deletedAsset: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error("Error deleting asset:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+// DELETE /api/assets - Delete multiple assets
+const deleteMultipleAssets = async (req, res) => {
+    try {
+        const { asset_ids } = req.body;
+
+        if (!Array.isArray(asset_ids) || asset_ids.length === 0) {
+            return res.status(400).json({ 
+                error: "asset_ids array is required and must not be empty" 
+            });
+        }
+
+        // Check if all assets exist
+        const existingAssets = [];
+        for (const asset_id of asset_ids) {
+            const asset = await model.getAssetById(asset_id);
+            if (asset.rows.length > 0) {
+                existingAssets.push(asset_id);
+            }
+        }
+
+        if (existingAssets.length === 0) {
+            return res.status(404).json({ 
+                error: "None of the specified assets were found" 
+            });
+        }
+
+        // Delete the assets
+        const result = await model.deleteMultipleAssets(existingAssets);
+
+        res.status(200).json({
+            message: `${result.rows.length} asset(s) deleted successfully`,
+            deletedAssets: result.rows,
+            requestedCount: asset_ids.length,
+            deletedCount: result.rows.length
+        });
+
+    } catch (err) {
+        console.error("Error deleting multiple assets:", err);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
 module.exports = {
     addAsset,
     getAllAssets,
@@ -268,5 +335,7 @@ module.exports = {
     getAssetsByStatus,
     getAssetsByOrg,
     searchAssets,
-    getAssetsWithFilters
+    getAssetsWithFilters,
+    deleteAsset,
+    deleteMultipleAssets
 };

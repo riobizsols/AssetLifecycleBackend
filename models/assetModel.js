@@ -222,6 +222,26 @@ const checkAssetIdExists = async (asset_id) => {
   return await db.query(query, [asset_id]);
 };
 
+const deleteAsset = async (asset_id) => {
+  const query = `
+        DELETE FROM "tblAssets"
+        WHERE asset_id = $1
+        RETURNING *
+    `;
+
+  return await db.query(query, [asset_id]);
+};
+
+const deleteMultipleAssets = async (asset_ids) => {
+  const query = `
+        DELETE FROM "tblAssets"
+        WHERE asset_id = ANY($1::text[])
+        RETURNING *
+    `;
+
+  return await db.query(query, [asset_ids]);
+};
+
 module.exports = {
   getAllAssets,
   getAssetById,
@@ -235,4 +255,6 @@ module.exports = {
   insertAsset,
   checkAssetExists,
   checkAssetIdExists,
+  deleteAsset,
+  deleteMultipleAssets,
 };

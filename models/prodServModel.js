@@ -25,7 +25,37 @@ async function addProdserv(data) {
   return result.rows[0];
 }
 
+async function deleteProdserv(prod_serv_id) {
+  const query = `
+    DELETE FROM "tblProdServs"
+    WHERE prod_serv_id = $1
+    RETURNING *;
+  `;
+  const result = await db.query(query, [prod_serv_id]);
+  return result.rows[0];
+}
+
+async function deleteMultipleProdserv(prod_serv_ids) {
+  if (!Array.isArray(prod_serv_ids) || prod_serv_ids.length === 0) {
+    throw new Error('Invalid or empty array of prod_serv_ids');
+  }
+
+  // Create placeholders for the IN clause
+  const placeholders = prod_serv_ids.map((_, index) => `$${index + 1}`).join(',');
+  
+  const query = `
+    DELETE FROM "tblProdServs"
+    WHERE prod_serv_id IN (${placeholders})
+    RETURNING *;
+  `;
+  
+  const result = await db.query(query, prod_serv_ids);
+  return result.rows;
+}
+
 module.exports = {
   addProdserv,
+  deleteProdserv,
+  deleteMultipleProdserv,
   // ...other methods
 };
