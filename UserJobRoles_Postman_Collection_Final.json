@@ -1,0 +1,375 @@
+{
+	"info": {
+		"_postman_id": "user-job-roles-api-collection-final",
+		"name": "User Job Roles API Collection (Final)",
+		"description": "Complete CRUD operations for tblUserJobRoles table with Bearer token authorization - Port 5001",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "1. Test Table Exists",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/test-table",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"test-table"
+					]
+				},
+				"description": "Check if the tblUserJobRoles table exists in the database"
+			},
+			"response": []
+		},
+		{
+			"name": "2. Get All User Job Roles",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/get-all",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"get-all"
+					]
+				},
+				"description": "Retrieve all user job role associations"
+			},
+			"response": []
+		},
+		{
+			"name": "3. Create User Job Role",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"user_job_role_id\": \"UJR001\",\n    \"user_id\": \"USR001\",\n    \"job_role_id\": \"JR001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/create",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"create"
+					]
+				},
+				"description": "Create a new user job role association"
+			},
+			"response": []
+		},
+		{
+			"name": "4. Create Another User Job Role",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"user_job_role_id\": \"UJR002\",\n    \"user_id\": \"USR002\",\n    \"job_role_id\": \"JR002\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/create",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"create"
+					]
+				},
+				"description": "Create another user job role association"
+			},
+			"response": []
+		},
+		{
+			"name": "5. Get User Job Role by ID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/get-by-id/UJR001",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"get-by-id",
+						"UJR001"
+					]
+				},
+				"description": "Get a specific user job role by its ID"
+			},
+			"response": []
+		},
+		{
+			"name": "6. Get User Job Roles by User ID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/get-by-user/USR001",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"get-by-user",
+						"USR001"
+					]
+				},
+				"description": "Get all job roles associated with a specific user"
+			},
+			"response": []
+		},
+		{
+			"name": "7. Get User Job Roles by Job Role ID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/get-by-job-role/JR001",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"get-by-job-role",
+						"JR001"
+					]
+				},
+				"description": "Get all users associated with a specific job role"
+			},
+			"response": []
+		},
+		{
+			"name": "8. Update User Job Role",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"job_role_id\": \"JR003\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/update/UJR001",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"update",
+						"UJR001"
+					]
+				},
+				"description": "Update an existing user job role association"
+			},
+			"response": []
+		},
+		{
+			"name": "9. Delete User Job Role",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/delete/UJR002",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"delete",
+						"UJR002"
+					]
+				},
+				"description": "Delete a specific user job role association"
+			},
+			"response": []
+		},
+		{
+			"name": "10. Delete Multiple User Job Roles",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"user_job_role_ids\": [\"UJR001\", \"UJR002\"]\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/delete-multiple",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"delete-multiple"
+					]
+				},
+				"description": "Delete multiple user job role associations"
+			},
+			"response": []
+		},
+		{
+			"name": "11. Test Error - Create Duplicate",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "Content-Type",
+						"value": "application/json"
+					},
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"user_job_role_id\": \"UJR001\",\n    \"user_id\": \"USR001\",\n    \"job_role_id\": \"JR001\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/create",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"create"
+					]
+				},
+				"description": "Test error handling - try to create a duplicate user job role"
+			},
+			"response": []
+		},
+		{
+			"name": "12. Test Error - Get Non-existent ID",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "Authorization",
+						"value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHRfaWQiOiJlMDdkNDBlYS1iNThmLTQ2MTYtODhmOC1lNTZlNTUxNjIxZjAiLCJvcmdfaWQiOiJPUkcwMDEiLCJ1c2VyX2lkIjoiRU1QMDA2IiwiZW1haWwiOiJuYXJlbnJpbzc1NkBnbWFpbC5jb20iLCJqb2Jfcm9sZV9pZCI6InN1cGVyX2FkbWluIiwiaWF0IjoxNzUyNDg5OTAyLCJleHAiOjE3NTMwOTQ3MDJ9.lGXFSie20Y1Q9iq910QTW_PAY7W9MXeuAUOaChEF9Ik",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/user-job-roles/get-by-id/NONEXISTENT",
+					"host": [
+						"{{base_url}}"
+					],
+					"path": [
+						"api",
+						"user-job-roles",
+						"get-by-id",
+						"NONEXISTENT"
+					]
+				},
+				"description": "Test error handling - try to get a non-existent user job role"
+			},
+			"response": []
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:5001",
+			"type": "string"
+		}
+	]
+} 
