@@ -13,12 +13,7 @@ const vendorsRoutes = require("./routes/vendorsRoutes");
 const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
-<<<<<<< HEAD
-const orgRoutes = require('./routes/orgRoutes');
-const propertiesRoutes = require('./routes/propertiesRoutes');
-=======
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
->>>>>>> origin/Naren
 
 const app = express();
 app.use(express.json());
