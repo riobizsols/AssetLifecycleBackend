@@ -13,8 +13,12 @@ const vendorsRoutes = require("./routes/vendorsRoutes");
 const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
+<<<<<<< HEAD
 const orgRoutes = require('./routes/orgRoutes');
 const propertiesRoutes = require('./routes/propertiesRoutes');
+=======
+const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
+>>>>>>> origin/Naren
 
 const app = express();
 app.use(express.json());
@@ -48,6 +52,7 @@ app.use("/api/", asset_typeRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
+app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

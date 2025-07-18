@@ -37,4 +37,10 @@ router.get("/status/:status", controller.getAssetsByStatus);
 // // GET /api/assets/search?q=searchTerm - Search assets
 // router.get("/search", controller.searchAssets);
 
+// DELETE /api/assets/:id - Delete single asset
+router.delete("/:id", controller.deleteAsset);
+
+// DELETE /api/assets - Delete multiple assets
+router.delete("/", controller.deleteMultipleAssets);
+
 module.exports = router;
