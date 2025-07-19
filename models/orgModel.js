@@ -35,12 +35,49 @@ const updateOrganization = async (org) => {
   return result.rows[0];
 };
 
+const checkOrgReferences = async (org_id) => {
+  try {
+    // Check if organization is referenced by users
+    const usersQuery = `
+      SELECT COUNT(*) as user_count 
+      FROM "tblUsers" 
+      WHERE org_id = $1
+    `;
+    const usersResult = await db.query(usersQuery, [org_id]);
+    const userCount = parseInt(usersResult.rows[0].user_count);
+
+    // Check if organization is referenced by other tables
+    // Add more checks as needed for other tables that reference org_id
+    
+    return {
+      userCount,
+      totalReferences: userCount
+    };
+  } catch (error) {
+    console.error('Error in checkOrgReferences:', error);
+    throw error;
+  }
+};
+
 const deleteOrganizations = async (org_id = []) => {
-  const result = await db.query(
-    `DELETE FROM "tblOrgs" WHERE org_id = ANY($1::text[])`,
-    [org_id]
-  );
-  return result.rowCount;
+  try {
+    // Check references before deletion
+    for (const id of org_id) {
+      const references = await checkOrgReferences(id);
+      if (references.totalReferences > 0) {
+        throw new Error(`Cannot delete organization ${id} - it is referenced by ${references.userCount} user(s)`);
+      }
+    }
+
+    const result = await db.query(
+      `DELETE FROM "tblOrgs" WHERE org_id = ANY($1::text[])`,
+      [org_id]
+    );
+    return result.rowCount;
+  } catch (error) {
+    console.error('Error in deleteOrganizations:', error);
+    throw error;
+  }
 };
 
 module.exports = {

@@ -85,6 +85,25 @@ const deleteOrganizationsController = async (req, res) => {
         res.status(200).json({ deleted: deletedCount });
     } catch (err) {
         console.error("Error deleting organizations:", err);
+        
+        // Handle foreign key constraint errors
+        if (err.message && err.message.includes('Cannot delete organization')) {
+            return res.status(400).json({ 
+                error: "Cannot delete organization",
+                message: err.message,
+                hint: "You must first reassign or delete all users associated with this organization before it can be deleted"
+            });
+        }
+        
+        // Handle PostgreSQL foreign key constraint errors
+        if (err.code === '23503') {
+            return res.status(400).json({ 
+                error: "Cannot delete organization",
+                message: "This organization is being used by existing records",
+                hint: "You must first reassign or delete all users associated with this organization before it can be deleted"
+            });
+        }
+        
         res.status(500).json({ message: "Internal server error" });
     }
 };

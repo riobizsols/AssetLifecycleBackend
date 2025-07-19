@@ -13,11 +13,20 @@ exports.getAllVendors = async (req, res) => {
 
 //add new vendor
 
+const generateVendorId = async () => {
+  const result = await db.query(`SELECT vendor_id FROM "tblVendors" ORDER BY vendor_id DESC LIMIT 1`);
+  const lastId = result.rows[0]?.vendor_id;
+  let newNumber = 10001; // starting number
+  if (lastId && /^VEND\d+$/.test(lastId)) {
+    newNumber = parseInt(lastId.replace('VEND', '')) + 1;
+  }
+  return `VEND${newNumber}`;
+};
 
 exports.createVendor = async (req, res) => {
   try {
     const {
-      vendor_id,
+      // vendor_id, // REMOVE this from destructuring
       vendor_name,
       company,
       email,
@@ -42,9 +51,10 @@ exports.createVendor = async (req, res) => {
     const changed_on = new Date();
     const created_on = new Date();
     const ext_id = uuidv4(); // Always auto-generate ext_id
+    const vendor_id = await generateVendorId(); // Always generate vendor_id
 
     const vendorData = {
-      vendor_id,
+      vendor_id, // use generated
       org_id,
       ext_id, // auto-generated
       vendor_name,
@@ -81,23 +91,78 @@ exports.createVendor = async (req, res) => {
 
 
 
-// Delete vendor by vendor_id
-exports.deleteVendor = async (req, res) => {
+// Delete multiple vendors
+exports.deleteVendors = async (req, res) => {
   try {
-    const { vendor_id } = req.params;
-    const query = 'DELETE FROM "tblVendors" WHERE vendor_id = $1 RETURNING *;';
-    const { rows } = await db.query(query, [vendor_id]);
-    if (rows.length === 0) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Vendor not found" });
+    const { ids } = req.body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Invalid request",
+        message: "Please provide an array of vendor IDs to delete" 
+      });
     }
-    res.json({ success: true, message: "Vendor deleted", vendor: rows[0] });
+
+    // Check if vendors exist and check all foreign key constraints
+    const checkQuery = `
+      SELECT 
+        v.vendor_id,
+        v.vendor_name,
+        CASE WHEN vps.vendor_id IS NOT NULL THEN true ELSE false END as has_products,
+        CASE WHEN a.vendor_id IS NOT NULL THEN true ELSE false END as has_assets
+      FROM "tblVendors" v
+      LEFT JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id
+      LEFT JOIN "tblAssets" a ON v.vendor_id = a.vendor_id
+      WHERE v.vendor_id = ANY($1)
+      GROUP BY v.vendor_id, v.vendor_name, vps.vendor_id, a.vendor_id;
+    `;
+    const checkResult = await db.query(checkQuery, [ids]);
+
+    // Check if all vendors exist
+    if (checkResult.rows.length !== ids.length) {
+      return res.status(404).json({
+        success: false,
+        error: "Vendors not found",
+        message: "One or more vendors do not exist"
+      });
+    }
+
+    // Check for any constraints
+    const vendorsWithConstraints = checkResult.rows.filter(row => row.has_products || row.has_assets);
+    if (vendorsWithConstraints.length > 0) {
+      const constraintDetails = vendorsWithConstraints.map(vendor => {
+        const constraints = [];
+        if (vendor.has_products) constraints.push("products/services");
+        if (vendor.has_assets) constraints.push("assets");
+        
+        return `${vendor.vendor_name} (${vendor.vendor_id}) - has associated ${constraints.join(" and ")}`;
+      });
+
+      return res.status(400).json({
+        success: false,
+        error: "Constraint violation",
+        message: "Cannot delete vendors with associated records",
+        details: constraintDetails
+      });
+    }
+
+    // Delete the vendors
+    const deleteQuery = 'DELETE FROM "tblVendors" WHERE vendor_id = ANY($1) RETURNING *;';
+    const { rows } = await db.query(deleteQuery, [ids]);
+
+    res.json({ 
+      success: true, 
+      message: `${rows.length} vendor(s) deleted successfully`,
+      deletedCount: rows.length
+    });
   } catch (error) {
-    console.error(error);
-    res
-      .status(500)
-      .json({ success: false, message: "Server Error", error: error.message });
+    console.error("Delete vendors error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Server Error",
+      message: "Failed to delete vendors" 
+    });
   }
 };
 

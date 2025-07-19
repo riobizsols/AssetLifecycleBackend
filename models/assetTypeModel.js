@@ -68,16 +68,6 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     return await db.query(query, values);
 };
 
-const deleteAssetType = async (asset_type_id) => {
-    const query = `
-        DELETE FROM "tblAssetTypes"
-        WHERE asset_type_id = $1
-        RETURNING *
-    `;
-    
-    return await db.query(query, [asset_type_id]);
-};
-
 const checkAssetTypeExists = async (ext_id, org_id) => {
     const query = `
         SELECT asset_type_id FROM "tblAssetTypes"
@@ -87,11 +77,49 @@ const checkAssetTypeExists = async (ext_id, org_id) => {
     return await db.query(query, [ext_id, org_id]);
 };
 
+const checkAssetTypeReferences = async (asset_type_id) => {
+    try {
+        // Check only tblAssets
+        const assetsQuery = `
+            SELECT a.asset_id, a.text as asset_name
+            FROM "tblAssets" a
+            WHERE a.asset_type_id = $1
+        `;
+        const assetsResult = await db.query(assetsQuery, [asset_type_id]);
+
+        // Return results
+        return {
+            rows: assetsResult.rows,
+            assetCount: assetsResult.rows.length,
+            deptAssetCount: 0 // We don't have department assets table
+        };
+    } catch (error) {
+        console.error('Error in checkAssetTypeReferences:', error);
+        throw error;
+    }
+};
+
+const deleteAssetType = async (asset_type_id) => {
+    try {
+        const query = `
+            DELETE FROM "tblAssetTypes"
+            WHERE asset_type_id = $1
+            RETURNING *
+        `;
+        
+        return await db.query(query, [asset_type_id]);
+    } catch (error) {
+        console.error('Error in deleteAssetType:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     insertAssetType,
     getAllAssetTypes,
     getAssetTypeById,
     updateAssetType,
     deleteAssetType,
-    checkAssetTypeExists
+    checkAssetTypeExists,
+    checkAssetTypeReferences
 }; 

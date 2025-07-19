@@ -14,6 +14,8 @@ const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
+const orgRoutes = require("./routes/orgRoutes");
+const propertiesRoutes = require("./routes/propertiesRoutes");
 
 const app = express();
 app.use(express.json());
