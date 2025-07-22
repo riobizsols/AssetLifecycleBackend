@@ -52,8 +52,62 @@ const deleteBranches = async (req, res) => {
     }
 };
 
+const updateBranch = async (req, res) => {
+    try {
+        const { branch_id } = req.params;
+        const { text, city, branch_code } = req.body;
+        const { user_id } = req.user;
+
+        // Validate required fields
+        if (!text || !city || !branch_code) {
+            return res.status(400).json({ 
+                error: "Missing required fields",
+                message: "Branch name, city and branch code are required" 
+            });
+        }
+
+        // Check if branch exists
+        const branches = await branchModel.getAllBranches();
+        const branchExists = branches.find(b => b.branch_id === branch_id);
+        
+        if (!branchExists) {
+            return res.status(404).json({ 
+                error: "Branch not found",
+                message: "The specified branch does not exist" 
+            });
+        }
+
+        // Check if branch code is unique (excluding current branch)
+        const duplicateBranchCode = branches.find(b => 
+            b.branch_code === branch_code && b.branch_id !== branch_id
+        );
+
+        if (duplicateBranchCode) {
+            return res.status(400).json({ 
+                error: "Duplicate branch code",
+                message: "This branch code is already in use" 
+            });
+        }
+
+        const updatedBranch = await branchModel.updateBranch(
+            branch_id,
+            { text, city, branch_code },
+            user_id
+        );
+
+        res.json({
+            message: "Branch updated successfully",
+            data: updatedBranch
+        });
+    } catch (error) {
+        console.error("Error updating branch:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
 module.exports = {
     getBranches,
     createBranch,
     deleteBranches,
+    updateBranch,
 };

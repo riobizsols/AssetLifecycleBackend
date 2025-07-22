@@ -1,65 +1,41 @@
 const model = require("../models/assetTypeModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const { v4: uuidv4 } = require('uuid');
 
 // POST /api/asset-types - Add new asset type
 const addAssetType = async (req, res) => {
     try {
         const {
-            ext_id,
-            org_id,
-            asset_type_id, // Allow manual asset_type_id
-            int_status = 1,
-            maintenance_schedule,
-            assignment_type,
-            inspection_required = false,
-            group_required = false,
-            text
+            text,                   // from frontend
+            assignment_type,        // from frontend
+            int_status,            // from frontend (1 or 0)
+            group_required,        // from frontend
+            inspection_required,    // from frontend
+            maintenance_schedule   // from frontend (1 or 0)
         } = req.body;
 
+        // Get org_id and user_id from authenticated user
+        const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
+        // Generate ext_id (UUID)
+        const ext_id = uuidv4();
+
+        // Generate unique asset_type_id
+        const asset_type_id = await generateCustomId("asset_type", 3);
+
         // Validate required fields
-        if (!ext_id || !org_id || !text) {
+        if (!text) {
             return res.status(400).json({ 
-                error: "ext_id, org_id, and text are required fields" 
+                error: "Asset type name (text) is required" 
             });
-        }
-
-        // Validate ext_id is a valid UUID
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(ext_id)) {
-            return res.status(400).json({ 
-                error: "ext_id must be a valid UUID format (e.g., 123e4567-e89b-12d3-a456-426614174000)" 
-            });
-        }
-
-        // Check if asset type already exists
-        const existingAsset = await model.checkAssetTypeExists(ext_id, org_id);
-        if (existingAsset.rows.length > 0) {
-            return res.status(409).json({ 
-                error: "Asset type with this ext_id and org_id already exists" 
-            });
-        }
-
-        // Use provided asset_type_id or generate one
-        let finalAssetTypeId = asset_type_id;
-        if (!asset_type_id) {
-            finalAssetTypeId = await generateCustomId("asset_type", 3);
-        } else {
-            // Check if the provided asset_type_id already exists
-            const existingAssetType = await model.getAssetTypeById(asset_type_id);
-            if (existingAssetType.rows.length > 0) {
-                return res.status(409).json({ 
-                    error: "Asset type with this asset_type_id already exists" 
-                });
-            }
         }
 
         // Insert new asset type
         const result = await model.insertAssetType(
             ext_id,
             org_id,
-            finalAssetTypeId,
+            asset_type_id,
             int_status,
             maintenance_schedule,
             assignment_type,
@@ -76,7 +52,7 @@ const addAssetType = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding asset type:", err);
-        res.status(500).json({ error: "Internal server error", err });
+        res.status(500).json({ error: "Internal server error", details: err.message });
     }
 };
 
@@ -170,20 +146,68 @@ const updateAssetType = async (req, res) => {
 const deleteAssetType = async (req, res) => {
     try {
         const { id } = req.params;
+        console.log('Received delete request for asset type ID:', id);
 
         // Check if asset type exists
         const existingAsset = await model.getAssetTypeById(id);
+        console.log('Existing asset check result:', existingAsset.rows);
+        
         if (existingAsset.rows.length === 0) {
-            return res.status(404).json({ error: "Asset type not found" });
+            console.log('Asset type not found:', id);
+            return res.status(404).json({ 
+                error: "Asset type not found",
+                details: `No asset type found with ID: ${id}`
+            });
         }
 
-        await model.deleteAssetType(id);
+        // Check if asset type is being used by any assets or department assets
+        const references = await model.checkAssetTypeReferences(id);
+        console.log('Reference check result:', references);
+        
+        const totalReferences = references.assetCount + references.deptAssetCount;
 
-        res.status(200).json({ message: "Asset type deleted successfully" });
+        if (totalReferences > 0) {
+            let errorDetails = [];
+            if (references.assetCount > 0) {
+                errorDetails.push(`${references.assetCount} asset${references.assetCount > 1 ? 's' : ''}`);
+            }
+            if (references.deptAssetCount > 0) {
+                errorDetails.push(`${references.deptAssetCount} department asset${references.deptAssetCount > 1 ? 's' : ''}`);
+            }
+
+            console.log('Cannot delete - references found:', errorDetails);
+            return res.status(400).json({ 
+                error: "Cannot delete this asset type as it is being used by existing records",
+                details: `This asset type is referenced by ${errorDetails.join(' and ')}`,
+                hint: "You must first reassign or delete all assets using this asset type before it can be deleted"
+            });
+        }
+
+        // If no references exist, proceed with deletion
+        console.log('Attempting to delete asset type:', id);
+        const result = await model.deleteAssetType(id);
+        console.log('Delete result:', result.rows);
+        
+        if (result.rows.length > 0) {
+            res.status(200).json({ 
+                message: "Asset type deleted successfully",
+                deleted: result.rows[0]
+            });
+        } else {
+            console.log('Delete failed - no rows affected');
+            res.status(500).json({ 
+                error: "Failed to delete asset type",
+                details: "No rows were affected"
+            });
+        }
 
     } catch (err) {
         console.error("Error deleting asset type:", err);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ 
+            error: "Internal server error", 
+            details: err.message,
+            hint: err.code === '23503' ? "This asset type cannot be deleted because it is referenced by other records" : undefined
+        });
     }
 };
 

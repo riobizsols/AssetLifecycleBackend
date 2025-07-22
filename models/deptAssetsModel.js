@@ -2,17 +2,17 @@ const db = require("../config/db");
 
 exports.getAssetMeta = (asset_type_id) => {
     return db.query(
-        "SELECT org_id, ext_id FROM tblAssetTypes WHERE asset_type_id = $1",
+        'SELECT org_id, ext_id FROM "tblAssetTypes" WHERE asset_type_id = $1',
         [asset_type_id]
     );
 };
 
 exports.getLastDeptAssetId = () => {
-    return db.query("SELECT id FROM tblDeptAssets ORDER BY id DESC LIMIT 1");
+    return db.query('SELECT dept_asset_type_id FROM "tblDeptAssetTypes" ORDER BY dept_asset_type_id DESC LIMIT 1');
 };
 
 exports.insertDeptAsset = (
-    id,
+    dept_asset_type_id,
     ext_id,
     dept_id,
     asset_type_id,
@@ -20,27 +20,28 @@ exports.insertDeptAsset = (
     created_by
 ) => {
     return db.query(
-        `INSERT INTO tblDeptAssets (
-      id, ext_id, dept_id, asset_type_id, org_id,
-      created_by, created_on, changed_by, changed_on
+        `INSERT INTO "tblDeptAssetTypes" (
+      dept_asset_type_id, ext_id, dept_id, asset_type_id, org_id,
+      created_by, created_on, changed_by, changed_on, int_status
     ) VALUES (
       $1, $2, $3, $4, $5,
-      $6, CURRENT_DATE, $6, CURRENT_DATE
+      $6, CURRENT_DATE, $6, CURRENT_DATE, 1
     )`,
-        [id, ext_id, dept_id, asset_type_id, org_id, created_by]
+        [dept_asset_type_id, ext_id, dept_id, asset_type_id, org_id, created_by]
     );
 };
 
-exports.deleteDeptAsset = (id) => {
-    return db.query("DELETE FROM tblDeptAssets WHERE id = $1", [id]);
+exports.deleteDeptAsset = (dept_asset_type_id) => {
+    return db.query('DELETE FROM "tblDeptAssetTypes" WHERE dept_asset_type_id = $1', [dept_asset_type_id]);
 };
 
 exports.getAllDeptAssets = () => {
     return db.query(`
-    SELECT da.id, da.dept_id, da.asset_type_id, d.text AS dept_name, at.text AS asset_name
-    FROM tblDeptAssets da
-    JOIN tblDepartments d ON da.dept_id = d.dept_id
-    JOIN tblAssetTypes at ON da.asset_type_id = at.asset_type_id
-    ORDER BY da.id
+    SELECT da.dept_asset_type_id, da.dept_id, da.asset_type_id, d.text AS dept_name, at.text AS asset_name
+    FROM "tblDeptAssetTypes" da
+    JOIN "tblDepartments" d ON da.dept_id = d.dept_id
+    JOIN "tblAssetTypes" at ON da.asset_type_id = at.asset_type_id
+    WHERE da.int_status = 1
+    ORDER BY da.dept_asset_type_id
   `);
 };

@@ -2,7 +2,7 @@ const db = require("../config/db");
 
 exports.generateCustomId = async (tableKey, padLength = 3) => {
     const result = await db.query(
-        "SELECT prefix, last_number FROM tblIdSequences WHERE table_key = $1",
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
     );
 
@@ -15,7 +15,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
 
     // Update the last number
     await db.query(
-        "UPDATE tblIdSequences SET last_number = $1 WHERE table_key = $2",
+        'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
         [next, tableKey]
     );
 

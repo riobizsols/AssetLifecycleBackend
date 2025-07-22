@@ -12,7 +12,7 @@ const protect = (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Attach full decoded info
+        // Attach full decoded info 
         req.user = {
             ext_id: decoded.ext_id,
             org_id: decoded.org_id,

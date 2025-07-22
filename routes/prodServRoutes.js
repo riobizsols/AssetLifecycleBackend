@@ -3,7 +3,12 @@ const router = express.Router();
 const prodservController = require('../controllers/prodServController');
 
 router.get('/prodserv', prodservController.getAllProdserv);
-router.post('/prodserv', prodservController.addProdserv);
+router.post('/prodserv', prodservController.addProdserv)
+
+// New endpoints for dropdowns
+router.get('/brands', prodservController.getBrandsByAssetType);
+router.get('/models', prodservController.getModelsByAssetTypeAndBrand);
+
 router.delete('/prodserv/:prod_serv_id', prodservController.deleteProdserv);
 router.delete('/prodserv', prodservController.deleteMultipleProdserv);
 

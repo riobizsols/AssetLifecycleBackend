@@ -35,7 +35,21 @@ const createDepartment = async (req, res) => {
             [org_id]
         );
 
-        const newDeptId = await generateCustomId("department");
+        let newDeptId;
+        if (deptIdResult.rows.length > 0) {
+            // Extract the numeric part from the last department ID
+            const lastDeptId = deptIdResult.rows[0].dept_id;
+            const match = lastDeptId.match(/\d+/);
+            if (match) {
+                const nextNum = parseInt(match[0]) + 1;
+                newDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
+            } else {
+                newDeptId = "DPT001";
+            }
+        } else {
+            // No departments exist yet, start with DPT001
+            newDeptId = "DPT001";
+        }
 
         // 🔹 Create department
         const newDept = await DepartmentModel.createDepartment({
@@ -61,16 +75,31 @@ const getNextDepartmentId = async (req, res) => {
     try {
         const org_id = req.user.org_id;
 
+        // Get the highest department ID for this organization
         const result = await db.query(
             "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
             [org_id]
         );
 
-        const newDeptId = await generateCustomId("department");
+        let nextDeptId;
+        if (result.rows.length > 0) {
+            // Extract the numeric part from the last department ID
+            const lastDeptId = result.rows[0].dept_id;
+            const match = lastDeptId.match(/\d+/);
+            if (match) {
+                const nextNum = parseInt(match[0]) + 1;
+                nextDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
+            } else {
+                nextDeptId = "DPT001";
+            }
+        } else {
+            // No departments exist yet, start with DPT001
+            nextDeptId = "DPT001";
+        }
 
-        console.log('Next department ID:', newDeptId);
+        console.log('Next department ID:', nextDeptId);
 
-        res.status(200).json({ nextDeptId: newDeptId });
+        res.status(200).json({ nextDeptId: nextDeptId });
     } catch (err) {
         console.error('Error getting next dept_id:', err);
         res.status(500).json({ error: 'Failed to fetch next department ID' });
@@ -94,6 +123,25 @@ const deleteDepartment = async (req, res) => {
         res.status(200).json({ message: "Departments deleted successfully" });
     } catch (err) {
         console.error("Error deleting departments:", err);
+        
+        // Handle foreign key constraint errors
+        if (err.message && err.message.includes('Cannot delete department')) {
+            return res.status(400).json({ 
+                error: "Cannot delete department",
+                message: err.message,
+                hint: "You must first reassign or delete all employees associated with this department before it can be deleted"
+            });
+        }
+        
+        // Handle PostgreSQL foreign key constraint errors
+        if (err.code === '23503') {
+            return res.status(400).json({ 
+                error: "Cannot delete department",
+                message: "This department is being used by existing employees",
+                hint: "You must first reassign or delete all employees associated with this department before it can be deleted"
+            });
+        }
+        
         res.status(500).json({ error: "Failed to delete departments" });
     }
   };

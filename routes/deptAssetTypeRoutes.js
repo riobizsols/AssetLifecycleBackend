@@ -12,3 +12,4 @@ router.post("/", controller.addDeptAsset);                // /api/dept-assets/
 router.delete("/", controller.deleteDeptAsset);           // /api/dept-assets/
 
 module.exports = router;
+//dept asset route

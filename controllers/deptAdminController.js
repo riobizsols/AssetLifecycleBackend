@@ -54,24 +54,85 @@ const fetchUsersForDept = async (req, res) => {
 const createDeptAdmin = async (req, res) => {
     try {
         const { dept_id, user_id } = req.body;
+        
+        // Validation
+        if (!dept_id || !user_id) {
+            return res.status(400).json({ 
+                error: "Missing required fields",
+                message: "Both dept_id and user_id are required" 
+            });
+        }
+
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
         const ext_id = uuidv4();
 
-        // Generate the next DPTA ID
-        const idResult = await db.query(
-            `SELECT id FROM "tblDeptAdmins" WHERE id LIKE 'DPTA%' ORDER BY id DESC LIMIT 1`
+        // Check if user already exists as admin for this department
+        const existingAdmin = await db.query(
+            `SELECT * FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`,
+            [dept_id, user_id]
         );
 
-       
-        const newId = await generateCustomId("dept_admin", 2);
+        if (existingAdmin.rows.length > 0) {
+            return res.status(400).json({ 
+                error: "User already admin",
+                message: "This user is already an admin for this department" 
+            });
+        }
+
+        // Check if department exists
+        const deptCheck = await db.query(
+            `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
+            [dept_id]
+        );
+
+        if (deptCheck.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "Department not found",
+                message: "The specified department does not exist" 
+            });
+        }
+
+        // Check if user exists
+        const userCheck = await db.query(
+            `SELECT full_name FROM "tblUsers" WHERE user_id = $1`,
+            [user_id]
+        );
+
+        if (userCheck.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "User not found",
+                message: "The specified user does not exist" 
+            });
+        }
+
+        // Generate the next dept_admin_id
+        const idResult = await db.query(
+            `SELECT dept_admin_id FROM "tblDeptAdmins" ORDER BY dept_admin_id DESC LIMIT 1`
+        );
+        
+        let newDeptAdminId;
+        if (idResult.rows.length > 0) {
+            // Extract the numeric part from the last dept_admin_id
+            const lastId = idResult.rows[0].dept_admin_id;
+            const match = lastId.match(/\d+/);
+            if (match) {
+                const nextNum = parseInt(match[0]) + 1;
+                newDeptAdminId = `DPTA${String(nextNum).padStart(3, "0")}`;
+            } else {
+                newDeptAdminId = "DPTA001";
+            }
+        } else {
+            // No dept admins exist yet, start with DPTA001
+            newDeptAdminId = "DPTA001";
+        }
 
         // Insert into tblDeptAdmins
         const insertResult = await db.query(
-            `INSERT INTO "tblDeptAdmins" (ext_id, id, org_id, dept_id, user_id, created_by, created_on)
+            `INSERT INTO "tblDeptAdmins" (ext_id, dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
          RETURNING *`,
-            [ext_id, newId, org_id, dept_id, user_id, created_by]
+            [ext_id, newDeptAdminId, org_id, dept_id, user_id, created_by]
         );
 
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"
@@ -81,10 +142,32 @@ const createDeptAdmin = async (req, res) => {
             [updatedRoleId, user_id]
         );
 
-        res.status(201).json(insertResult.rows[0]);
+        res.status(201).json({
+            message: "Department admin created successfully",
+            data: insertResult.rows[0]
+        });
     } catch (err) {
         console.error("Error creating department admin:", err);
-        res.status(500).json({ error: "Failed to assign department admin" });
+        
+        // Handle specific database errors
+        if (err.code === '23505') { // Unique constraint violation
+            return res.status(400).json({ 
+                error: "Duplicate entry",
+                message: "This user is already an admin for this department" 
+            });
+        }
+        
+        if (err.code === '23503') { // Foreign key constraint violation
+            return res.status(400).json({ 
+                error: "Invalid reference",
+                message: "The specified department or user does not exist" 
+            });
+        }
+        
+        res.status(500).json({ 
+            error: "Failed to assign department admin",
+            message: "An internal server error occurred" 
+        });
     }
   };
 
@@ -92,10 +175,46 @@ const createDeptAdmin = async (req, res) => {
 const deleteDeptAdmin = async (req, res) => {
     try {
         const { dept_id, user_id } = req.body;
+        
+        // Validation
+        if (!dept_id || !user_id) {
+            return res.status(400).json({ 
+                error: "Missing required fields",
+                message: "Both dept_id and user_id are required" 
+            });
+        }
+
+        // Check if admin exists before deleting
+        const existingAdmin = await db.query(
+            `SELECT * FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`,
+            [dept_id, user_id]
+        );
+
+        if (existingAdmin.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "Admin not found",
+                message: "This user is not an admin for this department" 
+            });
+        }
+
         await DeptAdminModel.deleteDeptAdmin({ dept_id, user_id });
-        res.status(200).json({ message: 'Admin removed successfully' });
+        
+        // Reset job_role_id in tblUsers
+        await db.query(
+            `UPDATE "tblUsers" SET job_role_id = NULL WHERE user_id = $1`,
+            [user_id]
+        );
+        
+        res.status(200).json({ 
+            message: 'Admin removed successfully',
+            data: { dept_id, user_id }
+        });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete admin' });
+        console.error("Error deleting department admin:", err);
+        res.status(500).json({ 
+            error: 'Failed to delete admin',
+            message: "An internal server error occurred"
+        });
     }
 };
 
@@ -105,12 +224,16 @@ const fetchAllAdmins = async (req, res) => {
             `SELECT d.dept_id, d.text AS dept_name, da.user_id, u.full_name
          FROM "tblDeptAdmins" da
          JOIN "tblUsers" u ON da.user_id = u.user_id
-         JOIN "tblDepartments" d ON da.dept_id = d.dept_id`
+         JOIN "tblDepartments" d ON da.dept_id = d.dept_id
+         ORDER BY d.text, u.full_name`
         );
         res.json(result.rows);
     } catch (err) {
         console.error("Failed to fetch all admins:", err);
-        res.status(500).json({ error: "Failed to fetch admins" });
+        res.status(500).json({ 
+            error: "Failed to fetch admins",
+            message: "An internal server error occurred"
+        });
     }
 };
   

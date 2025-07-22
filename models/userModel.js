@@ -103,11 +103,55 @@ const getAllUsers = async () => {
 const deleteUsers = async (userIds = []) => {
     if (!userIds.length) return;
 
-    const result = await db.query(
-        `DELETE FROM "tblUsers" WHERE user_id = ANY($1::text[])`,
-        [userIds]
-    );
-    return result.rowCount; // number of rows deleted
+    try {
+        // First check for dependencies
+        const dependencies = await db.query(`
+            SELECT DISTINCT u.user_id, u.full_name,
+                CASE
+                    WHEN da.user_id IS NOT NULL THEN 'Department Admin'
+                    WHEN a.user_id IS NOT NULL THEN 'Asset Owner'
+                    WHEN das.user_id IS NOT NULL THEN 'Department Asset Manager'
+                    WHEN v.contact_person_id IS NOT NULL THEN 'Vendor Contact'
+                END as role
+            FROM "tblUsers" u
+            LEFT JOIN "tblDeptAdmins" da ON u.user_id = da.user_id
+            LEFT JOIN "tblAssets" a ON u.user_id = a.user_id
+            LEFT JOIN "tblDeptAssets" das ON u.user_id = das.user_id
+            LEFT JOIN "tblVendors" v ON u.user_id = v.contact_person_id
+            WHERE u.user_id = ANY($1::text[])
+            AND (da.user_id IS NOT NULL 
+                OR a.user_id IS NOT NULL 
+                OR das.user_id IS NOT NULL 
+                OR v.contact_person_id IS NOT NULL)
+        `, [userIds]);
+
+        // If dependencies found, throw detailed error
+        if (dependencies.rows.length > 0) {
+            const error = new Error('Users have dependencies');
+            error.code = '23503';
+            error.dependencies = dependencies.rows;
+            error.detail = `Users have active roles: ${dependencies.rows.map(d => 
+                `${d.user_id} (${d.role})`).join(', ')}`;
+            throw error;
+        }
+
+        // If no dependencies, proceed with deletion
+        const result = await db.query(
+            `DELETE FROM "tblUsers" WHERE user_id = ANY($1::text[])`,
+            [userIds]
+        );
+        
+        return result.rowCount;
+    } catch (error) {
+        // If it's our custom dependency error, throw it as is
+        if (error.dependencies) {
+            throw error;
+        }
+        
+        // For other errors, log and rethrow
+        console.error('Error in deleteUsers:', error);
+        throw error;
+    }
 };
 
 // Update user by user_id

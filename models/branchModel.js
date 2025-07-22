@@ -28,8 +28,27 @@ const deleteBranches = async (ids = []) => {
   return result.rowCount;
 };
 
+const updateBranch = async (branch_id, data, changed_by) => {
+  const { text, city, branch_code } = data;
+  
+  const result = await db.query(
+    `UPDATE "tblBranches" 
+     SET text = $1, 
+         city = $2, 
+         branch_code = $3,
+         changed_by = $4,
+         changed_on = CURRENT_TIMESTAMP
+     WHERE branch_id = $5
+     RETURNING *`,
+    [text, city, branch_code, changed_by, branch_id]
+  );
+
+  return result.rows[0];
+};
+
 module.exports = {
   getAllBranches,
   addBranch,
   deleteBranches,
+  updateBranch,
 };

@@ -3,16 +3,19 @@ const model = require("../models/assetModel");
 // POST /api/assets - Add new asset
 const addAsset = async (req, res) => {
     try {
+        console.log("Received asset data:", req.body);
+        console.log("User info:", req.user);
+        
         const {
             asset_type_id,
-            ext_id,
-            asset_id, // Optional - auto-generated if not provided
+            ext_id, // Accept ext_id from frontend
+            asset_id,
             text,
             serial_number,
             description,
             branch_id,
             vendor_id,
-            prod_serve_id,
+            prod_serve_id, // Accept prod_serve_id from frontend
             maintsch_id,
             purchased_cost,
             purchased_on,
@@ -25,65 +28,89 @@ const addAsset = async (req, res) => {
             org_id
         } = req.body;
 
+        if (!req.user || !req.user.user_id) {
+            return res.status(401).json({ error: "User not authenticated or user_id missing" });
+        }
+
         const created_by = req.user.user_id;
 
-        // Validate required fields
-        if (!ext_id || !text || !org_id || !asset_id) {
-            return res.status(400).json({ 
-                error: "ext_id, text, org_id, and asset_id are required fields" 
-            });
+        if (!text || !org_id) {
+            return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
-        // Validate ext_id is a valid UUID
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(ext_id)) {
-            return res.status(400).json({ 
-                error: "ext_id must be a valid UUID format (e.g., 123e4567-e89b-12d3-a456-426614174000)" 
-            });
+        if (vendor_id) {
+            const vendorExists = await model.checkVendorExists(vendor_id);
+            if (vendorExists.rows.length === 0) {
+                console.warn("Invalid vendor_id:", vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${vendor_id}' does not exist` });
+            }
+        }
+        // If you want to re-enable prod_serve_id validation, uncomment and update this block:
+        // if (prod_serve_id) {
+        //     const prodServExists = await model.checkProdServExists(prod_serve_id);
+        //     if (prodServExists.rows.length === 0) {
+        //         console.warn("Invalid prod_serve_id:", prod_serve_id);
+        //         return res.status(400).json({ error: `Product/Service with ID '${prod_serve_id}' does not exist` });
+        //     }
+        // }
+
+        // Generate or validate asset_id
+        let finalAssetId = asset_id;
+        if (!asset_id) {
+            finalAssetId = await model.generateAssetId();
+        } else {
+            const existingAssetId = await model.checkAssetIdExists(asset_id);
+            if (existingAssetId.rows.length > 0) {
+                return res.status(409).json({ error: "Asset with this asset_id already exists" });
+            }
         }
 
-        // Check if asset already exists
-        const existingAsset = await model.checkAssetExists(ext_id, org_id);
-        if (existingAsset.rows.length > 0) {
-            return res.status(409).json({ 
-                error: "Asset with this ext_id and org_id already exists" 
-            });
-        }
-
-        // Check if the provided asset_id already exists
-        const existingAssetId = await model.checkAssetIdExists(asset_id);
-        if (existingAssetId.rows.length > 0) {
-            return res.status(409).json({ 
-                error: "Asset with this asset_id already exists" 
-            });
-        }
-
-        // Prepare asset data
+        // Prepare asset data (now includes ext_id and prod_serve_id)
         const assetData = {
             asset_type_id,
-            ext_id,
-            asset_id,
+            ext_id, // Pass ext_id to model/DB
+            asset_id: finalAssetId,
             text,
             serial_number,
             description,
-            branch_id,
-            vendor_id,
-            prod_serve_id,
-            maintsch_id,
+            branch_id: branch_id || null,
+            vendor_id: vendor_id || null,
+            prod_serve_id: prod_serve_id || null, // Use value from frontend
+            maintsch_id: maintsch_id || null,
             purchased_cost,
             purchased_on,
-            purchased_by,
-            expiry_date,
+            purchased_by: purchased_by || null,
+            expiry_date: expiry_date || null,
             current_status,
             warranty_period,
             parent_asset_id,
             group_id,
+            // warranty_period: warranty_period || null,
+            // parent_id: parent_id || null,
+            // group_id: group_id || null,
             org_id,
             created_by
         };
 
-        // Insert new asset
+        // Insert asset
         const result = await model.insertAsset(assetData);
+        const { asset_id: insertedAssetId, ext_id: insertedExtId } = result.rows[0];
+
+        // Insert properties if any
+        if (req.body.properties && Object.keys(req.body.properties).length > 0) {
+            console.log('Saving property values:', req.body.properties);
+            for (const [propId, value] of Object.entries(req.body.properties)) {
+                if (value) {
+                    await model.insertAssetPropValue({
+                        asset_id: insertedAssetId,
+                        ext_id: insertedExtId,
+                        org_id,
+                        asset_type_prop_id: propId,
+                        value
+                    });
+                }
+            }
+        }
 
         res.status(201).json({
             message: "Asset added successfully",
@@ -92,17 +119,25 @@ const addAsset = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding asset:", err);
-        res.status(500).json({ error: "Internal server error", err });
+        res.status(500).json({
+            error: "Internal server error",
+            message: err.message,
+            details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        });
     }
 };
+
 
 // GET /api/assets - Get all assets
 const getAllAssets = async (req, res) => {
     try {
         const result = await model.getAllAssets();
+        if (!result || !result.rows || result.rows.length === 0) {
+            console.warn("[getAllAssets] No assets found");
+        }
         res.status(200).json(result.rows);
     } catch (err) {
-        console.error("Error fetching assets:", err);
+        console.error("[getAllAssets] Error fetching assets:", err);
         res.status(500).json({ error: "Failed to fetch assets" });
     }
 };
