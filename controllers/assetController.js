@@ -20,7 +20,7 @@ const addAsset = async (req, res) => {
             expiry_date,
             current_status = "Active",
             warranty_period,
-            parent_id,
+            parent_asset_id,
             group_id,
             org_id
         } = req.body;
@@ -76,7 +76,7 @@ const addAsset = async (req, res) => {
             expiry_date,
             current_status,
             warranty_period,
-            parent_id,
+            parent_asset_id,
             group_id,
             org_id,
             created_by
@@ -188,6 +188,20 @@ const getAssetsByStatus = async (req, res) => {
         res.status(500).json({ error: "Failed to fetch assets by status" });
     }
 };
+
+// GET /api/assets/serial/:serial_number - Get assets by serial number
+const getAssetsBySerialNumber = async (req, res) => {
+    try {
+        const { serial_number } = req.params;
+        const result = await model.getAssetsBySerialNumber(serial_number);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error("Error fetching assets by serial number:", err);
+        res.status(500).json({ error: "Failed to fetch assets by serial number" });
+    }
+};
+
+
 
 // GET /api/assets/org/:org_id - Get assets by organization
 const getAssetsByOrg = async (req, res) => {
@@ -333,6 +347,7 @@ module.exports = {
     getAssetsByBranch,
     getAssetsByVendor,
     getAssetsByStatus,
+    getAssetsBySerialNumber,
     getAssetsByOrg,
     searchAssets,
     getAssetsWithFilters,

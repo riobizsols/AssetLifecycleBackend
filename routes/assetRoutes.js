@@ -30,6 +30,11 @@ router.get("/vendor/:vendor_id", controller.getAssetsByVendor);
 // GET /api/assets/status/:status - Get assets by status
 router.get("/status/:status", controller.getAssetsByStatus);
 
+// GET /api/assets/serial/:serial_number - Get assets by serial number
+router.get("/serial/:serial_number", controller.getAssetsBySerialNumber);
+
+
+
 // // GET /api/assets/org/:org_id - Get assets by organization
 // router.get("/org/:org_id", controller.getAssetsByOrg);
 

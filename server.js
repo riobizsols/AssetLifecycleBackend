@@ -13,6 +13,7 @@ const vendorsRoutes = require("./routes/vendorsRoutes");
 const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
+const assetAssignmentRoutes = require("./routes/assetAssignmentRoute");
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
 
 const app = express();
@@ -38,6 +39,7 @@ app.use("/api/", vendorsRoutes);
 app.use("/api/", prodServRoutes);
 app.use("/api/", asset_typeRoutes);
 app.use("/api/assets", assetRoutes);
+app.use("/api/asset-assignments", assetAssignmentRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 
 app.get("/", (req, res) => {
