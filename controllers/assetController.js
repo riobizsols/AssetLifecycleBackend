@@ -236,7 +236,26 @@ const getAssetsBySerialNumber = async (req, res) => {
     }
 };
 
-
+// GET /api/assets/type/:asset_type_id/inactive - Get inactive assets by asset type
+const getInactiveAssetsByAssetType = async (req, res) => {
+    try {
+        const { asset_type_id } = req.params;
+        const result = await model.getInactiveAssetsByAssetType(asset_type_id);
+        
+        const count = result.rows.length;
+        const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";
+        
+        res.status(200).json({
+            message: message,
+            count: count,
+            asset_type_id: asset_type_id,
+            data: result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching inactive assets by asset type:", err);
+        res.status(500).json({ error: "Failed to fetch inactive assets by asset type" });
+    }
+};
 
 // GET /api/assets/org/:org_id - Get assets by organization
 const getAssetsByOrg = async (req, res) => {
@@ -383,6 +402,7 @@ module.exports = {
     getAssetsByVendor,
     getAssetsByStatus,
     getAssetsBySerialNumber,
+    getInactiveAssetsByAssetType,
     getAssetsByOrg,
     searchAssets,
     getAssetsWithFilters,

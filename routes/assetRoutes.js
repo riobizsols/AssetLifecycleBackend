@@ -22,6 +22,9 @@ router.get("/details/:id", controller.getAssetWithDetails);
 // GET /api/assets/type/:asset_type_id - Get assets by asset type
 router.get("/type/:asset_type_id", controller.getAssetsByAssetType);
 
+// GET /api/assets/type/:asset_type_id/inactive - Get inactive assets by asset type
+router.get("/type/:asset_type_id/inactive", controller.getInactiveAssetsByAssetType);
+
 // GET /api/assets/branch/:branch_id - Get assets by branch
 router.get("/branch/:branch_id", controller.getAssetsByBranch);
 

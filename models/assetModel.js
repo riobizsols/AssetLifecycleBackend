@@ -120,6 +120,26 @@ const getAssetsByOrg = async (org_id) => {
   return await db.query(query, [org_id]);
 };
 
+const getInactiveAssetsByAssetType = async (asset_type_id) => {
+  const query = `
+        SELECT 
+            a.asset_type_id, a.ext_id, a.asset_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.vendor_id, a.prod_serve_id, a.maintsch_id, a.purchased_cost,
+            a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+            a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
+        FROM "tblAssets" a
+        WHERE a.asset_type_id = $1
+        AND a.asset_id NOT IN (
+            SELECT DISTINCT aa.asset_id 
+            FROM "tblAssetAssignments" aa
+            WHERE aa.action = 'A' AND aa.latest_assignment_flag = true
+        )
+        ORDER BY a.created_on DESC
+    `;
+
+  return await db.query(query, [asset_type_id]);
+};
+
 const searchAssets = async (searchTerm) => {
   const query = `
         SELECT 
@@ -338,6 +358,7 @@ module.exports = {
   getAssetsByStatus,
   getAssetsBySerialNumber,
   getAssetsByOrg,
+  getInactiveAssetsByAssetType,
   searchAssets,
   getAssetWithDetails,
   insertAsset,

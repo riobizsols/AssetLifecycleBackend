@@ -6,20 +6,20 @@ const addAssetAssignment = async (req, res) => {
         const {
             asset_assign_id,
             dept_id,
-            employee_id,
             asset_id,
-            effective_date,
-            return_date,
-            status = "Active",
-            org_id
+            org_id,
+            employee_int_id,
+            action = "Assigned",
+            action_by,
+            latest_assignment_flag
         } = req.body;
 
         const created_by = req.user.user_id;
 
         // Validate required fields
-        if (!asset_assign_id || !dept_id || !employee_id || !asset_id || !org_id) {
+        if (!asset_assign_id || !dept_id || !asset_id || !org_id || !employee_int_id || latest_assignment_flag === undefined) {
             return res.status(400).json({ 
-                error: "asset_assign_id, dept_id, employee_id, asset_id, and org_id are required fields" 
+                error: "asset_assign_id, dept_id, asset_id, org_id, employee_int_id, and latest_assignment_flag are required fields" 
             });
         }
 
@@ -33,25 +33,19 @@ const addAssetAssignment = async (req, res) => {
             });
         }
 
-        // Check if there's already an active assignment for this asset and employee
-        const activeAssignment = await model.checkActiveAssignmentExists(asset_id, employee_id, org_id);
-        if (activeAssignment.rows.length > 0) {
-            return res.status(409).json({ 
-                error: "There is already an active assignment for this asset and employee" 
-            });
-        }
+        // Note: Multiple assignments are allowed for the same asset and employee
+        // The latest_assignment_flag should be managed manually to indicate the current active assignment
 
         // Prepare assignment data
         const assignmentData = {
             asset_assign_id,
             dept_id,
-            employee_id,
             asset_id,
-            effective_date,
-            return_date,
-            status,
             org_id,
-            created_by
+            employee_int_id,
+            action,
+            action_by: created_by,
+            latest_assignment_flag
         };
 
         // Insert new asset assignment
@@ -137,6 +131,48 @@ const getAssetAssignmentsByEmployee = async (req, res) => {
     }
 };
 
+// GET /api/asset-assignments/employee/:employee_id/active - Get active asset assignments by employee
+const getActiveAssetAssignmentsByEmployee = async (req, res) => {
+    try {
+        const { employee_id } = req.params;
+        const result = await model.getActiveAssetAssignmentsByEmployeeWithDetails(employee_id);
+        
+        const count = result.assignments.length;
+        const message = count > 0 ? `Active AssetAssignment : ${count}` : "No active asset assignments found";
+        
+        // Check if employee exists
+        if (!result.employee) {
+            return res.status(404).json({ 
+                error: "Employee not found",
+                message: "Employee not found",
+                count: 0,
+                data: [],
+                employee: null,
+                department: null
+            });
+        }
+        
+        res.status(200).json({
+            message: message,
+            count: count,
+            data: result.assignments,
+            employee: {
+                emp_int_id: result.employee.emp_int_id,
+                employee_id: result.employee.employee_id,
+                employee_name: result.employee.employee_name,
+                dept_id: result.employee.dept_id
+            },
+            department: {
+                dept_id: result.employee.dept_id,
+                department_name: result.employee.department_name
+            }
+        });
+    } catch (err) {
+        console.error("Error fetching active asset assignments by employee:", err);
+        res.status(500).json({ error: "Failed to fetch active asset assignments by employee" });
+    }
+};
+
 // GET /api/asset-assignments/asset/:asset_id - Get asset assignments by asset
 const getAssetAssignmentsByAsset = async (req, res) => {
     try {
@@ -179,12 +215,12 @@ const updateAssetAssignment = async (req, res) => {
         const { id } = req.params;
         const {
             dept_id,
-            employee_id,
             asset_id,
-            effective_date,
-            return_date,
-            status,
-            org_id
+            org_id,
+            employee_int_id,
+            action,
+            action_by,
+            latest_assignment_flag
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -198,13 +234,12 @@ const updateAssetAssignment = async (req, res) => {
         // Prepare update data
         const updateData = {
             dept_id,
-            employee_id,
             asset_id,
-            effective_date,
-            return_date,
-            status,
             org_id,
-            changed_by
+            employee_int_id,
+            action,
+            action_by: changed_by,
+            latest_assignment_flag
         };
 
         // Update asset assignment
@@ -217,6 +252,51 @@ const updateAssetAssignment = async (req, res) => {
 
     } catch (err) {
         console.error("Error updating asset assignment:", err);
+        res.status(500).json({ error: "Internal server error", err });
+    }
+};
+
+// PUT /api/asset-assignments/asset/:asset_id - Update asset assignment by asset_id (only for action="A" and latest_assignment_flag=true)
+const updateAssetAssignmentByAssetId = async (req, res) => {
+    try {
+        const { asset_id } = req.params;
+        const { latest_assignment_flag } = req.body;
+
+        // Validate required field
+        if (latest_assignment_flag === undefined) {
+            return res.status(400).json({ 
+                error: "latest_assignment_flag is required field" 
+            });
+        }
+
+        // Check if asset assignment exists with the required conditions
+        const existingAssignment = await model.getAssetAssignmentsByAsset(asset_id);
+        const validAssignment = existingAssignment.rows.find(row => 
+            row.action === 'A' && row.latest_assignment_flag === true
+        );
+        
+        if (!validAssignment) {
+            return res.status(404).json({ 
+                error: "No asset assignment found with action='A' and latest_assignment_flag=true for this asset_id" 
+            });
+        }
+
+        // Update asset assignment
+        const result = await model.updateAssetAssignmentByAssetId(asset_id, latest_assignment_flag);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "No rows were updated. Please check if the asset has action='A' and latest_assignment_flag=true" 
+            });
+        }
+
+        res.status(200).json({
+            message: "Asset assignment updated successfully",
+            assignment: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error("Error updating asset assignment by asset_id:", err);
         res.status(500).json({ error: "Internal server error", err });
     }
 };
@@ -278,10 +358,12 @@ module.exports = {
     getAssetAssignmentWithDetails,
     getAssetAssignmentsByDept,
     getAssetAssignmentsByEmployee,
+    getActiveAssetAssignmentsByEmployee,
     getAssetAssignmentsByAsset,
     getAssetAssignmentsByStatus,
     getAssetAssignmentsByOrg,
     updateAssetAssignment,
+    updateAssetAssignmentByAssetId,
     deleteAssetAssignment,
     deleteMultipleAssetAssignments,
 };
