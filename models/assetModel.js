@@ -6,7 +6,7 @@ const getAllAssets = async () => {
            asset_id, asset_type_id, ext_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         ORDER BY created_on DESC
     `;
@@ -20,7 +20,7 @@ const getAssetById = async (asset_id) => {
            asset_id, asset_type_id, ext_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE asset_id = $1
     `;
@@ -34,7 +34,7 @@ const getAssetsByAssetType = async (asset_type_id) => {
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE asset_type_id = $1
         ORDER BY created_on DESC
@@ -49,7 +49,7 @@ const getAssetsByBranch = async (branch_id) => {
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE branch_id = $1
         ORDER BY created_on DESC
@@ -64,7 +64,7 @@ const getAssetsByVendor = async (vendor_id) => {
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE vendor_id = $1
         ORDER BY created_on DESC
@@ -79,7 +79,7 @@ const getAssetsByStatus = async (current_status) => {
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE current_status = $1
         ORDER BY created_on DESC
@@ -88,13 +88,30 @@ const getAssetsByStatus = async (current_status) => {
   return await db.query(query, [current_status]);
 };
 
+const getAssetsBySerialNumber = async (serial_number) => {
+  const query = `
+        SELECT 
+            asset_type_id, ext_id, asset_id, text, serial_number, description,
+            branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+        FROM "tblAssets"
+        WHERE serial_number = $1
+        ORDER BY created_on DESC
+    `;
+
+  return await db.query(query, [serial_number]);
+};
+
+
+
 const getAssetsByOrg = async (org_id) => {
   const query = `
         SELECT 
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE org_id = $1
         ORDER BY created_on DESC
@@ -103,13 +120,33 @@ const getAssetsByOrg = async (org_id) => {
   return await db.query(query, [org_id]);
 };
 
+const getInactiveAssetsByAssetType = async (asset_type_id) => {
+  const query = `
+        SELECT 
+            a.asset_type_id, a.ext_id, a.asset_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.vendor_id, a.prod_serve_id, a.maintsch_id, a.purchased_cost,
+            a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+            a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
+        FROM "tblAssets" a
+        WHERE a.asset_type_id = $1
+        AND a.asset_id NOT IN (
+            SELECT DISTINCT aa.asset_id 
+            FROM "tblAssetAssignments" aa
+            WHERE aa.action = 'A' AND aa.latest_assignment_flag = true
+        )
+        ORDER BY a.created_on DESC
+    `;
+
+  return await db.query(query, [asset_type_id]);
+};
+
 const searchAssets = async (searchTerm) => {
   const query = `
         SELECT 
             asset_type_id, ext_id, asset_id, text, serial_number, description,
             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            group_id, org_id, created_by, created_on, changed_by, changed_on
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE 
             text ILIKE $1 OR 
@@ -128,7 +165,7 @@ const getAssetWithDetails = async (asset_id) => {
             a.asset_type_id, a.ext_id, a.asset_id, a.text, a.serial_number, a.description,
             a.branch_id, a.vendor_id, a.prod_serve_id, a.maintsch_id, a.purchased_cost,
             a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
-            a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+            a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
             at.text as asset_type_name,
             at.is_child,
             at.parent_asset_type_id,
@@ -174,6 +211,76 @@ const getPotentialParentAssets = async (asset_type_id) => {
 
   return await db.query(query, [asset_type_id]);
 };
+const insertAsset = async (assetData) => {
+  const {
+    asset_type_id,
+    asset_id,
+    text,
+    serial_number,
+    description,
+    branch_id,
+    vendor_id,
+    prod_serve_id,
+    maintsch_id,
+    purchased_cost,
+    purchased_on,
+    purchased_by,
+    expiry_date,
+    current_status,
+    warranty_period,
+    parent_asset_id,
+    group_id,
+    org_id,
+    created_by,
+  } = assetData;
+  
+
+  const query = `
+        INSERT INTO "tblAssets" (
+            asset_type_id, ext_id, asset_id, text, serial_number, description,
+            branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
+        RETURNING *
+    `;
+    
+  //   INSERT INTO "tblAssets" (
+  //     asset_type_id, ext_id, asset_id, text, serial_number, description,
+  //     branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+  //     purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+  //     parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+  //   ) VALUES (
+  //     $1, gen_random_uuid(), $2, $3, $4, $5,
+  //     $6, $7, $8, $9, $10,
+  //     $11, $12, $13, $14, $15,
+  //     $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
+  //   )
+  //   RETURNING *;
+  // `;
+
+  const values = [
+    asset_type_id,
+    asset_id,
+    text,
+    serial_number,
+    description,
+    branch_id,
+    vendor_id,
+    prod_serve_id,
+    maintsch_id,
+    purchased_cost,
+    purchased_on,
+    purchased_by,
+    expiry_date,
+    current_status,
+    warranty_period,
+    parent_asset_id,
+    group_id,
+    org_id,
+    created_by,
+  ];
+}
 
 const insertAsset = async ({
   asset_type_id,
@@ -503,6 +610,19 @@ const deleteMultipleAssets = async (asset_ids) => {
 
 module.exports = {
   getAllAssets,
+<<<<<<< HEAD
+=======
+  getAssetById,
+  getAssetsByAssetType,
+  getAssetsByBranch,
+  getAssetsByVendor,
+  getAssetsByStatus,
+  getAssetsBySerialNumber,
+  getAssetsByOrg,
+  getInactiveAssetsByAssetType,
+  searchAssets,
+  getAssetWithDetails,
+>>>>>>> origin/Naren
   insertAsset,
   updateAsset,
   deleteMultipleAssets,

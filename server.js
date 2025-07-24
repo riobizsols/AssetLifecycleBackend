@@ -13,9 +13,11 @@ const vendorsRoutes = require("./routes/vendorsRoutes");
 const prodServRoutes = require("./routes/prodServRoutes");
 const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
+const assetAssignmentRoutes = require("./routes/assetAssignmentRoute");
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
 const orgRoutes = require("./routes/orgRoutes");
 const propertiesRoutes = require("./routes/propertiesRoutes");
+const employeeRoutes = require("./routes/employeeRoutes");
 
 const app = express();
 app.use(express.json());
@@ -47,8 +49,10 @@ app.use("/api/", vendorsRoutes);
 app.use("/api/", prodServRoutes);
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
+app.use("/api/asset-assignments", assetAssignmentRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
+app.use("/api/employees", employeeRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 
 app.get("/", (req, res) => {
