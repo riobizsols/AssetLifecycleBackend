@@ -211,76 +211,76 @@ const getPotentialParentAssets = async (asset_type_id) => {
 
   return await db.query(query, [asset_type_id]);
 };
-const insertAsset = async (assetData) => {
-  const {
-    asset_type_id,
-    asset_id,
-    text,
-    serial_number,
-    description,
-    branch_id,
-    vendor_id,
-    prod_serve_id,
-    maintsch_id,
-    purchased_cost,
-    purchased_on,
-    purchased_by,
-    expiry_date,
-    current_status,
-    warranty_period,
-    parent_asset_id,
-    group_id,
-    org_id,
-    created_by,
-  } = assetData;
+// const insertAsset = async (assetData) => {
+//   const {
+//     asset_type_id,
+//     asset_id,
+//     text,
+//     serial_number,
+//     description,
+//     branch_id,
+//     vendor_id,
+//     prod_serve_id,
+//     maintsch_id,
+//     purchased_cost,
+//     purchased_on,
+//     purchased_by,
+//     expiry_date,
+//     current_status,
+//     warranty_period,
+//     parent_asset_id,
+//     group_id,
+//     org_id,
+//     created_by,
+//   } = assetData;
   
 
-  const query = `
-        INSERT INTO "tblAssets" (
-            asset_type_id, ext_id, asset_id, text, serial_number, description,
-            branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
-        RETURNING *
-    `;
+//   const query = `
+//         INSERT INTO "tblAssets" (
+//             asset_type_id, ext_id, asset_id, text, serial_number, description,
+//             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+//             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+//             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+//         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
+//         RETURNING *
+//     `;
     
-  //   INSERT INTO "tblAssets" (
-  //     asset_type_id, ext_id, asset_id, text, serial_number, description,
-  //     branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-  //     purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-  //     parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-  //   ) VALUES (
-  //     $1, gen_random_uuid(), $2, $3, $4, $5,
-  //     $6, $7, $8, $9, $10,
-  //     $11, $12, $13, $14, $15,
-  //     $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
-  //   )
-  //   RETURNING *;
-  // `;
+//   //   INSERT INTO "tblAssets" (
+//   //     asset_type_id, ext_id, asset_id, text, serial_number, description,
+//   //     branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+//   //     purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+//   //     parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+//   //   ) VALUES (
+//   //     $1, gen_random_uuid(), $2, $3, $4, $5,
+//   //     $6, $7, $8, $9, $10,
+//   //     $11, $12, $13, $14, $15,
+//   //     $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
+//   //   )
+//   //   RETURNING *;
+//   // `;
 
-  const values = [
-    asset_type_id,
-    asset_id,
-    text,
-    serial_number,
-    description,
-    branch_id,
-    vendor_id,
-    prod_serve_id,
-    maintsch_id,
-    purchased_cost,
-    purchased_on,
-    purchased_by,
-    expiry_date,
-    current_status,
-    warranty_period,
-    parent_asset_id,
-    group_id,
-    org_id,
-    created_by,
-  ];
-}
+//   const values = [
+//     asset_type_id,
+//     asset_id,
+//     text,
+//     serial_number,
+//     description,
+//     branch_id,
+//     vendor_id,
+//     prod_serve_id,
+//     maintsch_id,
+//     purchased_cost,
+//     purchased_on,
+//     purchased_by,
+//     expiry_date,
+//     current_status,
+//     warranty_period,
+//     parent_asset_id,
+//     group_id,
+//     org_id,
+//     created_by,
+//   ];
+// }
 
 const insertAsset = async ({
   asset_type_id,
@@ -610,8 +610,6 @@ const deleteMultipleAssets = async (asset_ids) => {
 
 module.exports = {
   getAllAssets,
-<<<<<<< HEAD
-=======
   getAssetById,
   getAssetsByAssetType,
   getAssetsByBranch,
@@ -622,7 +620,6 @@ module.exports = {
   getInactiveAssetsByAssetType,
   searchAssets,
   getAssetWithDetails,
->>>>>>> origin/Naren
   insertAsset,
   updateAsset,
   deleteMultipleAssets,
