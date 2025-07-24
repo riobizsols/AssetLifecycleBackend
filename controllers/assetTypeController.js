@@ -11,7 +11,9 @@ const addAssetType = async (req, res) => {
             int_status,            // from frontend (1 or 0)
             group_required,        // from frontend
             inspection_required,    // from frontend
-            maintenance_schedule   // from frontend (1 or 0)
+            maintenance_schedule,   // from frontend (1 or 0)
+            is_child = false,      // from frontend
+            parent_asset_type_id = null  // from frontend
         } = req.body;
 
         // Get org_id and user_id from authenticated user
@@ -31,6 +33,28 @@ const addAssetType = async (req, res) => {
             });
         }
 
+        // Validate parent_asset_type_id if is_child is true
+        if (is_child && !parent_asset_type_id) {
+            return res.status(400).json({
+                error: "Parent asset type ID is required when creating a child asset type"
+            });
+        }
+
+        // Verify parent_asset_type_id exists and is not a child itself
+        if (parent_asset_type_id) {
+            const parentAssetType = await model.getAssetTypeById(parent_asset_type_id);
+            if (parentAssetType.rows.length === 0) {
+                return res.status(400).json({
+                    error: "Parent asset type not found"
+                });
+            }
+            if (parentAssetType.rows[0].is_child) {
+                return res.status(400).json({
+                    error: "Cannot set a child asset type as parent"
+                });
+            }
+        }
+
         // Insert new asset type
         const result = await model.insertAssetType(
             ext_id,
@@ -42,7 +66,9 @@ const addAssetType = async (req, res) => {
             inspection_required,
             group_required,
             created_by,
-            text
+            text,
+            is_child,
+            parent_asset_type_id
         );
 
         res.status(201).json({
@@ -64,6 +90,17 @@ const getAllAssetTypes = async (req, res) => {
     } catch (err) {
         console.error("Error fetching asset types:", err);
         res.status(500).json({ error: "Failed to fetch asset types" });
+    }
+};
+
+// GET /api/asset-types/parents - Get all parent asset types
+const getParentAssetTypes = async (req, res) => {
+    try {
+        const result = await model.getParentAssetTypes();
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error("Error fetching parent asset types:", err);
+        res.status(500).json({ error: "Failed to fetch parent asset types" });
     }
 };
 
@@ -96,7 +133,9 @@ const updateAssetType = async (req, res) => {
             assignment_type,
             inspection_required,
             group_required,
-            text
+            text,
+            is_child,
+            parent_asset_type_id
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -105,6 +144,34 @@ const updateAssetType = async (req, res) => {
         const existingAsset = await model.getAssetTypeById(id);
         if (existingAsset.rows.length === 0) {
             return res.status(404).json({ error: "Asset type not found" });
+        }
+
+        // Validate parent_asset_type_id if is_child is true
+        if (is_child && !parent_asset_type_id) {
+            return res.status(400).json({
+                error: "Parent asset type ID is required when setting as child asset type"
+            });
+        }
+
+        // Verify parent_asset_type_id exists and is not a child itself
+        if (parent_asset_type_id) {
+            const parentAssetType = await model.getAssetTypeById(parent_asset_type_id);
+            if (parentAssetType.rows.length === 0) {
+                return res.status(400).json({
+                    error: "Parent asset type not found"
+                });
+            }
+            if (parentAssetType.rows[0].is_child) {
+                return res.status(400).json({
+                    error: "Cannot set a child asset type as parent"
+                });
+            }
+            // Prevent circular reference
+            if (parent_asset_type_id === id) {
+                return res.status(400).json({
+                    error: "Asset type cannot be its own parent"
+                });
+            }
         }
 
         // Check if new ext_id and org_id combination already exists (excluding current record)
@@ -126,7 +193,9 @@ const updateAssetType = async (req, res) => {
             assignment_type: assignment_type || existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
-            text: text || existingAsset.rows[0].text
+            text: text || existingAsset.rows[0].text,
+            is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
+            parent_asset_type_id: parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id
         };
 
         const result = await model.updateAssetType(id, updateData, changed_by);
@@ -157,6 +226,16 @@ const deleteAssetType = async (req, res) => {
             return res.status(404).json({ 
                 error: "Asset type not found",
                 details: `No asset type found with ID: ${id}`
+            });
+        }
+
+        // Check if asset type has child asset types
+        const childAssetTypes = await model.getAllAssetTypes();
+        const hasChildren = childAssetTypes.rows.some(asset => asset.parent_asset_type_id === id);
+        if (hasChildren) {
+            return res.status(400).json({
+                error: "Cannot delete asset type that has child asset types",
+                details: "Please delete or reassign all child asset types first"
             });
         }
 
@@ -216,5 +295,6 @@ module.exports = {
     getAllAssetTypes,
     getAssetTypeById,
     updateAssetType,
-    deleteAssetType
+    deleteAssetType,
+    getParentAssetTypes
 };

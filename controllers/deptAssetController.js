@@ -91,7 +91,14 @@ const getAllAssetTypes = async (req, res) => {
     try {
         console.log('Fetching all asset types...');
         const result = await db.query(
-            "SELECT asset_type_id, text FROM \"tblAssetTypes\" WHERE int_status = 1"
+            `SELECT 
+                asset_type_id, 
+                text,
+                group_required,
+                COALESCE(is_child, false) as is_child,
+                parent_asset_type_id
+             FROM "tblAssetTypes" 
+             WHERE int_status = 1`
         );
         console.log(`Found ${result.rows.length} asset types:`, result.rows);
         res.status(200).json(result.rows);

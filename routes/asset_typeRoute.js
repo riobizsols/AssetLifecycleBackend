@@ -1,24 +1,30 @@
-const express = require("express");
+const express = require('express');
 const router = express.Router();
-const assetTypeController = require("../controllers/assetTypeController");
-const { protect } = require("../middlewares/authMiddleware");
+const {
+    addAssetType,
+    getAllAssetTypes,
+    getAssetTypeById,
+    updateAssetType,
+    deleteAssetType,
+    getParentAssetTypes
+} = require('../controllers/assetTypeController');
 
-// Apply authentication middleware
-router.use(protect);
+// Add new asset type
+router.post('/', addAssetType);
 
-// POST /api/asset-types - Add new asset type
-router.post("/asset-types", assetTypeController.addAssetType);
+// Get all asset types
+router.get('/', getAllAssetTypes);
 
-// GET /api/asset-types - Get all asset types
-router.get("/asset-types", assetTypeController.getAllAssetTypes);
+// Get all parent asset types
+router.get('/parents', getParentAssetTypes);
 
-// GET /api/asset-types/:id - Get asset type by ID
-router.get("/asset-types/:id", assetTypeController.getAssetTypeById);
+// Get asset type by ID
+router.get('/:id', getAssetTypeById);
 
-// PUT /api/asset-types/:id - Update asset type
-router.put("/asset-types/:id", assetTypeController.updateAssetType);
+// Update asset type
+router.put('/:id', updateAssetType);
 
-// DELETE /api/asset-types/:id - Delete asset type
-router.delete("/asset-types/:id", assetTypeController.deleteAssetType);
+// Delete asset type
+router.delete('/:id', deleteAssetType);
 
 module.exports = router;

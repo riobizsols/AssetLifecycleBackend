@@ -45,7 +45,7 @@ app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
 app.use("/api/", vendorsRoutes);
 app.use("/api/", prodServRoutes);
-app.use("/api/", asset_typeRoutes);
+app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
