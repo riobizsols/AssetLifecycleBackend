@@ -2,15 +2,13 @@ const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/assetController");
 const { authorize } = require("../middlewares/authorize");
-
+    
 router.get("/", controller.getAllAssets);
 router.post("/", controller.addAsset);
-<<<<<<< HEAD
 router.put("/:asset_id", controller.updateAsset);
 router.delete("/:asset_id", controller.deleteAsset);
 router.post("/delete", controller.deleteMultipleAssets);
 router.get("/potential-parents/:asset_type_id", controller.getPotentialParentAssets);
-=======
 
 router.get("/all-assets", controller.getAllAssets);
 // GET /api/assets - Get all assets (with optional query filters)
@@ -53,6 +51,5 @@ router.delete("/:id", controller.deleteAsset);
 
 // DELETE /api/assets - Delete multiple assets
 router.delete("/", controller.deleteMultipleAssets);
->>>>>>> origin/Naren
 
 module.exports = router;
