@@ -210,35 +210,56 @@ const checkActiveAssignmentExists = async (asset_id, employee_id, org_id) => {
 };
 
 const updateAssetAssignment = async (asset_assign_id, updateData) => {
-  const {
-    dept_id,
-    asset_id,
-    org_id,
-    employee_int_id,
-    action,
-    action_by,
-    latest_assignment_flag,
-  } = updateData;
+  // Build SET clause and values dynamically
+  const setClauses = [];
+  const values = [asset_assign_id];
+  let idx = 2;
 
+  if (updateData.dept_id !== undefined) {
+    setClauses.push(`dept_id = $${idx}`);
+    values.push(updateData.dept_id);
+    idx++;
+  }
+  if (updateData.asset_id !== undefined) {
+    setClauses.push(`asset_id = $${idx}`);
+    values.push(updateData.asset_id);
+    idx++;
+  }
+  if (updateData.org_id !== undefined) {
+    setClauses.push(`org_id = $${idx}`);
+    values.push(updateData.org_id);
+    idx++;
+  }
+  if (updateData.employee_int_id !== undefined) {
+    setClauses.push(`employee_int_id = $${idx}`);
+    values.push(updateData.employee_int_id);
+    idx++;
+  }
+  if (updateData.action !== undefined) {
+    setClauses.push(`action = $${idx}`);
+    values.push(updateData.action);
+    idx++;
+  }
+  // Always update action_on and action_by
+  setClauses.push(`action_on = CURRENT_TIMESTAMP`);
+  if (updateData.action_by !== undefined) {
+    setClauses.push(`action_by = $${idx}`);
+    values.push(updateData.action_by);
+    idx++;
+  }
+  if (updateData.latest_assignment_flag !== undefined) {
+    setClauses.push(`latest_assignment_flag = $${idx}`);
+    values.push(updateData.latest_assignment_flag);
+    idx++;
+  }
+
+  const setClause = setClauses.join(', ');
   const query = `
-        UPDATE "tblAssetAssignments"
-        SET 
-            dept_id = $2, asset_id = $3, org_id = $4, employee_int_id = $5,
-            action = $6, action_on = CURRENT_TIMESTAMP, action_by = $7, latest_assignment_flag = $8
-        WHERE asset_assign_id = $1
-        RETURNING *
-    `;
-
-  const values = [
-    asset_assign_id,
-    dept_id,
-    asset_id,
-    org_id,
-    employee_int_id,
-    action,
-    action_by,
-    latest_assignment_flag,
-  ];
+    UPDATE "tblAssetAssignments"
+    SET ${setClause}
+    WHERE asset_assign_id = $1
+    RETURNING *
+  `;
 
   return await db.query(query, values);
 };

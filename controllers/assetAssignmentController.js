@@ -77,6 +77,78 @@ const addAssetAssignment = async (req, res) => {
     }
 };
 
+// POST /api/asset-assignments/employee - Add new asset assignment for employee only (no assignment_type check)
+const addEmployeeAssetAssignment = async (req, res) => {
+    try {
+        const {
+            asset_assign_id,
+            dept_id,
+            asset_id,
+            org_id,
+            employee_int_id,
+            action = "Assigned",
+            action_by,
+            latest_assignment_flag
+        } = req.body;
+
+        const created_by = req.user.user_id;
+
+        // Validate required fields
+        if (!asset_assign_id || !dept_id || !asset_id || !org_id || !employee_int_id || latest_assignment_flag === undefined) {
+            return res.status(400).json({ 
+                error: "asset_assign_id, dept_id, asset_id, org_id, employee_int_id, and latest_assignment_flag are required fields" 
+            });
+        }
+
+        // Check asset type assignment_type to ensure it is not Department
+        // const assetModel = require("../models/assetModel");
+        // const assetTypeResult = await assetModel.getAssetTypeAssignmentType(asset_id);
+        // if (assetTypeResult.rows.length === 0) {
+        //     return res.status(404).json({ 
+        //         error: "Asset not found or asset type not configured" 
+        //     });
+        // }
+        // const assignmentType = assetTypeResult.rows[0].assignment_type;
+        // if (assignmentType === "Department") {
+        //     return res.status(400).json({ 
+        //         error: "This asset type is for department assignment only" 
+        //     });
+        // }
+
+        // Check if asset assignment already exists
+        const existingAssignment = await model.checkAssetAssignmentExists(asset_assign_id);
+        if (existingAssignment.rows.length > 0) {
+            return res.status(409).json({ 
+                error: "Asset assignment with this asset_assign_id already exists" 
+            });
+        }
+
+        // Prepare assignment data
+        const assignmentData = {
+            asset_assign_id,
+            dept_id,
+            asset_id,
+            org_id,
+            employee_int_id,
+            action,
+            action_by: created_by,
+            latest_assignment_flag
+        };
+
+        // Insert new asset assignment
+        const result = await model.insertAssetAssignment(assignmentData);
+
+        res.status(201).json({
+            message: "Employee asset assignment added successfully",
+            assignment: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error("Error adding employee asset assignment:", err);
+        res.status(500).json({ error: "Internal server error", err });
+    }
+};
+
 // GET /api/asset-assignments - Get all asset assignments
 const getAllAssetAssignments = async (req, res) => {
     try {
@@ -425,3 +497,5 @@ module.exports = {
     deleteMultipleAssetAssignments,
     getDepartmentWiseAssetAssignments,
 };
+
+module.exports.addEmployeeAssetAssignment = addEmployeeAssetAssignment;

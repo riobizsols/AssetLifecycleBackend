@@ -9,6 +9,9 @@ router.use(protect);
 // POST /api/asset-assignments - Add new asset assignment
 router.post("/", controller.addAssetAssignment);  //....
 
+// POST /api/asset-assignments/employee - Add asset assignment for employee only
+router.post('/employee', controller.addEmployeeAssetAssignment);
+
 // GET /api/asset-assignments - Get all asset assignments
 router.get("/", controller.getAllAssetAssignments);
 
