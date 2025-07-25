@@ -184,6 +184,7 @@ const getAssetWithDetails = async (asset_id) => {
 const insertAsset = async (assetData) => {
   const {
     asset_type_id,
+    ext_id,
     asset_id,
     text,
     serial_number,
@@ -213,22 +214,10 @@ const insertAsset = async (assetData) => {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
         RETURNING *
     `;
-  //   INSERT INTO "tblAssets" (
-  //     asset_type_id, ext_id, asset_id, text, serial_number, description,
-  //     branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-  //     purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-  //     parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-  //   ) VALUES (
-  //     $1, gen_random_uuid(), $2, $3, $4, $5,
-  //     $6, $7, $8, $9, $10,
-  //     $11, $12, $13, $14, $15,
-  //     $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
-  //   )
-  //   RETURNING *;
-  // `;
 
   const values = [
     asset_type_id,
+    ext_id,
     asset_id,
     text,
     serial_number,
@@ -287,6 +276,17 @@ const checkProdServExists = async (prod_serv_id) => {
     `;
 
   return await db.query(query, [prod_serv_id]);
+};
+
+const getAssetTypeAssignmentType = async (asset_id) => {
+  const query = `
+        SELECT at.assignment_type
+        FROM "tblAssets" a
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.asset_id = $1
+    `;
+
+  return await db.query(query, [asset_id]);
 };
 
 const insertAssetPropValue = async (propValueData) => {
@@ -366,6 +366,7 @@ module.exports = {
   checkAssetIdExists,
   checkVendorExists,
   checkProdServExists,
+  getAssetTypeAssignmentType,
   insertAssetPropValue,
   generateAssetId,
   deleteAsset,

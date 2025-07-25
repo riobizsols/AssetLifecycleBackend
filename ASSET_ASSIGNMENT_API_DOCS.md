@@ -21,10 +21,32 @@ Authorization: Bearer <your-jwt-token>
     "dept_id": "string",
     "asset_id": "string",
     "org_id": "string",
-    "employee_int_id": "string",
+    "employee_int_id": "string (conditional)",
     "action": "string (optional, default: 'Assigned')",
     "action_by": "string",
     "latest_assignment_flag": "boolean"
+  }
+  ```
+- **Validation Rules**:
+  - `asset_assign_id`, `dept_id`, `asset_id`, `org_id`, and `latest_assignment_flag` are always required
+  - `employee_int_id` is required only when the asset's assignment_type is "User"
+  - `employee_int_id` is not required when the asset's assignment_type is "Department"
+- **Response**:
+  ```json
+  {
+    "message": "Asset assignment added successfully",
+    "assignment": {
+      "asset_assign_id": "AA001",
+      "dept_id": "DEPT001",
+      "asset_id": "ASSET001",
+      "org_id": "ORG001",
+      "employee_int_id": "EMP001",
+      "action": "A",
+      "action_on": "2024-01-15T10:30:00Z",
+      "action_by": "USER001",
+      "latest_assignment_flag": true
+    },
+    "assignment_type": "User"
   }
   ```
 
@@ -137,7 +159,81 @@ Authorization: Bearer <your-jwt-token>
 - **GET** `/api/asset-assignments/org/:org_id`
 - **Description**: Retrieves all asset assignments for a specific organization
 
-### 11. Update Asset Assignment
+### 11. Get Department-wise Asset Assignments
+- **GET** `/api/asset-assignments/department/:dept_id/assignments`
+- **Description**: Retrieves department details, employee count, and assigned assets for a specific department
+- **Filters**: Only returns assets with `assignment_type = 'Department'` in the AssetTypes table
+- **Response**: Object containing department details, counts, and assigned assets list
+- **Example Response**:
+  ```json
+  {
+    "message": "Department has 3 assigned assets and 15 employees",
+    "department": {
+      "dept_id": "DEPT001",
+      "department_name": "IT Department",
+      "employee_count": 15
+    },
+    "assetCount": 3,
+    "employeeCount": 15,
+    "assignedAssets": [
+      {
+        "asset_id": "AST001",
+        "asset_name": "Laptop Dell XPS",
+        "serial_number": "SN123456",
+        "description": "High-performance laptop",
+        "asset_type_id": "AT001",
+        "asset_type_name": "Laptop",
+        "assignment_type": "Department",
+        "asset_assign_id": "AA001",
+        "action": "A",
+        "action_on": "2024-01-15T10:30:00Z",
+        "action_by": "USER001",
+        "latest_assignment_flag": true
+      },
+      {
+        "asset_id": "AST002",
+        "asset_name": "Printer HP LaserJet",
+        "serial_number": "SN789012",
+        "description": "Network printer",
+        "asset_type_id": "AT002",
+        "asset_type_name": "Printer",
+        "assignment_type": "Department",
+        "asset_assign_id": "AA002",
+        "action": "A",
+        "action_on": "2024-01-16T09:15:00Z",
+        "action_by": "USER001",
+        "latest_assignment_flag": true
+      }
+    ]
+  }
+  ```
+- **Example Response (No Assigned Assets)**:
+  ```json
+  {
+    "message": "Department has no assigned assets and 8 employees",
+    "department": {
+      "dept_id": "DEPT002",
+      "department_name": "HR Department",
+      "employee_count": 8
+    },
+    "assetCount": 0,
+    "employeeCount": 8,
+    "assignedAssets": []
+  }
+  ```
+- **Example Response (Department Not Found)**:
+  ```json
+  {
+    "error": "Department not found",
+    "message": "Department not found",
+    "department": null,
+    "assignedAssets": [],
+    "assetCount": 0,
+    "employeeCount": 0
+  }
+  ```
+
+### 12. Update Asset Assignment
 - **PUT** `/api/asset-assignments/:id`
 - **Description**: Updates an existing asset assignment
 - **Body**:
@@ -153,7 +249,7 @@ Authorization: Bearer <your-jwt-token>
   }
   ```
 
-### 12. Update Asset Assignment by Asset ID
+### 13. Update Asset Assignment by Asset ID
 - **PUT** `/api/asset-assignments/asset/:asset_id`
 - **Description**: Updates asset assignment for a specific asset (only for action="A" and latest_assignment_flag=true)
 - **Body**:
@@ -163,11 +259,11 @@ Authorization: Bearer <your-jwt-token>
   }
   ```
 
-### 13. Delete Single Asset Assignment
+### 14. Delete Single Asset Assignment
 - **DELETE** `/api/asset-assignments/:id`
 - **Description**: Deletes a specific asset assignment
 
-### 14. Delete Multiple Asset Assignments
+### 15. Delete Multiple Asset Assignments
 - **DELETE** `/api/asset-assignments`
 - **Description**: Deletes multiple asset assignments
 - **Body**:
