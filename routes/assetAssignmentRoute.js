@@ -7,7 +7,7 @@ const { protect } = require("../middlewares/authMiddleware");
 router.use(protect);
 
 // POST /api/asset-assignments - Add new asset assignment
-router.post("/", controller.addAssetAssignment);
+router.post("/", controller.addAssetAssignment);  //....
 
 // GET /api/asset-assignments - Get all asset assignments
 router.get("/", controller.getAllAssetAssignments);
@@ -25,7 +25,7 @@ router.get("/dept/:dept_id", controller.getAssetAssignmentsByDept);
 router.get("/employee-history/:employee_id", controller.getAssetAssignmentsByEmployee);
 
 // GET /api/asset-assignments/employee/:employee_id/active - Get active asset assignments by employee
-router.get("/employee/:employee_id/active", controller.getActiveAssetAssignmentsByEmployee);
+router.get("/employee/:employee_id/active", controller.getActiveAssetAssignmentsByEmployee); //.....
 
 // GET /api/asset-assignments/asset/:asset_id - Get asset assignments by asset
 router.get("/asset/:asset_id", controller.getAssetAssignmentsByAsset);

@@ -13,6 +13,6 @@ router.get("/", controller.getAllEmployees);
 router.get("/:id", controller.getEmployeeById);
 
 // GET /api/employees/department/:dept_id - Get employees by department
-router.get("/department/:dept_id", controller.getEmployeesByDepartment);
+router.get("/department/:dept_id", controller.getEmployeesByDepartment); 
 
 module.exports = router;

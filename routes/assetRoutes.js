@@ -3,7 +3,6 @@ const router = express.Router();
 const controller = require("../controllers/assetController");
 const { authorize } = require("../middlewares/authorize");
     
-router.get("/", controller.getAllAssets);
 router.post("/", controller.addAsset);
 router.put("/:asset_id", controller.updateAsset);
 router.delete("/:asset_id", controller.deleteAsset);
@@ -15,16 +14,16 @@ router.get("/all-assets", controller.getAllAssets);
 router.get("/", controller.getAssetsWithFilters);
 
 // GET /api/assets/:id - Get asset by ID
-router.get("/:id", controller.getAssetById);
+router.get("/:id", controller.getAssetById);  //......
 
 // GET /api/assets/details/:id - Get asset with detailed information
-router.get("/details/:id", controller.getAssetWithDetails);
+// router.get("/details/:id", controller.getAssetWithDetails);
 
 // GET /api/assets/type/:asset_type_id - Get assets by asset type
-router.get("/type/:asset_type_id", controller.getAssetsByAssetType);
+router.get("/type/:asset_type_id", controller.getAssetsByAssetType); //......
 
 // GET /api/assets/type/:asset_type_id/inactive - Get inactive assets by asset type
-router.get("/type/:asset_type_id/inactive", controller.getInactiveAssetsByAssetType);
+router.get("/type/:asset_type_id/inactive", controller.getInactiveAssetsByAssetType); //.....
 
 // GET /api/assets/branch/:branch_id - Get assets by branch
 router.get("/branch/:branch_id", controller.getAssetsByBranch);

@@ -448,6 +448,21 @@ const getPotentialParentAssets = async (req, res) => {
   }
 };
 
+// GET /api/assets/:id - Get asset by ID
+const getAssetById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await model.getAssetById(id);
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    console.error('Error fetching asset by ID:', err);
+    res.status(500).json({ error: 'Failed to fetch asset by ID' });
+  }
+};
+
 module.exports = {
   getAllAssets,
   addAsset,
@@ -455,7 +470,7 @@ module.exports = {
   getPotentialParentAssets,
     getAllAssets,
     getAssetById,
-    getAssetWithDetails,
+    // getAssetWithDetails,
     getAssetsByAssetType,
     getAssetsByBranch,
     getAssetsByVendor,
