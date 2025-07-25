@@ -185,7 +185,34 @@ const getAssetWithDetails = async (asset_id) => {
   return await db.query(query, [asset_id]);
 };
 
-const getPotentialParentAssets = async (asset_type_id) => {
+// const getPotentialParentAssets = async (asset_type_id) => {
+
+
+
+const insertAsset = async (assetData) => {
+  const {
+    asset_type_id,
+    ext_id,
+    asset_id,
+    text,
+    serial_number,
+    description,
+    branch_id,
+    vendor_id,
+    prod_serve_id,
+    maintsch_id,
+    purchased_cost,
+    purchased_on,
+    purchased_by,
+    expiry_date,
+    current_status,
+    warranty_period,
+    parent_asset_id,
+    group_id,
+    org_id,
+    created_by,
+  } = assetData;
+
   const query = `
     WITH asset_type_info AS (
       SELECT 
@@ -211,56 +238,71 @@ const getPotentialParentAssets = async (asset_type_id) => {
 
   return await db.query(query, [asset_type_id]);
 };
-// const insertAsset = async (assetData) => {
-//   const {
-//     asset_type_id,
-//     asset_id,
-//     text,
-//     serial_number,
-//     description,
-//     branch_id,
-//     vendor_id,
-//     prod_serve_id,
-//     maintsch_id,
-//     purchased_cost,
-//     purchased_on,
-//     purchased_by,
-//     expiry_date,
-//     current_status,
-//     warranty_period,
-//     parent_asset_id,
-//     group_id,
-//     org_id,
-//     created_by,
-//   } = assetData;
-  
 
-//   const query = `
-//         INSERT INTO "tblAssets" (
-//             asset_type_id, ext_id, asset_id, text, serial_number, description,
-//             branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-//             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-//             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-//         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, $20, CURRENT_TIMESTAMP)
-//         RETURNING *
+
+// const insertAsset = async ({
+//   asset_type_id,
+//   ext_id,
+//   text,
+//   serial_number,
+//   description,
+//   branch_id,
+//   vendor_id,
+//   prod_serve_id,
+//   maintsch_id,
+//   purchased_cost,
+//   purchased_on,
+//   purchased_by,
+//   expiry_date,
+//   current_status,
+//   warranty_period,
+//   parent_asset_id,
+//   org_id,
+//   created_by,
+//   changed_by,
+//   properties
+// }) => {
+//   const client = await db.connect();
+//   try {
+//     await client.query('BEGIN');
+
+//     // Insert asset
+//     const query = `
+//       INSERT INTO "tblAssets" (
+//         asset_id,
+//         asset_type_id,
+//         ext_id,
+//         text,
+//         serial_number,
+//         description,
+//         branch_id,
+//         vendor_id,
+//         prod_serve_id,
+//         maintsch_id,
+//         purchased_cost,
+//         purchased_on,
+//         purchased_by,
+//         expiry_date,
+//         current_status,
+//         warranty_period,
+//         parent_asset_id,
+//         org_id,
+//         created_by,
+//         changed_by,
+//         created_on,
+//         changed_on
+//       )
+//       VALUES (
+//         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+//       )
+//       RETURNING *
 //     `;
-    
-//   //   INSERT INTO "tblAssets" (
-//   //     asset_type_id, ext_id, asset_id, text, serial_number, description,
-//   //     branch_id, vendor_id, prod_serve_id, maintsch_id, purchased_cost,
-//   //     purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-//   //     parent_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-//   //   ) VALUES (
-//   //     $1, gen_random_uuid(), $2, $3, $4, $5,
-//   //     $6, $7, $8, $9, $10,
-//   //     $11, $12, $13, $14, $15,
-//   //     $16, $17, $18, $19, CURRENT_TIMESTAMP, $19, CURRENT_TIMESTAMP
-//   //   )
-//   //   RETURNING *;
-//   // `;
 
+//     // Generate asset_id
+//     const asset_id = await generateAssetId();
 //   const values = [
 //     asset_type_id,
+//     ext_id,
 //     asset_id,
 //     text,
 //     serial_number,
@@ -280,118 +322,35 @@ const getPotentialParentAssets = async (asset_type_id) => {
 //     org_id,
 //     created_by,
 //   ];
-// }
 
-const insertAsset = async ({
-  asset_type_id,
-  ext_id,
-  text,
-  serial_number,
-  description,
-  branch_id,
-  vendor_id,
-  prod_serve_id,
-  maintsch_id,
-  purchased_cost,
-  purchased_on,
-  purchased_by,
-  expiry_date,
-  current_status,
-  warranty_period,
-  parent_asset_id,
-  org_id,
-  created_by,
-  changed_by,
-  properties
-}) => {
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
+    
 
-    // Insert asset
-    const query = `
-      INSERT INTO "tblAssets" (
-        asset_id,
-        asset_type_id,
-        ext_id,
-        text,
-        serial_number,
-        description,
-        branch_id,
-        vendor_id,
-        prod_serve_id,
-        maintsch_id,
-        purchased_cost,
-        purchased_on,
-        purchased_by,
-        expiry_date,
-        current_status,
-        warranty_period,
-        parent_asset_id,
-        org_id,
-        created_by,
-        changed_by,
-        created_on,
-        changed_on
-      )
-      VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-      )
-      RETURNING *
-    `;
+//     const result = await client.query(query, values);
 
-    // Generate asset_id
-    const asset_id = await generateAssetId();
+//     // Insert properties if any
+//     if (properties && Object.keys(properties).length > 0) {
+//       for (const [assetTypePropId, value] of Object.entries(properties)) {
+//         // Generate a unique apv_id
+//         const timestamp = Date.now().toString().slice(-6);
+//         const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+//         const apvId = `APV${timestamp}${random}`;
 
-    const values = [
-      asset_id,
-      asset_type_id,
-      ext_id,
-      text,
-      serial_number,
-      description,
-      branch_id,
-      vendor_id,
-      prod_serve_id,
-      maintsch_id,
-      purchased_cost,
-      purchased_on,
-      purchased_by,
-      expiry_date,
-      current_status || 'Active',
-      warranty_period,
-      parent_asset_id,
-      org_id,
-      created_by,
-      changed_by
-    ];
+//         await client.query(
+//           'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, ext_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5, $6)',
+//           [apvId, asset_id, ext_id, org_id, assetTypePropId, value]
+//         );
+//       }
+//     }
 
-    const result = await client.query(query, values);
-
-    // Insert properties if any
-    if (properties && Object.keys(properties).length > 0) {
-      for (const [assetTypePropId, value] of Object.entries(properties)) {
-        // Generate a unique apv_id
-        const timestamp = Date.now().toString().slice(-6);
-        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-        const apvId = `APV${timestamp}${random}`;
-
-        await client.query(
-          'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, ext_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5, $6)',
-          [apvId, asset_id, ext_id, org_id, assetTypePropId, value]
-        );
-      }
-    }
-
-    await client.query('COMMIT');
-    return result.rows[0];
-  } catch (err) {
-    await client.query('ROLLBACK');
-    throw err;
-  } finally {
-    client.release();
-  }
-};
+//     await client.query('COMMIT');
+//     return result.rows[0];
+//   } catch (err) {
+//     await client.query('ROLLBACK');
+//     throw err;
+//   } finally {
+//     client.release();
+//   }
+// };
 
 const updateAsset = async (asset_id, {
   asset_type_id,
@@ -516,6 +475,17 @@ const checkProdServExists = async (prod_serv_id) => {
   return await db.query(query, [prod_serv_id]);
 };
 
+const getAssetTypeAssignmentType = async (asset_id) => {
+  const query = `
+        SELECT at.assignment_type
+        FROM "tblAssets" a
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.asset_id = $1
+    `;
+
+  return await db.query(query, [asset_id]);
+};
+
 const insertAssetPropValue = async (propValueData) => {
   const {
     asset_id,
@@ -546,14 +516,14 @@ const generateAssetId = async () => {
   const timestamp = Date.now().toString().slice(-6);
   const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
   const assetId = `AST${timestamp}${random}`;
-  
+
   // Check if this ID already exists
   const existing = await checkAssetIdExists(assetId);
   if (existing.rows.length > 0) {
     // If exists, generate a new one recursively
     return generateAssetId();
   }
-  
+
   return assetId;
 }
 const deleteAsset = async (asset_id) => {
@@ -622,6 +592,14 @@ module.exports = {
   getAssetWithDetails,
   insertAsset,
   updateAsset,
+  checkAssetExists,
+  checkAssetIdExists,
+  checkVendorExists,
+  checkProdServExists,
+  getAssetTypeAssignmentType,
+  insertAssetPropValue,
+  generateAssetId,
+  deleteAsset,
   deleteMultipleAssets,
-  getPotentialParentAssets
+  // getPotentialParentAssets
 };

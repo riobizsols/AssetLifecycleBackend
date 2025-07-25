@@ -16,14 +16,31 @@ const addAssetAssignment = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        // Validate required fields
-        if (!asset_assign_id || !dept_id || !asset_id || !org_id || !employee_int_id || latest_assignment_flag === undefined) {
+        // Validate basic required fields
+        if (!asset_assign_id || !dept_id || !asset_id || !org_id || latest_assignment_flag === undefined) {
             return res.status(400).json({ 
-                error: "asset_assign_id, dept_id, asset_id, org_id, employee_int_id, and latest_assignment_flag are required fields" 
+                error: "asset_assign_id, dept_id, asset_id, org_id, and latest_assignment_flag are required fields" 
             });
         }
 
+        // Check asset type assignment_type to determine if employee_int_id is required
+        const assetModel = require("../models/assetModel");
+        const assetTypeResult = await assetModel.getAssetTypeAssignmentType(asset_id);
+        
+        if (assetTypeResult.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "Asset not found or asset type not configured" 
+            });
+        }
 
+        const assignmentType = assetTypeResult.rows[0].assignment_type;
+        
+        // Validate employee_int_id based on assignment_type
+        if (assignmentType === "User" && !employee_int_id) {
+            return res.status(400).json({ 
+                error: "employee_int_id is required when assignment_type is 'User'" 
+            });
+        }
 
         // Check if asset assignment already exists
         const existingAssignment = await model.checkAssetAssignmentExists(asset_assign_id);
@@ -33,16 +50,13 @@ const addAssetAssignment = async (req, res) => {
             });
         }
 
-        // Note: Multiple assignments are allowed for the same asset and employee
-        // The latest_assignment_flag should be managed manually to indicate the current active assignment
-
         // Prepare assignment data
         const assignmentData = {
             asset_assign_id,
             dept_id,
             asset_id,
             org_id,
-            employee_int_id,
+            employee_int_id: assignmentType === "Department" ? null : employee_int_id,
             action,
             action_by: created_by,
             latest_assignment_flag
@@ -53,7 +67,8 @@ const addAssetAssignment = async (req, res) => {
 
         res.status(201).json({
             message: "Asset assignment added successfully",
-            assignment: result.rows[0]
+            assignment: result.rows[0],
+            assignment_type: assignmentType
         });
 
     } catch (err) {
@@ -347,7 +362,49 @@ const deleteMultipleAssetAssignments = async (req, res) => {
 
     } catch (err) {
         console.error("Error deleting multiple asset assignments:", err);
-        res.status(500).json({ error: "Internal server error", err });
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+// GET /api/asset-assignments/department/:dept_id/assignments - Get department-wise asset assignments
+const getDepartmentWiseAssetAssignments = async (req, res) => {
+    try {
+        const { dept_id } = req.params;
+        const result = await model.getDepartmentWiseAssetAssignments(dept_id);
+        
+        // Check if department exists
+        if (!result.department) {
+            return res.status(404).json({ 
+                error: "Department not found",
+                message: "Department not found",
+                department: null,
+                assignedAssets: [],
+                assetCount: 0,
+                employeeCount: 0
+            });
+        }
+        
+        const assetCount = result.assignedAssets.length;
+        const employeeCount = result.department.employee_count;
+        
+        const message = assetCount > 0 
+            ? `Department has ${assetCount} assigned assets and ${employeeCount} employees`
+            : `Department has no assigned assets and ${employeeCount} employees`;
+        
+        res.status(200).json({
+            message: message,
+            department: {
+                dept_id: result.department.dept_id,
+                department_name: result.department.department_name,
+                employee_count: employeeCount
+            },
+            assetCount: assetCount,
+            employeeCount: employeeCount,
+            assignedAssets: result.assignedAssets
+        });
+    } catch (err) {
+        console.error("Error fetching department-wise asset assignments:", err);
+        res.status(500).json({ error: "Failed to fetch department-wise asset assignments" });
     }
 };
 
@@ -366,4 +423,5 @@ module.exports = {
     updateAssetAssignmentByAssetId,
     deleteAssetAssignment,
     deleteMultipleAssetAssignments,
+    getDepartmentWiseAssetAssignments,
 };

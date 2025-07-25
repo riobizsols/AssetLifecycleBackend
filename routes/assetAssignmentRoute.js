@@ -36,6 +36,9 @@ router.get("/action/:action", controller.getAssetAssignmentsByStatus);
 // GET /api/asset-assignments/org/:org_id - Get asset assignments by organization
 router.get("/org/:org_id", controller.getAssetAssignmentsByOrg);
 
+// GET /api/asset-assignments/department/:dept_id/assignments - Get department-wise asset assignments
+router.get("/department/:dept_id/assignments", controller.getDepartmentWiseAssetAssignments);
+
 // PUT /api/asset-assignments/:id - Update asset assignment
 router.put("/:id", controller.updateAssetAssignment);
 

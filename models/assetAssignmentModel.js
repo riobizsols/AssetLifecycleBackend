@@ -276,6 +276,45 @@ const deleteMultipleAssetAssignments = async (asset_assign_ids) => {
   return await db.query(query, [asset_assign_ids]);
 };
 
+const getDepartmentWiseAssetAssignments = async (dept_id) => {
+  // Get department details and employee count
+  const deptQuery = `
+        SELECT 
+            d.dept_id, d.text as department_name,
+            COUNT(DISTINCT e.employee_id) as employee_count
+        FROM "tblDepartments" d
+        LEFT JOIN "tblEmployees" e ON d.dept_id = e.dept_id
+        WHERE d.dept_id = $1
+        GROUP BY d.dept_id, d.text
+    `;
+
+  const deptResult = await db.query(deptQuery, [dept_id]);
+
+  // Get assigned assets for department (only assets with assignment_type = 'Department')
+  const assignedAssetsQuery = `
+        SELECT DISTINCT
+            a.asset_id, a.text as asset_name, a.serial_number, a.description,
+            a.asset_type_id, at.text as asset_type_name, at.assignment_type,
+            aa.asset_assign_id, aa.action, aa.action_on, aa.action_by,
+            aa.latest_assignment_flag
+        FROM "tblAssets" a
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+        WHERE aa.dept_id = $1 
+        AND at.assignment_type = 'Department'
+        AND aa.action = 'A' 
+        AND aa.latest_assignment_flag = true
+        ORDER BY a.text
+    `;
+
+  const assignedAssetsResult = await db.query(assignedAssetsQuery, [dept_id]);
+
+  return {
+    department: deptResult.rows[0] || null,
+    assignedAssets: assignedAssetsResult.rows
+  };
+};
+
 module.exports = {
   getAllAssetAssignments,
   getAssetAssignmentById,
@@ -294,4 +333,5 @@ module.exports = {
   updateAssetAssignmentByAssetId,
   deleteAssetAssignment,
   deleteMultipleAssetAssignments,
+  getDepartmentWiseAssetAssignments,
 };
