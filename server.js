@@ -5,6 +5,7 @@ require("dotenv").config();
 const authRoutes = require("./routes/authRoutes");
 const jobRoleRoutes = require("./routes/jobRoleRoutes");
 const userRoutes = require("./routes/userRoutes");
+<<<<<<< HEAD
 const departmentRoutes = require("./routes/departmentRoutes");
 const branchRoutes = require("./routes/branchRoutes");
 const deptAdminRoutes = require("./routes/deptAdminRoutes");
@@ -12,8 +13,16 @@ const assetTypeRoutes = require("./routes/assetTypeRoutes");
 const vendorsRoutes = require("./routes/vendorsRoutes");
 const userJobRoleRoutes = require("./routes/userJobRoleRoutes");
 
+=======
+const departmentRoutes = require('./routes/departmentRoutes');
+const branchRoutes = require('./routes/branchRoutes');
+const deptAdminRoutes = require('./routes/deptAdminRoutes');
+const assetTypeRoutes = require('./routes/assetTypeRoutes');
+const orgRoutes = require('./routes/orgRoutes');
+>>>>>>> 2f02a97bbd4f216017c81bf5c22d67757e089ef5
 
 const app = express();
+app.use(express.json());
 
 app.use(
   cors({
@@ -32,11 +41,19 @@ app.use("/api/branches", branchRoutes);
 app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", assetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
+<<<<<<< HEAD
 app.use("/api/vendors", vendorsRoutes);
 app.use("/api/user-job-roles", userJobRoleRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
+=======
+app.use("/api/orgs", orgRoutes);
+
+
+app.get('/', (req, res) => {
+    res.send('Server is running!');
+>>>>>>> 2f02a97bbd4f216017c81bf5c22d67757e089ef5
 });
 
 app.listen(PORT, () => {
