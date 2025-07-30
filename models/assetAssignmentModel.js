@@ -144,13 +144,11 @@ const getAssetAssignmentWithDetails = async (asset_assign_id) => {
             aa.action, aa.action_on, aa.action_by, aa.latest_assignment_flag,
             d.text as dept_name,
             e.name as employee_name,
-            a.text as asset_name,
-            o.text as org_name
+            a.text as asset_name
         FROM "tblAssetAssignments" aa
         LEFT JOIN "tblDepartments" d ON aa.dept_id = d.dept_id
         LEFT JOIN "tblEmployees" e ON aa.employee_int_id = e.employee_id
         LEFT JOIN "tblAssets" a ON aa.asset_id = a.asset_id
-        LEFT JOIN "tblOrganizations" o ON aa.org_id = o.org_id
         WHERE aa.asset_assign_id = $1
     `;
 

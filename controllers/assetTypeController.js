@@ -11,7 +11,7 @@ const addAssetType = async (req, res) => {
             int_status,            // from frontend (1 or 0)
             group_required,        // from frontend
             inspection_required,    // from frontend
-            maintenance_schedule,   // from frontend (1 or 0)
+            maint_required,        // from frontend (1 or 0)
             is_child = false,      // from frontend
             parent_asset_type_id = null  // from frontend
         } = req.body;
@@ -61,7 +61,7 @@ const addAssetType = async (req, res) => {
             org_id,
             asset_type_id,
             int_status,
-            maintenance_schedule,
+            maint_required,
             assignment_type,
             inspection_required,
             group_required,
@@ -129,7 +129,7 @@ const updateAssetType = async (req, res) => {
             ext_id,
             org_id,
             int_status,
-            maintenance_schedule,
+            maint_required,
             assignment_type,
             inspection_required,
             group_required,
@@ -189,7 +189,7 @@ const updateAssetType = async (req, res) => {
             ext_id: ext_id || existingAsset.rows[0].ext_id,
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
-            maintenance_schedule: maintenance_schedule || existingAsset.rows[0].maintenance_schedule,
+            maint_required: maint_required || existingAsset.rows[0].maint_required,
             assignment_type: assignment_type || existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,

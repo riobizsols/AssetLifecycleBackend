@@ -1,9 +1,9 @@
 const db = require('../config/db');
 
-const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, maintenance_schedule, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null) => {
+const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null) => {
     const query = `
         INSERT INTO "tblAssetTypes" (
-            ext_id, org_id, asset_type_id, int_status, maintenance_schedule, 
+            ext_id, org_id, asset_type_id, int_status, maint_required, 
             assignment_type, inspection_required, group_required, created_by, 
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $9, CURRENT_TIMESTAMP, $10, $11, $12)
@@ -11,7 +11,7 @@ const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, mainte
     `;
     
     const values = [
-        ext_id, org_id, asset_type_id, int_status, maintenance_schedule,
+        ext_id, org_id, asset_type_id, int_status, maint_required,
         assignment_type, inspection_required, group_required, created_by, text,
         is_child, parent_asset_type_id
     ];
@@ -22,7 +22,7 @@ const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, mainte
 const getAllAssetTypes = async () => {
     const query = `
         SELECT 
-            ext_id, org_id, asset_type_id, int_status, maintenance_schedule,
+            ext_id, org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
         FROM "tblAssetTypes"
@@ -35,7 +35,7 @@ const getAllAssetTypes = async () => {
 const getAssetTypeById = async (asset_type_id) => {
     const query = `
         SELECT 
-            ext_id, org_id, asset_type_id, int_status, maintenance_schedule,
+            ext_id, org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
         FROM "tblAssetTypes"
@@ -47,14 +47,14 @@ const getAssetTypeById = async (asset_type_id) => {
 
 const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
-        ext_id, org_id, int_status, maintenance_schedule, assignment_type,
+        ext_id, org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, text, is_child, parent_asset_type_id
     } = updateData;
     
     const query = `
         UPDATE "tblAssetTypes"
         SET 
-            ext_id = $1, org_id = $2, int_status = $3, maintenance_schedule = $4,
+            ext_id = $1, org_id = $2, int_status = $3, maint_required = $4,
             assignment_type = $5, inspection_required = $6, group_required = $7,
             changed_by = $8, changed_on = CURRENT_TIMESTAMP, text = $9,
             is_child = $10, parent_asset_type_id = $11
@@ -63,7 +63,7 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     `;
     
     const values = [
-        ext_id, org_id, int_status, maintenance_schedule, assignment_type,
+        ext_id, org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, changed_by, text,
         is_child, parent_asset_type_id, asset_type_id
     ];

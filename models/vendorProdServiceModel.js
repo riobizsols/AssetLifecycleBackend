@@ -131,8 +131,8 @@ const getVendorProdServiceWithDetails = async (ven_prod_serv_id) => {
     const query = `
         SELECT 
             vps.ven_prod_serv_id, vps.ext_id, vps.prod_serv_id, vps.vendor_id, vps.org_id,
-            v.text as vendor_name,
-            ps.text as prod_serv_name
+            v.vendor_name,
+            ps.description as prod_serv_name
         FROM "tblVendorProdService" vps
         LEFT JOIN "tblVendors" v ON vps.vendor_id = v.vendor_id
         LEFT JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id
