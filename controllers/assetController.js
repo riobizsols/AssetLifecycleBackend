@@ -437,16 +437,7 @@ const deleteMultipleAssets = async (req, res) => {
   }
 };
 
-const getPotentialParentAssets = async (req, res) => {
-  const { asset_type_id } = req.params;
-  try {
-    const assets = await model.getPotentialParentAssets(asset_type_id);
-    res.json(assets.rows);
-  } catch (err) {
-    console.error("Error fetching potential parent assets:", err);
-    res.status(500).json({ error: "Failed to fetch potential parent assets" });
-  }
-};
+
 
 // GET /api/assets/:id - Get asset by ID
 const getAssetById = async (req, res) => {
@@ -463,9 +454,137 @@ const getAssetById = async (req, res) => {
   }
 };
 
+// POST /api/assets/add   (WEB CONTROLLER) - Create new asset (new function)
+const createAsset = async (req, res) => {
+    try {
+        console.log("Received asset data:", req.body);
+        console.log("User info:", req.user);
+        
+        const {
+            asset_type_id,
+            ext_id, // Accept ext_id from frontend
+            asset_id,
+            text,
+            serial_number,
+            description,
+            branch_id,
+            vendor_id,
+            prod_serve_id, // Accept prod_serve_id from frontend
+            maintsch_id,
+            purchased_cost,
+            purchased_on,
+            purchased_by,
+            expiry_date,
+            current_status = "Active",
+            warranty_period,
+            parent_asset_id,
+            group_id,
+            org_id
+        } = req.body;
+
+        if (!req.user || !req.user.user_id) {
+            return res.status(401).json({ error: "User not authenticated or user_id missing" });
+        }
+
+        const created_by = req.user.user_id;
+
+        if (!text || !org_id) {
+            return res.status(400).json({ error: "text, and org_id are required fields" });
+        }
+
+        if (vendor_id) {
+            const vendorExists = await model.checkVendorExists(vendor_id);
+            if (vendorExists.rows.length === 0) {
+                console.warn("Invalid vendor_id:", vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${vendor_id}' does not exist` });
+            }
+        }
+
+        // Generate or validate asset_id
+        let finalAssetId = asset_id;
+        if (!asset_id) {
+            finalAssetId = await model.generateAssetId();
+        } else {
+            const existingAssetId = await model.checkAssetIdExists(asset_id);
+            if (existingAssetId.rows.length > 0) {
+                return res.status(409).json({ error: "Asset with this asset_id already exists" });
+            }
+        }
+
+        // Prepare asset data (now includes ext_id and prod_serve_id)
+        const assetData = {
+            asset_type_id,
+            ext_id, // Pass ext_id to model/DB
+            asset_id: finalAssetId,
+            text,
+            serial_number,
+            description,
+            branch_id: branch_id || null,
+            vendor_id: vendor_id || null,
+            prod_serve_id: prod_serve_id || null, // Use value from frontend
+            maintsch_id: maintsch_id || null,
+            purchased_cost,
+            purchased_on,
+            purchased_by: purchased_by || null,
+            expiry_date: expiry_date || null,
+            current_status,
+            warranty_period,
+            parent_asset_id,
+            group_id,
+            org_id,
+            created_by
+        };
+
+        // Insert asset using the new createAsset function
+        const result = await model.createAsset(assetData);
+        const { asset_id: insertedAssetId, ext_id: insertedExtId } = result.rows[0];
+
+        // Insert properties if any
+        if (req.body.properties && Object.keys(req.body.properties).length > 0) {
+            console.log('Saving property values:', req.body.properties);
+            for (const [propId, value] of Object.entries(req.body.properties)) {
+                if (value) {
+                    await model.insertAssetPropValue({
+                        asset_id: insertedAssetId,
+                        ext_id: insertedExtId,
+                        org_id,
+                        asset_type_prop_id: propId,
+                        value
+                    });
+                }
+            }
+        }
+
+        res.status(201).json({
+            message: "Asset added successfully",
+            asset: result.rows[0]
+        });
+
+    } catch (err) {
+        console.error("Error adding asset:", err);
+        res.status(500).json({
+            error: "Internal server error",
+            message: err.message,
+            details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+        });
+    }
+};
+// WEB CONTROLLER
+const getPotentialParentAssets = async (req, res) => {
+  const { asset_type_id } = req.params;
+  try {
+    const assets = await model.getPotentialParentAssets(asset_type_id);
+    res.json(assets.rows);
+  } catch (err) {
+    console.error("Error fetching potential parent assets:", err);
+    res.status(500).json({ error: "Failed to fetch potential parent assets" });
+  }
+};
+
 module.exports = {
   getAllAssets,
   addAsset,
+  createAsset,
   updateAsset,
   getPotentialParentAssets,
     getAllAssets,

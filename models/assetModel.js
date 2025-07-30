@@ -240,117 +240,6 @@ const insertAsset = async (assetData) => {
 };
 
 
-// const insertAsset = async ({
-//   asset_type_id,
-//   ext_id,
-//   text,
-//   serial_number,
-//   description,
-//   branch_id,
-//   vendor_id,
-//   prod_serve_id,
-//   maintsch_id,
-//   purchased_cost,
-//   purchased_on,
-//   purchased_by,
-//   expiry_date,
-//   current_status,
-//   warranty_period,
-//   parent_asset_id,
-//   org_id,
-//   created_by,
-//   changed_by,
-//   properties
-// }) => {
-//   const client = await db.connect();
-//   try {
-//     await client.query('BEGIN');
-
-//     // Insert asset
-//     const query = `
-//       INSERT INTO "tblAssets" (
-//         asset_id,
-//         asset_type_id,
-//         ext_id,
-//         text,
-//         serial_number,
-//         description,
-//         branch_id,
-//         vendor_id,
-//         prod_serve_id,
-//         maintsch_id,
-//         purchased_cost,
-//         purchased_on,
-//         purchased_by,
-//         expiry_date,
-//         current_status,
-//         warranty_period,
-//         parent_asset_id,
-//         org_id,
-//         created_by,
-//         changed_by,
-//         created_on,
-//         changed_on
-//       )
-//       VALUES (
-//         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-//       )
-//       RETURNING *
-//     `;
-
-//     // Generate asset_id
-//     const asset_id = await generateAssetId();
-//   const values = [
-//     asset_type_id,
-//     ext_id,
-//     asset_id,
-//     text,
-//     serial_number,
-//     description,
-//     branch_id,
-//     vendor_id,
-//     prod_serve_id,
-//     maintsch_id,
-//     purchased_cost,
-//     purchased_on,
-//     purchased_by,
-//     expiry_date,
-//     current_status,
-//     warranty_period,
-//     parent_asset_id,
-//     group_id,
-//     org_id,
-//     created_by,
-//   ];
-
-    
-
-//     const result = await client.query(query, values);
-
-//     // Insert properties if any
-//     if (properties && Object.keys(properties).length > 0) {
-//       for (const [assetTypePropId, value] of Object.entries(properties)) {
-//         // Generate a unique apv_id
-//         const timestamp = Date.now().toString().slice(-6);
-//         const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-//         const apvId = `APV${timestamp}${random}`;
-
-//         await client.query(
-//           'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, ext_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5, $6)',
-//           [apvId, asset_id, ext_id, org_id, assetTypePropId, value]
-//         );
-//       }
-//     }
-
-//     await client.query('COMMIT');
-//     return result.rows[0];
-//   } catch (err) {
-//     await client.query('ROLLBACK');
-//     throw err;
-//   } finally {
-//     client.release();
-//   }
-// };
 
 const updateAsset = async (asset_id, {
   asset_type_id,
@@ -578,6 +467,130 @@ const deleteMultipleAssets = async (asset_ids) => {
   }
 };
 
+const getPotentialParentAssets = async (asset_type_id) => {
+  const query = `
+    WITH asset_type_info AS (
+      SELECT 
+        at.asset_type_id,
+        at.is_child,
+        at.parent_asset_type_id,
+        pat.text as parent_type_name
+      FROM "tblAssetTypes" at
+      LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
+      WHERE at.asset_type_id = $1
+    )
+    SELECT DISTINCT
+      a.asset_id,
+      at.text as asset_type_name,
+      a.description as asset_name,
+      a.serial_number
+    FROM "tblAssets" a
+    JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE at.is_child = false
+    AND a.current_status = 'Active'
+    ORDER BY a.description, a.serial_number;
+  `;
+
+  return await db.query(query, [asset_type_id]);
+};
+
+// WEB MODEL
+const createAsset = async (assetData) => {
+  const {
+    asset_type_id,
+    ext_id,
+    asset_id,
+    text,
+    serial_number,
+    description,
+    branch_id,
+    vendor_id,
+    prod_serve_id,
+    maintsch_id,
+    purchased_cost,
+    purchased_on,
+    purchased_by,
+    expiry_date,
+    current_status,
+    warranty_period,
+    parent_asset_id,
+    group_id,
+    org_id,
+    created_by,
+  } = assetData;
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Insert asset
+    const query = `
+      INSERT INTO "tblAssets" (
+        asset_id,
+        asset_type_id,
+        ext_id,
+        text,
+        serial_number,
+        description,
+        branch_id,
+        vendor_id,
+        prod_serve_id,
+        maintsch_id,
+        purchased_cost,
+        purchased_on,
+        purchased_by,
+        expiry_date,
+        current_status,
+        warranty_period,
+        parent_asset_id,
+        group_id,
+        org_id,
+        created_by,
+        changed_by,
+        created_on,
+        changed_on
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+      RETURNING *
+    `;
+
+    const values = [
+      asset_id,
+      asset_type_id,
+      ext_id,
+      text,
+      serial_number,
+      description,
+      branch_id,
+      vendor_id,
+      prod_serve_id,
+      maintsch_id,
+      purchased_cost,
+      purchased_on,
+      purchased_by,
+      expiry_date,
+      current_status,
+      warranty_period,
+      parent_asset_id,
+      group_id,
+      org_id,
+      created_by,
+    ];
+
+    const result = await client.query(query, values);
+
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAllAssets,
   getAssetById,
@@ -591,6 +604,7 @@ module.exports = {
   searchAssets,
   getAssetWithDetails,
   insertAsset,
+  createAsset,
   updateAsset,
   checkAssetExists,
   checkAssetIdExists,
@@ -601,5 +615,5 @@ module.exports = {
   generateAssetId,
   deleteAsset,
   deleteMultipleAssets,
-  // getPotentialParentAssets
+  getPotentialParentAssets
 };
