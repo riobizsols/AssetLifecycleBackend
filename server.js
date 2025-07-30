@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
-
 const authRoutes = require("./routes/authRoutes");
 const jobRoleRoutes = require("./routes/jobRoleRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -20,6 +19,11 @@ const propertiesRoutes = require("./routes/propertiesRoutes");
 const employeeRoutes = require("./routes/employeeRoutes");
 const maintTypeRoutes = require("./routes/maintTypeRoutes");
 const maintenanceScheduleRoutes = require("./routes/maintenanceScheduleRoutes");
+const maintenanceRoutes = require("./routes/maintenanceRoutes");
+const serialNumberRoutes = require("./routes/serialNumberRoutes");
+
+// Import maintenance schedule service
+const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
 
 const app = express();
 app.use(express.json());
@@ -58,6 +62,8 @@ app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
+app.use("/api/maintenance", maintenanceRoutes);
+app.use("/api/serial-numbers", serialNumberRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
@@ -73,4 +79,7 @@ app.get("/", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
+  
+  // Initialize maintenance schedule cron job
+  initializeMaintenanceScheduleCron();
 });
