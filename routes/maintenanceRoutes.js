@@ -90,17 +90,17 @@ router.get('/check-records', async (req, res) => {
     const headerResult = await pool.query(headerQuery);
     
     // Check detail records
-    const detailQuery = `
-      SELECT COUNT(*) as count,
-             MAX(created_on) as latest_created,
-             status,
-             WFAMSH_ID
-      FROM "tblWFAssetMaintSch_D" 
-      WHERE created_by = 'system'
-      GROUP BY status, WFAMSH_ID
-      ORDER BY latest_created DESC
-      LIMIT 10
-    `;
+                    const detailQuery = `
+                  SELECT COUNT(*) as count,
+                         MAX(created_on) as latest_created,
+                         status,
+                         wfamsh_id
+                  FROM "tblWFAssetMaintSch_D" 
+                  WHERE created_by = 'system'
+                  GROUP BY status, wfamsh_id
+                  ORDER BY latest_created DESC
+                  LIMIT 10
+                `;
     
     const detailResult = await pool.query(detailQuery);
     

@@ -167,7 +167,7 @@ const createMaintenanceSchedule = async () => {
         
         const insertWFAMSHQuery = `
           INSERT INTO "tblWFAssetMaintSch_H" (
-            WFAMSH_ID, at_main_freq_id, maint_type_id, asset_id, group_id, 
+            wfamsh_id, at_main_freq_id, maint_type_id, asset_id, group_id, 
             vendor_id, pl_sch_date, act_sch_date, status, created_by, 
             created_on, changed_by, changed_on, org_id
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
@@ -218,7 +218,7 @@ const createMaintenanceSchedule = async () => {
             
             const insertWFAMSDQuery = `
               INSERT INTO "tblWFAssetMaintSch_D" (
-                wfamsd_id, WFAMSH_ID, job_role_id, user_id, dept_id, 
+                wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
                 sequence, status, notes, created_by, created_on, 
                 changed_by, changed_on, org_id
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
