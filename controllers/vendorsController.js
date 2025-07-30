@@ -266,7 +266,6 @@ exports.getVendorProdServices = async (req, res) => {
       FROM "tblVendorProdService" vps
       LEFT JOIN "tblVendors" v ON vps.vendor_id = v.vendor_id
       LEFT JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id
-      WHERE vps.int_status = 1
       ORDER BY v.vendor_name, ps.brand, ps.model
     `;
     

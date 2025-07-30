@@ -15,7 +15,8 @@ const addAsset = async (req, res) => {
             serial_number,
             description,
             branch_id,
-            vendor_id,
+            purchase_vendor_id,
+            service_vendor_id,
             prod_serve_id, // Accept prod_serve_id from frontend
             maintsch_id,
             purchased_cost,
@@ -39,11 +40,19 @@ const addAsset = async (req, res) => {
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
-        if (vendor_id) {
-            const vendorExists = await model.checkVendorExists(vendor_id);
+        if (purchase_vendor_id) {
+            const vendorExists = await model.checkVendorExists(purchase_vendor_id);
             if (vendorExists.rows.length === 0) {
-                console.warn("Invalid vendor_id:", vendor_id);
-                return res.status(400).json({ error: `Vendor with ID '${vendor_id}' does not exist` });
+                console.warn("Invalid purchase_vendor_id:", purchase_vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${purchase_vendor_id}' does not exist` });
+            }
+        }
+        
+        if (service_vendor_id) {
+            const vendorExists = await model.checkVendorExists(service_vendor_id);
+            if (vendorExists.rows.length === 0) {
+                console.warn("Invalid service_vendor_id:", service_vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${service_vendor_id}' does not exist` });
             }
         }
         // If you want to re-enable prod_serve_id validation, uncomment and update this block:
@@ -66,16 +75,16 @@ const addAsset = async (req, res) => {
             }
         }
 
-        // Prepare asset data (now includes ext_id and prod_serve_id)
+        // Prepare asset data (now includes prod_serve_id)
         const assetData = {
             asset_type_id,
-            ext_id, // Pass ext_id to model/DB
             asset_id: finalAssetId,
             text,
             serial_number,
             description,
             branch_id: branch_id || null,
-            vendor_id: vendor_id || null,
+            purchase_vendor_id: purchase_vendor_id || null,
+            service_vendor_id: service_vendor_id || null,
             prod_serve_id: prod_serve_id || null, // Use value from frontend
             maintsch_id: maintsch_id || null,
             purchased_cost,
@@ -95,7 +104,7 @@ const addAsset = async (req, res) => {
 
         // Insert asset
         const result = await model.insertAsset(assetData);
-        const { asset_id: insertedAssetId, ext_id: insertedExtId } = result.rows[0];
+        const { asset_id: insertedAssetId } = result.rows[0];
 
         // Insert properties if any
         if (req.body.properties && Object.keys(req.body.properties).length > 0) {
@@ -179,7 +188,8 @@ const updateAsset = async (req, res) => {
     asset_type_id,
     serial_number,
     description,
-    vendor_id,
+    purchase_vendor_id,
+    service_vendor_id,
     prod_serve_id,
     maintsch_id,
     purchased_cost,
@@ -196,7 +206,8 @@ const updateAsset = async (req, res) => {
       asset_type_id,
       serial_number,
       description,
-      vendor_id,
+      purchase_vendor_id,
+      service_vendor_id,
       prod_serve_id,
       maintsch_id,
       purchased_cost,
@@ -468,7 +479,8 @@ const createAsset = async (req, res) => {
             serial_number,
             description,
             branch_id,
-            vendor_id,
+            purchase_vendor_id,
+            service_vendor_id,
             prod_serve_id, // Accept prod_serve_id from frontend
             maintsch_id,
             purchased_cost,
@@ -492,11 +504,19 @@ const createAsset = async (req, res) => {
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
-        if (vendor_id) {
-            const vendorExists = await model.checkVendorExists(vendor_id);
+        if (purchase_vendor_id) {
+            const vendorExists = await model.checkVendorExists(purchase_vendor_id);
             if (vendorExists.rows.length === 0) {
-                console.warn("Invalid vendor_id:", vendor_id);
-                return res.status(400).json({ error: `Vendor with ID '${vendor_id}' does not exist` });
+                console.warn("Invalid purchase_vendor_id:", purchase_vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${purchase_vendor_id}' does not exist` });
+            }
+        }
+        
+        if (service_vendor_id) {
+            const vendorExists = await model.checkVendorExists(service_vendor_id);
+            if (vendorExists.rows.length === 0) {
+                console.warn("Invalid service_vendor_id:", service_vendor_id);
+                return res.status(400).json({ error: `Vendor with ID '${service_vendor_id}' does not exist` });
             }
         }
 
@@ -520,7 +540,8 @@ const createAsset = async (req, res) => {
             serial_number,
             description,
             branch_id: branch_id || null,
-            vendor_id: vendor_id || null,
+            purchase_vendor_id: purchase_vendor_id || null,
+            service_vendor_id: service_vendor_id || null,
             prod_serve_id: prod_serve_id || null, // Use value from frontend
             maintsch_id: maintsch_id || null,
             purchased_cost,
