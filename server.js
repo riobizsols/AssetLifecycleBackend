@@ -18,6 +18,8 @@ const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
 const orgRoutes = require("./routes/orgRoutes");
 const propertiesRoutes = require("./routes/propertiesRoutes");
 const employeeRoutes = require("./routes/employeeRoutes");
+const maintTypeRoutes = require("./routes/maintTypeRoutes");
+const maintenanceScheduleRoutes = require("./routes/maintenanceScheduleRoutes");
 
 const app = express();
 app.use(express.json());
@@ -39,6 +41,8 @@ app.use(express.json());
 const PORT = process.env.PORT || 5001;
 
 app.use("/api/auth", authRoutes);
+app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
+app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api", jobRoleRoutes, departmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
@@ -58,6 +62,14 @@ app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
+
+
+
+
+
+
+
+
 
 app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
