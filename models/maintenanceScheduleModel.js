@@ -67,7 +67,7 @@ const checkExistingMaintenanceSchedules = async (asset_id) => {
 const checkExistingWorkflowMaintenanceSchedules = async (asset_id) => {
     const query = `
         SELECT 
-            "WFAMSH_ID" as wfamsh_id,
+            wfamsh_id,
             asset_id,
             status,
             act_sch_date
@@ -115,9 +115,9 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
 // 8. Generate next WFAMSH_ID
 const getNextWFAMSHId = async () => {
     const query = `
-        SELECT "WFAMSH_ID" 
+        SELECT "wfamsh_id" 
         FROM "tblWFAssetMaintSch_H" 
-        ORDER BY CAST(SUBSTRING("WFAMSH_ID" FROM '\\d+$') AS INTEGER) DESC 
+        ORDER BY CAST(SUBSTRING("wfamsh_id" FROM '\\d+$') AS INTEGER) DESC 
         LIMIT 1
     `;
     
@@ -127,7 +127,7 @@ const getNextWFAMSHId = async () => {
         return 'WFAMSH_01';
     }
     
-    const lastId = result.rows[0].WFAMSH_ID;
+    const lastId = result.rows[0].wfamsh_id;
     const match = lastId.match(/\d+/);
     if (match) {
         const nextNum = parseInt(match[0]) + 1;
@@ -180,7 +180,7 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
     
     const query = `
         INSERT INTO "tblWFAssetMaintSch_H" (
-            "WFAMSH_ID",
+            "wfamsh_id",
             at_main_freq_id,
             maint_type_id,
             asset_id,

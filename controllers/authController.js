@@ -37,8 +37,8 @@ const login = async (req, res) => {
     await db.query(
         `UPDATE "tblUsers" 
          SET last_accessed = CURRENT_DATE 
-         WHERE ext_id = $1 AND org_id = $2 AND user_id = $3`,
-        [user.ext_id, user.org_id, user.user_id]
+         WHERE org_id = $1 AND user_id = $2`,
+        [user.org_id, user.user_id]
     );
 
     const token = generateToken(user);
@@ -47,7 +47,6 @@ const login = async (req, res) => {
         user: {
             full_name: user.full_name,
             email: user.email,
-            ext_id: user.ext_id,
             org_id: user.org_id,
             user_id: user.user_id,
             job_role_id: user.job_role_id
@@ -79,25 +78,11 @@ const register = async (req, res) => {
         return res.status(400).json({ message: 'Email already exists' });
     }
 
-    // Fetch ext_id for the given org_id from tblOrgs
-    const extResult = await db.query(
-        'SELECT ext_id FROM "tblOrgs" WHERE org_id = $1',
-        [req.user.org_id]
-    );
-
-    // If no org found, reject
-    if (extResult.rowCount === 0) {
-        return res.status(400).json({ message: 'Invalid organization ID' });
-    }
-
-    const ext_id = extResult.rows[0].ext_id;
-
     //  Hash the password securely
     const hashedPassword = await bcrypt.hash(password, 10);
 
     //  Create the user in tblUsers
     const user = await createUser({
-        ext_id,
         org_id: req.user.org_id,
         user_id,
         full_name,
@@ -151,7 +136,6 @@ const resetPassword = async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     await updatePassword({
-        ext_id: user.ext_id,
         org_id: user.org_id,
         user_id: user.user_id
     }, hashedPassword, user.user_id); // changed_by = user_id
@@ -163,11 +147,11 @@ const resetPassword = async (req, res) => {
 // 🔐 Super Admin: Update Own Password
 const updateOwnPassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
-    const { ext_id, org_id, user_id } = req.user;
+    const { org_id, user_id } = req.user;
 
     const result = await db.query(
-        'SELECT * FROM "tblUsers" WHERE ext_id = $1 AND org_id = $2 AND user_id = $3',
-        [ext_id, org_id, user_id]
+        'SELECT * FROM "tblUsers" WHERE org_id = $1 AND user_id = $2',
+        [org_id, user_id]
     );
     const user = result.rows[0];
 
@@ -183,8 +167,8 @@ const updateOwnPassword = async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     await db.query(
-        'UPDATE "tblUsers" SET password = $1 WHERE ext_id = $2 AND org_id = $3 AND user_id = $4',
-        [hashedPassword, ext_id, org_id, user_id]
+        'UPDATE "tblUsers" SET password = $1 WHERE org_id = $2 AND user_id = $3',
+        [hashedPassword, org_id, user_id]
     );
 
     res.json({ message: 'Password updated successfully' });

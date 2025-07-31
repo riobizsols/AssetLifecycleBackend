@@ -11,6 +11,27 @@ exports.getAllVendors = async (req, res) => {
   }
 };
 
+// Get vendor by ID
+exports.getVendorById = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const vendor = await vendorsModel.getVendorById(vendorId);
+    
+    if (!vendor) {
+      return res.status(404).json({ error: "Vendor not found" });
+    }
+    
+    res.json({
+      success: true,
+      data: vendor,
+      message: "Vendor details retrieved successfully"
+    });
+  } catch (error) {
+    console.error("Get vendor by ID error:", error);
+    res.status(500).json({ error: "Failed to fetch vendor details" });
+  }
+};
+
 //add new vendor
 
 const generateVendorId = async () => {

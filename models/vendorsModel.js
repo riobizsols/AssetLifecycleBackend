@@ -6,6 +6,12 @@ const getAllVendors = async () => {
   return result.rows;
 };
 
+// Get vendor by ID
+const getVendorById = async (vendorId) => {
+  const result = await db.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
+  return result.rows[0];
+};
+
 
 const createVendor = async (vendor) => {
   const query = `
@@ -72,5 +78,6 @@ module.exports = {
 
 module.exports = {
   getAllVendors,
+  getVendorById,
   createVendor,
 };

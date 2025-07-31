@@ -214,6 +214,20 @@ const createMaintenanceSchedule = async () => {
           const jobRolesResult = await pool.query(jobRolesQuery, [wfSeq.wf_steps_id]);
           
           for (const jobRole of jobRolesResult.rows) {
+            // Find users with this job role and department
+            const usersQuery = `
+              SELECT user_id 
+              FROM "tblUsers" 
+              WHERE job_role_id = $1 
+                AND dept_id = $2 
+                AND org_id = $3
+                AND status = 'Active'
+              LIMIT 1
+            `;
+            
+            const usersResult = await pool.query(usersQuery, [jobRole.job_role_id, jobRole.dept_id, asset.org_id]);
+            const assignedUserId = usersResult.rows.length > 0 ? usersResult.rows[0].user_id : null;
+            
             const wfamsDId = `WFAMSD_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
             
             const insertWFAMSDQuery = `
@@ -228,7 +242,7 @@ const createMaintenanceSchedule = async () => {
               wfamsDId,
               wfamsHId,
               jobRole.job_role_id,
-              null, // user_id
+              assignedUserId, // Assign user based on job role and department
               jobRole.dept_id,
               wfSeq.wf_at_seqs_id,
               'IN',
@@ -240,7 +254,64 @@ const createMaintenanceSchedule = async () => {
               asset.org_id
             ]);
             
-            console.log(`Inserted WFAMSD record: ${wfamsDId} for job role: ${jobRole.job_role_id}`);
+            console.log(`Inserted WFAMSD record: ${wfamsDId} for job role: ${jobRole.job_role_id}, assigned to user: ${assignedUserId}`);
+          }
+        }
+        
+        // Step 3k: Set the first person (smallest sequence) to AP status
+        const findSmallestSequenceQuery = `
+          SELECT wfamsd_id, sequence 
+          FROM "tblWFAssetMaintSch_D" 
+          WHERE wfamsh_id = $1 
+          ORDER BY sequence ASC 
+          LIMIT 1
+        `;
+        
+        const smallestSequenceResult = await pool.query(findSmallestSequenceQuery, [wfamsHId]);
+        
+        if (smallestSequenceResult.rows.length > 0) {
+          const firstPerson = smallestSequenceResult.rows[0];
+          
+          // Create a new record for the first person with AP status
+          const apRecordId = `WFAMSD_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          
+          const insertAPRecordQuery = `
+            INSERT INTO "tblWFAssetMaintSch_D" (
+              wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
+              sequence, status, notes, created_by, created_on, 
+              changed_by, changed_on, org_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          `;
+          
+          // Get the job role and dept from the first person's record
+          const firstPersonDetailsQuery = `
+            SELECT job_role_id, dept_id, user_id
+            FROM "tblWFAssetMaintSch_D" 
+            WHERE wfamsd_id = $1
+          `;
+          
+          const firstPersonDetails = await pool.query(firstPersonDetailsQuery, [firstPerson.wfamsd_id]);
+          
+          if (firstPersonDetails.rows.length > 0) {
+            const details = firstPersonDetails.rows[0];
+            
+            await pool.query(insertAPRecordQuery, [
+              apRecordId,
+              wfamsHId,
+              details.job_role_id,
+              details.user_id,
+              details.dept_id,
+              firstPerson.sequence,
+              'AP', // Approval Pending status
+              null, // notes
+              'system',
+              new Date(),
+              null, // changed_by
+              null, // changed_on
+              asset.org_id
+            ]);
+            
+            console.log(`Created AP record for first person: ${apRecordId} with sequence: ${firstPerson.sequence}`);
           }
         }
         
@@ -263,11 +334,8 @@ const initializeMaintenanceScheduleCron = () => {
   cron.schedule('* * * * *', () => {
     console.log(`[${new Date().toISOString()}] Maintenance Schedule Cron Job triggered`);
     
-    // For now, run the dummy function
-    dummyMaintenanceSchedule();
-    
-    // Uncomment the line below when ready to use actual maintenance schedule logic
-    // createMaintenanceSchedule();
+    // Run the actual maintenance schedule logic
+    createMaintenanceSchedule();
   });
   
   console.log('Maintenance schedule cron job initialized - running every hour');

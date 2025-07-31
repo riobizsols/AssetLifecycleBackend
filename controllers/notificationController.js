@@ -64,20 +64,19 @@ const getUserNotifications = async (req, res) => {
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
-      id: notification.wfamsd_id,
+      id: notification.wfamsh_id, // Use wfamsh_id as unique identifier
       wfamshId: notification.wfamsh_id,
-      userId: notification.user_id,
-      sequence: notification.sequence,
-      status: notification.detail_status,
+      userId: notification.current_action_user_id,
+      status: 'AP', // Current action user always has AP status
       dueDate: notification.pl_sch_date,
       assetId: notification.asset_id,
       assetTypeName: notification.asset_type_name,
-      userName: notification.user_name,
-      userEmail: notification.user_email,
+      userName: notification.current_action_user_name, // Show current action user
+      userEmail: notification.current_action_user_email,
       cutoffDate: notification.cutoff_date,
       daysUntilDue: Math.floor(notification.days_until_due || 0),
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
-      isUrgent: notification.days_until_cutoff <= 0,
+      isUrgent: notification.days_until_cutoff <= 2, // Show urgent when 2 days or less until cutoff
       isOverdue: notification.days_until_due <= 0,
       maintenanceType: notification.maint_type_name || 'Regular Maintenance' // Use actual maintenance type name from database
     }));
