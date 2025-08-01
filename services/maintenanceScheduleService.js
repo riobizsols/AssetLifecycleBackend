@@ -163,7 +163,11 @@ const createMaintenanceSchedule = async () => {
         }
         
         // Step 3h-i: Insert record into tblWFAssetMaintSch_H
-        const wfamsHId = `WFAMSH_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        // Generate sequential ID for WFAMSH
+        const maxHIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsh_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_H"`;
+        const maxHIdResult = await pool.query(maxHIdQuery);
+        const nextHId = (maxHIdResult.rows[0].max_num || 0) + 1;
+        const wfamsHId = `WFAMSH_${nextHId.toString().padStart(2, '0')}`;
         
         const insertWFAMSHQuery = `
           INSERT INTO "tblWFAssetMaintSch_H" (
@@ -228,7 +232,11 @@ const createMaintenanceSchedule = async () => {
             const usersResult = await pool.query(usersQuery, [jobRole.job_role_id, jobRole.dept_id, asset.org_id]);
             const assignedUserId = usersResult.rows.length > 0 ? usersResult.rows[0].user_id : null;
             
-            const wfamsDId = `WFAMSD_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+            // Generate sequential ID for WFAMSD
+            const maxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
+            const maxIdResult = await pool.query(maxIdQuery);
+            const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
+            const wfamsDId = `WFAMSD_${nextId.toString().padStart(2, '0')}`;
             
             const insertWFAMSDQuery = `
               INSERT INTO "tblWFAssetMaintSch_D" (
@@ -273,7 +281,11 @@ const createMaintenanceSchedule = async () => {
           const firstPerson = smallestSequenceResult.rows[0];
           
           // Create a new record for the first person with AP status
-          const apRecordId = `WFAMSD_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          // Generate sequential ID for AP record
+          const maxAPIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
+          const maxAPIdResult = await pool.query(maxAPIdQuery);
+          const nextAPId = (maxAPIdResult.rows[0].max_num || 0) + 1;
+          const apRecordId = `WFAMSD_${nextAPId.toString().padStart(2, '0')}`;
           
           const insertAPRecordQuery = `
             INSERT INTO "tblWFAssetMaintSch_D" (
