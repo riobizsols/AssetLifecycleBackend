@@ -5,6 +5,10 @@ const generateMaintenanceSchedules = async (req, res) => {
     try {
         console.log('Starting maintenance schedule generation...');
         
+        // Get test date from request body if provided, otherwise use current date
+        const testDate = req.body.test_date ? new Date(req.body.test_date) : new Date();
+        console.log(`Using date for comparison: ${testDate}`);
+        
         // Step 1: Get asset types that require maintenance
         const assetTypesResult = await model.getAssetTypesRequiringMaintenance();
         const assetTypes = assetTypesResult.rows;
@@ -94,23 +98,26 @@ const generateMaintenanceSchedules = async (req, res) => {
                 for (const frequency of frequencies) {
                     console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for asset ${asset.asset_id}`);
                     
-                    // Calculate planned schedule date: purchased_date + frequency
-                    const plannedScheduleDate = model.calculatePlannedScheduleDate(asset.purchased_on, frequency.frequency, frequency.uom);
+                    // Calculate planned schedule date: dateToConsider + frequency
+                    const plannedScheduleDate = model.calculatePlannedScheduleDate(dateToConsider, frequency.frequency, frequency.uom);
                     console.log(`Asset ${asset.asset_id} purchased on: ${asset.purchased_on}`);
-                    console.log(`Planned schedule date: ${plannedScheduleDate} (purchased + ${frequency.frequency} ${frequency.uom})`);
+                    console.log(`Date to consider: ${dateToConsider}`);
+                    console.log(`Planned schedule date: ${plannedScheduleDate} (dateToConsider + ${frequency.frequency} ${frequency.uom})`);
                     
-                    // Step 3g: Check if maintenance is due (compare planned date with today)
-                    const today = new Date();
-                    const isDue = today >= plannedScheduleDate;
+                    // Step 3g: Check if maintenance is due (schedule 10 days before planned date)
+                    const tenDaysBeforePlanned = new Date(plannedScheduleDate);
+                    tenDaysBeforePlanned.setDate(tenDaysBeforePlanned.getDate() - 10);
+                    
+                    const isDue = testDate >= tenDaysBeforePlanned;
                     
                     if (!isDue) {
                         console.log(`Maintenance not due for asset ${asset.asset_id} with frequency ${frequency.frequency} ${frequency.uom}`);
-                        console.log(`Today: ${today}, Planned: ${plannedScheduleDate}`);
+                        console.log(`Test date: ${testDate}, 10 days before planned: ${tenDaysBeforePlanned}, Planned: ${plannedScheduleDate}`);
                         continue;
                     }
                     
                     console.log(`Maintenance is due for asset ${asset.asset_id}, creating schedule...`);
-                    console.log(`Today: ${today}, Planned: ${plannedScheduleDate}`);
+                    console.log(`Test date: ${testDate}, 10 days before planned: ${tenDaysBeforePlanned}, Planned: ${plannedScheduleDate}`);
                     
                     // Step 3h & 3i: Create workflow maintenance schedule header
                     const wfamshId = await model.getNextWFAMSHId();
@@ -135,13 +142,25 @@ const generateMaintenanceSchedules = async (req, res) => {
                     // Step 3j: Create workflow maintenance schedule details
                     const workflowSequences = await model.getWorkflowAssetSequences(asset.asset_type_id);
                     
+                    console.log(`Found ${workflowSequences.rows.length} workflow sequences for asset type ${asset.asset_type_id}`);
+                    
                     if (workflowSequences.rows.length === 0) {
                         console.log(`No workflow sequences found for asset type ${asset.asset_type_id}`);
                         continue;
                     }
                     
+                    let totalDetailsCreated = 0;
+                    
                     for (const sequence of workflowSequences.rows) {
+                        console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
+                        
                         const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
+                        console.log(`Found ${workflowJobRoles.rows.length} job roles for sequence ${sequence.seqs_no}`);
+                        
+                        if (workflowJobRoles.rows.length === 0) {
+                            console.log(`No job roles found for sequence ${sequence.seqs_no}, skipping...`);
+                            continue;
+                        }
                         
                         for (const jobRole of workflowJobRoles.rows) {
                             const wfamsdId = await model.getNextWFAMSDId();
@@ -160,9 +179,12 @@ const generateMaintenanceSchedules = async (req, res) => {
                             };
                             
                             await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId}`);
+                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}`);
+                            totalDetailsCreated++;
                         }
                     }
+                    
+                    console.log(`Total details created for header ${wfamshId}: ${totalDetailsCreated}`);
                     
                     totalSchedulesCreated++;
                 }
@@ -179,7 +201,8 @@ const generateMaintenanceSchedules = async (req, res) => {
             asset_types_processed: assetTypes.length,
             assets_processed: processedAssets,
             assets_skipped: skippedAssets,
-            schedules_created: totalSchedulesCreated
+            schedules_created: totalSchedulesCreated,
+            test_date_used: testDate
         });
         
     } catch (error) {

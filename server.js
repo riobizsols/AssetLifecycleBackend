@@ -26,7 +26,7 @@ const approvalDetailRoutes = require("./routes/approvalDetailRoutes");
 const checklistRoutes = require("./routes/checklistRoutes");
 
 // Import maintenance schedule service
-const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
+// const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
 
 const app = express();
 app.use(express.json());
@@ -87,5 +87,5 @@ app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   
   // Initialize maintenance schedule cron job
-  initializeMaintenanceScheduleCron();
+  // initializeMaintenanceScheduleCron();
 });

@@ -213,30 +213,76 @@ const insertAsset = async (assetData) => {
     created_by,
   } = assetData;
 
-  const query = `
-    WITH asset_type_info AS (
-      SELECT 
-        at.asset_type_id,
-        at.is_child,
-        at.parent_asset_type_id,
-        pat.text as parent_type_name
-      FROM "tblAssetTypes" at
-      LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
-      WHERE at.asset_type_id = $1
-    )
-    SELECT DISTINCT
-      a.asset_id,
-      at.text as asset_type_name,
-      a.description as asset_name,
-      a.serial_number
-    FROM "tblAssets" a
-    JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-    WHERE at.is_child = false
-    AND a.current_status = 'Active'
-    ORDER BY a.description, a.serial_number;
-  `;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
 
-  return await db.query(query, [asset_type_id]);
+    // Insert asset
+    const query = `
+      INSERT INTO "tblAssets" (
+        asset_id,
+        asset_type_id,
+        text,
+        serial_number,
+        description,
+        branch_id,
+        purchase_vendor_id,
+        service_vendor_id,
+        prod_serve_id,
+        maintsch_id,
+        purchased_cost,
+        purchased_on,
+        purchased_by,
+        expiry_date,
+        current_status,
+        warranty_period,
+        parent_asset_id,
+        group_id,
+        org_id,
+        created_by,
+        changed_by,
+        created_on,
+        changed_on
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+      )
+      RETURNING *
+    `;
+
+    const values = [
+      asset_id,
+      asset_type_id,
+      text,
+      serial_number,
+      description,
+      branch_id,
+      purchase_vendor_id,
+      service_vendor_id,
+      prod_serve_id,
+      maintsch_id,
+      purchased_cost,
+      purchased_on,
+      purchased_by,
+      expiry_date,
+      current_status,
+      warranty_period,
+      parent_asset_id,
+      group_id,
+      org_id,
+      created_by,
+    ];
+
+    const result = await client.query(query, values);
+
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 
@@ -245,6 +291,7 @@ const updateAsset = async (asset_id, {
   asset_type_id,
   serial_number,
   description,
+  branch_id,
   purchase_vendor_id,
   service_vendor_id,
   prod_serve_id,
@@ -255,6 +302,9 @@ const updateAsset = async (asset_id, {
   expiry_date,
   current_status,
   warranty_period,
+  parent_asset_id,
+  group_id,
+  org_id,
   properties
 }) => {
   const client = await db.connect();
@@ -268,18 +318,22 @@ const updateAsset = async (asset_id, {
         asset_type_id = COALESCE($1, asset_type_id),
         serial_number = COALESCE($2, serial_number),
         description = COALESCE($3, description),
-        purchase_vendor_id = $4,
-        service_vendor_id = $5,
-        prod_serve_id = $6,
-        maintsch_id = $7,
-        purchased_cost = COALESCE($8, purchased_cost),
-        purchased_on = COALESCE($9, purchased_on),
-        purchased_by = $10,
-        expiry_date = $11,
-        current_status = COALESCE($12, current_status),
-        warranty_period = $13,
+        branch_id = COALESCE($4, branch_id),
+        purchase_vendor_id = $5,
+        service_vendor_id = $6,
+        prod_serve_id = $7,
+        maintsch_id = $8,
+        purchased_cost = COALESCE($9, purchased_cost),
+        purchased_on = COALESCE($10, purchased_on),
+        purchased_by = $11,
+        expiry_date = $12,
+        current_status = COALESCE($13, current_status),
+        warranty_period = $14,
+        parent_asset_id = $15,
+        group_id = $16,
+        org_id = COALESCE($17, org_id),
         changed_on = CURRENT_TIMESTAMP
-      WHERE asset_id = $14
+      WHERE asset_id = $18
       RETURNING *
     `;
 
@@ -287,6 +341,7 @@ const updateAsset = async (asset_id, {
       asset_type_id,
       serial_number,
       description,
+      branch_id,
       purchase_vendor_id,
       service_vendor_id,
       prod_serve_id,
@@ -297,6 +352,9 @@ const updateAsset = async (asset_id, {
       expiry_date,
       current_status,
       warranty_period,
+      parent_asset_id,
+      group_id,
+      org_id,
       asset_id
     ];
 
