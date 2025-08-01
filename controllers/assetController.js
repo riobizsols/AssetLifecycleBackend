@@ -188,6 +188,7 @@ const updateAsset = async (req, res) => {
     asset_type_id,
     serial_number,
     description,
+    branch_id,
     purchase_vendor_id,
     service_vendor_id,
     prod_serve_id,
@@ -198,6 +199,9 @@ const updateAsset = async (req, res) => {
     expiry_date,
     current_status,
     warranty_period,
+    parent_asset_id,
+    group_id,
+    org_id,
     properties
   } = req.body;
 
@@ -206,6 +210,7 @@ const updateAsset = async (req, res) => {
       asset_type_id,
       serial_number,
       description,
+      branch_id,
       purchase_vendor_id,
       service_vendor_id,
       prod_serve_id,
@@ -216,6 +221,9 @@ const updateAsset = async (req, res) => {
       expiry_date,
       current_status,
       warranty_period,
+      parent_asset_id,
+      group_id,
+      org_id,
       properties
     });
 

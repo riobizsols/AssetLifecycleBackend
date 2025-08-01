@@ -23,7 +23,7 @@ const maintenanceRoutes = require("./routes/maintenanceRoutes");
 const serialNumberRoutes = require("./routes/serialNumberRoutes");
 
 // Import maintenance schedule service
-const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
+// const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
 
 const app = express();
 app.use(express.json());
@@ -81,5 +81,5 @@ app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   
   // Initialize maintenance schedule cron job
-  initializeMaintenanceScheduleCron();
+  // initializeMaintenanceScheduleCron();
 });
