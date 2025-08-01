@@ -21,6 +21,9 @@ const maintTypeRoutes = require("./routes/maintTypeRoutes");
 const maintenanceScheduleRoutes = require("./routes/maintenanceScheduleRoutes");
 const maintenanceRoutes = require("./routes/maintenanceRoutes");
 const serialNumberRoutes = require("./routes/serialNumberRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
+const approvalDetailRoutes = require("./routes/approvalDetailRoutes");
+const checklistRoutes = require("./routes/checklistRoutes");
 
 // Import maintenance schedule service
 // const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
@@ -64,6 +67,9 @@ app.use("/api/employees", employeeRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/serial-numbers", serialNumberRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/approval-detail", approvalDetailRoutes);
+app.use("/api/checklist", checklistRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

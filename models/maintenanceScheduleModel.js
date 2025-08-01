@@ -115,9 +115,9 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
 // 8. Generate next WFAMSH_ID
 const getNextWFAMSHId = async () => {
     const query = `
-        SELECT wfamsh_id 
+        SELECT "wfamsh_id" 
         FROM "tblWFAssetMaintSch_H" 
-        ORDER BY CAST(SUBSTRING(wfamsh_id FROM '\\d+$') AS INTEGER) DESC 
+        ORDER BY CAST(SUBSTRING("wfamsh_id" FROM '\\d+$') AS INTEGER) DESC 
         LIMIT 1
     `;
     
@@ -180,7 +180,7 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
     
     const query = `
         INSERT INTO "tblWFAssetMaintSch_H" (
-            wfamsh_id,
+            "wfamsh_id",
             at_main_freq_id,
             maint_type_id,
             asset_id,

@@ -11,7 +11,6 @@ const findUserByEmail = async (email) => {
 
 // Create user — called by super_admin
 const createUser = async ({
-    ext_id,
     org_id,
     user_id,
     full_name,
@@ -25,22 +24,21 @@ const createUser = async ({
 }) => {
     const result = await db.query(
         `INSERT INTO "tblUsers" (
-            ext_id, org_id, user_id,
+            org_id, user_id,
             full_name, email, phone,
             job_role_id, password,
             created_by, created_on,
             changed_by, changed_on,
             time_zone, dept_id
         ) VALUES (
-            $1, $2, $3,
-            $4, $5, $6,
-            $7, $8,
-            $9, CURRENT_DATE,
-            $9, CURRENT_DATE,
-            $10, $11
+            $1, $2,
+            $3, $4, $5,
+            $6, $7,
+            $8, CURRENT_DATE,
+            $8, CURRENT_DATE,
+            $9, $10
         ) RETURNING *`,
         [
-            ext_id,      
             org_id,     
             user_id,    
             full_name,    
@@ -80,7 +78,7 @@ const findUserByResetToken = async (token) => {
 };
 
 // Update user password after reset
-const updatePassword = async ({ ext_id, org_id, user_id }, hashedPassword, changed_by) => {
+const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) => {
     await db.query(
         `UPDATE "tblUsers"
          SET password = $1,
@@ -88,8 +86,8 @@ const updatePassword = async ({ ext_id, org_id, user_id }, hashedPassword, chang
              reset_token_expiry = NULL,
              changed_by = $2,
              changed_on = CURRENT_DATE
-         WHERE ext_id = $3 AND org_id = $4 AND user_id = $5`,
-        [hashedPassword, changed_by, ext_id, org_id, user_id]
+         WHERE org_id = $3 AND user_id = $4`,
+        [hashedPassword, changed_by, org_id, user_id]
     );
 };
 
