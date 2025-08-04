@@ -19,14 +19,13 @@ const propertiesRoutes = require("./routes/propertiesRoutes");
 const employeeRoutes = require("./routes/employeeRoutes");
 const maintTypeRoutes = require("./routes/maintTypeRoutes");
 const maintenanceScheduleRoutes = require("./routes/maintenanceScheduleRoutes");
-const maintenanceRoutes = require("./routes/maintenanceRoutes");
 const serialNumberRoutes = require("./routes/serialNumberRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const approvalDetailRoutes = require("./routes/approvalDetailRoutes");
 const checklistRoutes = require("./routes/checklistRoutes");
+const cronRoutes = require("./routes/cronRoutes");
+const CronService = require("./services/cronService");
 
-// Import maintenance schedule service
-// const { initializeMaintenanceScheduleCron } = require("./services/maintenanceScheduleService");
 
 const app = express();
 app.use(express.json());
@@ -45,7 +44,7 @@ app.use(
 );
 app.use(express.json());
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 
 app.use("/api/auth", authRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
@@ -65,11 +64,11 @@ app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
-app.use("/api/maintenance", maintenanceRoutes);
 app.use("/api/serial-numbers", serialNumberRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/approval-detail", approvalDetailRoutes);
 app.use("/api/checklist", checklistRoutes);
+app.use("/api/cron", cronRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
@@ -78,14 +77,10 @@ app.get("/", (req, res) => {
 
 
 
-
-
-
-
-
 app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   
-  // Initialize maintenance schedule cron job
-  // initializeMaintenanceScheduleCron();
+  // Initialize cron jobs after server starts
+  const cronService = new CronService();
+  cronService.initCronJobs();
 });

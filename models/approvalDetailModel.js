@@ -204,12 +204,6 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 
 const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001') => {
   try {
-    // Get the next sequential ID for current user's record
-    const maxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
-    const maxIdResult = await pool.query(maxIdQuery);
-    const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-    const newCurrentUserRecordId = `WFAMSD_${nextId.toString().padStart(2, '0')}`;
-    
     // Get current workflow details - get the latest record for each user
     const currentQuery = `
       SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
@@ -238,60 +232,60 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
       throw new Error('User not found in workflow');
     }
     
-    // Create new record for current user's approval action
+    // Update current user's status to UA (User Approved)
     await pool.query(
-      `INSERT INTO "tblWFAssetMaintSch_D" (
-        wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
-        sequence, status, notes, created_by, created_on, 
-        changed_by, changed_on, org_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10, ARRAY[NOW()::timestamp without time zone], $11)`,
-      [
-        newCurrentUserRecordId,
-        currentUserStep.wfamsh_id,
-        currentUserStep.job_role_id,
-        currentUserStep.user_id,
-        currentUserStep.dept_id,
-        currentUserStep.sequence,
-        'UA', // Approved status
-        note, // Store approval note
-        'system',
-        userId.substring(0, 20), // changed_by - truncate to 20 chars
-        orgId
-      ]
+      `UPDATE "tblWFAssetMaintSch_D" 
+       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       WHERE wfamsd_id = $4`,
+      ['UA', note, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
     
-    // Find next user and create new record with AP status
+    console.log(`Updated current user ${userId} status to UA`);
+    
+    // Insert history record for current user approval
+    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
+    const historyIdResult = await pool.query(historyIdQuery);
+    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
+    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    
+          await pool.query(
+        `INSERT INTO "tblWFAssetMaintHist" (
+          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, userId, 'UA', note, orgId]
+      );
+    
+    console.log(`Inserted history record: ${wfamhisId} for user ${userId} approval`);
+    
+    // Find next user and update their status to AP
     const nextUserStep = workflowDetails.find(w => w.sequence > currentUserStep.sequence);
     if (nextUserStep) {
-      // Get the next sequential ID for next user's record
-      const nextUserMaxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
-      const nextUserMaxIdResult = await pool.query(nextUserMaxIdQuery);
-      const nextUserNextId = (nextUserMaxIdResult.rows[0].max_num || 0) + 1;
-      const newNextUserRecordId = `WFAMSD_${nextUserNextId.toString().padStart(2, '0')}`;
-      
-      // Create new record for next user with AP status
+      // Update next user's status to AP (Approval Pending)
       await pool.query(
-        `INSERT INTO "tblWFAssetMaintSch_D" (
-          wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
-          sequence, status, notes, created_by, created_on, 
-          changed_by, changed_on, org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10, ARRAY[NOW()::timestamp without time zone], $11)`,
-        [
-          newNextUserRecordId,
-          nextUserStep.wfamsh_id,
-          nextUserStep.job_role_id,
-          nextUserStep.user_id,
-          nextUserStep.dept_id,
-          nextUserStep.sequence,
-          'AP', // Approval Pending status
-          null, // notes
-          'system',
-          userId.substring(0, 20), // changed_by - truncate to 20 chars
-          orgId
-        ]
+        `UPDATE "tblWFAssetMaintSch_D" 
+         SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
+         WHERE wfamsd_id = $3`,
+        ['AP', userId.substring(0, 20), nextUserStep.wfamsd_id]
       );
+      
+      console.log(`Updated next user ${nextUserStep.user_id} status to AP`);
+      
+      // Insert history record for next user status change
+      const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
+      const nextHistoryIdResult = await pool.query(nextHistoryIdQuery);
+      const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
+      const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
+      
+      await pool.query(
+        `INSERT INTO "tblWFAssetMaintHist" (
+          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+        [nextWfamhisId, nextUserStep.wfamsh_id, nextUserStep.wfamsd_id, userId, 'AP', null, orgId]
+      );
+      
+      console.log(`Inserted history record: ${nextWfamhisId} for next user ${nextUserStep.user_id} status change`);
     } else {
-      // Check if all users in the workflow have approved (UA status)
+      // No next user - check if all users have approved
       const allUsersApprovedQuery = `
         SELECT COUNT(*) as total_users,
                COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users
@@ -323,12 +317,6 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
 
 const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
   try {
-    // Get the next sequential ID for current user's record
-    const maxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
-    const maxIdResult = await pool.query(maxIdQuery);
-    const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-    const newCurrentUserRecordId = `WFAMSD_${nextId.toString().padStart(2, '0')}`;
-    
     // Get current workflow details - get the latest record for each user
     const currentQuery = `
       SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
@@ -357,80 +345,79 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
       throw new Error('User not found in workflow');
     }
     
-    // Create new record for current user's rejection action
+    // Update current user's status to UR (User Rejected)
     await pool.query(
-      `INSERT INTO "tblWFAssetMaintSch_D" (
-        wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
-        sequence, status, notes, created_by, created_on, 
-        changed_by, changed_on, org_id
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10, ARRAY[NOW()::timestamp without time zone], $11)`,
-      [
-        newCurrentUserRecordId,
-        currentUserStep.wfamsh_id,
-        currentUserStep.job_role_id,
-        currentUserStep.user_id,
-        currentUserStep.dept_id,
-        currentUserStep.sequence,
-        'UR', // Rejected status
-        reason, // Store rejection reason in notes
-        'system',
-        userId.substring(0, 20), // changed_by - truncate to 20 chars
-        orgId
-      ]
+      `UPDATE "tblWFAssetMaintSch_D" 
+       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       WHERE wfamsd_id = $4`,
+      ['UR', reason, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
     
-         // Find the previous approved user and create new record with AP status
-     // We need to look at the latest status of each user, not just the current workflow details
-     const previousApprovedUserQuery = `
-       SELECT wfd.user_id, wfd.sequence, wfd.job_role_id, wfd.dept_id, wfd.wfamsh_id
-       FROM "tblWFAssetMaintSch_D" wfd
-       WHERE wfd.wfamsh_id = $1 
-         AND wfd.sequence < $2
-         AND wfd.status = 'UA'
-         AND wfd.wfamsd_id = (
-           SELECT MAX(wfd2.wfamsd_id)
-           FROM "tblWFAssetMaintSch_D" wfd2
-           WHERE wfd2.user_id = wfd.user_id 
-             AND wfd2.wfamsh_id = wfd.wfamsh_id
-         )
-       ORDER BY wfd.sequence DESC
-       LIMIT 1
-     `;
-     
-     const previousApprovedResult = await pool.query(previousApprovedUserQuery, [currentUserStep.wfamsh_id, currentUserStep.sequence]);
-     const previousApprovedUser = previousApprovedResult.rows[0];
-
-     if (previousApprovedUser) {
-      // Get the next sequential ID for previous user's record
-      const prevUserMaxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
-      const prevUserMaxIdResult = await pool.query(prevUserMaxIdQuery);
-      const prevUserNextId = (prevUserMaxIdResult.rows[0].max_num || 0) + 1;
-      const newPrevUserRecordId = `WFAMSD_${prevUserNextId.toString().padStart(2, '0')}`;
-      
-      // Create new record for previous user with AP status
-      await pool.query(
-        `INSERT INTO "tblWFAssetMaintSch_D" (
-          wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
-          sequence, status, notes, created_by, created_on, 
-          changed_by, changed_on, org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10, ARRAY[NOW()::timestamp without time zone], $11)`,
-        [
-          newPrevUserRecordId,
-          previousApprovedUser.wfamsh_id,
-          previousApprovedUser.job_role_id,
-          previousApprovedUser.user_id,
-          previousApprovedUser.dept_id,
-          previousApprovedUser.sequence,
-          'AP', // Approval Pending status
-          null, // notes
-          'system',
-          userId.substring(0, 20), // changed_by - truncate to 20 chars
-          orgId
-        ]
+    console.log(`Updated current user ${userId} status to UR`);
+    
+    // Insert history record for current user rejection
+    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
+    const historyIdResult = await pool.query(historyIdQuery);
+    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
+    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    
+          await pool.query(
+        `INSERT INTO "tblWFAssetMaintHist" (
+          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, userId, 'UR', reason, orgId]
       );
+    
+    console.log(`Inserted history record: ${wfamhisId} for user ${userId} rejection`);
+    
+    // Find the previous approved user and update their status back to AP
+    const previousApprovedUserQuery = `
+      SELECT wfd.wfamsd_id, wfd.user_id, wfd.sequence, wfd.job_role_id, wfd.dept_id, wfd.wfamsh_id
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1 
+        AND wfd.sequence < $2
+        AND wfd.status = 'UA'
+        AND wfd.wfamsd_id = (
+          SELECT MAX(wfd2.wfamsd_id)
+          FROM "tblWFAssetMaintSch_D" wfd2
+          WHERE wfd2.user_id = wfd.user_id 
+            AND wfd2.wfamsh_id = wfd.wfamsh_id
+        )
+      ORDER BY wfd.sequence DESC
+      LIMIT 1
+    `;
+    
+    const previousApprovedResult = await pool.query(previousApprovedUserQuery, [currentUserStep.wfamsh_id, currentUserStep.sequence]);
+    const previousApprovedUser = previousApprovedResult.rows[0];
+
+    if (previousApprovedUser) {
+      // Update previous user's status back to AP (Approval Pending)
+      await pool.query(
+        `UPDATE "tblWFAssetMaintSch_D" 
+         SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
+         WHERE wfamsd_id = $3`,
+        ['AP', userId.substring(0, 20), previousApprovedUser.wfamsd_id]
+      );
+      
+      console.log(`Updated previous user ${previousApprovedUser.user_id} status back to AP`);
+      
+      // Insert history record for previous user status revert
+      const prevHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
+      const prevHistoryIdResult = await pool.query(prevHistoryIdQuery);
+      const prevNextHistoryId = (prevHistoryIdResult.rows[0].max_num || 0) + 1;
+      const prevWfamhisId = `WFAMHIS_${prevNextHistoryId.toString().padStart(2, '0')}`;
+      
+      await pool.query(
+        `INSERT INTO "tblWFAssetMaintHist" (
+          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+        [prevWfamhisId, previousApprovedUser.wfamsh_id, previousApprovedUser.wfamsd_id, userId, 'AP', null, orgId]
+      );
+      
+      console.log(`Inserted history record: ${prevWfamhisId} for previous user ${previousApprovedUser.user_id} status revert`);
     }
     
-        // Check if all users have rejected before creating new records
+    // Check if all users have rejected
     const rejectionCheckQuery = `
       SELECT 
         COUNT(*) as total_users,
@@ -453,51 +440,49 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
       console.log('All users have rejected - ending workflow as CA');
       await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
     } else {
-      // Find next user and create new record with AP status
+      // Find next user and update their status to AP
       const nextUserStep = workflowDetails.find(w => w.sequence > currentUserStep.sequence);
       console.log('Reject - Current user sequence:', currentUserStep.sequence);
-      console.log('Reject - All workflow details:', workflowDetails.map(w => ({ user_id: w.user_id, sequence: w.sequence, status: w.status })));
       console.log('Reject - Next user step:', nextUserStep);
+      
       if (nextUserStep) {
-        console.log('Reject - Creating new record for next user:', nextUserStep.user_id, 'with AP status');
-      // Get the next sequential ID for next user's record
-      const nextUserMaxIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamsd_id FROM 8) AS INTEGER)) as max_num FROM "tblWFAssetMaintSch_D"`;
-      const nextUserMaxIdResult = await pool.query(nextUserMaxIdQuery);
-      const nextUserNextId = (nextUserMaxIdResult.rows[0].max_num || 0) + 1;
-      const newNextUserRecordId = `WFAMSD_${nextUserNextId.toString().padStart(2, '0')}`;
-      
-      // Create new record for next user with AP status
-      await pool.query(
-        `INSERT INTO "tblWFAssetMaintSch_D" (
-          wfamsd_id, wfamsh_id, job_role_id, user_id, dept_id, 
-          sequence, status, notes, created_by, created_on, 
-          changed_by, changed_on, org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10, ARRAY[NOW()::timestamp without time zone], $11)`,
-        [
-          newNextUserRecordId,
-          nextUserStep.wfamsh_id,
-          nextUserStep.job_role_id,
-          nextUserStep.user_id,
-          nextUserStep.dept_id,
-          nextUserStep.sequence,
-          'AP', // Approval Pending status
-          null, // notes
-          'system',
-          userId.substring(0, 20), // changed_by - truncate to 20 chars
-          orgId
-        ]
-      );
-    } else {
-      console.log('Reject - No next user found (current user is last in sequence)');
-      
-      // Check if this rejection creates a deadlock (no more path forward)
-      const deadlockCheckQuery = `
-        SELECT 
-          COUNT(*) as total_users,
-          COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-          COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-          COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-        FROM (
+        console.log('Reject - Updating next user:', nextUserStep.user_id, 'to AP status');
+        
+        // Update next user's status to AP (Approval Pending)
+        await pool.query(
+          `UPDATE "tblWFAssetMaintSch_D" 
+           SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
+           WHERE wfamsd_id = $3`,
+          ['AP', userId.substring(0, 20), nextUserStep.wfamsd_id]
+        );
+        
+        console.log(`Updated next user ${nextUserStep.user_id} status to AP`);
+        
+        // Insert history record for next user status change
+        const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
+        const nextHistoryIdResult = await pool.query(nextHistoryIdQuery);
+        const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
+        const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
+        
+        await pool.query(
+          `INSERT INTO "tblWFAssetMaintHist" (
+            wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+          ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+          [nextWfamhisId, nextUserStep.wfamsh_id, nextUserStep.wfamsd_id, userId, 'AP', null, orgId]
+        );
+        
+        console.log(`Inserted history record: ${nextWfamhisId} for next user ${nextUserStep.user_id} status change`);
+      } else {
+        console.log('Reject - No next user found (current user is last in sequence)');
+        
+        // Check if this rejection creates a deadlock (no more path forward)
+        const deadlockCheckQuery = `
+          SELECT 
+            COUNT(*) as total_users,
+            COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
+            COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
+            COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
+          FROM (
           SELECT DISTINCT wfd.user_id, 
                  FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
           FROM "tblWFAssetMaintSch_D" wfd
@@ -537,39 +522,38 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
 // Get workflow history for an asset
 const getWorkflowHistory = async (assetId, orgId = 'ORG001') => {
   try {
-    const query = `
+    // Get history from tblWFAssetMaintHist table
+    const historyQuery = `
       SELECT 
-        wfd.wfamsd_id,
-        wfd.wfamsh_id,
-        wfd.job_role_id,
-        wfd.user_id,
-        wfd.dept_id,
-        wfd.sequence,
-        wfd.status,
-        wfd.notes,
-        wfd.created_by,
-        wfd.created_on,
-        wfd.changed_by,
-        wfd.changed_on,
-        wfd.org_id,
+        wh.wfamhis_id,
+        wh.wfamsh_id,
+        wh.wfamsd_id,
+        wh.action_by,
+        wh.action_on,
+        wh.action,
+        wh.notes,
         u.full_name as user_name,
-        u.email as user_email,
-        wfd.job_role_id as job_role_name,
+        wfd_user.full_name as affected_user_name,
+        jr.text as job_role_name,
         d.text as dept_name,
-        wfd.dept_id as dept_id_raw
-      FROM "tblWFAssetMaintSch_D" wfd
-      LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+        wfd.sequence,
+        wfd.user_id as affected_user_id
+      FROM "tblWFAssetMaintHist" wh
+      INNER JOIN "tblWFAssetMaintSch_D" wfd ON wh.wfamsd_id = wfd.wfamsd_id
+      INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+      LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+      LEFT JOIN "tblUsers" wfd_user ON wfd.user_id = wfd_user.user_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-      WHERE wfd.org_id = $1 
-        AND EXISTS (
-          SELECT 1 FROM "tblWFAssetMaintSch_H" wfh 
-          WHERE wfh.wfamsh_id = wfd.wfamsh_id 
-            AND wfh.asset_id = $2
-        )
-      ORDER BY wfd.created_on ASC, wfd.sequence ASC
+      WHERE wfh.asset_id = $1 AND wh.org_id = $2
+      ORDER BY wh.action_on ASC
     `;
-
-    const result = await pool.query(query, [orgId, assetId]);
+    
+    console.log(`Querying history for asset ${assetId} and org ${orgId}`);
+    
+    const result = await pool.query(historyQuery, [assetId, orgId]);
+    console.log(`Found ${result.rows.length} history records for asset ${assetId}`);
+    console.log('History records:', result.rows);
     return result.rows;
   } catch (error) {
     console.error('Error in getWorkflowHistory:', error);

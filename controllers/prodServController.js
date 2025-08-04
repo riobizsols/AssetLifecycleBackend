@@ -1,6 +1,7 @@
 const db = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
 const prodServModel = require('../models/prodServModel');
+const { generateCustomId } = require('../utils/idGenerator');
 
 // Get all prodserv
 exports.getAllProdserv = async (req, res) => {
@@ -41,33 +42,20 @@ exports.getModelsByAssetTypeAndBrand = async (req, res) => {
   }
 };
 
-const generateProdServId = async () => {
-  // Get latest ID from DB
-  const result = await db.query(`SELECT prod_serv_id FROM "tblProdServs" ORDER BY prod_serv_id DESC LIMIT 1`);
-  const lastId = result.rows[0]?.prod_serv_id;
-
-  let newNumber = 10001; // starting number
-  if (lastId && /^PS\d+$/.test(lastId)) {
-    newNumber = parseInt(lastId.replace('PS', '')) + 1;
-  }
-
-  return `PS${newNumber}`;
-};
+// Removed custom generateProdServId function - using generateCustomId from idGenerator instead
 
 // add ProdServ
 exports.addProdserv = async (req, res) => {
   try {
     const { assetType, brand, model, description, ps_type } = req.body;
 
-    const prod_serv_id = await generateProdServId(); 
-    const ext_id = uuidv4();
+    const prod_serv_id = await generateCustomId("prod_serv", 3); 
     const org_id = req.user.org_id; 
 
     const asset_type_id = assetType; 
     const status = 1; 
     const prodserv = await prodServModel.addProdserv({
       prod_serv_id,
-      ext_id,
       org_id,
       asset_type_id,
       brand,

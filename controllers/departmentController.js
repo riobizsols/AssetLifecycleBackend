@@ -13,20 +13,6 @@ const createDepartment = async (req, res) => {
         const parent_id = null;
         const changed_by = null;
 
-        // 🔹 Get ext_id from tblOrgs
-        const orgResult = await db.query(
-            'SELECT ext_id FROM "tblOrgs" WHERE org_id = $1',
-            [org_id]
-        );
-
-        if (orgResult.rows.length === 0) {
-            return res.status(400).json({ error: 'Invalid org_id - not found in tblOrgs' });
-        }
-
-        const ext_id = orgResult.rows[0].ext_id;
-
-      
-
         let branch_code = null;
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
@@ -53,7 +39,6 @@ const createDepartment = async (req, res) => {
 
         // 🔹 Create department
         const newDept = await DepartmentModel.createDepartment({
-            ext_id,
             org_id,
             dept_id: newDeptId,
             int_status,

@@ -86,7 +86,6 @@ const getVendorProdServicesByOrg = async (req, res) => {
 const addVendorProdService = async (req, res) => {
     try {
         const {
-            ext_id,
             prod_serv_id,
             vendor_id,
             org_id,
@@ -94,25 +93,17 @@ const addVendorProdService = async (req, res) => {
         } = req.body;
 
         // Validate required fields
-        if (!ext_id || !prod_serv_id || !vendor_id || !org_id) {
+        if (!prod_serv_id || !vendor_id || !org_id) {
             return res.status(400).json({ 
-                error: "ext_id, prod_serv_id, vendor_id, and org_id are required fields" 
-            });
-        }
-
-        // Validate ext_id is a valid UUID
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(ext_id)) {
-            return res.status(400).json({ 
-                error: "ext_id must be a valid UUID format (e.g., 123e4567-e89b-12d3-a456-426614174000)" 
+                error: "prod_serv_id, vendor_id, and org_id are required fields" 
             });
         }
 
         // Check if vendor product service already exists
-        const existingVendorProdService = await model.checkVendorProdServiceExists(ext_id, org_id);
+        const existingVendorProdService = await model.checkVendorProdServiceExists(vendor_id, prod_serv_id, org_id);
         if (existingVendorProdService.rows.length > 0) {
             return res.status(409).json({ 
-                error: "Vendor product service with this ext_id and org_id already exists" 
+                error: "Vendor product service with this vendor_id, prod_serv_id, and org_id already exists" 
             });
         }
 
@@ -133,7 +124,6 @@ const addVendorProdService = async (req, res) => {
         // Insert new vendor product service
         const result = await model.insertVendorProdService(
             finalVendorProdServiceId,
-            ext_id,
             prod_serv_id,
             vendor_id,
             org_id
@@ -146,7 +136,45 @@ const addVendorProdService = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding vendor product service:", err);
-        res.status(500).json({ error: "Internal server error" });
+        
+        // Handle specific database errors
+        if (err.code === '23505') {
+            // Duplicate key constraint violation
+            if (err.detail && err.detail.includes('ven_prod_serv_id')) {
+                return res.status(409).json({ 
+                    error: "Duplicate vendor product service ID",
+                    message: "A vendor product service with this ID already exists. Please try again.",
+                    type: "DUPLICATE_ID"
+                });
+            } else {
+                return res.status(409).json({ 
+                    error: "Duplicate vendor product service",
+                    message: "This vendor-product-service combination already exists.",
+                    type: "DUPLICATE_RECORD"
+                });
+            }
+        } else if (err.code === '23503') {
+            // Foreign key constraint violation
+            return res.status(400).json({ 
+                error: "Invalid reference",
+                message: "The vendor or product/service does not exist.",
+                type: "INVALID_REFERENCE"
+            });
+        } else if (err.message && err.message.includes("Invalid tableKey")) {
+            // ID generator error
+            return res.status(500).json({ 
+                error: "ID generation error",
+                message: "Unable to generate unique ID. Please try again.",
+                type: "ID_GENERATION_ERROR"
+            });
+        }
+        
+        // Generic error
+        res.status(500).json({ 
+            error: "Failed to add vendor product service",
+            message: "An unexpected error occurred. Please try again.",
+            type: "INTERNAL_ERROR"
+        });
     }
 };
 
@@ -155,7 +183,6 @@ const updateVendorProdService = async (req, res) => {
     try {
         const { id } = req.params;
         const {
-            ext_id,
             prod_serv_id,
             vendor_id,
             org_id
@@ -167,29 +194,18 @@ const updateVendorProdService = async (req, res) => {
             return res.status(404).json({ error: "Vendor product service not found" });
         }
 
-        // Validate ext_id is a valid UUID if provided
-        if (ext_id) {
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (!uuidRegex.test(ext_id)) {
-                return res.status(400).json({ 
-                    error: "ext_id must be a valid UUID format" 
-                });
-            }
-        }
-
-        // Check if new ext_id and org_id combination already exists (excluding current record)
-        if (ext_id && org_id) {
-            const duplicateCheck = await model.checkVendorProdServiceExists(ext_id, org_id);
+        // Check if new vendor_id, prod_serv_id, and org_id combination already exists (excluding current record)
+        if (vendor_id && prod_serv_id && org_id) {
+            const duplicateCheck = await model.checkVendorProdServiceExists(vendor_id, prod_serv_id, org_id);
             const duplicate = duplicateCheck.rows.find(row => row.ven_prod_serv_id !== id);
             if (duplicate) {
                 return res.status(409).json({ 
-                    error: "Vendor product service with this ext_id and org_id already exists" 
+                    error: "Vendor product service with this vendor_id, prod_serv_id, and org_id already exists" 
                 });
             }
         }
 
         const updateData = {
-            ext_id: ext_id || existingVendorProdService.rows[0].ext_id,
             prod_serv_id: prod_serv_id || existingVendorProdService.rows[0].prod_serv_id,
             vendor_id: vendor_id || existingVendorProdService.rows[0].vendor_id,
             org_id: org_id || existingVendorProdService.rows[0].org_id
@@ -204,7 +220,30 @@ const updateVendorProdService = async (req, res) => {
 
     } catch (err) {
         console.error("Error updating vendor product service:", err);
-        res.status(500).json({ error: "Internal server error" });
+        
+        // Handle specific database errors
+        if (err.code === '23505') {
+            // Duplicate key constraint violation
+            return res.status(409).json({ 
+                error: "Duplicate vendor product service",
+                message: "This vendor-product-service combination already exists.",
+                type: "DUPLICATE_RECORD"
+            });
+        } else if (err.code === '23503') {
+            // Foreign key constraint violation
+            return res.status(400).json({ 
+                error: "Invalid reference",
+                message: "The vendor or product/service does not exist.",
+                type: "INVALID_REFERENCE"
+            });
+        }
+        
+        // Generic error
+        res.status(500).json({ 
+            error: "Failed to update vendor product service",
+            message: "An unexpected error occurred. Please try again.",
+            type: "INTERNAL_ERROR"
+        });
     }
 };
 
@@ -229,7 +268,23 @@ const deleteVendorProdService = async (req, res) => {
 
     } catch (err) {
         console.error("Error deleting vendor product service:", err);
-        res.status(500).json({ error: "Internal server error" });
+        
+        // Handle specific database errors
+        if (err.code === '23503') {
+            // Foreign key constraint violation
+            return res.status(400).json({ 
+                error: "Cannot delete vendor product service",
+                message: "This vendor product service is being used by other records and cannot be deleted.",
+                type: "CONSTRAINT_VIOLATION"
+            });
+        }
+        
+        // Generic error
+        res.status(500).json({ 
+            error: "Failed to delete vendor product service",
+            message: "An unexpected error occurred. Please try again.",
+            type: "INTERNAL_ERROR"
+        });
     }
 };
 
@@ -271,7 +326,23 @@ const deleteMultipleVendorProdServices = async (req, res) => {
 
     } catch (err) {
         console.error("Error deleting multiple vendor product services:", err);
-        res.status(500).json({ error: "Internal server error" });
+        
+        // Handle specific database errors
+        if (err.code === '23503') {
+            // Foreign key constraint violation
+            return res.status(400).json({ 
+                error: "Cannot delete vendor product services",
+                message: "Some vendor product services are being used by other records and cannot be deleted.",
+                type: "CONSTRAINT_VIOLATION"
+            });
+        }
+        
+        // Generic error
+        res.status(500).json({ 
+            error: "Failed to delete vendor product services",
+            message: "An unexpected error occurred. Please try again.",
+            type: "INTERNAL_ERROR"
+        });
     }
 };
 

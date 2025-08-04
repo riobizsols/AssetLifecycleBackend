@@ -6,15 +6,15 @@ const getAllBranches = async () => {
 };
 
 const addBranch = async (branch) => {
-  const { branch_id, ext_id, org_id, text, city, branch_code, created_by } =
+  const { branch_id, org_id, text, city, branch_code, created_by } =
     branch;
 
   const result = await db.query(
     `INSERT INTO "tblBranches" (
-        branch_id, ext_id, org_id, text, city, branch_code, created_by, created_on
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        branch_id, org_id, text, city, branch_code, created_by, created_on
+      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
       RETURNING *`,
-    [branch_id, ext_id, org_id, text, city, branch_code, created_by]
+    [branch_id, org_id, text, city, branch_code, created_by]
   );
 
   return result.rows[0];

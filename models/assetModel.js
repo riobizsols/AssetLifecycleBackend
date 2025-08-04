@@ -1,4 +1,5 @@
 const db = require("../config/db");
+const { generateCustomId } = require('../utils/idGenerator');
 
 const getAllAssets = async () => {
   const query = `
@@ -461,19 +462,8 @@ const insertAssetPropValue = async (propValueData) => {
 };
 
 const generateAssetId = async () => {
-  // Generate a unique asset ID with format: AST + timestamp + random number
-  const timestamp = Date.now().toString().slice(-6);
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  const assetId = `AST${timestamp}${random}`;
-
-  // Check if this ID already exists
-  const existing = await checkAssetIdExists(assetId);
-  if (existing.rows.length > 0) {
-    // If exists, generate a new one recursively
-    return generateAssetId();
-  }
-
-  return assetId;
+  // Use the proper ID generator for asset IDs
+  return await generateCustomId("asset", 3);
 }
 const deleteAsset = async (asset_id) => {
   const client = await db.connect();
@@ -558,7 +548,8 @@ const getPotentialParentAssets = async (asset_type_id) => {
 const createAsset = async (assetData) => {
   const {
     asset_type_id,
-    asset_id,
+    ext_id,
+    asset_id, // This might be empty, we'll generate it inside transaction
     text,
     serial_number,
     description,
@@ -582,6 +573,14 @@ const createAsset = async (assetData) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    // Generate asset ID inside the transaction
+    let finalAssetId = asset_id;
+    if (!asset_id) {
+      console.log('🔢 Generating asset ID inside transaction...');
+      finalAssetId = await generateCustomId("asset", 3);
+      console.log('🔢 Generated asset ID:', finalAssetId);
+    }
 
     // Insert asset
     const query = `
@@ -617,7 +616,7 @@ const createAsset = async (assetData) => {
     `;
 
     const values = [
-      asset_id,
+      finalAssetId,
       asset_type_id,
       text,
       serial_number,

@@ -65,7 +65,6 @@ const createDeptAdmin = async (req, res) => {
 
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
-        const ext_id = uuidv4();
 
         // Check if user already exists as admin for this department
         const existingAdmin = await db.query(
@@ -106,33 +105,15 @@ const createDeptAdmin = async (req, res) => {
             });
         }
 
-        // Generate the next dept_admin_id
-        const idResult = await db.query(
-            `SELECT dept_admin_id FROM "tblDeptAdmins" ORDER BY dept_admin_id DESC LIMIT 1`
-        );
-        
-        let newDeptAdminId;
-        if (idResult.rows.length > 0) {
-            // Extract the numeric part from the last dept_admin_id
-            const lastId = idResult.rows[0].dept_admin_id;
-            const match = lastId.match(/\d+/);
-            if (match) {
-                const nextNum = parseInt(match[0]) + 1;
-                newDeptAdminId = `DPTA${String(nextNum).padStart(3, "0")}`;
-            } else {
-                newDeptAdminId = "DPTA001";
-            }
-        } else {
-            // No dept admins exist yet, start with DPTA001
-            newDeptAdminId = "DPTA001";
-        }
+        // Generate the next dept_admin_id using idGenerator
+        const newDeptAdminId = await generateCustomId("dept_admin", 2);
 
         // Insert into tblDeptAdmins
         const insertResult = await db.query(
-            `INSERT INTO "tblDeptAdmins" (ext_id, dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
-         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
+            `INSERT INTO "tblDeptAdmins" (dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
          RETURNING *`,
-            [ext_id, newDeptAdminId, org_id, dept_id, user_id, created_by]
+            [newDeptAdminId, org_id, dept_id, user_id, created_by]
         );
 
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"

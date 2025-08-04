@@ -2,7 +2,7 @@ const db = require("../config/db");
 
 exports.getAssetMeta = (asset_type_id) => {
     return db.query(
-        'SELECT org_id, ext_id FROM "tblAssetTypes" WHERE asset_type_id = $1',
+        'SELECT org_id FROM "tblAssetTypes" WHERE asset_type_id = $1',
         [asset_type_id]
     );
 };
@@ -13,7 +13,6 @@ exports.getLastDeptAssetId = () => {
 
 exports.insertDeptAsset = (
     dept_asset_type_id,
-    ext_id,
     dept_id,
     asset_type_id,
     org_id,
@@ -21,13 +20,13 @@ exports.insertDeptAsset = (
 ) => {
     return db.query(
         `INSERT INTO "tblDeptAssetTypes" (
-      dept_asset_type_id, ext_id, dept_id, asset_type_id, org_id,
+      dept_asset_type_id, dept_id, asset_type_id, org_id,
       created_by, created_on, changed_by, changed_on, int_status
     ) VALUES (
-      $1, $2, $3, $4, $5,
-      $6, CURRENT_DATE, $6, CURRENT_DATE, 1
+      $1, $2, $3, $4,
+      $5, CURRENT_DATE, $5, CURRENT_DATE, 1
     )`,
-        [dept_asset_type_id, ext_id, dept_id, asset_type_id, org_id, created_by]
+        [dept_asset_type_id, dept_id, asset_type_id, org_id, created_by]
     );
 };
 

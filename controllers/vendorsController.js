@@ -1,6 +1,7 @@
 const vendorsModel = require("../models/vendorsModel");
 const db = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
+const { generateCustomId } = require("../utils/idGenerator");
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -34,16 +35,6 @@ exports.getVendorById = async (req, res) => {
 
 //add new vendor
 
-const generateVendorId = async () => {
-  const result = await db.query(`SELECT vendor_id FROM "tblVendors" ORDER BY vendor_id DESC LIMIT 1`);
-  const lastId = result.rows[0]?.vendor_id;
-  let newNumber = 10001; // starting number
-  if (lastId && /^VEND\d+$/.test(lastId)) {
-    newNumber = parseInt(lastId.replace('VEND', '')) + 1;
-  }
-  return `VEND${newNumber}`;
-};
-
 exports.createVendor = async (req, res) => {
   try {
     const {
@@ -71,13 +62,11 @@ exports.createVendor = async (req, res) => {
     const org_id = req.user.org_id;
     const changed_on = new Date();
     const created_on = new Date();
-    const ext_id = uuidv4(); // Always auto-generate ext_id
-    const vendor_id = await generateVendorId(); // Always generate vendor_id
+    const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
 
     const vendorData = {
       vendor_id, // use generated
       org_id,
-      ext_id, // auto-generated
       vendor_name,
       int_status,
       company_name: company,
@@ -131,12 +120,12 @@ exports.deleteVendors = async (req, res) => {
         v.vendor_id,
         v.vendor_name,
         CASE WHEN vps.vendor_id IS NOT NULL THEN true ELSE false END as has_products,
-        CASE WHEN a.vendor_id IS NOT NULL THEN true ELSE false END as has_assets
+        CASE WHEN a.purchase_vendor_id IS NOT NULL OR a.service_vendor_id IS NOT NULL THEN true ELSE false END as has_assets
       FROM "tblVendors" v
       LEFT JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id
-      LEFT JOIN "tblAssets" a ON v.vendor_id = a.vendor_id
+      LEFT JOIN "tblAssets" a ON v.vendor_id = a.purchase_vendor_id OR v.vendor_id = a.service_vendor_id
       WHERE v.vendor_id = ANY($1)
-      GROUP BY v.vendor_id, v.vendor_name, vps.vendor_id, a.vendor_id;
+      GROUP BY v.vendor_id, v.vendor_name, vps.vendor_id, a.purchase_vendor_id, a.service_vendor_id;
     `;
     const checkResult = await db.query(checkQuery, [ids]);
 
@@ -193,7 +182,6 @@ exports.updateVendor = async (req, res) => {
     const { vendor_id } = req.params;
     const {
       org_id,
-      ext_id,
       vendor_name,
       int_status,
       company_name,
@@ -215,30 +203,28 @@ exports.updateVendor = async (req, res) => {
     const query = `
         UPDATE "tblVendors" SET
           org_id = $1,
-          ext_id = $2,
-          vendor_name = $3,
-          int_status = $4,
-          company_name = $5,
-          address_line1 = $6,
-          address_line2 = $7,
-          city = $8,
-          state = $9,
-          pincode = $10,
-          company_email = $11,
-          gst_number = $12,
-          cin_number = $13,
-          contact_person_name = $14,
-          contact_person_email = $15,
-          contact_person_number = $16,
-          changed_by = $17,
-          changed_on = $18
-        WHERE vendor_id = $19
+          vendor_name = $2,
+          int_status = $3,
+          company_name = $4,
+          address_line1 = $5,
+          address_line2 = $6,
+          city = $7,
+          state = $8,
+          pincode = $9,
+          company_email = $10,
+          gst_number = $11,
+          cin_number = $12,
+          contact_person_name = $13,
+          contact_person_email = $14,
+          contact_person_number = $15,
+          changed_by = $16,
+          changed_on = $17
+        WHERE vendor_id = $18
         RETURNING *;
       `;
 
     const values = [
       org_id,
-      ext_id,
       vendor_name,
       int_status,
       company_name,

@@ -531,7 +531,8 @@ const createAsset = async (req, res) => {
         // Generate or validate asset_id
         let finalAssetId = asset_id;
         if (!asset_id) {
-            finalAssetId = await model.generateAssetId();
+            // Asset ID will be generated inside the transaction in the model
+            finalAssetId = ''; // Empty string to trigger generation in model
         } else {
             const existingAssetId = await model.checkAssetIdExists(asset_id);
             if (existingAssetId.rows.length > 0) {
