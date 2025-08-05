@@ -1,5 +1,19 @@
 const model = require("../models/vendorProdServiceModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const db = require("../config/db");
+
+// Generate vendor product service ID
+const generateVendorProdServiceId = async () => {
+    const result = await db.query(`SELECT ven_prod_serv_id FROM "tblVendorProdService" ORDER BY ven_prod_serv_id DESC LIMIT 1`);
+    const lastId = result.rows[0]?.ven_prod_serv_id;
+    
+    let newNumber = 1; // starting number
+    if (lastId && /^VPS\d+$/.test(lastId)) {
+        newNumber = parseInt(lastId.replace('VPS', '')) + 1;
+    }
+    
+    return `VPS${String(newNumber).padStart(3, '0')}`;
+};
 
 // GET /api/vendor-prod-services - Get all vendor product services
 const getAllVendorProdServices = async (req, res) => {
@@ -88,8 +102,7 @@ const addVendorProdService = async (req, res) => {
         const {
             prod_serv_id,
             vendor_id,
-            org_id,
-            ven_prod_serv_id // Optional, will be auto-generated if not provided
+            org_id
         } = req.body;
 
         // Validate required fields
@@ -107,19 +120,8 @@ const addVendorProdService = async (req, res) => {
             });
         }
 
-        // Use provided ven_prod_serv_id or generate one
-        let finalVendorProdServiceId = ven_prod_serv_id;
-        if (!ven_prod_serv_id) {
-            finalVendorProdServiceId = await generateCustomId("vendor_prod_serv", 3);
-        } else {
-            // Check if the provided ven_prod_serv_id already exists
-            const existingId = await model.checkVendorProdServiceIdExists(ven_prod_serv_id);
-            if (existingId.rows.length > 0) {
-                return res.status(409).json({ 
-                    error: "Vendor product service with this ven_prod_serv_id already exists" 
-                });
-            }
-        }
+        // Generate ven_prod_serv_id automatically
+        const finalVendorProdServiceId = await generateVendorProdServiceId();
 
         // Insert new vendor product service
         const result = await model.insertVendorProdService(

@@ -47,17 +47,26 @@ exports.getModelsByAssetTypeAndBrand = async (req, res) => {
 // add ProdServ
 exports.addProdserv = async (req, res) => {
   try {
-    const { assetType, brand, model, description, ps_type } = req.body;
+    const { assetType, asset_type_id, brand, model, description, ps_type } = req.body;
 
     const prod_serv_id = await generateCustomId("prod_serv", 3); 
     const org_id = req.user.org_id; 
 
-    const asset_type_id = assetType; 
+    // Use asset_type_id if provided, otherwise use assetType
+    const finalAssetTypeId = asset_type_id || assetType; 
+    
+    if (!finalAssetTypeId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'asset_type_id or assetType is required' 
+      });
+    }
+    
     const status = 1; 
     const prodserv = await prodServModel.addProdserv({
       prod_serv_id,
       org_id,
-      asset_type_id,
+      asset_type_id: finalAssetTypeId,
       brand,
       model,
       status,

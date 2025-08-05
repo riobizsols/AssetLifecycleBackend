@@ -5,8 +5,8 @@ const {
 
 const fetchJobRoles = async (req, res) => {
     try {
-        const { ext_id, org_id } = req.user;
-        const roles = await getJobRolesByOrg(ext_id, org_id);
+        const { org_id } = req.user;
+        const roles = await getJobRolesByOrg(org_id);
         res.json({ roles });
     } catch (error) {
         console.error("Error fetching job roles:", error);
@@ -16,7 +16,7 @@ const fetchJobRoles = async (req, res) => {
 
 const addJobRole = async (req, res) => {
     try {
-        const { ext_id, org_id } = req.user;
+        const { org_id } = req.user;
         const { job_role_id, text, job_function } = req.body;
 
         if (!job_role_id || !text) {
@@ -24,7 +24,6 @@ const addJobRole = async (req, res) => {
         }
 
         const newRole = await createJobRole({
-            ext_id,
             org_id,
             job_role_id,
             text,

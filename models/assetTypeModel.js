@@ -122,6 +122,22 @@ const getParentAssetTypes = async () => {
     return await db.query(query);
 };
 
+const getAssetTypesByAssignmentType = async (assignment_type) => {
+    const query = `
+        SELECT 
+            org_id, asset_type_id, int_status, maint_required,
+            assignment_type, inspection_required, group_required, created_by,
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, serial_num_format
+        FROM "tblAssetTypes"
+        WHERE assignment_type = $1
+        AND int_status = 1
+        ORDER BY text
+    `;
+    
+    return await db.query(query, [assignment_type]);
+};
+
 const deleteAssetType = async (asset_type_id) => {
     try {
         const query = `
@@ -145,5 +161,6 @@ module.exports = {
     deleteAssetType,
     checkAssetTypeExists,
     checkAssetTypeReferences,
-    getParentAssetTypes
+    getParentAssetTypes,
+    getAssetTypesByAssignmentType
 }; 

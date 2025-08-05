@@ -122,6 +122,23 @@ const getParentAssetTypes = async (req, res) => {
     }
 };
 
+// GET /api/asset-types/assignment-type/:assignment_type - Get asset types by assignment type
+const getAssetTypesByAssignmentType = async (req, res) => {
+    try {
+        const { assignment_type } = req.params;
+        
+        if (!assignment_type) {
+            return res.status(400).json({ error: "Assignment type parameter is required" });
+        }
+        
+        const result = await model.getAssetTypesByAssignmentType(assignment_type);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error("Error fetching asset types by assignment type:", err);
+        res.status(500).json({ error: "Failed to fetch asset types by assignment type" });
+    }
+};
+
 // GET /api/asset-types/:id - Get asset type by ID
 const getAssetTypeById = async (req, res) => {
     try {
@@ -305,5 +322,6 @@ module.exports = {
     getAssetTypeById,
     updateAssetType,
     deleteAssetType,
-    getParentAssetTypes
+    getParentAssetTypes,
+    getAssetTypesByAssignmentType
 };

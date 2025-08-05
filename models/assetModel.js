@@ -3,8 +3,13 @@ const { generateCustomId } = require('../utils/idGenerator');
 
 const getAllAssets = async () => {
   const query = `
+<<<<<<< HEAD
         SELECT 
            asset_id, asset_type_id, text, serial_number, description,
+=======
+                SELECT 
+            asset_id, asset_type_id, text, serial_number, description,
+>>>>>>> origin/Naren
             branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
@@ -17,8 +22,13 @@ const getAllAssets = async () => {
 
 const getAssetById = async (asset_id) => {
   const query = `
+<<<<<<< HEAD
         SELECT 
            asset_id, asset_type_id, text, serial_number, description,
+=======
+                SELECT 
+            asset_id, asset_type_id, text, serial_number, description,
+>>>>>>> origin/Naren
             branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
@@ -390,13 +400,13 @@ const updateAsset = async (asset_id, {
 };
 
 
-const checkAssetExists = async (ext_id, org_id) => {
+const checkAssetExists = async (org_id) => {
   const query = `
         SELECT asset_id FROM "tblAssets"
-        WHERE ext_id = $1 AND org_id = $2
+        WHERE org_id = $1
     `;
 
-  return await db.query(query, [ext_id, org_id]);
+  return await db.query(query, [org_id]);
 };
 
 const checkAssetIdExists = async (asset_id) => {

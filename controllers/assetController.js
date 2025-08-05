@@ -9,7 +9,6 @@ const addAsset = async (req, res) => {
         
         const {
             asset_type_id,
-            ext_id, // Accept ext_id from frontend
             asset_id,
             text,
             serial_number,
@@ -113,7 +112,6 @@ const addAsset = async (req, res) => {
                 if (value) {
                     await model.insertAssetPropValue({
                         asset_id: insertedAssetId,
-                        ext_id: insertedExtId,
                         org_id,
                         asset_type_prop_id: propId,
                         value
@@ -481,7 +479,6 @@ const createAsset = async (req, res) => {
         
         const {
             asset_type_id,
-            ext_id, // Accept ext_id from frontend
             asset_id,
             text,
             serial_number,
@@ -540,10 +537,13 @@ const createAsset = async (req, res) => {
             }
         }
 
+<<<<<<< HEAD
         // Prepare asset data (now includes ext_id and prod_serv_id)
+=======
+        // Prepare asset data (now includes prod_serv_id)
+>>>>>>> origin/Naren
         const assetData = {
             asset_type_id,
-            ext_id, // Pass ext_id to model/DB
             asset_id: finalAssetId,
             text,
             serial_number,
@@ -567,7 +567,7 @@ const createAsset = async (req, res) => {
 
         // Insert asset using the new createAsset function
         const result = await model.createAsset(assetData);
-        const { asset_id: insertedAssetId, ext_id: insertedExtId } = result.rows[0];
+        const { asset_id: insertedAssetId } = result.rows[0];
 
         // Insert properties if any
         if (req.body.properties && Object.keys(req.body.properties).length > 0) {
@@ -576,7 +576,6 @@ const createAsset = async (req, res) => {
                 if (value) {
                     await model.insertAssetPropValue({
                         asset_id: insertedAssetId,
-                        ext_id: insertedExtId,
                         org_id,
                         asset_type_prop_id: propId,
                         value

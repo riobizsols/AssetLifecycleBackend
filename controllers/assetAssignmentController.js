@@ -457,7 +457,7 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
         }
         
         const assetCount = result.assignedAssets.length;
-        const employeeCount = result.department.employee_count;
+        const employeeCount = result.employees.length;
         
         const message = assetCount > 0 
             ? `Department has ${assetCount} assigned assets and ${employeeCount} employees`
@@ -472,7 +472,8 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             },
             assetCount: assetCount,
             employeeCount: employeeCount,
-            assignedAssets: result.assignedAssets
+            assignedAssets: result.assignedAssets,
+            employees: result.employees
         });
     } catch (err) {
         console.error("Error fetching department-wise asset assignments:", err);

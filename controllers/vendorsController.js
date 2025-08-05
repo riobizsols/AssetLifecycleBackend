@@ -40,9 +40,9 @@ exports.createVendor = async (req, res) => {
     const {
       // vendor_id, // REMOVE this from destructuring
       vendor_name,
-      company,
-      email,
-      contact_number,
+      company_name,
+      company_email,
+      contact_person_number,
       gst_number,
       cin_number,
       product_supply,
@@ -69,18 +69,18 @@ exports.createVendor = async (req, res) => {
       org_id,
       vendor_name,
       int_status,
-      company_name: company,
+      company_name,
       address_line1,
       address_line2,
       city,
       state,
       pincode,
-      company_email: email,
+      company_email,
       gst_number,
       cin_number,
       contact_person_name,
       contact_person_email,
-      contact_person_number: contact_number,
+      contact_person_number,
       created_by,
       created_on,
       changed_by,
@@ -100,6 +100,78 @@ exports.createVendor = async (req, res) => {
 };
 
 
+
+// Delete single vendor
+exports.deleteVendor = async (req, res) => {
+  try {
+    const { vendor_id } = req.params;
+
+    if (!vendor_id) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Invalid request",
+        message: "Vendor ID is required" 
+      });
+    }
+
+    // Check if vendor exists and check all foreign key constraints
+    const checkQuery = `
+      SELECT 
+        v.vendor_id,
+        v.vendor_name,
+        CASE WHEN vps.vendor_id IS NOT NULL THEN true ELSE false END as has_products,
+        CASE WHEN a.purchase_vendor_id = v.vendor_id OR a.service_vendor_id = v.vendor_id THEN true ELSE false END as has_assets
+      FROM "tblVendors" v
+      LEFT JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id
+      LEFT JOIN "tblAssets" a ON (v.vendor_id = a.purchase_vendor_id OR v.vendor_id = a.service_vendor_id)
+      WHERE v.vendor_id = $1
+      GROUP BY v.vendor_id, v.vendor_name, vps.vendor_id, a.purchase_vendor_id, a.service_vendor_id;
+    `;
+    const checkResult = await db.query(checkQuery, [vendor_id]);
+
+    // Check if vendor exists
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: "Vendor not found",
+        message: "The specified vendor does not exist"
+      });
+    }
+
+    const vendor = checkResult.rows[0];
+
+    // Check for any constraints
+    if (vendor.has_products || vendor.has_assets) {
+      const constraints = [];
+      if (vendor.has_products) constraints.push("products/services");
+      if (vendor.has_assets) constraints.push("assets");
+      
+      return res.status(400).json({
+        success: false,
+        error: "Constraint violation",
+        message: "Cannot delete vendor with associated records",
+        details: `${vendor.vendor_name} (${vendor.vendor_id}) - has associated ${constraints.join(" and ")}`
+      });
+    }
+
+    // Delete the vendor
+    const deleteQuery = 'DELETE FROM "tblVendors" WHERE vendor_id = $1 RETURNING *;';
+    const { rows } = await db.query(deleteQuery, [vendor_id]);
+
+    res.json({ 
+      success: true, 
+      message: "Vendor deleted successfully",
+      deletedVendor: rows[0]
+    });
+  } catch (error) {
+    console.error("Delete vendor error:", error);
+    res.status(500).json({ 
+      success: false, 
+      error: "Server Error",
+      message: "Failed to delete vendor" 
+    });
+  }
+};
 
 // Delete multiple vendors
 exports.deleteVendors = async (req, res) => {
