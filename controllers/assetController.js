@@ -17,7 +17,7 @@ const addAsset = async (req, res) => {
             branch_id,
             purchase_vendor_id,
             service_vendor_id,
-            prod_serve_id, // Accept prod_serve_id from frontend
+            prod_serv_id, // Accept prod_serv_id from frontend
             maintsch_id,
             purchased_cost,
             purchased_on,
@@ -55,12 +55,12 @@ const addAsset = async (req, res) => {
                 return res.status(400).json({ error: `Vendor with ID '${service_vendor_id}' does not exist` });
             }
         }
-        // If you want to re-enable prod_serve_id validation, uncomment and update this block:
-        // if (prod_serve_id) {
-        //     const prodServExists = await model.checkProdServExists(prod_serve_id);
+        // If you want to re-enable prod_serv_id validation, uncomment and update this block:
+        // if (prod_serv_id) {
+        //     const prodServExists = await model.checkProdServExists(prod_serv_id);
         //     if (prodServExists.rows.length === 0) {
-        //         console.warn("Invalid prod_serve_id:", prod_serve_id);
-        //         return res.status(400).json({ error: `Product/Service with ID '${prod_serve_id}' does not exist` });
+        //         console.warn("Invalid prod_serv_id:", prod_serv_id);
+        //         return res.status(400).json({ error: `Product/Service with ID '${prod_serv_id}' does not exist` });
         //     }
         // }
 
@@ -75,7 +75,7 @@ const addAsset = async (req, res) => {
             }
         }
 
-        // Prepare asset data (now includes prod_serve_id)
+        // Prepare asset data (now includes prod_serv_id)
         const assetData = {
             asset_type_id,
             asset_id: finalAssetId,
@@ -85,7 +85,7 @@ const addAsset = async (req, res) => {
             branch_id: branch_id || null,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
-            prod_serve_id: prod_serve_id || null, // Use value from frontend
+            prod_serv_id: prod_serv_id || null, // Use value from frontend
             maintsch_id: maintsch_id || null,
             purchased_cost,
             purchased_on,
@@ -191,7 +191,7 @@ const updateAsset = async (req, res) => {
     branch_id,
     purchase_vendor_id,
     service_vendor_id,
-    prod_serve_id,
+    prod_serv_id,
     maintsch_id,
     purchased_cost,
     purchased_on,
@@ -213,7 +213,7 @@ const updateAsset = async (req, res) => {
       branch_id,
       purchase_vendor_id,
       service_vendor_id,
-      prod_serve_id,
+      prod_serv_id,
       maintsch_id,
       purchased_cost,
       purchased_on,
@@ -489,7 +489,7 @@ const createAsset = async (req, res) => {
             branch_id,
             purchase_vendor_id,
             service_vendor_id,
-            prod_serve_id, // Accept prod_serve_id from frontend
+            prod_serv_id, // Accept prod_serv_id from frontend
             maintsch_id,
             purchased_cost,
             purchased_on,
@@ -540,7 +540,7 @@ const createAsset = async (req, res) => {
             }
         }
 
-        // Prepare asset data (now includes ext_id and prod_serve_id)
+        // Prepare asset data (now includes ext_id and prod_serv_id)
         const assetData = {
             asset_type_id,
             ext_id, // Pass ext_id to model/DB
@@ -551,7 +551,7 @@ const createAsset = async (req, res) => {
             branch_id: branch_id || null,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
-            prod_serve_id: prod_serve_id || null, // Use value from frontend
+            prod_serv_id: prod_serv_id || null, // Use value from frontend
             maintsch_id: maintsch_id || null,
             purchased_cost,
             purchased_on,

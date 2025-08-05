@@ -44,7 +44,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         wfh.status as header_status,
         wfh.created_on as maintenance_created_on,
         a.asset_type_id,
-        a.prod_serve_id as vendor_id,
+        a.prod_serv_id as vendor_id,
         v.vendor_name,
         at.maint_lead_type,
         at.text as asset_type_name,
@@ -64,7 +64,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
       LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
       LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-      LEFT JOIN "tblVendors" v ON a.prod_serve_id = v.vendor_id
+      LEFT JOIN "tblVendors" v ON a.prod_serv_id = v.vendor_id
       WHERE wfd.org_id = $1 
         AND wfh.asset_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
@@ -681,7 +681,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
        INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-       LEFT JOIN "tblVendors" v ON a.prod_serve_id = v.vendor_id
+       LEFT JOIN "tblVendors" v ON a.prod_serv_id = v.vendor_id
        LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
        LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
        LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
@@ -733,7 +733,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
           wfh.pl_sch_date as act_maint_st_date,
           a.asset_type_id,
           wfh.maint_type_id,
-          a.prod_serve_id as vendor_id,
+          a.prod_serv_id as vendor_id,
           wfh.at_main_freq_id
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id

@@ -24,6 +24,7 @@ const notificationRoutes = require("./routes/notificationRoutes");
 const approvalDetailRoutes = require("./routes/approvalDetailRoutes");
 const checklistRoutes = require("./routes/checklistRoutes");
 const cronRoutes = require("./routes/cronRoutes");
+const navigationRoutes = require("./routes/navigationRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -69,6 +70,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/approval-detail", approvalDetailRoutes);
 app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);
+app.use("/api/navigation", navigationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
