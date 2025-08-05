@@ -1,20 +1,20 @@
 const db = require('../config/db');
 
-const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, serial_num_format = null) => {
+const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null) => {
     const query = `
         INSERT INTO "tblAssetTypes" (
             org_id, asset_type_id, int_status, maint_required, 
             assignment_type, inspection_required, group_required, created_by, 
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, serial_num_format
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, $14)
+            maint_type_id, maint_lead_type
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13)
         RETURNING *
     `;
     
     const values = [
         org_id, asset_type_id, int_status, maint_required,
         assignment_type, inspection_required, group_required, created_by, text,
-        is_child, parent_asset_type_id, maint_type_id, maint_lead_type, serial_num_format
+        is_child, parent_asset_type_id, maint_type_id, maint_lead_type
     ];
     
     return await db.query(query, values);
@@ -26,7 +26,7 @@ const getAllAssetTypes = async () => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, serial_num_format
+            maint_type_id, maint_lead_type
         FROM "tblAssetTypes"
         ORDER BY created_on DESC
     `;
@@ -40,7 +40,7 @@ const getAssetTypeById = async (asset_type_id) => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, serial_num_format
+            maint_type_id, maint_lead_type
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
@@ -52,7 +52,7 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
         org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, text, is_child, parent_asset_type_id,
-        maint_type_id, maint_lead_type, serial_num_format
+        maint_type_id, maint_lead_type
     } = updateData;
     
     const query = `
@@ -62,15 +62,15 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
             assignment_type = $4, inspection_required = $5, group_required = $6,
             changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
             is_child = $9, parent_asset_type_id = $10, maint_type_id = $11,
-            maint_lead_type = $12, serial_num_format = $13
-        WHERE asset_type_id = $14
+            maint_lead_type = $12
+        WHERE asset_type_id = $13
         RETURNING *
     `;
     
     const values = [
         org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, changed_by, text,
-        is_child, parent_asset_type_id, maint_type_id, maint_lead_type, serial_num_format, asset_type_id
+        is_child, parent_asset_type_id, maint_type_id, maint_lead_type, asset_type_id
     ];
     
     return await db.query(query, values);

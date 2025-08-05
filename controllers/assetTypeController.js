@@ -1,6 +1,5 @@
 const model = require("../models/assetTypeModel");
 const { generateCustomId } = require("../utils/idGenerator");
-const { v4: uuidv4 } = require('uuid');
 
 // POST /api/asset-types - Add new asset type
 const addAssetType = async (req, res) => {
@@ -15,18 +14,15 @@ const addAssetType = async (req, res) => {
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
             maint_type_id = null,  // from frontend
-            maint_lead_type = null, // from frontend
-            serial_num_format = null // from frontend
+            maint_lead_type = null  // from frontend
         } = req.body;
 
         // Get org_id and user_id from authenticated user
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
-
-
         // Generate unique asset_type_id
-        const asset_type_id = await generateCustomId("asset_type", 3);
+        let asset_type_id = await generateCustomId("asset_type", 3);
 
         // Validate required fields
         if (!text) {
@@ -58,22 +54,40 @@ const addAssetType = async (req, res) => {
         }
 
         // Insert new asset type
-        const result = await model.insertAssetType(
-            org_id,
-            asset_type_id,
-            int_status,
-            maint_required,
-            assignment_type,
-            inspection_required,
-            group_required,
-            created_by,
-            text,
-            is_child,
-            parent_asset_type_id,
-            maint_type_id,
-            maint_lead_type,
-            serial_num_format
-        );
+        let result;
+        let retryCount = 0;
+        const maxRetries = 3;
+        
+        while (retryCount < maxRetries) {
+            try {
+                result = await model.insertAssetType(
+                    org_id,
+                    asset_type_id,
+                    int_status,
+                    maint_required,
+                    assignment_type,
+                    inspection_required,
+                    group_required,
+                    created_by,
+                    text,
+                    is_child,
+                    parent_asset_type_id,
+                    maint_type_id,
+                    maint_lead_type
+                );
+                break; // Success, exit the loop
+            } catch (err) {
+                if (err.code === '23505' && err.constraint === 'tblAssetType_UK' && retryCount < maxRetries - 1) {
+                    // Duplicate key error, generate a new ID and retry
+                    console.warn(`Duplicate asset_type_id ${asset_type_id}, generating new ID...`);
+                    asset_type_id = await generateCustomId("asset_type", 3);
+                    retryCount++;
+                } else {
+                    // Re-throw the error if it's not a duplicate key or we've exhausted retries
+                    throw err;
+                }
+            }
+        }
 
         res.status(201).json({
             message: "Asset type added successfully",
@@ -157,8 +171,7 @@ const updateAssetType = async (req, res) => {
             is_child,
             parent_asset_type_id,
             maint_type_id,
-            maint_lead_type,
-            serial_num_format
+            maint_lead_type
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -197,17 +210,6 @@ const updateAssetType = async (req, res) => {
             }
         }
 
-        // Check if new asset_type_id and org_id combination already exists (excluding current record)
-        if (org_id) {
-            const duplicateCheck = await model.checkAssetTypeExists(org_id, id);
-            const duplicate = duplicateCheck.rows.find(row => row.asset_type_id !== id);
-            if (duplicate) {
-                return res.status(409).json({ 
-                    error: "Asset type with this asset_type_id and org_id already exists" 
-                });
-            }
-        }
-
         const updateData = {
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
@@ -219,8 +221,7 @@ const updateAssetType = async (req, res) => {
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id,
             maint_type_id: maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id,
-            maint_lead_type: maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type,
-            serial_num_format: serial_num_format !== undefined ? serial_num_format : existingAsset.rows[0].serial_num_format
+            maint_lead_type: maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type
         };
 
         const result = await model.updateAssetType(id, updateData, changed_by);

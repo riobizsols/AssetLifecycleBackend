@@ -1,6 +1,7 @@
 const vendorsModel = require("../models/vendorsModel");
 const db = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
+const { generateCustomId } = require("../utils/idGenerator");
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -34,16 +35,6 @@ exports.getVendorById = async (req, res) => {
 
 //add new vendor
 
-const generateVendorId = async () => {
-  const result = await db.query(`SELECT vendor_id FROM "tblVendors" ORDER BY vendor_id DESC LIMIT 1`);
-  const lastId = result.rows[0]?.vendor_id;
-  let newNumber = 1; // starting number
-  if (lastId && /^V\d+$/.test(lastId)) {
-    newNumber = parseInt(lastId.replace('V', '')) + 1;
-  }
-  return `V${String(newNumber).padStart(3, '0')}`;
-};
-
 exports.createVendor = async (req, res) => {
   try {
     const {
@@ -71,7 +62,7 @@ exports.createVendor = async (req, res) => {
     const org_id = req.user.org_id;
     const changed_on = new Date();
     const created_on = new Date();
-    const vendor_id = await generateVendorId(); // Always generate vendor_id
+    const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
 
     const vendorData = {
       vendor_id, // use generated
@@ -201,10 +192,10 @@ exports.deleteVendors = async (req, res) => {
         v.vendor_id,
         v.vendor_name,
         CASE WHEN vps.vendor_id IS NOT NULL THEN true ELSE false END as has_products,
-        CASE WHEN a.purchase_vendor_id = v.vendor_id OR a.service_vendor_id = v.vendor_id THEN true ELSE false END as has_assets
+        CASE WHEN a.purchase_vendor_id IS NOT NULL OR a.service_vendor_id IS NOT NULL THEN true ELSE false END as has_assets
       FROM "tblVendors" v
       LEFT JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id
-      LEFT JOIN "tblAssets" a ON (v.vendor_id = a.purchase_vendor_id OR v.vendor_id = a.service_vendor_id)
+      LEFT JOIN "tblAssets" a ON v.vendor_id = a.purchase_vendor_id OR v.vendor_id = a.service_vendor_id
       WHERE v.vendor_id = ANY($1)
       GROUP BY v.vendor_id, v.vendor_name, vps.vendor_id, a.purchase_vendor_id, a.service_vendor_id;
     `;

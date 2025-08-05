@@ -1,5 +1,5 @@
 const db = require('../config/db');
-const { v4: uuidv4 } = require('uuid');
+const { generateCustomId } = require('../utils/idGenerator');
 
 // Get all departments
 const getAllDepartments = async () => {
@@ -35,27 +35,15 @@ const getUsersByDeptId = async (dept_id) => {
     return result.rows;
 };
 
-// Generate next business ID: DPTA001, DPTA002...
-const getNextDeptAdminId = async () => {
-    const res = await db.query(`SELECT id FROM "tblDeptAdmins" ORDER BY id DESC LIMIT 1`);
-    let nextId = 'DPTA001';
-    if (res.rows.length > 0) {
-        const lastId = res.rows[0].id;
-        const next = parseInt(lastId.replace('DPTA', ''), 10) + 1;
-        nextId = `DPTA${String(next).padStart(3, '0')}`;
-    }
-    return nextId;
-};
-
 // Create a new department admin
 const createDeptAdmin = async ({ dept_id, user_id, org_id, created_by }) => {
-    const id = await getNextDeptAdminId();
+    const dept_admin_id = await generateCustomId("dept_admin", 3);
 
     const result = await db.query(`
-    INSERT INTO "tblDeptAdmins" (id, dept_id, user_id, org_id, created_by)
+    INSERT INTO "tblDeptAdmins" (dept_admin_id, dept_id, user_id, org_id, created_by)
     VALUES ($1, $2, $3, $4, $5)
     RETURNING *
-  `, [id, dept_id, user_id, org_id, created_by]);
+  `, [dept_admin_id, dept_id, user_id, org_id, created_by]);
 
     return result.rows[0];
 };

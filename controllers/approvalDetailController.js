@@ -166,15 +166,16 @@ const getWorkflowHistoryController = async (req, res) => {
     // Format the history data for frontend
     const formattedHistory = history.map(record => ({
       id: record.wfamsd_id,
-      date: new Date(record.created_on).toLocaleString(),
-      action: getActionText(record.status),
-      actionType: getActionType(record.status),
-      user: record.user_name || 'Unknown User',
+      date: new Date(record.action_on).toLocaleString(),
+      action: getActionText(record.action),
+      actionType: getActionType(record.action),
+      user: record.affected_user_name || 'Unknown User',
+      actionBy: record.user_name || 'System',
       notes: record.notes || '',
       jobRole: record.job_role_name || '',
-      department: record.dept_name || record.dept_id_raw || '',
+      department: record.dept_name || '',
       sequence: record.sequence,
-      status: record.status
+      status: record.action
     }));
 
     res.json({

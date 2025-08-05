@@ -105,26 +105,8 @@ const createDeptAdmin = async (req, res) => {
             });
         }
 
-        // Generate the next dept_admin_id
-        const idResult = await db.query(
-            `SELECT dept_admin_id FROM "tblDeptAdmins" ORDER BY dept_admin_id DESC LIMIT 1`
-        );
-        
-        let newDeptAdminId;
-        if (idResult.rows.length > 0) {
-            // Extract the numeric part from the last dept_admin_id
-            const lastId = idResult.rows[0].dept_admin_id;
-            const match = lastId.match(/\d+/);
-            if (match) {
-                const nextNum = parseInt(match[0]) + 1;
-                newDeptAdminId = `DPTA${String(nextNum).padStart(3, "0")}`;
-            } else {
-                newDeptAdminId = "DPTA001";
-            }
-        } else {
-            // No dept admins exist yet, start with DPTA001
-            newDeptAdminId = "DPTA001";
-        }
+        // Generate the next dept_admin_id using idGenerator
+        const newDeptAdminId = await generateCustomId("dept_admin", 2);
 
         // Insert into tblDeptAdmins
         const insertResult = await db.query(

@@ -17,7 +17,7 @@ const createBranch = async (req, res) => {
         const { text, city, branch_code } = req.body;
 
         // Fetch latest branch ID
-        const newId = await generateCustomId("branch", 2); 
+        const newId = await generateCustomId("branch", 3); 
 
         const newBranch = await branchModel.addBranch({
             branch_id: newId,
