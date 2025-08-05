@@ -536,12 +536,7 @@ const createAsset = async (req, res) => {
                 return res.status(409).json({ error: "Asset with this asset_id already exists" });
             }
         }
-
-<<<<<<< HEAD
-        // Prepare asset data (now includes ext_id and prod_serv_id)
-=======
-        // Prepare asset data (now includes prod_serv_id)
->>>>>>> origin/Naren
+  // Prepare asset data (now includes prod_serv_id)
         const assetData = {
             asset_type_id,
             asset_id: finalAssetId,
