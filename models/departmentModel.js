@@ -54,7 +54,6 @@ const deleteDepartment = async (org_id, dept_id) => {
 // ✅ Create a department (with fallback defaults)
 const createDepartment = async (dept) => {
     const {
-        ext_id,
         org_id,
         dept_id,
         int_status = 1,
@@ -67,14 +66,13 @@ const createDepartment = async (dept) => {
 
     const result = await db.query(
         `INSERT INTO "tblDepartments" (
-      ext_id, org_id, dept_id, int_status, text, parent_id,
+      org_id, dept_id, int_status, text, parent_id,
       branch_code, created_on, changed_on, created_by, changed_by
     ) VALUES (
-      $1, $2, $3, $4, $5, $6,
-      $7, CURRENT_DATE, CURRENT_DATE, $8, $9
+      $1, $2, $3, $4, $5,
+      $6, CURRENT_DATE, CURRENT_DATE, $7, $8
     ) RETURNING *`,
         [
-            ext_id,
             org_id,
             dept_id,
             int_status,

@@ -65,7 +65,6 @@ const createDeptAdmin = async (req, res) => {
 
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
-        const ext_id = uuidv4();
 
         // Check if user already exists as admin for this department
         const existingAdmin = await db.query(
@@ -129,10 +128,10 @@ const createDeptAdmin = async (req, res) => {
 
         // Insert into tblDeptAdmins
         const insertResult = await db.query(
-            `INSERT INTO "tblDeptAdmins" (ext_id, dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
-         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
+            `INSERT INTO "tblDeptAdmins" (dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
          RETURNING *`,
-            [ext_id, newDeptAdminId, org_id, dept_id, user_id, created_by]
+            [newDeptAdminId, org_id, dept_id, user_id, created_by]
         );
 
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"

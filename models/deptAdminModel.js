@@ -49,14 +49,13 @@ const getNextDeptAdminId = async () => {
 
 // Create a new department admin
 const createDeptAdmin = async ({ dept_id, user_id, org_id, created_by }) => {
-    const ext_id = uuidv4();
     const id = await getNextDeptAdminId();
 
     const result = await db.query(`
-    INSERT INTO "tblDeptAdmins" (ext_id, id, dept_id, user_id, org_id, created_by)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO "tblDeptAdmins" (id, dept_id, user_id, org_id, created_by)
+    VALUES ($1, $2, $3, $4, $5)
     RETURNING *
-  `, [ext_id, id, dept_id, user_id, org_id, created_by]);
+  `, [id, dept_id, user_id, org_id, created_by]);
 
     return result.rows[0];
 };

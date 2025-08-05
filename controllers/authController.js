@@ -15,7 +15,6 @@ require('dotenv').config();
 // 🔐 JWT Creator
 const generateToken = (user) => {
     return jwt.sign({
-        ext_id: user.ext_id,
         org_id: user.org_id,
         user_id: user.user_id,
         email: user.email,

@@ -14,7 +14,6 @@ const protect = (req, res, next) => {
 
         // Attach full decoded info 
         req.user = {
-            ext_id: decoded.ext_id,
             org_id: decoded.org_id,
             user_id: decoded.user_id,
             job_role_id: decoded.job_role_id,

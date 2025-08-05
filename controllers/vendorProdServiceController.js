@@ -1,5 +1,19 @@
 const model = require("../models/vendorProdServiceModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const db = require("../config/db");
+
+// Generate vendor product service ID
+const generateVendorProdServiceId = async () => {
+    const result = await db.query(`SELECT ven_prod_serv_id FROM "tblVendorProdService" ORDER BY ven_prod_serv_id DESC LIMIT 1`);
+    const lastId = result.rows[0]?.ven_prod_serv_id;
+    
+    let newNumber = 1; // starting number
+    if (lastId && /^VPS\d+$/.test(lastId)) {
+        newNumber = parseInt(lastId.replace('VPS', '')) + 1;
+    }
+    
+    return `VPS${String(newNumber).padStart(3, '0')}`;
+};
 
 // GET /api/vendor-prod-services - Get all vendor product services
 const getAllVendorProdServices = async (req, res) => {
@@ -86,54 +100,32 @@ const getVendorProdServicesByOrg = async (req, res) => {
 const addVendorProdService = async (req, res) => {
     try {
         const {
-            ext_id,
             prod_serv_id,
             vendor_id,
-            org_id,
-            ven_prod_serv_id // Optional, will be auto-generated if not provided
+            org_id
         } = req.body;
 
         // Validate required fields
-        if (!ext_id || !prod_serv_id || !vendor_id || !org_id) {
+        if (!prod_serv_id || !vendor_id || !org_id) {
             return res.status(400).json({ 
-                error: "ext_id, prod_serv_id, vendor_id, and org_id are required fields" 
-            });
-        }
-
-        // Validate ext_id is a valid UUID
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(ext_id)) {
-            return res.status(400).json({ 
-                error: "ext_id must be a valid UUID format (e.g., 123e4567-e89b-12d3-a456-426614174000)" 
+                error: "prod_serv_id, vendor_id, and org_id are required fields" 
             });
         }
 
         // Check if vendor product service already exists
-        const existingVendorProdService = await model.checkVendorProdServiceExists(ext_id, org_id);
+        const existingVendorProdService = await model.checkVendorProdServiceExists(vendor_id, prod_serv_id, org_id);
         if (existingVendorProdService.rows.length > 0) {
             return res.status(409).json({ 
-                error: "Vendor product service with this ext_id and org_id already exists" 
+                error: "Vendor product service with this vendor_id and prod_serv_id combination already exists" 
             });
         }
 
-        // Use provided ven_prod_serv_id or generate one
-        let finalVendorProdServiceId = ven_prod_serv_id;
-        if (!ven_prod_serv_id) {
-            finalVendorProdServiceId = await generateCustomId("vendor_prod_serv", 3);
-        } else {
-            // Check if the provided ven_prod_serv_id already exists
-            const existingId = await model.checkVendorProdServiceIdExists(ven_prod_serv_id);
-            if (existingId.rows.length > 0) {
-                return res.status(409).json({ 
-                    error: "Vendor product service with this ven_prod_serv_id already exists" 
-                });
-            }
-        }
+        // Generate ven_prod_serv_id automatically
+        const finalVendorProdServiceId = await generateVendorProdServiceId();
 
         // Insert new vendor product service
         const result = await model.insertVendorProdService(
             finalVendorProdServiceId,
-            ext_id,
             prod_serv_id,
             vendor_id,
             org_id
@@ -155,7 +147,6 @@ const updateVendorProdService = async (req, res) => {
     try {
         const { id } = req.params;
         const {
-            ext_id,
             prod_serv_id,
             vendor_id,
             org_id
@@ -167,29 +158,7 @@ const updateVendorProdService = async (req, res) => {
             return res.status(404).json({ error: "Vendor product service not found" });
         }
 
-        // Validate ext_id is a valid UUID if provided
-        if (ext_id) {
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (!uuidRegex.test(ext_id)) {
-                return res.status(400).json({ 
-                    error: "ext_id must be a valid UUID format" 
-                });
-            }
-        }
-
-        // Check if new ext_id and org_id combination already exists (excluding current record)
-        if (ext_id && org_id) {
-            const duplicateCheck = await model.checkVendorProdServiceExists(ext_id, org_id);
-            const duplicate = duplicateCheck.rows.find(row => row.ven_prod_serv_id !== id);
-            if (duplicate) {
-                return res.status(409).json({ 
-                    error: "Vendor product service with this ext_id and org_id already exists" 
-                });
-            }
-        }
-
         const updateData = {
-            ext_id: ext_id || existingVendorProdService.rows[0].ext_id,
             prod_serv_id: prod_serv_id || existingVendorProdService.rows[0].prod_serv_id,
             vendor_id: vendor_id || existingVendorProdService.rows[0].vendor_id,
             org_id: org_id || existingVendorProdService.rows[0].org_id

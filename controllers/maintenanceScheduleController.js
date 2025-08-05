@@ -165,21 +165,27 @@ const generateMaintenanceSchedules = async (req, res) => {
                         for (const jobRole of workflowJobRoles.rows) {
                             const wfamsdId = await model.getNextWFAMSDId();
                             
+                            // Set status based on sequence number
+                            const seqNo = parseInt(sequence.seqs_no);
+                            const status = seqNo === 10 ? 'AP' : 'IN';
+                            
+                            console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
+                            
                             const scheduleDetailData = {
                                 wfamsd_id: wfamsdId,
                                 wfamsh_id: wfamshId,
                                 job_role_id: jobRole.job_role_id,
-                                user_id: null,
+                                user_id: jobRole.emp_int_id, // Use emp_int_id from tblWFJobRole
                                 dept_id: jobRole.dept_id,
                                 sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
-                                status: 'IN',
+                                status: status, // 'AP' for sequence 10, 'IN' for others
                                 notes: null,
                                 created_by: 'system',
                                 org_id: asset.org_id
                             };
                             
                             await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}`);
+                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, user ${jobRole.emp_int_id}, status: ${status}`);
                             totalDetailsCreated++;
                         }
                     }

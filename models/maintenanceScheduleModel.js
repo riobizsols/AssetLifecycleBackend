@@ -103,7 +103,8 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
             wf_job_role_id,
             wf_steps_id,
             job_role_id,
-            dept_id
+            dept_id,
+            emp_int_id
         FROM "tblWFJobRole"
         WHERE wf_steps_id = $1
         ORDER BY wf_job_role_id

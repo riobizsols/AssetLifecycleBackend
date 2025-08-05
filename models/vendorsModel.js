@@ -18,7 +18,6 @@ const createVendor = async (vendor) => {
     INSERT INTO "tblVendors" (
       vendor_id,
       org_id,
-      ext_id,
       vendor_name,
       int_status,
       company_name,
@@ -39,14 +38,13 @@ const createVendor = async (vendor) => {
       changed_on
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
     ) RETURNING *;
   `;
 
   const values = [
     vendor.vendor_id,
     vendor.org_id,
-    vendor.ext_id,
     vendor.vendor_name,
     vendor.int_status,
     vendor.company_name,

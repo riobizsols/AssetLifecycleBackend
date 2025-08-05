@@ -328,9 +328,22 @@ const getDepartmentWiseAssetAssignments = async (dept_id) => {
 
   const assignedAssetsResult = await db.query(assignedAssetsQuery, [dept_id]);
 
+  // Get employees for the department
+  const employeesQuery = `
+        SELECT 
+            e.employee_id, e.emp_int_id, e.name as employee_name, 
+            e.email_id as email, e.phone_number as phone, e.employee_type as designation
+        FROM "tblEmployees" e
+        WHERE e.dept_id = $1
+        ORDER BY e.name
+    `;
+
+  const employeesResult = await db.query(employeesQuery, [dept_id]);
+
   return {
     department: deptResult.rows[0] || null,
-    assignedAssets: assignedAssetsResult.rows
+    assignedAssets: assignedAssetsResult.rows,
+    employees: employeesResult.rows
   };
 };
 

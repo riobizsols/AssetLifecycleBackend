@@ -39,7 +39,7 @@ const addDeptAsset = async (req, res) => {
             });
         }
 
-        const { org_id, ext_id } = assetRes.rows[0];
+        const { org_id } = assetRes.rows[0];
 
         // Check if mapping already exists
         const existingMapping = await db.query(
@@ -56,7 +56,7 @@ const addDeptAsset = async (req, res) => {
 
         const dept_asset_type_id = await generateCustomId("dept_asset", 3);
 
-        await model.insertDeptAsset(dept_asset_type_id, ext_id, dept_id, asset_type_id, org_id, created_by);
+        await model.insertDeptAsset(dept_asset_type_id, dept_id, asset_type_id, org_id, created_by);
 
         res.status(201).json({ 
             message: "Department asset mapping created successfully",

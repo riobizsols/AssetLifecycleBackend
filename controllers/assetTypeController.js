@@ -13,15 +13,17 @@ const addAssetType = async (req, res) => {
             inspection_required,    // from frontend
             maint_required,        // from frontend (1 or 0)
             is_child = false,      // from frontend
-            parent_asset_type_id = null  // from frontend
+            parent_asset_type_id = null,  // from frontend
+            maint_type_id = null,  // from frontend
+            maint_lead_type = null, // from frontend
+            serial_num_format = null // from frontend
         } = req.body;
 
         // Get org_id and user_id from authenticated user
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
-        // Generate ext_id (UUID)
-        const ext_id = uuidv4();
+
 
         // Generate unique asset_type_id
         const asset_type_id = await generateCustomId("asset_type", 3);
@@ -57,7 +59,6 @@ const addAssetType = async (req, res) => {
 
         // Insert new asset type
         const result = await model.insertAssetType(
-            ext_id,
             org_id,
             asset_type_id,
             int_status,
@@ -68,7 +69,10 @@ const addAssetType = async (req, res) => {
             created_by,
             text,
             is_child,
-            parent_asset_type_id
+            parent_asset_type_id,
+            maint_type_id,
+            maint_lead_type,
+            serial_num_format
         );
 
         res.status(201).json({
@@ -104,6 +108,23 @@ const getParentAssetTypes = async (req, res) => {
     }
 };
 
+// GET /api/asset-types/assignment-type/:assignment_type - Get asset types by assignment type
+const getAssetTypesByAssignmentType = async (req, res) => {
+    try {
+        const { assignment_type } = req.params;
+        
+        if (!assignment_type) {
+            return res.status(400).json({ error: "Assignment type parameter is required" });
+        }
+        
+        const result = await model.getAssetTypesByAssignmentType(assignment_type);
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error("Error fetching asset types by assignment type:", err);
+        res.status(500).json({ error: "Failed to fetch asset types by assignment type" });
+    }
+};
+
 // GET /api/asset-types/:id - Get asset type by ID
 const getAssetTypeById = async (req, res) => {
     try {
@@ -126,7 +147,6 @@ const updateAssetType = async (req, res) => {
     try {
         const { id } = req.params;
         const {
-            ext_id,
             org_id,
             int_status,
             maint_required,
@@ -135,7 +155,10 @@ const updateAssetType = async (req, res) => {
             group_required,
             text,
             is_child,
-            parent_asset_type_id
+            parent_asset_type_id,
+            maint_type_id,
+            maint_lead_type,
+            serial_num_format
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -174,19 +197,18 @@ const updateAssetType = async (req, res) => {
             }
         }
 
-        // Check if new ext_id and org_id combination already exists (excluding current record)
-        if (ext_id && org_id) {
-            const duplicateCheck = await model.checkAssetTypeExists(ext_id, org_id);
+        // Check if new asset_type_id and org_id combination already exists (excluding current record)
+        if (org_id) {
+            const duplicateCheck = await model.checkAssetTypeExists(org_id, id);
             const duplicate = duplicateCheck.rows.find(row => row.asset_type_id !== id);
             if (duplicate) {
                 return res.status(409).json({ 
-                    error: "Asset type with this ext_id and org_id already exists" 
+                    error: "Asset type with this asset_type_id and org_id already exists" 
                 });
             }
         }
 
         const updateData = {
-            ext_id: ext_id || existingAsset.rows[0].ext_id,
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
             maint_required: maint_required || existingAsset.rows[0].maint_required,
@@ -195,7 +217,10 @@ const updateAssetType = async (req, res) => {
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
             text: text || existingAsset.rows[0].text,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
-            parent_asset_type_id: parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id
+            parent_asset_type_id: parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id,
+            maint_type_id: maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id,
+            maint_lead_type: maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type,
+            serial_num_format: serial_num_format !== undefined ? serial_num_format : existingAsset.rows[0].serial_num_format
         };
 
         const result = await model.updateAssetType(id, updateData, changed_by);
@@ -296,5 +321,6 @@ module.exports = {
     getAssetTypeById,
     updateAssetType,
     deleteAssetType,
-    getParentAssetTypes
+    getParentAssetTypes,
+    getAssetTypesByAssignmentType
 };

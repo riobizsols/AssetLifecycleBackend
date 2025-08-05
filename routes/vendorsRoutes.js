@@ -7,6 +7,7 @@ router.get("/vendor/:vendorId", vendorsController.getVendorById);
 router.get("/vendor-prod-services", vendorsController.getVendorProdServices);
 router.post("/create-vendor", vendorsController.createVendor);
 router.delete("/delete-vendors", vendorsController.deleteVendors);
+router.delete("/delete-vendor/:vendor_id", vendorsController.deleteVendor);
 router.put("/update/:vendor_id", vendorsController.updateVendor);
 
 module.exports = router;

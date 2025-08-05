@@ -2,9 +2,9 @@ const db = require("../config/db");
 
 const getAllAssets = async () => {
   const query = `
-        SELECT 
-           asset_id, asset_type_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+                SELECT 
+            asset_id, asset_type_id, text, serial_number, description,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -16,9 +16,9 @@ const getAllAssets = async () => {
 
 const getAssetById = async (asset_id) => {
   const query = `
-        SELECT 
-           asset_id, asset_type_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+                SELECT 
+            asset_id, asset_type_id, text, serial_number, description,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -32,7 +32,7 @@ const getAssetsByAssetType = async (asset_type_id) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -47,7 +47,7 @@ const getAssetsByBranch = async (branch_id) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -62,7 +62,7 @@ const getAssetsByVendor = async (vendor_id) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -77,7 +77,7 @@ const getAssetsByStatus = async (current_status) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -92,7 +92,7 @@ const getAssetsBySerialNumber = async (serial_number) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -109,7 +109,7 @@ const getAssetsByOrg = async (org_id) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -124,7 +124,7 @@ const getInactiveAssetsByAssetType = async (asset_type_id) => {
   const query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
-            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serve_id, a.maintsch_id, a.purchased_cost,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
             a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
             a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
         FROM "tblAssets" a
@@ -144,7 +144,7 @@ const searchAssets = async (searchTerm) => {
   const query = `
         SELECT 
             asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serve_id, maintsch_id, purchased_cost,
+            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
             purchased_on, purchased_by, expiry_date, current_status, warranty_period,
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
@@ -163,7 +163,7 @@ const getAssetWithDetails = async (asset_id) => {
   const query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
-            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serve_id, a.maintsch_id, a.purchased_cost,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
             a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
             a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
             at.text as asset_type_name,
@@ -178,7 +178,7 @@ const getAssetWithDetails = async (asset_id) => {
         LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
-        LEFT JOIN "tblProdServs" ps ON a.prod_serve_id = ps.prod_serv_id
+        LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
         WHERE a.asset_id = $1
     `;
 
@@ -199,7 +199,7 @@ const insertAsset = async (assetData) => {
     branch_id,
     purchase_vendor_id,
     service_vendor_id,
-    prod_serve_id,
+    prod_serv_id,
     maintsch_id,
     purchased_cost,
     purchased_on,
@@ -228,7 +228,7 @@ const insertAsset = async (assetData) => {
         branch_id,
         purchase_vendor_id,
         service_vendor_id,
-        prod_serve_id,
+        prod_serv_id,
         maintsch_id,
         purchased_cost,
         purchased_on,
@@ -259,7 +259,7 @@ const insertAsset = async (assetData) => {
       branch_id,
       purchase_vendor_id,
       service_vendor_id,
-      prod_serve_id,
+      prod_serv_id,
       maintsch_id,
       purchased_cost,
       purchased_on,
@@ -294,7 +294,7 @@ const updateAsset = async (asset_id, {
   branch_id,
   purchase_vendor_id,
   service_vendor_id,
-  prod_serve_id,
+  prod_serv_id,
   maintsch_id,
   purchased_cost,
   purchased_on,
@@ -321,7 +321,7 @@ const updateAsset = async (asset_id, {
         branch_id = COALESCE($4, branch_id),
         purchase_vendor_id = $5,
         service_vendor_id = $6,
-        prod_serve_id = $7,
+        prod_serv_id = $7,
         maintsch_id = $8,
         purchased_cost = COALESCE($9, purchased_cost),
         purchased_on = COALESCE($10, purchased_on),
@@ -344,7 +344,7 @@ const updateAsset = async (asset_id, {
       branch_id,
       purchase_vendor_id,
       service_vendor_id,
-      prod_serve_id,
+      prod_serv_id,
       maintsch_id,
       purchased_cost,
       purchased_on,
@@ -389,13 +389,13 @@ const updateAsset = async (asset_id, {
 };
 
 
-const checkAssetExists = async (ext_id, org_id) => {
+const checkAssetExists = async (org_id) => {
   const query = `
         SELECT asset_id FROM "tblAssets"
-        WHERE ext_id = $1 AND org_id = $2
+        WHERE org_id = $1
     `;
 
-  return await db.query(query, [ext_id, org_id]);
+  return await db.query(query, [org_id]);
 };
 
 const checkAssetIdExists = async (asset_id) => {
@@ -461,10 +461,16 @@ const insertAssetPropValue = async (propValueData) => {
 };
 
 const generateAssetId = async () => {
-  // Generate a unique asset ID with format: AST + timestamp + random number
-  const timestamp = Date.now().toString().slice(-6);
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  const assetId = `AST${timestamp}${random}`;
+  // Get the latest asset ID from the database
+  const result = await db.query(`SELECT asset_id FROM "tblAssets" ORDER BY asset_id DESC LIMIT 1`);
+  const lastId = result.rows[0]?.asset_id;
+  
+  let newNumber = 1; // starting number
+  if (lastId && /^ASS\d+$/.test(lastId)) {
+    newNumber = parseInt(lastId.replace('ASS', '')) + 1;
+  }
+  
+  const assetId = `ASS${String(newNumber).padStart(3, '0')}`;
 
   // Check if this ID already exists
   const existing = await checkAssetIdExists(assetId);
@@ -565,7 +571,7 @@ const createAsset = async (assetData) => {
     branch_id,
     purchase_vendor_id,
     service_vendor_id,
-    prod_serve_id,
+    prod_serv_id,
     maintsch_id,
     purchased_cost,
     purchased_on,
@@ -594,7 +600,7 @@ const createAsset = async (assetData) => {
         branch_id,
         purchase_vendor_id,
         service_vendor_id,
-        prod_serve_id,
+        prod_serv_id,
         maintsch_id,
         purchased_cost,
         purchased_on,
@@ -625,7 +631,7 @@ const createAsset = async (assetData) => {
       branch_id,
       purchase_vendor_id,
       service_vendor_id,
-      prod_serve_id,
+      prod_serv_id,
       maintsch_id,
       purchased_cost,
       purchased_on,

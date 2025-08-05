@@ -1,19 +1,20 @@
 const db = require('../config/db');
 
-const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null) => {
+const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, serial_num_format = null) => {
     const query = `
         INSERT INTO "tblAssetTypes" (
-            ext_id, org_id, asset_type_id, int_status, maint_required, 
+            org_id, asset_type_id, int_status, maint_required, 
             assignment_type, inspection_required, group_required, created_by, 
-            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $9, CURRENT_TIMESTAMP, $10, $11, $12)
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, serial_num_format
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, $14)
         RETURNING *
     `;
     
     const values = [
-        ext_id, org_id, asset_type_id, int_status, maint_required,
+        org_id, asset_type_id, int_status, maint_required,
         assignment_type, inspection_required, group_required, created_by, text,
-        is_child, parent_asset_type_id
+        is_child, parent_asset_type_id, maint_type_id, maint_lead_type, serial_num_format
     ];
     
     return await db.query(query, values);
@@ -22,9 +23,10 @@ const insertAssetType = async (ext_id, org_id, asset_type_id, int_status, maint_
 const getAllAssetTypes = async () => {
     const query = `
         SELECT 
-            ext_id, org_id, asset_type_id, int_status, maint_required,
+            org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
-            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, serial_num_format
         FROM "tblAssetTypes"
         ORDER BY created_on DESC
     `;
@@ -35,9 +37,10 @@ const getAllAssetTypes = async () => {
 const getAssetTypeById = async (asset_type_id) => {
     const query = `
         SELECT 
-            ext_id, org_id, asset_type_id, int_status, maint_required,
+            org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
-            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, serial_num_format
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
@@ -47,37 +50,39 @@ const getAssetTypeById = async (asset_type_id) => {
 
 const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
-        ext_id, org_id, int_status, maint_required, assignment_type,
-        inspection_required, group_required, text, is_child, parent_asset_type_id
+        org_id, int_status, maint_required, assignment_type,
+        inspection_required, group_required, text, is_child, parent_asset_type_id,
+        maint_type_id, maint_lead_type, serial_num_format
     } = updateData;
     
     const query = `
         UPDATE "tblAssetTypes"
         SET 
-            ext_id = $1, org_id = $2, int_status = $3, maint_required = $4,
-            assignment_type = $5, inspection_required = $6, group_required = $7,
-            changed_by = $8, changed_on = CURRENT_TIMESTAMP, text = $9,
-            is_child = $10, parent_asset_type_id = $11
-        WHERE asset_type_id = $12
+            org_id = $1, int_status = $2, maint_required = $3,
+            assignment_type = $4, inspection_required = $5, group_required = $6,
+            changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
+            is_child = $9, parent_asset_type_id = $10, maint_type_id = $11,
+            maint_lead_type = $12, serial_num_format = $13
+        WHERE asset_type_id = $14
         RETURNING *
     `;
     
     const values = [
-        ext_id, org_id, int_status, maint_required, assignment_type,
+        org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, changed_by, text,
-        is_child, parent_asset_type_id, asset_type_id
+        is_child, parent_asset_type_id, maint_type_id, maint_lead_type, serial_num_format, asset_type_id
     ];
     
     return await db.query(query, values);
 };
 
-const checkAssetTypeExists = async (ext_id, org_id) => {
+const checkAssetTypeExists = async (org_id, asset_type_id) => {
     const query = `
         SELECT asset_type_id FROM "tblAssetTypes"
-        WHERE ext_id = $1 AND org_id = $2
+        WHERE org_id = $1 AND asset_type_id = $2
     `;
     
-    return await db.query(query, [ext_id, org_id]);
+    return await db.query(query, [org_id, asset_type_id]);
 };
 
 const checkAssetTypeReferences = async (asset_type_id) => {
@@ -117,6 +122,22 @@ const getParentAssetTypes = async () => {
     return await db.query(query);
 };
 
+const getAssetTypesByAssignmentType = async (assignment_type) => {
+    const query = `
+        SELECT 
+            org_id, asset_type_id, int_status, maint_required,
+            assignment_type, inspection_required, group_required, created_by,
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, serial_num_format
+        FROM "tblAssetTypes"
+        WHERE assignment_type = $1
+        AND int_status = 1
+        ORDER BY text
+    `;
+    
+    return await db.query(query, [assignment_type]);
+};
+
 const deleteAssetType = async (asset_type_id) => {
     try {
         const query = `
@@ -140,5 +161,6 @@ module.exports = {
     deleteAssetType,
     checkAssetTypeExists,
     checkAssetTypeReferences,
-    getParentAssetTypes
+    getParentAssetTypes,
+    getAssetTypesByAssignmentType
 }; 

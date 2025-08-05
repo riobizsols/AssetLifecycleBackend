@@ -13,7 +13,7 @@ const getBranches = async (req, res) => {
 
 const createBranch = async (req, res) => {
     try {
-        const { org_id, ext_id, user_id } = req.user;
+        const { org_id, user_id } = req.user;
         const { text, city, branch_code } = req.body;
 
         // Fetch latest branch ID
@@ -21,7 +21,6 @@ const createBranch = async (req, res) => {
 
         const newBranch = await branchModel.addBranch({
             branch_id: newId,
-            ext_id,
             org_id,
             text,
             city,
