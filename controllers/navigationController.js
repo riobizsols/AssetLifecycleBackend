@@ -5,12 +5,15 @@ const { getUserJobRole, assignJobRoleToUser, updateUserJobRole, getAllUsersWithJ
 const getUserNavigationData = async (req, res) => {
     try {
         const user_id = req.user.user_id;
-        const navigation = await getUserNavigation(user_id);
+        const platform = req.query.platform; // Default to Desktop ('D'), can be 'M' for mobile
+        
+        const navigation = await getUserNavigation(user_id, platform);
         
         res.json({
             success: true,
             data: navigation,
-            user_id: user_id
+            user_id: user_id,
+            platform: platform
         });
     } catch (error) {
         console.error('Error fetching user navigation:', error);
@@ -25,12 +28,15 @@ const getUserNavigationData = async (req, res) => {
 const getJobRoleNavigation = async (req, res) => {
     try {
         const { job_role_id } = req.params;
-        const navigation = await getNavigationByJobRole(job_role_id);
+        const platform = req.query.platform || 'D'; // Default to Desktop ('D'), can be 'M' for mobile
+        
+        const navigation = await getNavigationByJobRole(job_role_id, platform);
         
         res.json({
             success: true,
             data: navigation,
-            job_role_id: job_role_id
+            job_role_id: job_role_id,
+            platform: platform
         });
     } catch (error) {
         console.error('Error fetching job role navigation:', error);
