@@ -6,8 +6,8 @@ const insertAssetType = async (org_id, asset_type_id, int_status, maint_required
             org_id, asset_type_id, int_status, maint_required, 
             assignment_type, inspection_required, group_required, created_by, 
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13)
+            maint_type_id, maint_lead_type, last_gen_seq_no
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, 0)
         RETURNING *
     `;
     
@@ -26,7 +26,7 @@ const getAllAssetTypes = async () => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type
+            maint_type_id, maint_lead_type, last_gen_seq_no
         FROM "tblAssetTypes"
         ORDER BY created_on DESC
     `;
@@ -40,7 +40,7 @@ const getAssetTypeById = async (asset_type_id) => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type
+            maint_type_id, maint_lead_type, last_gen_seq_no
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
