@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-require('dotenv').config();
+const { FRONTEND_URL } = require('../config/environment');
 
 const transporter = nodemailer.createTransport({
     service: 'gmail',
@@ -9,9 +9,8 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-// ⛳ Tip: You can extract FRONTEND_URL into an env variable for reusability
 const sendResetEmail = async (to, token) => {
-    const resetLink = `${process.env.FRONTEND_URL || 'http://localhost:5173'}/reset-password?token=${token}`;
+    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
 
     try {
         const info = await transporter.sendMail({

@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-require("dotenv").config();
+const { PORT, CORS_ORIGINS } = require("./config/environment");
 const authRoutes = require("./routes/authRoutes");
 const jobRoleRoutes = require("./routes/jobRoleRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -39,13 +39,13 @@ app.use((req, res, next) => {
 
 app.use(
   cors({
-    origin: "http://localhost:5173",
+    origin: CORS_ORIGINS,
     credentials: true,
   })
 );
 app.use(express.json());
 
-const PORT = process.env.PORT || 5000;
+// PORT is now imported from environment config
 
 app.use("/api/auth", authRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
