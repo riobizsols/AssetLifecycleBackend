@@ -299,6 +299,102 @@ const isMaintenanceDue = (lastMaintenanceDate, frequency, uom) => {
     return today >= nextMaintenanceDate;
 };
 
+// Get all maintenance schedules from tblAssetMaintSch
+const getAllMaintenanceSchedules = async (orgId = 'ORG001') => {
+    const query = `
+        SELECT 
+            ams.*,
+            a.asset_type_id,
+            a.serial_number,
+            a.description as asset_description,
+            at.text as asset_type_name,
+            mt.text as maintenance_type_name,
+            v.vendor_name,
+            -- Calculate days until due (if act_maint_st_date is in the future)
+            CASE 
+                WHEN ams.act_maint_st_date > CURRENT_DATE THEN 
+                    EXTRACT(DAY FROM (ams.act_maint_st_date - CURRENT_DATE))
+                ELSE 0
+            END as days_until_due
+        FROM "tblAssetMaintSch" ams
+        INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+        LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+        WHERE ams.org_id = $1
+        ORDER BY ams.created_on DESC
+    `;
+    
+    return await db.query(query, [orgId]);
+};
+
+// Get maintenance schedule details by ID from tblAssetMaintSch
+const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001') => {
+    const query = `
+        SELECT 
+            ams.*,
+            COALESCE(a.asset_type_id, 'N/A') as asset_type_id,
+            COALESCE(at.text, 'Unknown Asset Type') as asset_type_name
+        FROM "tblAssetMaintSch" ams
+        LEFT JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE ams.ams_id = $1 AND ams.org_id = $2
+    `;
+    
+    return await db.query(query, [amsId, orgId]);
+};
+
+// Update maintenance schedule in tblAssetMaintSch
+const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') => {
+    const {
+        notes,
+        status,
+        po_number,
+        invoice,
+        technician_name,
+        technician_email,
+        technician_phno,
+        changed_by,
+        changed_on
+    } = updateData;
+
+    // Automatically set end date to current date when updating
+    const currentDate = new Date().toISOString().split('T')[0];
+
+    const query = `
+        UPDATE "tblAssetMaintSch"
+        SET
+            notes = COALESCE($2, notes),
+            status = COALESCE($3, status),
+            act_main_end_date = $4,
+            po_number = COALESCE($5, po_number),
+            invoice = COALESCE($6, invoice),
+            technician_name = COALESCE($7, technician_name),
+            technician_email = COALESCE($8, technician_email),
+            technician_phno = COALESCE($9, technician_phno),
+            changed_by = $10,
+            changed_on = $11
+        WHERE ams_id = $1 AND org_id = $12
+        RETURNING *
+    `;
+
+    const values = [
+        amsId,
+        notes,
+        status,
+        currentDate, // Automatically set to current date
+        po_number,
+        invoice,
+        technician_name,
+        technician_email,
+        technician_phno,
+        changed_by,
+        changed_on,
+        orgId
+    ];
+    return await db.query(query, values);
+};
+
 module.exports = {
     getAssetTypesRequiringMaintenance,
     getAssetsByAssetType,
@@ -312,5 +408,8 @@ module.exports = {
     insertWorkflowMaintenanceScheduleHeader,
     insertWorkflowMaintenanceScheduleDetail,
     calculatePlannedScheduleDate,
-    isMaintenanceDue
+    isMaintenanceDue,
+    getAllMaintenanceSchedules,
+    getMaintenanceScheduleById,
+    updateMaintenanceSchedule
 }; 

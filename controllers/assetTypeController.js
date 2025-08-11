@@ -143,10 +143,20 @@ const getAssetTypesByAssignmentType = async (req, res) => {
 const getAssetTypesByGroupRequired = async (req, res) => {
     try {
         const result = await model.getAssetTypesByGroupRequired();
-        res.status(200).json(result.rows);
+        res.status(200).json({
+            success: true,
+            message: "Asset types retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            timestamp: new Date().toISOString()
+        });
     } catch (err) {
         console.error("Error fetching asset types by group required:", err);
-        res.status(500).json({ error: "Failed to fetch asset types by group required" });
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch asset types by group required",
+            error: err.message 
+        });
     }
 };
 

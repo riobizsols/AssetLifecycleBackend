@@ -117,6 +117,58 @@ router.get('/current/:assetTypeId', protect, async (req, res) => {
   }
 });
 
+// Get next sequence number for an asset type (without generating)
+router.get('/next/:assetTypeId', protect, async (req, res) => {
+  try {
+    const { assetTypeId } = req.params;
+    const { orgId = 'ORG001' } = req.query;
+    
+    if (!assetTypeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Asset type ID is required'
+      });
+    }
+    
+    const result = await getCurrentSequence(assetTypeId, orgId);
+    
+    if (result.success) {
+      const nextSequence = result.currentSequence + 1;
+      const now = new Date();
+      const year = now.getFullYear().toString().slice(-2);
+      const reversedYear = year.split('').reverse().join('');
+      const month = (now.getMonth() + 1).toString().padStart(2, '0');
+      
+      const nextSerialNumber = `${result.assetTypeId}${reversedYear}${month}${nextSequence.toString().padStart(5, '0')}`;
+      
+      res.json({
+        success: true,
+        data: {
+          currentSequence: result.currentSequence,
+          nextSequence: nextSequence,
+          nextSerialNumber: nextSerialNumber,
+          assetTypeId: result.assetTypeId,
+          year: year,
+          month: month
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to get next sequence',
+        error: result.error
+      });
+    }
+  } catch (error) {
+    console.error('Error getting next sequence:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+});
+
 // Get serial number statistics
 router.get('/stats', protect, async (req, res) => {
   try {

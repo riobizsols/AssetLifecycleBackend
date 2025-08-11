@@ -241,10 +241,21 @@ const getAssetsByAssetType = async (req, res) => {
     try {
         const { asset_type_id } = req.params;
         const result = await model.getAssetsByAssetType(asset_type_id);
-        res.status(200).json(result.rows);
+        res.status(200).json({
+            success: true,
+            message: "Assets retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            asset_type_id: asset_type_id,
+            timestamp: new Date().toISOString()
+        });
     } catch (err) {
         console.error("Error fetching assets by type:", err);
-        res.status(500).json({ error: "Failed to fetch assets by type" });
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch assets by type",
+            error: err.message 
+        });
     }
 };
 
@@ -666,6 +677,14 @@ const createAsset = async (req, res) => {
                 return res.status(409).json({ error: "Asset with this asset_id already exists" });
             }
         }
+        
+        // Check if an asset with the same serial number already exists
+        if (serial_number) {
+            const existingSerial = await model.getAssetsBySerialNumber(serial_number);
+            if (existingSerial.rows.length > 0) {
+                return res.status(409).json({ error: "Asset with this serial number already exists" });
+            }
+        }
   // Prepare asset data (now includes prod_serv_id)
         const assetData = {
             asset_type_id,
@@ -690,29 +709,47 @@ const createAsset = async (req, res) => {
             created_by
         };
 
-        // Insert asset using the new createAsset function
-        const result = await model.createAsset(assetData);
-        const { asset_id: insertedAssetId } = result.rows[0];
+        // Start a transaction to ensure atomicity
+        const client = await db.connect();
+        
+        try {
+            await client.query('BEGIN');
+            
+            // Insert asset using the new createAsset function
+            const result = await model.createAsset(assetData);
+            const { asset_id: insertedAssetId } = result.rows[0];
 
-        // Insert properties if any
-        if (req.body.properties && Object.keys(req.body.properties).length > 0) {
-            console.log('Saving property values:', req.body.properties);
-            for (const [propId, value] of Object.entries(req.body.properties)) {
-                if (value) {
-                    await model.insertAssetPropValue({
-                        asset_id: insertedAssetId,
-                        org_id,
-                        asset_type_prop_id: propId,
-                        value
-                    });
+            // No need to increment sequence since we're now using the actual serial numbers
+            console.log(`✅ Asset created successfully with serial number: ${serial_number}`);
+
+            // Insert properties if any
+            if (req.body.properties && Object.keys(req.body.properties).length > 0) {
+                console.log('Saving property values:', req.body.properties);
+                for (const [propId, value] of Object.entries(req.body.properties)) {
+                    if (value) {
+                        await model.insertAssetPropValue({
+                            asset_id: insertedAssetId,
+                            org_id,
+                            asset_type_prop_id: propId,
+                            value
+                        });
+                    }
                 }
             }
-        }
 
-        res.status(201).json({
-            message: "Asset added successfully",
-            asset: result.rows[0]
-        });
+            await client.query('COMMIT');
+            
+            res.status(201).json({
+                message: "Asset added successfully",
+                asset: result.rows[0]
+            });
+            
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
 
     } catch (err) {
         console.error("Error adding asset:", err);

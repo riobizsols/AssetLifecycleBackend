@@ -1,9 +1,10 @@
 const cron = require('node-cron');
 const axios = require('axios');
+const { BACKEND_URL } = require('../config/environment');
 
 class CronService {
     constructor() {
-        this.baseURL = process.env.BASE_URL || 'http://localhost:5000';
+        this.baseURL = BACKEND_URL;
         this.apiToken = process.env.CRON_API_TOKEN;
     }
 

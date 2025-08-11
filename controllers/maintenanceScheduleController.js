@@ -275,9 +275,133 @@ const getMaintenanceFrequencyForAssetType = async (req, res) => {
     }
 };
 
+// Get all maintenance schedules from tblAssetMaintSch
+const getAllMaintenanceSchedules = async (req, res) => {
+    try {
+        const orgId = req.query.orgId || 'ORG001';
+        
+        const result = await model.getAllMaintenanceSchedules(orgId);
+        
+        // Format the data for frontend - include all columns from tblAssetMaintSch plus joined data
+        const formattedData = result.rows.map(record => {
+            // Get all columns from tblAssetMaintSch
+            const baseRecord = {};
+            Object.keys(record).forEach(key => {
+                if (!['asset_type_id', 'serial_number', 'asset_description', 'asset_type_name', 'maintenance_type_name', 'vendor_name', 'days_until_due'].includes(key)) {
+                    baseRecord[key] = record[key];
+                }
+            });
+            
+            // Add joined data
+            return {
+                ...baseRecord,
+                asset_type_id: record.asset_type_id,
+                serial_number: record.serial_number,
+                asset_description: record.asset_description,
+                asset_type_name: record.asset_type_name,
+                maintenance_type_name: record.maintenance_type_name,
+                vendor_name: record.vendor_name,
+                days_until_due: record.days_until_due
+            };
+        });
+
+        res.json({
+            success: true,
+            message: 'Maintenance schedules retrieved successfully',
+            data: formattedData,
+            count: formattedData.length,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Error in getAllMaintenanceSchedules:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve maintenance schedules',
+            error: error.message
+        });
+    }
+};
+
+// Get maintenance schedule details by ID from tblAssetMaintSch
+const getMaintenanceScheduleById = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const orgId = req.query.orgId;
+        
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Maintenance schedule ID is required'
+            });
+        }
+        
+        const result = await model.getMaintenanceScheduleById(id, orgId);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Maintenance schedule not found'
+            });
+        }
+        
+        const record = result.rows[0];
+        
+        // Format the data for frontend - include all columns from tblAssetMaintSch
+        const formattedData = { ...record };
+
+        res.json({
+            success: true,
+            message: 'Maintenance schedule details retrieved successfully',
+            data: formattedData,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Error in getMaintenanceScheduleById:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to retrieve maintenance schedule details',
+            error: error.message
+        });
+    }
+};
+
+// Update maintenance schedule in tblAssetMaintSch
+const updateMaintenanceSchedule = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const orgId = req.query.orgId;
+        const updateData = req.body;
+        const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
+        const changedOn = new Date(); // Set changed_on to current timestamp
+
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Maintenance schedule ID is required' });
+        }
+        if (!updateData.status) {
+            return res.status(400).json({ success: false, message: 'Status is required' });
+        }
+
+        const result = await model.updateMaintenanceSchedule(id, { ...updateData, changed_by: changedBy, changed_on: changedOn }, orgId);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
+        }
+
+        res.status(200).json({ success: true, message: 'Maintenance schedule updated successfully', data: result.rows[0] });
+    } catch (error) {
+        console.error('Error in updateMaintenanceSchedule:', error);
+        res.status(500).json({ success: false, message: 'Failed to update maintenance schedule', error: error.message });
+    }
+};
+
 module.exports = {
     generateMaintenanceSchedules,
     getMaintenanceSchedulesForAsset,
     getAssetTypesRequiringMaintenance,
-    getMaintenanceFrequencyForAssetType
+    getMaintenanceFrequencyForAssetType,
+    getAllMaintenanceSchedules,
+    getMaintenanceScheduleById,
+    updateMaintenanceSchedule
 }; 

@@ -61,6 +61,8 @@ const addToPrintQueue = async (serialNumber, orgId, createdBy) => {
 /**
  * Generate serial number with format: AssetType + Year + Month + 5-digit sequence
  * Example: 1250700301 (AssetType: AST001 -> 12, Year: 50, Month: 07, Sequence: 00301)
+ * Now uses last_gen_seq_no from tblAssetTypes table for each asset type
+ * NOTE: This function only generates the serial number without incrementing the sequence
  */
 const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
   try {
@@ -72,25 +74,45 @@ const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
     // Convert asset type ID to serial format (AST001 -> 12)
     const formattedAssetTypeId = convertAssetTypeToSerialFormat(assetTypeId);
     
-    // Get the next sequence number by counting existing serial numbers for this asset type, year, and month
-    const countQuery = `
-      SELECT COUNT(*) as count
-      FROM "tblPrintSerialNoQueue" 
-      WHERE serial_no LIKE $1 AND org_id = $2
+    // Get the last 5 digits of the most recent serial number for this asset type
+    const lastSerialQuery = `
+      SELECT serial_number 
+      FROM "tblAssets" 
+      WHERE asset_type_id = $1 
+      AND serial_number IS NOT NULL 
+      AND serial_number != ''
+      ORDER BY created_on DESC 
+      LIMIT 1
     `;
     
-    const pattern = `${formattedAssetTypeId}${reversedYear}${month}%`;
-    const countResult = await pool.query(countQuery, [pattern, orgId]);
+    const lastSerialResult = await pool.query(lastSerialQuery, [assetTypeId]);
     
-    const newSequence = (countResult.rows[0].count || 0) + 1;
-    const serialNumber = `${formattedAssetTypeId}${reversedYear}${month}${newSequence.toString().padStart(5, '0')}`;
+    let nextSequence = 1; // Default to 1 if no previous serial numbers
     
-    console.log(`📝 Generated serial number: ${serialNumber} (Sequence: ${newSequence})`);
+    if (lastSerialResult.rows.length > 0) {
+      const lastSerialNumber = lastSerialResult.rows[0].serial_number;
+      
+      // Extract the last 5 digits from the serial number
+      if (lastSerialNumber && lastSerialNumber.length >= 5) {
+        const last5Digits = lastSerialNumber.slice(-5);
+        const lastSequence = parseInt(last5Digits);
+        
+        if (!isNaN(lastSequence)) {
+          nextSequence = lastSequence + 1;
+          console.log(`📊 Found last serial: ${lastSerialNumber}, last 5 digits: ${last5Digits}, next sequence: ${nextSequence}`);
+        }
+      }
+    }
+    
+    // Generate the serial number without updating the database
+    const serialNumber = `${formattedAssetTypeId}${reversedYear}${month}${nextSequence.toString().padStart(5, '0')}`;
+    
+    console.log(`📝 Generated serial number preview: ${serialNumber} (Next Sequence: ${nextSequence}) for asset type: ${assetTypeId}`);
     
     return {
       success: true,
       serialNumber: serialNumber,
-      sequence: newSequence,
+      sequence: nextSequence,
       assetTypeId: formattedAssetTypeId,
       year: year,
       month: month,
@@ -105,6 +127,8 @@ const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
     };
   }
 };
+
+
 
 /**
  * Generate serial number and add to print queue
@@ -139,7 +163,7 @@ const generateSerialNumberAndQueue = async (assetTypeId, orgId, createdBy) => {
 };
 
 /**
- * Get current sequence for an asset type
+ * Get current sequence for an asset type from tblAssetTypes table
  */
 const getCurrentSequence = async (assetTypeId, orgId = 'ORG001') => {
   try {
@@ -151,17 +175,26 @@ const getCurrentSequence = async (assetTypeId, orgId = 'ORG001') => {
     // Convert asset type ID to serial format (AST001 -> 12)
     const formattedAssetTypeId = convertAssetTypeToSerialFormat(assetTypeId);
     
+    // Get current sequence from tblAssetTypes table
     const query = `
-      SELECT COUNT(*) as count, MAX(serial_no) as last_used_serial
-      FROM "tblPrintSerialNoQueue" 
-      WHERE serial_no LIKE $1 AND org_id = $2
+      SELECT COALESCE(last_gen_seq_no, 0) as current_sequence
+      FROM "tblAssetTypes" 
+      WHERE asset_type_id = $1
     `;
     
-    const pattern = `${formattedAssetTypeId}${reversedYear}${month}%`;
-    const result = await pool.query(query, [pattern, orgId]);
+    const result = await pool.query(query, [assetTypeId]);
     
-    const currentSequence = result.rows[0].count || 0;
-    const lastUsedSerial = result.rows[0].last_used_serial;
+    if (result.rows.length === 0) {
+      return {
+        success: false,
+        error: `Asset type ${assetTypeId} not found`
+      };
+    }
+    
+    const currentSequence = result.rows[0].current_sequence || 0;
+    
+    // Generate the last used serial number for display
+    const lastUsedSerial = `${formattedAssetTypeId}${reversedYear}${month}${currentSequence.toString().padStart(5, '0')}`;
     
     return {
       success: true,
