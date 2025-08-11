@@ -288,11 +288,141 @@ const getAssetsByStatus = async (req, res) => {
 const getAssetsBySerialNumber = async (req, res) => {
     try {
         const { serial_number } = req.params;
+        
+        if (!serial_number) {
+            return res.status(400).json({ error: "Serial number parameter is required" });
+        }
+        
         const result = await model.getAssetsBySerialNumber(serial_number);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching assets by serial number:", err);
         res.status(500).json({ error: "Failed to fetch assets by serial number" });
+    }
+};
+
+// GET /api/assets/expiring-within-30-days - Get assets expiring within 30 days
+const getAssetsExpiringWithin30Days = async (req, res) => {
+    try {
+        const result = await model.getAssetsExpiringWithin30Days();
+        
+        res.status(200).json({
+            message: `Found ${result.rows.length} assets expiring within 30 days`,
+            days: 30,
+            count: result.rows.length,
+            assets: result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching assets expiring within 30 days:", err);
+        res.status(500).json({ error: "Failed to fetch assets expiring within 30 days" });
+    }
+};
+
+// GET /api/assets/expiry/:filterType - Get assets by expiry date
+const getAssetsByExpiryDate = async (req, res) => {
+    try {
+        const { filterType } = req.params;
+        const { value, days } = req.query;
+        
+        let filterValue = value;
+        
+        // Handle different filter types
+        switch (filterType) {
+            case 'expired':
+                // Get expired assets
+                const expiredResult = await model.getAssetsByExpiryDate('expired');
+                res.status(200).json({
+                    message: `Found ${expiredResult.rows.length} expired assets`,
+                    filter_type: 'expired',
+                    count: expiredResult.rows.length,
+                    assets: expiredResult.rows
+                });
+                break;
+
+            case 'expiring_soon':
+                // Get assets expiring soon (default 30 days)
+                const daysNumber = parseInt(days) || 30;
+                if (isNaN(daysNumber) || daysNumber < 1) {
+                    return res.status(400).json({ 
+                        error: "Days parameter must be a positive number" 
+                    });
+                }
+                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber);
+                res.status(200).json({
+                    message: `Found ${expiringSoonResult.rows.length} assets expiring within ${daysNumber} days`,
+                    filter_type: 'expiring_soon',
+                    days: daysNumber,
+                    count: expiringSoonResult.rows.length,
+                    assets: expiringSoonResult.rows
+                });
+                break;
+
+            case 'expiring_on':
+                // Get assets expiring on a specific date
+                if (!value) {
+                    return res.status(400).json({ 
+                        error: "Date parameter is required for 'expiring_on' filter" 
+                    });
+                }
+                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value);
+                res.status(200).json({
+                    message: `Found ${expiringOnResult.rows.length} assets expiring on ${value}`,
+                    filter_type: 'expiring_on',
+                    date: value,
+                    count: expiringOnResult.rows.length,
+                    assets: expiringOnResult.rows
+                });
+                break;
+
+            case 'expiring_between':
+                // Get assets expiring between two dates
+                if (!value || !value.includes(',')) {
+                    return res.status(400).json({ 
+                        error: "Date range parameter is required for 'expiring_between' filter (format: startDate,endDate)" 
+                    });
+                }
+                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value);
+                const [startDate, endDate] = value.split(',');
+                res.status(200).json({
+                    message: `Found ${expiringBetweenResult.rows.length} assets expiring between ${startDate} and ${endDate}`,
+                    filter_type: 'expiring_between',
+                    start_date: startDate,
+                    end_date: endDate,
+                    count: expiringBetweenResult.rows.length,
+                    assets: expiringBetweenResult.rows
+                });
+                break;
+
+            case 'no_expiry':
+                // Get assets with no expiry date
+                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry');
+                res.status(200).json({
+                    message: `Found ${noExpiryResult.rows.length} assets with no expiry date`,
+                    filter_type: 'no_expiry',
+                    count: noExpiryResult.rows.length,
+                    assets: noExpiryResult.rows
+                });
+                break;
+
+            case 'all':
+                // Get all assets with expiry date info
+                const allResult = await model.getAssetsByExpiryDate('all');
+                res.status(200).json({
+                    message: `Found ${allResult.rows.length} assets with expiry date information`,
+                    filter_type: 'all',
+                    count: allResult.rows.length,
+                    assets: allResult.rows
+                });
+                break;
+
+            default:
+                return res.status(400).json({ 
+                    error: "Invalid filter type. Valid types: expired, expiring_soon, expiring_on, expiring_between, no_expiry, all" 
+                });
+        }
+    } catch (err) {
+        console.error("Error fetching assets by expiry date:", err);
+        res.status(500).json({ error: "Failed to fetch assets by expiry date" });
     }
 };
 
@@ -611,18 +741,18 @@ module.exports = {
   createAsset,
   updateAsset,
   getPotentialParentAssets,
-    getAllAssets,
-    getAssetById,
-    // getAssetWithDetails,
-    getAssetsByAssetType,
-    getAssetsByBranch,
-    getAssetsByVendor,
-    getAssetsByStatus,
-    getAssetsBySerialNumber,
-    getInactiveAssetsByAssetType,
-    getAssetsByOrg,
-    searchAssets,
-    getAssetsWithFilters,
-    deleteAsset,
-    deleteMultipleAssets
+  getAssetById,
+  getAssetsByAssetType,
+  getAssetsByBranch,
+  getAssetsByVendor,
+  getAssetsByStatus,
+  getAssetsBySerialNumber,
+  getAssetsExpiringWithin30Days,
+  getAssetsByExpiryDate,
+  getInactiveAssetsByAssetType,
+  getAssetsByOrg,
+  searchAssets,
+  getAssetsWithFilters,
+  deleteAsset,
+  deleteMultipleAssets
 };

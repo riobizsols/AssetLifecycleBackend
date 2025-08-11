@@ -42,6 +42,11 @@ router.get("/status/:status", controller.getAssetsByStatus);
 // GET /api/assets/serial/:serial_number - Get assets by serial number
 router.get("/serial/:serial_number", controller.getAssetsBySerialNumber);
 
+// GET /api/assets/expiring-30-days - Get assets expiring within 30 days
+router.get("/expiring-30-days", controller.getAssetsExpiringWithin30Days);
+
+// GET /api/assets/expiry/:filterType - Get assets by expiry date with different filters
+router.get("/expiry/:filterType", controller.getAssetsByExpiryDate);
 
 
 // // GET /api/assets/org/:org_id - Get assets by organization

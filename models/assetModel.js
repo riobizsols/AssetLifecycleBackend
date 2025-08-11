@@ -519,29 +519,141 @@ const deleteMultipleAssets = async (asset_ids) => {
 
 const getPotentialParentAssets = async (asset_type_id) => {
   const query = `
-    WITH asset_type_info AS (
-      SELECT 
-        at.asset_type_id,
-        at.is_child,
-        at.parent_asset_type_id,
-        pat.text as parent_type_name
-      FROM "tblAssetTypes" at
-      LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
-      WHERE at.asset_type_id = $1
-    )
-    SELECT DISTINCT
-      a.asset_id,
-      at.text as asset_type_name,
-      a.description as asset_name,
-      a.serial_number
-    FROM "tblAssets" a
-    JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-    WHERE at.is_child = false
-    AND a.current_status = 'Active'
-    ORDER BY a.description, a.serial_number;
+    SELECT 
+      asset_id, text, serial_number, description, current_status
+    FROM "tblAssets"
+    WHERE asset_type_id = $1
+    AND current_status = 'Active'
+    AND parent_asset_id IS NULL
+    ORDER BY text
   `;
 
   return await db.query(query, [asset_type_id]);
+};
+
+// Get assets expiring within 30 days
+const getAssetsExpiringWithin30Days = async () => {
+  const query = `
+    SELECT 
+      asset_id, asset_type_id, text, serial_number, description,
+      branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+      purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+      parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+      CASE 
+        WHEN expiry_date IS NOT NULL THEN 
+          expiry_date - CURRENT_DATE
+        ELSE NULL
+      END as days_until_expiry
+    FROM "tblAssets"
+    WHERE expiry_date IS NOT NULL
+    AND expiry_date >= CURRENT_DATE
+    AND expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+    ORDER BY expiry_date ASC
+  `;
+
+  return await db.query(query);
+};
+
+// Get assets by expiry date with different filter types
+const getAssetsByExpiryDate = async (filterType, value = null) => {
+  let query = '';
+  let params = [];
+
+  switch (filterType) {
+    case 'expired':
+      query = `
+        SELECT 
+          asset_id, asset_type_id, text, serial_number, description,
+          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          CASE 
+            WHEN expiry_date IS NOT NULL THEN 
+              CURRENT_DATE - expiry_date
+            ELSE NULL
+          END as days_expired
+        FROM "tblAssets"
+        WHERE expiry_date IS NOT NULL
+        AND expiry_date < CURRENT_DATE
+        ORDER BY expiry_date DESC
+      `;
+      break;
+
+    case 'expiring_soon':
+      const days = parseInt(value) || 30;
+      query = `
+        SELECT 
+          asset_id, asset_type_id, text, serial_number, description,
+          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          CASE 
+            WHEN expiry_date IS NOT NULL THEN 
+              expiry_date - CURRENT_DATE
+            ELSE NULL
+          END as days_until_expiry
+        FROM "tblAssets"
+        WHERE expiry_date IS NOT NULL
+        AND expiry_date >= CURRENT_DATE
+        AND expiry_date <= CURRENT_DATE + INTERVAL '${days} days'
+        ORDER BY expiry_date ASC
+      `;
+      break;
+
+    case 'expiring_on':
+      query = `
+        SELECT 
+          asset_id, asset_type_id, text, serial_number, description,
+          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+        FROM "tblAssets"
+        WHERE expiry_date = $1
+        ORDER BY text
+      `;
+      params = [value];
+      break;
+
+    case 'expiring_between':
+      const [startDate, endDate] = value.split(',');
+      query = `
+        SELECT 
+          asset_id, asset_type_id, text, serial_number, description,
+          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          CASE 
+            WHEN expiry_date IS NOT NULL THEN 
+              expiry_date - CURRENT_DATE
+            ELSE NULL
+          END as days_until_expiry
+        FROM "tblAssets"
+        WHERE expiry_date IS NOT NULL
+        AND expiry_date >= $1
+        AND expiry_date <= $2
+        ORDER BY expiry_date ASC
+      `;
+      params = [startDate, endDate];
+      break;
+
+    case 'no_expiry':
+      query = `
+        SELECT 
+          asset_id, asset_type_id, text, serial_number, description,
+          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
+          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
+          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
+        FROM "tblAssets"
+        WHERE expiry_date IS NULL
+        ORDER BY text
+      `;
+      break;
+
+    default:
+      throw new Error('Invalid filter type');
+  }
+
+  return await db.query(query, params);
 };
 
 // WEB MODEL
@@ -674,5 +786,7 @@ module.exports = {
   generateAssetId,
   deleteAsset,
   deleteMultipleAssets,
-  getPotentialParentAssets
+  getPotentialParentAssets,
+  getAssetsExpiringWithin30Days,
+  getAssetsByExpiryDate
 };
