@@ -373,70 +373,26 @@ const updateMaintenanceSchedule = async (req, res) => {
         const { id } = req.params;
         const orgId = req.query.orgId;
         const updateData = req.body;
-        
-        if (!id) {
-            return res.status(400).json({
-                success: false,
-                message: 'Maintenance schedule ID is required'
-            });
-        }
-        
-        // Validate required fields
-        if (!updateData.status) {
-            return res.status(400).json({
-                success: false,
-                message: 'Status is required'
-            });
-        }
-        
-        if (updateData.status === 'CO' && !updateData.act_main_end_date) {
-            return res.status(400).json({
-                success: false,
-                message: 'End date is required when status is Completed'
-            });
-        }
-        
-        // Get user ID from authentication token
-        const userId = req.user?.user_id || req.user?.id;
-        if (!userId) {
-            return res.status(400).json({
-                success: false,
-                message: 'User ID not found in authentication token'
-            });
-        }
-        
-        // Add user ID and timestamp to update data
-        const finalUpdateData = {
-            ...updateData,
-            changed_by: userId,
-            changed_on: new Date().toISOString()
-        };
-        
-        const result = await model.updateMaintenanceSchedule(id, finalUpdateData, orgId);
-        
-        if (result.rows.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: 'Maintenance schedule not found or no changes made'
-            });
-        }
-        
-        const updatedRecord = result.rows[0];
-        
-        res.json({
-            success: true,
-            message: 'Maintenance schedule updated successfully',
-            data: updatedRecord,
-            timestamp: new Date().toISOString()
-        });
+        const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
+        const changedOn = new Date(); // Set changed_on to current timestamp
 
+        if (!id) {
+            return res.status(400).json({ success: false, message: 'Maintenance schedule ID is required' });
+        }
+        if (!updateData.status) {
+            return res.status(400).json({ success: false, message: 'Status is required' });
+        }
+
+        const result = await model.updateMaintenanceSchedule(id, { ...updateData, changed_by: changedBy, changed_on: changedOn }, orgId);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
+        }
+
+        res.status(200).json({ success: true, message: 'Maintenance schedule updated successfully', data: result.rows[0] });
     } catch (error) {
         console.error('Error in updateMaintenanceSchedule:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Failed to update maintenance schedule',
-            error: error.message
-        });
+        res.status(500).json({ success: false, message: 'Failed to update maintenance schedule', error: error.message });
     }
 };
 

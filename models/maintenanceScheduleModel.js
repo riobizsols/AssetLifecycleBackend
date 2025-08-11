@@ -349,7 +349,6 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
     const {
         notes,
         status,
-        act_main_end_date,
         po_number,
         invoice,
         technician_name,
@@ -359,12 +358,15 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
         changed_on
     } = updateData;
 
+    // Automatically set end date to current date when updating
+    const currentDate = new Date().toISOString().split('T')[0];
+
     const query = `
         UPDATE "tblAssetMaintSch"
-        SET 
+        SET
             notes = COALESCE($2, notes),
             status = COALESCE($3, status),
-            act_main_end_date = COALESCE($4, act_main_end_date),
+            act_main_end_date = $4,
             po_number = COALESCE($5, po_number),
             invoice = COALESCE($6, invoice),
             technician_name = COALESCE($7, technician_name),
@@ -375,12 +377,12 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
         WHERE ams_id = $1 AND org_id = $12
         RETURNING *
     `;
-    
+
     const values = [
         amsId,
         notes,
         status,
-        act_main_end_date,
+        currentDate, // Automatically set to current date
         po_number,
         invoice,
         technician_name,
@@ -390,7 +392,6 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
         changed_on,
         orgId
     ];
-    
     return await db.query(query, values);
 };
 
