@@ -1,59 +1,22 @@
 const db = require('../config/db');
+const { generateCustomId } = require('../utils/idGenerator');
 
-// Simple counter for generating sequential IDs
-let headerCounter = 0;
-let detailCounter = 0;
-
-// Generate asset group header ID directly
+// Generate asset group header ID using centralized generator
 const generateAssetGroupHeaderId = async () => {
-    const result = await db.query(`
-        SELECT assetgroup_h_id 
-        FROM "tblAssetGroup_H" 
-        ORDER BY CAST(SUBSTRING(assetgroup_h_id FROM '\\d+$') AS INTEGER) DESC 
-        LIMIT 1
-    `);
-    
-    let nextNum = 1;
-    if (result.rows.length > 0) {
-        const lastId = result.rows[0].assetgroup_h_id;
-        const match = lastId.match(/\d+/); // extract numeric part
-        if (match) {
-            nextNum = parseInt(match[0]) + 1;
-        }
-    }
-    
-    headerCounter = nextNum;
-    return `AGH${String(nextNum).padStart(3, "0")}`;
+    return await generateCustomId('asset_group_h', 3);
 };
 
-// Generate asset group detail ID directly
+// Generate asset group detail ID using centralized generator
 const generateAssetGroupDetailId = async () => {
-    const result = await db.query(`
-        SELECT assetgroup_d_id 
-        FROM "tblAssetGroup_D" 
-        ORDER BY CAST(SUBSTRING(assetgroup_d_id FROM '\\d+$') AS INTEGER) DESC 
-        LIMIT 1
-    `);
-    
-    let nextNum = 1;
-    if (result.rows.length > 0) {
-        const lastId = result.rows[0].assetgroup_d_id;
-        const match = lastId.match(/\d+/); // extract numeric part
-        if (match) {
-            nextNum = parseInt(match[0]) + 1;
-        }
-    }
-    
-    detailCounter = nextNum;
-    return `AGD${String(nextNum).padStart(3, "0")}`;
+    return await generateCustomId('asset_group_d', 3);
 };
 
-// Generate sequential detail IDs without database queries
-const generateSequentialDetailIds = (count) => {
+// Generate sequential detail IDs using centralized generator
+const generateSequentialDetailIds = async (count) => {
     const ids = [];
     for (let i = 0; i < count; i++) {
-        detailCounter++;
-        ids.push(`AGD${String(detailCounter).padStart(3, "0")}`);
+        const id = await generateCustomId('asset_group_d', 3);
+        ids.push(id);
     }
     return ids;
 };
@@ -103,7 +66,7 @@ const createAssetGroup = async (org_id, text, asset_ids, created_by) => {
         `, [assetgroup_h_id, org_id, text, created_by]);
         
         // Generate sequential detail IDs
-        const detailIds = generateSequentialDetailIds(asset_ids.length);
+        const detailIds = await generateSequentialDetailIds(asset_ids.length);
         
         // Insert details for each asset
         const detailResults = [];
@@ -168,7 +131,8 @@ const getAssetGroupById = async (assetgroup_h_id) => {
             d.asset_id,
             a.text as asset_name,
             a.description,
-            a.purchased_on
+            a.purchased_on,
+            a.asset_type_id
         FROM "tblAssetGroup_D" d
         LEFT JOIN "tblAssets" a ON d.asset_id = a.asset_id
         WHERE d.assetgroup_h_id = $1
@@ -205,7 +169,7 @@ const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) =>
         `, [assetgroup_h_id]);
         
         // Generate sequential detail IDs
-        const detailIds = generateSequentialDetailIds(asset_ids.length);
+        const detailIds = await generateSequentialDetailIds(asset_ids.length);
         
         // Insert new details
         const detailResults = [];

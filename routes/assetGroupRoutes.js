@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { protect } = require('../middlewares/authMiddleware');
 const {
     createAssetGroup,
     getAllAssetGroups,
@@ -7,6 +8,9 @@ const {
     updateAssetGroup,
     deleteAssetGroup
 } = require('../controllers/assetGroupController');
+
+// Apply protect middleware to all routes
+router.use(protect);
 
 // Create new asset group
 router.post('/', createAssetGroup);

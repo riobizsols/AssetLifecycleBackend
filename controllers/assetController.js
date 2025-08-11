@@ -241,10 +241,21 @@ const getAssetsByAssetType = async (req, res) => {
     try {
         const { asset_type_id } = req.params;
         const result = await model.getAssetsByAssetType(asset_type_id);
-        res.status(200).json(result.rows);
+        res.status(200).json({
+            success: true,
+            message: "Assets retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            asset_type_id: asset_type_id,
+            timestamp: new Date().toISOString()
+        });
     } catch (err) {
         console.error("Error fetching assets by type:", err);
-        res.status(500).json({ error: "Failed to fetch assets by type" });
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch assets by type",
+            error: err.message 
+        });
     }
 };
 
