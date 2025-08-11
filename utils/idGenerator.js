@@ -39,7 +39,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'dept_admin': 'tblDeptAdmins',
         'branch': 'tblBranches',
         'vendor_prod_serv': 'tblVendorProdService',
-        'prod_serv': 'tblProdServs'
+        'prod_serv': 'tblProdServs',
+        'asset_group_h': 'tblAssetGroup_H',
+        'asset_group_d': 'tblAssetGroup_D'
     };
 
     const targetTable = tableMap[tableKey];
@@ -55,7 +57,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'dept_admin': 'dept_admin_id',
             'branch': 'branch_id',
             'vendor_prod_serv': 'ven_prod_serv_id',
-            'prod_serv': 'prod_serv_id'
+            'prod_serv': 'prod_serv_id',
+            'asset_group_h': 'assetgroup_h_id',
+            'asset_group_d': 'assetgroup_d_id'
         };
 
         const columnName = columnMap[tableKey];

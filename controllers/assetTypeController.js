@@ -139,6 +139,17 @@ const getAssetTypesByAssignmentType = async (req, res) => {
     }
 };
 
+// GET /api/asset-types/group-required - Get asset types where group_required is true
+const getAssetTypesByGroupRequired = async (req, res) => {
+    try {
+        const result = await model.getAssetTypesByGroupRequired();
+        res.status(200).json(result.rows);
+    } catch (err) {
+        console.error("Error fetching asset types by group required:", err);
+        res.status(500).json({ error: "Failed to fetch asset types by group required" });
+    }
+};
+
 // GET /api/asset-types/:id - Get asset type by ID
 const getAssetTypeById = async (req, res) => {
     try {
@@ -323,5 +334,6 @@ module.exports = {
     updateAssetType,
     deleteAssetType,
     getParentAssetTypes,
-    getAssetTypesByAssignmentType
+    getAssetTypesByAssignmentType,
+    getAssetTypesByGroupRequired
 };
