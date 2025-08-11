@@ -7,7 +7,8 @@ const {
     updateAssetType,
     deleteAssetType,
     getParentAssetTypes,
-    getAssetTypesByAssignmentType
+    getAssetTypesByAssignmentType,
+    getAssetTypesByGroupRequired
 } = require('../controllers/assetTypeController');
 
 // Add new asset type
@@ -21,6 +22,9 @@ router.get('/parents', getParentAssetTypes);
 
 // Get asset types by assignment type
 router.get('/assignment-type/:assignment_type', getAssetTypesByAssignmentType);
+
+// Get asset types where group_required is true
+router.get('/group-required', getAssetTypesByGroupRequired);
 
 // Get asset type by ID
 router.get('/:id', getAssetTypeById);

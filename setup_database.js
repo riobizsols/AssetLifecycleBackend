@@ -35,7 +35,33 @@ async function setupDatabase() {
         `);
         console.log('✅ tblJobRoleNav table created');
 
-        // 3. Insert sample navigation data for JR001
+        // 3. Create tblAssetGroup_H table
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS "tblAssetGroup_H" (
+                assetgroup_h_id VARCHAR PRIMARY KEY,
+                org_id VARCHAR NOT NULL,
+                text VARCHAR NOT NULL,
+                created_by VARCHAR NOT NULL,
+                created_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                changed_by VARCHAR,
+                changed_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ tblAssetGroup_H table created');
+
+        // 4. Create tblAssetGroup_D table
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS "tblAssetGroup_D" (
+                assetgroup_d_id VARCHAR PRIMARY KEY,
+                assetgroup_h_id VARCHAR NOT NULL,
+                asset_id VARCHAR NOT NULL,
+                FOREIGN KEY (assetgroup_h_id) REFERENCES "tblAssetGroup_H"(assetgroup_h_id) ON DELETE CASCADE,
+                FOREIGN KEY (asset_id) REFERENCES "tblAssets"(asset_id) ON DELETE CASCADE
+            );
+        `);
+        console.log('✅ tblAssetGroup_D table created');
+
+        // 5. Insert sample navigation data for JR001
         const navigationData = [
             // Top level items
             { id: 'JRN001', job_role_id: 'JR001', app_id: 'DASHBOARD', label: 'Dashboard', is_group: false, seq: 1, access_level: 'A' },
