@@ -762,6 +762,16 @@ const createAsset = async (assetData) => {
   }
 };
 
+// Get total count of assets
+const getAssetsCount = async () => {
+  const query = `
+    SELECT COUNT(*) as count
+    FROM "tblAssets"
+  `;
+  
+  return await db.query(query);
+};
+
 module.exports = {
   getAllAssets,
   getAssetById,
@@ -788,5 +798,6 @@ module.exports = {
   deleteMultipleAssets,
   getPotentialParentAssets,
   getAssetsExpiringWithin30Days,
-  getAssetsByExpiryDate
+  getAssetsByExpiryDate,
+  getAssetsCount
 };
