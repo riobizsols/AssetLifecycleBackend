@@ -26,6 +26,7 @@ const approvalDetailRoutes = require("./routes/approvalDetailRoutes");
 const checklistRoutes = require("./routes/checklistRoutes");
 const cronRoutes = require("./routes/cronRoutes");
 const navigationRoutes = require("./routes/navigationRoutes");
+const assetScrapRoutes = require("./routes/assetScrapRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -73,6 +74,7 @@ app.use("/api/approval-detail", approvalDetailRoutes);
 app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/navigation", navigationRoutes);
+app.use("/api/scrap-assets", assetScrapRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
