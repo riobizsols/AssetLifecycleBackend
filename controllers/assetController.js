@@ -760,6 +760,27 @@ const createAsset = async (req, res) => {
         });
     }
 };
+// GET /api/assets/expiring-30-days-by-type - Get assets expiring within 30 days grouped by asset type
+const getAssetsExpiringWithin30DaysByType = async (req, res) => {
+    try {
+        const result = await model.getAssetsExpiringWithin30DaysByType();
+        
+        // Calculate total count
+        const totalCount = result.rows.reduce((sum, type) => sum + parseInt(type.asset_count), 0);
+        
+        res.status(200).json({
+            message: `Found ${totalCount} assets expiring within 30 days across ${result.rows.length} asset types`,
+            days: 30,
+            total_count: totalCount,
+            asset_types_count: result.rows.length,
+            asset_types: result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching assets expiring within 30 days by type:", err);
+        res.status(500).json({ error: "Failed to fetch assets expiring within 30 days by type" });
+    }
+};
+
 // WEB CONTROLLER
 const getPotentialParentAssets = async (req, res) => {
   const { asset_type_id } = req.params;
@@ -786,6 +807,7 @@ module.exports = {
   getAssetsBySerialNumber,
   getAssetsExpiringWithin30Days,
   getAssetsByExpiryDate,
+  getAssetsExpiringWithin30DaysByType,
   getInactiveAssetsByAssetType,
   getAssetsByOrg,
   searchAssets,

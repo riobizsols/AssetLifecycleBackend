@@ -554,6 +554,42 @@ const getAssetsExpiringWithin30Days = async () => {
   return await db.query(query);
 };
 
+// Get assets expiring within 30 days grouped by asset type
+const getAssetsExpiringWithin30DaysByType = async () => {
+  const query = `
+    SELECT 
+      at.text as asset_type_name,
+      at.asset_type_id,
+      COUNT(a.asset_id) as asset_count,
+      JSON_AGG(
+        JSON_BUILD_OBJECT(
+          'asset_id', a.asset_id,
+          'text', a.text,
+          'serial_number', a.serial_number,
+          'description', a.description,
+          'expiry_date', a.expiry_date,
+          'current_status', a.current_status,
+          'days_until_expiry', CASE 
+            WHEN a.expiry_date IS NOT NULL THEN 
+              a.expiry_date - CURRENT_DATE
+            ELSE NULL
+          END
+        ) ORDER BY a.expiry_date ASC
+      ) as assets
+    FROM "tblAssetTypes" at
+    LEFT JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
+      AND a.expiry_date IS NOT NULL
+      AND a.expiry_date >= CURRENT_DATE
+      AND a.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+    WHERE at.asset_type_id IS NOT NULL
+    GROUP BY at.asset_type_id, at.text
+    HAVING COUNT(a.asset_id) > 0
+    ORDER BY at.text ASC
+  `;
+
+  return await db.query(query);
+};
+
 // Get assets by expiry date with different filter types
 const getAssetsByExpiryDate = async (filterType, value = null) => {
   let query = '';
@@ -788,5 +824,6 @@ module.exports = {
   deleteMultipleAssets,
   getPotentialParentAssets,
   getAssetsExpiringWithin30Days,
+  getAssetsExpiringWithin30DaysByType,
   getAssetsByExpiryDate
 };

@@ -4,6 +4,9 @@ const controller = require("../controllers/assetController");
 const { authorize } = require("../middlewares/authorize");
 const { protect } = require("../middlewares/authMiddleware");
 
+// Public route for testing - Get assets expiring within 30 days grouped by asset type
+router.get("/expiring-30-days-by-type", controller.getAssetsExpiringWithin30DaysByType);
+
 router.use(protect);
     
 router.post("/", controller.addAsset);
