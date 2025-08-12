@@ -21,6 +21,9 @@ router.get("/all-assets", controller.getAllAssets);
 // GET /api/assets - Get all assets (with optional query filters)
 router.get("/", controller.getAssetsWithFilters);
 
+// GET /api/assets/count - Get total count of assets
+router.get("/count", controller.getAssetsCount);
+
 // GET /api/assets/:id - Get asset by ID
 router.get("/:id", controller.getAssetById);  //......
 
@@ -46,10 +49,10 @@ router.get("/status/:status", controller.getAssetsByStatus);
 router.get("/serial/:serial_number", controller.getAssetsBySerialNumber);
 
 // GET /api/assets/expiring-30-days - Get assets expiring within 30 days
-// router.get("/expiring-30-days", controller.getAssetsExpiringWithin30Days);
+router.get("/expiring-30-days", controller.getAssetsExpiringWithin30Days); //....
 
 // GET /api/assets/expiry/:filterType - Get assets by expiry date with different filters
-router.get("/expiry/:filterType", controller.getAssetsByExpiryDate);
+router.get("/expiry/:filterType", controller.getAssetsByExpiryDate); //....
 
 
 // // GET /api/assets/org/:org_id - Get assets by organization

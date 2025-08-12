@@ -793,6 +793,25 @@ const getPotentialParentAssets = async (req, res) => {
   }
 };
 
+// GET /api/assets/count - Get total count of assets
+const getAssetsCount = async (req, res) => {
+  try {
+    const count = await model.getAssetsCount();
+    res.json({
+      success: true,
+      count: count.rows[0].count,
+      message: "Total assets count retrieved successfully"
+    });
+  } catch (err) {
+    console.error("Error fetching assets count:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch assets count",
+      message: err.message 
+    });
+  }
+};
+
 module.exports = {
   getAllAssets,
   addAsset,
@@ -813,5 +832,6 @@ module.exports = {
   searchAssets,
   getAssetsWithFilters,
   deleteAsset,
-  deleteMultipleAssets
+  deleteMultipleAssets,
+  getAssetsCount
 };
