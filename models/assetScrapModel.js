@@ -77,8 +77,27 @@ const addScrapAsset = async (scrapData) => {
   // Generate ASD ID
   const asd_id = await generateAsdId();
 
-  const query = `
-    INSERT INTO "tblAssetScrapDet" (
+  // Start a transaction to ensure both operations succeed or fail together
+  const client = await db.connect();
+  
+  try {
+    await client.query('BEGIN');
+    
+    // 1. Insert into scrap table
+    const insertQuery = `
+      INSERT INTO "tblAssetScrapDet" (
+        asd_id,
+        asset_id,
+        scrapped_date,
+        scrapped_by,
+        location,
+        notes,
+        org_id
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      RETURNING *
+    `;
+
+    const insertValues = [
       asd_id,
       asset_id,
       scrapped_date,
@@ -86,21 +105,34 @@ const addScrapAsset = async (scrapData) => {
       location,
       notes,
       org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    RETURNING *
-  `;
+    ];
 
-  const values = [
-    asd_id,
-    asset_id,
-    scrapped_date,
-    scrapped_by,
-    location,
-    notes,
-    org_id
-  ];
-
-  return await db.query(query, values);
+    const scrapResult = await client.query(insertQuery, insertValues);
+    
+    // 2. Update the main asset status to SCRAPPED
+    const updateQuery = `
+      UPDATE "tblAssets" 
+      SET current_status = 'SCRAPPED', 
+          changed_by = $1, 
+          changed_on = CURRENT_TIMESTAMP
+      WHERE asset_id = $2
+      RETURNING *
+    `;
+    
+    await client.query(updateQuery, [scrapped_by, asset_id]);
+    
+    // Commit the transaction
+    await client.query('COMMIT');
+    
+    return scrapResult;
+    
+  } catch (error) {
+    // Rollback on error
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 };
 
 // Update scrap asset
