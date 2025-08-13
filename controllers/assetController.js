@@ -1,7 +1,6 @@
 const model = require("../models/assetModel");
 const db = require("../config/db");
 
-// POST /api/assets - Add new asset
 const addAsset = async (req, res) => {
     try {
         console.log("Received asset data:", req.body);
@@ -637,7 +636,14 @@ const createAsset = async (req, res) => {
             warranty_period,
             parent_asset_id,
             group_id,
-            org_id
+            org_id,
+            // Depreciation fields
+            salvage_value,
+            useful_life_years,
+            current_book_value,
+            accumulated_depreciation,
+            last_depreciation_calc_date,
+            depreciation_start_date
         } = req.body;
 
         if (!req.user || !req.user.user_id) {
@@ -685,7 +691,51 @@ const createAsset = async (req, res) => {
                 return res.status(409).json({ error: "Asset with this serial number already exists" });
             }
         }
-  // Prepare asset data (now includes prod_serv_id)
+        
+        // Get asset type's depreciation method to calculate correct rate
+        let calculatedDepreciationRate = 0;
+        let depreciationType = 'SL'; // Default to Straight Line
+        
+        if (asset_type_id) {
+            try {
+                const assetTypeQuery = `
+                    SELECT depreciation_type 
+                    FROM "tblAssetTypes" 
+                    WHERE asset_type_id = $1
+                `;
+                const assetTypeResult = await db.query(assetTypeQuery, [asset_type_id]);
+                
+                if (assetTypeResult.rows.length > 0) {
+                    depreciationType = assetTypeResult.rows[0].depreciation_type || 'SL';
+                }
+                
+                console.log('🔍 Asset Type Depreciation Method:', depreciationType);
+            } catch (error) {
+                console.warn('⚠️ Failed to fetch asset type depreciation method, defaulting to SL:', error.message);
+                depreciationType = 'SL';
+            }
+        }
+        
+        // Calculate depreciation rate based on the asset type's method
+        if (useful_life_years && useful_life_years > 0) {
+            if (depreciationType === 'SL') {
+                calculatedDepreciationRate = (1 / useful_life_years) * 100; // Straight Line: 100% / useful life years
+            } else if (depreciationType === 'RB') {
+                calculatedDepreciationRate = (2 / useful_life_years) * 100; // Reducing Balance: (2 / useful life years) * 100
+            } else if (depreciationType === 'DD') {
+                calculatedDepreciationRate = (2 / useful_life_years) * 100; // Double Declining: same as RB
+            } else {
+                calculatedDepreciationRate = 0; // No Depreciation (ND)
+            }
+        }
+        
+        console.log('🔢 Depreciation Calculation:');
+        console.log('  Asset Type ID:', asset_type_id);
+        console.log('  Depreciation Method:', depreciationType);
+        console.log('  Useful Life Years:', useful_life_years);
+        console.log('  Calculated Depreciation Rate:', calculatedDepreciationRate);
+        
+        // Prepare asset data (now includes prod_serv_id and depreciation fields)
         const assetData = {
             asset_type_id,
             asset_id: finalAssetId,
@@ -706,7 +756,15 @@ const createAsset = async (req, res) => {
             parent_asset_id,
             group_id,
             org_id,
-            created_by
+            created_by,
+            // Depreciation fields
+            salvage_value: parseFloat(salvage_value) || 0,
+            useful_life_years: parseInt(useful_life_years) || 5,
+            depreciation_rate: calculatedDepreciationRate,
+            current_book_value: parseFloat(current_book_value) || parseFloat(purchased_cost) || 0,
+            accumulated_depreciation: parseFloat(accumulated_depreciation) || 0,
+            last_depreciation_calc_date: last_depreciation_calc_date || null,
+            depreciation_start_date: depreciation_start_date || purchased_on
         };
 
         // Start a transaction to ensure atomicity
