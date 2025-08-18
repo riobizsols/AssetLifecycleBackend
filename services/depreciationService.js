@@ -106,25 +106,61 @@ class DepreciationService {
     /**
      * Calculate Reducing Balance Depreciation
      * @param {number} currentBookValue - Current book value
-     * @param {number} depreciationRate - Depreciation rate as decimal (e.g., 0.25 for 25%)
+     * @param {number} originalCost - Original cost of the asset
+     * @param {number} salvageValue - Salvage/residual value
+     * @param {number} usefulLifeYears - Useful life in years
+     * @param {number} depreciationRate - Optional explicit depreciation rate as decimal (e.g., 0.25 for 25%)
      * @returns {Object} Depreciation calculation results
      */
-    static calculateReducingBalanceDepreciation(currentBookValue, depreciationRate) {
+    static calculateReducingBalanceDepreciation(currentBookValue, originalCost, salvageValue = 0, usefulLifeYears, depreciationRate = null) {
         try {
             if (currentBookValue <= 0) {
                 throw new Error('Current book value must be greater than 0');
             }
-            if (depreciationRate <= 0 || depreciationRate >= 1) {
-                throw new Error('Depreciation rate must be between 0 and 1');
+            if (originalCost <= 0) {
+                throw new Error('Original cost must be greater than 0');
+            }
+            if (salvageValue < 0) {
+                throw new Error('Salvage value cannot be negative');
+            }
+            if (salvageValue >= originalCost) {
+                throw new Error('Salvage value must be less than original cost');
+            }
+            if (usefulLifeYears <= 0) {
+                throw new Error('Useful life must be greater than 0');
             }
 
-            const depreciationAmount = currentBookValue * depreciationRate;
-            const newBookValue = currentBookValue - depreciationAmount;
+            // Calculate depreciation rate if not provided
+            let calculatedRate;
+            if (depreciationRate !== null) {
+                if (depreciationRate <= 0 || depreciationRate >= 1) {
+                    throw new Error('Depreciation rate must be between 0 and 1');
+                }
+                calculatedRate = depreciationRate;
+            } else {
+                // Calculate rate using the formula: r = 1 - (salvage_value / original_cost)^(1/useful_life)
+                // This ensures the asset reaches salvage value at the end of its useful life
+                if (salvageValue === 0) {
+                    // If salvage value is 0, use a standard reducing balance rate
+                    calculatedRate = 2 / usefulLifeYears; // Double declining balance rate
+                } else {
+                    calculatedRate = 1 - Math.pow(salvageValue / originalCost, 1 / usefulLifeYears);
+                }
+            }
+
+            // Calculate depreciation amount
+            const rawDepreciationAmount = currentBookValue * calculatedRate;
+            
+            // Ensure book value doesn't go below salvage value
+            const tentativeNewBookValue = currentBookValue - rawDepreciationAmount;
+            const newBookValue = Math.max(tentativeNewBookValue, salvageValue);
+            const actualDepreciationAmount = currentBookValue - newBookValue;
 
             return {
-                depreciationAmount: parseFloat(depreciationAmount.toFixed(2)),
+                depreciationAmount: parseFloat(actualDepreciationAmount.toFixed(2)),
                 newBookValue: parseFloat(newBookValue.toFixed(2)),
-                depreciationRate: parseFloat((depreciationRate * 100).toFixed(2))
+                depreciationRate: parseFloat((calculatedRate * 100).toFixed(4)),
+                calculatedRate: parseFloat(calculatedRate.toFixed(6))
             };
         } catch (error) {
             throw new Error(`Reducing Balance Depreciation calculation failed: ${error.message}`);

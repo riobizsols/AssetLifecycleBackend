@@ -717,17 +717,43 @@ const createAsset = async (req, res) => {
         }
         
         // Calculate depreciation rate based on the asset type's method
-        if (useful_life_years && useful_life_years > 0) {
-            if (depreciationType === 'SL') {
-                calculatedDepreciationRate = (1 / useful_life_years) * 100; // Straight Line: 100% / useful life years
-            } else if (depreciationType === 'RB') {
-                calculatedDepreciationRate = (2 / useful_life_years) * 100; // Reducing Balance: (2 / useful life years) * 100
-            } else if (depreciationType === 'DD') {
-                calculatedDepreciationRate = (2 / useful_life_years) * 100; // Double Declining: same as RB
-            } else {
-                calculatedDepreciationRate = 0; // No Depreciation (ND)
-            }
+       // Calculate depreciation rate based on the asset type's method
+if (useful_life_years && useful_life_years > 0) {
+    const cost = parseFloat(purchased_cost) || 0;
+    const salvage = parseFloat(salvage_value) || 0;
+
+    if (depreciationType === 'SL') {
+        // Straight Line: 100% / useful life years
+        calculatedDepreciationRate = (1 / useful_life_years) * 100;
+
+    } else if (depreciationType === 'RB') {
+        // Reducing Balance: precise formula to hit salvage value exactly
+        if (cost > 0 && salvage >= 0 && salvage < cost) {
+            const rate = 1 - Math.pow(salvage / cost, 1 / useful_life_years);
+            calculatedDepreciationRate = rate * 100;
+        } else {
+            calculatedDepreciationRate = 0;
         }
+
+    } else if (depreciationType === 'DD') {
+        // Double Declining, adjusted to ensure final year ends at salvage value
+        if (cost > 0 && salvage >= 0 && salvage < cost) {
+            let rate = (2 / useful_life_years);
+            // If standard DDB would go below salvage too early, adjust to RB formula
+            const rbRate = 1 - Math.pow(salvage / cost, 1 / useful_life_years);
+            if (rbRate < rate) {
+                rate = rbRate; // ensures salvage value is respected
+            }
+            calculatedDepreciationRate = rate * 100;
+        } else {
+            calculatedDepreciationRate = (2 / useful_life_years) * 100;
+        }
+
+    } else {
+        calculatedDepreciationRate = 0; // No Depreciation (ND)
+    }
+}
+
         
         console.log('🔢 Depreciation Calculation:');
         console.log('  Asset Type ID:', asset_type_id);
@@ -818,6 +844,7 @@ const createAsset = async (req, res) => {
         });
     }
 };
+
 // GET /api/assets/expiring-30-days-by-type - Get assets expiring within 30 days grouped by asset type
 const getAssetsExpiringWithin30DaysByType = async (req, res) => {
     try {

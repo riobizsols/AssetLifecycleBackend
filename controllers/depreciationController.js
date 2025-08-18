@@ -79,10 +79,14 @@ class DepreciationController {
                 );
             } else if (depreciationMethod === 'RB') {
                 const currentBookValue = asset.current_book_value || asset.purchased_cost;
-                const depreciationRate = (asset.depreciation_rate || 0.25) / 100; // Convert percentage to decimal
+                // Use explicit rate if provided, otherwise let the service calculate it
+                const explicitRate = asset.depreciation_rate ? (asset.depreciation_rate / 100) : null;
                 depreciationResult = DepreciationService.calculateReducingBalanceDepreciation(
                     currentBookValue,
-                    depreciationRate
+                    asset.purchased_cost,
+                    salvageValue,
+                    usefulLifeYears,
+                    explicitRate
                 );
             } else if (depreciationMethod === 'DD') {
                 const currentBookValue = asset.current_book_value || asset.purchased_cost;

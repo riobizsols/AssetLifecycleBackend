@@ -129,74 +129,58 @@ class CronJobService {
         const usefulLifeYears = asset.useful_life_years || 5;
         const depreciationMethod = asset.asset_type_depreciation_type || 'SL';
         const salvageValue = asset.salvage_value || 0;
-        
-        let depreciationResult;
+    
         let depreciationAmount;
-        let bookValueAfter;
         let bookValueBefore = asset.current_book_value || asset.purchased_cost;
-        
+        let bookValueAfter;
+        let annualRateDecimal = 0; // Store as decimal (e.g., 0.2 for 20%)
+    
         if (depreciationMethod === 'SL') {
-            // Calculate monthly straight line depreciation
+            // Straight Line
             const annualDepreciation = (asset.purchased_cost - salvageValue) / usefulLifeYears;
             const monthlyDepreciation = annualDepreciation / 12;
-            
+            annualRateDecimal = 1 / usefulLifeYears;
+    
             depreciationAmount = monthlyDepreciation;
-            bookValueAfter = bookValueBefore - depreciationAmount;
-            
-            // Ensure book value doesn't go below salvage value
-            if (bookValueAfter < salvageValue) {
-                bookValueAfter = salvageValue;
-                depreciationAmount = bookValueBefore - salvageValue;
-            }
-            
+            bookValueAfter = Math.max(bookValueBefore - depreciationAmount, salvageValue);
+    
             console.log(`[DEBUG SL] Annual: ${annualDepreciation}, Monthly: ${monthlyDepreciation}`);
-            console.log(`[DEBUG SL] Before: ${bookValueBefore}, After: ${bookValueAfter}, Depreciation: ${depreciationAmount}`);
-        } else if (depreciationMethod === 'RB') {
-            // Calculate Reducing Balance (WDV) depreciation - Auto-calculated rate
-            // Formula: Double Declining Balance = (2 / useful_life_years) * 100
-            const depreciationRatePercent = (2 / usefulLifeYears) * 100; // Auto-calculated based on useful life
-            const annualDepreciationRate = depreciationRatePercent / 100;
-            const monthlyDepreciationRate = annualDepreciationRate / 12; // Monthly rate
-            
-            // Monthly depreciation = Monthly Rate * Current Book Value
-            depreciationAmount = bookValueBefore * monthlyDepreciationRate;
-            bookValueAfter = bookValueBefore - depreciationAmount;
-            
-            // Ensure book value doesn't go below salvage value
-            if (bookValueAfter < salvageValue) {
-                bookValueAfter = salvageValue;
-                depreciationAmount = bookValueBefore - salvageValue;
+        } 
+        else if (depreciationMethod === 'RB') {
+            // Reducing Balance
+            if (asset.depreciation_rate && asset.depreciation_rate > 0) {
+                annualRateDecimal = asset.depreciation_rate / 100; // Convert % to decimal
+            } else {
+                annualRateDecimal = 1 - Math.pow(salvageValue / asset.purchased_cost, 1 / usefulLifeYears);
             }
-            
-            console.log(`[DEBUG RB] Auto-calculated Rate: ${depreciationRatePercent.toFixed(2)}% (2/${usefulLifeYears}), Monthly Rate: ${(monthlyDepreciationRate * 100).toFixed(4)}%`);
-            console.log(`[DEBUG RB] Before: ${bookValueBefore}, After: ${bookValueAfter}, Depreciation: ${depreciationAmount}`);
-        } else if (depreciationMethod === 'DD') {
-            // Calculate Double Declining Balance depreciation
-            // Formula: 2 * Beginning Book Value * Depreciation Rate
-            // Rate = (100% / Useful life of the asset) - this stays the same
-            const straightLineRate = 100 / usefulLifeYears; // e.g., 100/5 = 20%
-            const doubleDecliningRate = 2 * straightLineRate; // e.g., 2 * 20% = 40%
-            
-            // Annual rate converted to monthly
-            const annualDepreciationRate = doubleDecliningRate / 100;
-            const monthlyDepreciationRate = annualDepreciationRate / 12; // Monthly rate
-            
-            // Monthly depreciation = Monthly Rate * Current Book Value
-            depreciationAmount = bookValueBefore * monthlyDepreciationRate;
-            bookValueAfter = bookValueBefore - depreciationAmount;
-            
-            // Ensure book value doesn't go below salvage value
-            if (bookValueAfter < salvageValue) {
-                bookValueAfter = salvageValue;
-                depreciationAmount = bookValueBefore - salvageValue;
-            }
-            
-            console.log(`[DEBUG DD] Straight Line Rate: ${straightLineRate.toFixed(2)}%, Double Rate: ${doubleDecliningRate.toFixed(2)}%, Monthly Rate: ${(monthlyDepreciationRate * 100).toFixed(4)}%`);
-            console.log(`[DEBUG DD] Before: ${bookValueBefore}, After: ${bookValueAfter}, Depreciation: ${depreciationAmount}`);
-        } else {
+    
+            const monthlyRateDecimal = annualRateDecimal / 12;
+            depreciationAmount = bookValueBefore * monthlyRateDecimal;
+            bookValueAfter = Math.max(bookValueBefore - depreciationAmount, salvageValue);
+    
+            console.log(`[DEBUG RB] Annual Rate: ${(annualRateDecimal * 100).toFixed(4)}%, Monthly Rate: ${(monthlyRateDecimal * 100).toFixed(6)}%`);
+        } 
+        else if (depreciationMethod === 'DD') {
+            // Double Declining Balance
+            const straightLineRateDecimal = 1 / usefulLifeYears;
+            const doubleDecliningRateDecimal = straightLineRateDecimal * 2;
+            annualRateDecimal = doubleDecliningRateDecimal;
+    
+            const monthlyRateDecimal = doubleDecliningRateDecimal / 12;
+            depreciationAmount = bookValueBefore * monthlyRateDecimal;
+            bookValueAfter = Math.max(bookValueBefore - depreciationAmount, salvageValue);
+    
+            console.log(`[DEBUG DD] Straight Line Rate: ${(straightLineRateDecimal * 100).toFixed(2)}%, Double Rate: ${(doubleDecliningRateDecimal * 100).toFixed(2)}%, Monthly Rate: ${(monthlyRateDecimal * 100).toFixed(4)}%`);
+        } 
+        else {
             throw new Error(`Unsupported depreciation method: ${depreciationMethod}`);
         }
-        
+    
+        // Adjust final depreciation if hitting salvage
+        if (bookValueAfter === salvageValue) {
+            depreciationAmount = bookValueBefore - salvageValue;
+        }
+    
         // Insert depreciation record
         await DepreciationModel.insertDepreciationRecord({
             asset_id: asset.asset_id,
@@ -204,42 +188,29 @@ class CronJobService {
             depreciation_amount: depreciationAmount,
             book_value_before: bookValueBefore,
             book_value_after: bookValueAfter,
-            depreciation_rate: depreciationMethod === 'SL' ? (100 / usefulLifeYears) : 
-                              depreciationMethod === 'RB' ? ((2 / usefulLifeYears) * 100) : 
-                              depreciationMethod === 'DD' ? ((2 / usefulLifeYears) * 100) : 
-                              (depreciationResult?.depreciationRate || asset.depreciation_rate || 0),
+            depreciation_rate: annualRateDecimal * 100, // store as %
             useful_life_years: usefulLifeYears,
             created_by: userId
         });
-        
+    
         // Update asset depreciation values
-        console.log(`[DEBUG] Updating asset ${asset.asset_id}:`);
-        console.log(`  - Before: ${bookValueBefore}`);
-        console.log(`  - After: ${bookValueAfter}`);
-        console.log(`  - Depreciation: ${depreciationAmount}`);
-        console.log(`  - Old Accumulated: ${asset.accumulated_depreciation || 0}`);
-        console.log(`  - New Accumulated: ${(asset.accumulated_depreciation || 0) + depreciationAmount}`);
-        
         const updateResult = await DepreciationModel.updateAssetDepreciation(asset.asset_id, {
             current_book_value: bookValueAfter,
             accumulated_depreciation: (asset.accumulated_depreciation || 0) + depreciationAmount,
             last_depreciation_calc_date: new Date(),
-            depreciation_rate: depreciationMethod === 'SL' ? (100 / usefulLifeYears) : 
-                              depreciationMethod === 'RB' ? ((2 / usefulLifeYears) * 100) : 
-                              depreciationMethod === 'DD' ? ((2 / usefulLifeYears) * 100) : 
-                              (depreciationResult?.depreciationRate || asset.depreciation_rate || 0),
+            depreciation_rate: annualRateDecimal * 100, // store as %
             changed_by: userId
         });
-        
-        console.log(`[DEBUG] Asset update result:`, updateResult.rows[0]);
-        console.log(`[DEBUG] Asset ${asset.asset_id} updated successfully`);
-        
+    
+        console.log(`[DEBUG] Asset ${asset.asset_id} updated:`, updateResult.rows[0]);
+    
         return {
             depreciationAmount,
             bookValueBefore,
             bookValueAfter
         };
     }
+    
 }
 
 module.exports = CronJobService;
