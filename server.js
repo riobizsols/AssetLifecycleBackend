@@ -14,6 +14,7 @@ const asset_typeRoutes = require("./routes/asset_typeRoute");
 const assetRoutes = require("./routes/assetRoutes");
 const assetAssignmentRoutes = require("./routes/assetAssignmentRoute");
 const assetGroupRoutes = require("./routes/assetGroupRoutes");
+const groupAssetRoutes = require("./routes/groupAssetRoutes");
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
 const orgRoutes = require("./routes/orgRoutes");
 const propertiesRoutes = require("./routes/propertiesRoutes");
@@ -27,8 +28,13 @@ const checklistRoutes = require("./routes/checklistRoutes");
 const cronRoutes = require("./routes/cronRoutes");
 const navigationRoutes = require("./routes/navigationRoutes");
 const assetScrapRoutes = require("./routes/assetScrapRoutes");
+<<<<<<< HEAD
 const depreciationRoutes = require("./routes/depreciationRoutes");
 const cronJobRoutes = require("./routes/cronJobRoutes");
+=======
+const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
+const scrapSalesRoutes = require("./routes/scrapSalesRoutes");
+>>>>>>> origin/Naren
 const CronService = require("./services/cronService");
 
 
@@ -66,6 +72,7 @@ app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
 app.use("/api/asset-assignments", assetAssignmentRoutes);
 app.use("/api/asset-groups", assetGroupRoutes);
+app.use("/api/group-assets", groupAssetRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/employees", employeeRoutes);
@@ -77,8 +84,13 @@ app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/navigation", navigationRoutes);
 app.use("/api/scrap-assets", assetScrapRoutes);
+<<<<<<< HEAD
 app.use("/api/depreciation", depreciationRoutes);
 app.use("/api/cron-jobs", cronJobRoutes);
+=======
+app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
+app.use("/api/scrap-sales", scrapSalesRoutes);
+>>>>>>> origin/Naren
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
