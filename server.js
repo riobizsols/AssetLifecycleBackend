@@ -28,13 +28,10 @@ const checklistRoutes = require("./routes/checklistRoutes");
 const cronRoutes = require("./routes/cronRoutes");
 const navigationRoutes = require("./routes/navigationRoutes");
 const assetScrapRoutes = require("./routes/assetScrapRoutes");
-<<<<<<< HEAD
 const depreciationRoutes = require("./routes/depreciationRoutes");
 const cronJobRoutes = require("./routes/cronJobRoutes");
-=======
 const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
 const scrapSalesRoutes = require("./routes/scrapSalesRoutes");
->>>>>>> origin/Naren
 const CronService = require("./services/cronService");
 
 
@@ -84,13 +81,10 @@ app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/navigation", navigationRoutes);
 app.use("/api/scrap-assets", assetScrapRoutes);
-<<<<<<< HEAD
 app.use("/api/depreciation", depreciationRoutes);
 app.use("/api/cron-jobs", cronJobRoutes);
-=======
 app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
->>>>>>> origin/Naren
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
