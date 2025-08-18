@@ -16,14 +16,16 @@ const config = {
     PORT: process.env.PORT || 5000,
     DATABASE_URL: process.env.DATABASE_URL,
     JWT_SECRET: process.env.JWT_SECRET,
-    FRONTEND_URL: process.env.FRONTEND_URL || 'https://your-domain.com',
-    BACKEND_URL: process.env.BACKEND_URL || 'https://your-domain.com',
-    API_BASE_URL: process.env.API_BASE_URL || 'https://your-domain.com/api',
+    FRONTEND_URL: process.env.FRONTEND_URL || 'http://103.27.234.248',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://103.27.234.248:5000',
+    API_BASE_URL: process.env.API_BASE_URL || 'http://103.27.234.248:5000/api',
     ENVIRONMENT: 'production',
     CORS_ORIGINS: [
-      process.env.FRONTEND_URL || 'https://your-domain.com',
-      'https://your-domain.com',
-      'http://your-domain.com'
+      process.env.FRONTEND_URL || 'http://103.27.234.248',
+      'http://103.27.234.248',
+      'http://103.27.234.248:5173',  // ✅ Add this for your current frontend port
+      'http://103.27.234.248:3000',  // ✅ Add this for alternative port
+      'http://103.27.234.248:8080' 
     ]
   }
 };

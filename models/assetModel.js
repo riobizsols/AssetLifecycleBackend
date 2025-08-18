@@ -38,6 +38,7 @@ const getAssetsByAssetType = async (asset_type_id) => {
             parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE asset_type_id = $1
+        AND current_status != 'SCRAPPED'
         ORDER BY created_on DESC
     `;
 
@@ -581,6 +582,7 @@ const getAssetsExpiringWithin30DaysByType = async () => {
       AND a.expiry_date IS NOT NULL
       AND a.expiry_date >= CURRENT_DATE
       AND a.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+      AND a.current_status != 'SCRAPPED'
     WHERE at.asset_type_id IS NOT NULL
     GROUP BY at.asset_type_id, at.text
     HAVING COUNT(a.asset_id) > 0
@@ -611,6 +613,7 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
         FROM "tblAssets"
         WHERE expiry_date IS NOT NULL
         AND expiry_date < CURRENT_DATE
+        AND current_status != 'SCRAPPED'
         ORDER BY expiry_date DESC
       `;
       break;
@@ -632,6 +635,7 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
         WHERE expiry_date IS NOT NULL
         AND expiry_date >= CURRENT_DATE
         AND expiry_date <= CURRENT_DATE + INTERVAL '${days} days'
+        AND current_status != 'SCRAPPED'
         ORDER BY expiry_date ASC
       `;
       break;
@@ -645,6 +649,7 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
           parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE expiry_date = $1
+        AND current_status != 'SCRAPPED'
         ORDER BY text
       `;
       params = [value];
@@ -667,6 +672,7 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
         WHERE expiry_date IS NOT NULL
         AND expiry_date >= $1
         AND expiry_date <= $2
+        AND current_status != 'SCRAPPED'
         ORDER BY expiry_date ASC
       `;
       params = [startDate, endDate];
@@ -681,6 +687,7 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
           parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
         FROM "tblAssets"
         WHERE expiry_date IS NULL
+        AND current_status != 'SCRAPPED'
         ORDER BY text
       `;
       break;

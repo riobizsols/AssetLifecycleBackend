@@ -18,7 +18,8 @@ const generateToken = (user) => {
         org_id: user.org_id,
         user_id: user.user_id,
         email: user.email,
-        job_role_id: user.job_role_id
+        job_role_id: user.job_role_id,
+        emp_int_id: user.emp_int_id
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
@@ -48,7 +49,8 @@ const login = async (req, res) => {
             email: user.email,
             org_id: user.org_id,
             user_id: user.user_id,
-            job_role_id: user.job_role_id
+            job_role_id: user.job_role_id,
+            emp_int_id: user.emp_int_id
         }
     });
 };

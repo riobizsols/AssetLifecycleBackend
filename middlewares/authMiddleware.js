@@ -17,7 +17,8 @@ const protect = (req, res, next) => {
             org_id: decoded.org_id,
             user_id: decoded.user_id,
             job_role_id: decoded.job_role_id,
-            email: decoded.email
+            email: decoded.email,
+            emp_int_id: decoded.emp_int_id
         };
 
         next();
