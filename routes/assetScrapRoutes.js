@@ -7,6 +7,9 @@ const { protect } = require("../middlewares/authMiddleware");
 // Public route for testing - Get all scrap assets
 router.get("/", controller.getAllScrapAssets);
 
+// Public route for testing - Get available assets by asset type
+router.get("/available-by-type/:asset_type_id", controller.getAvailableAssetsByAssetType);
+
 
 
 router.use(protect);

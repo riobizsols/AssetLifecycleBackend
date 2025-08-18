@@ -161,6 +161,37 @@ const checkScrapAssetExists = async (asd_id) => {
   return await db.query(query, [asd_id]);
 };
 
+// Get available assets by asset type (exclude those already scrapped)
+const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null) => {
+  let query = `
+    SELECT 
+      a.asset_id,
+      a.text AS asset_name,
+      a.serial_number,
+      a.asset_type_id,
+      at.text AS asset_type_name,
+      a.org_id
+    FROM "tblAssets" a
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE a.asset_type_id = $1
+      AND NOT EXISTS (
+        SELECT 1 
+        FROM "tblAssetScrapDet" s 
+        WHERE s.asset_id = a.asset_id
+      )`;
+
+  const params = [asset_type_id];
+
+  if (org_id) {
+    query += ` AND a.org_id = $2`;
+    params.push(org_id);
+  }
+
+  query += ` ORDER BY a.text`;
+
+  return await db.query(query, params);
+};
+
 module.exports = {
   getAllScrapAssets,
   getScrapAssetById,
@@ -169,5 +200,6 @@ module.exports = {
   updateScrapAsset,
   deleteScrapAsset,
   checkScrapAssetExists,
-  generateAsdId
+  generateAsdId,
+  getAvailableAssetsByAssetType
 };

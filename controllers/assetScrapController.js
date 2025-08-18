@@ -49,6 +49,39 @@ const getScrapAssetById = async (req, res) => {
     }
 };
 
+// GET /api/scrap-assets/available-by-type/:asset_type_id - Get available assets by asset type
+const getAvailableAssetsByAssetType = async (req, res) => {
+    try {
+        const { asset_type_id } = req.params;
+        const { org_id } = req.query;
+
+        if (!asset_type_id) {
+            return res.status(400).json({
+                success: false,
+                error: "asset_type_id is required"
+            });
+        }
+
+        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id || null);
+
+        res.status(200).json({
+            success: true,
+            message: `Found ${result.rows.length} available assets for asset_type_id ${asset_type_id}`,
+            count: result.rows.length,
+            asset_type_id,
+            org_id: org_id || null,
+            assets: result.rows
+        });
+    } catch (err) {
+        console.error("Error fetching available assets by asset type:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to fetch available assets by asset type",
+            message: err.message 
+        });
+    }
+};
+
 
 
 // POST /api/scrap-assets - Add new scrap asset
@@ -187,7 +220,7 @@ const deleteScrapAsset = async (req, res) => {
 module.exports = {
     getAllScrapAssets,
     getScrapAssetById,
-    
+    getAvailableAssetsByAssetType,
     addScrapAsset,
     updateScrapAsset,
     deleteScrapAsset
