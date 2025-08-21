@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const { generateCustomId } = require('../utils/idGenerator');
+const { convertAssetTypeToSerialFormat } = require('../utils/serialNumberGenerator');
 
 const getAllAssets = async () => {
   const query = `
@@ -247,7 +248,7 @@ const insertAsset = async (assetData) => {
         changed_on
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
       RETURNING *
     `;
@@ -519,17 +520,40 @@ const deleteMultipleAssets = async (asset_ids) => {
 };
 
 const getPotentialParentAssets = async (asset_type_id) => {
+  // First, get the parent asset type for this child asset type
+  const parentTypeQuery = `
+    SELECT parent_asset_type_id 
+    FROM "tblAssetTypes" 
+    WHERE asset_type_id = $1 AND is_child = true
+  `;
+  
+  const parentTypeResult = await db.query(parentTypeQuery, [asset_type_id]);
+  
+  if (parentTypeResult.rows.length === 0 || !parentTypeResult.rows[0].parent_asset_type_id) {
+    // Not a child asset type or no parent defined
+    return { rows: [] };
+  }
+  
+  const parentAssetTypeId = parentTypeResult.rows[0].parent_asset_type_id;
+  
+  // Now get assets of the parent asset type
   const query = `
     SELECT 
-      asset_id, text, serial_number, description, current_status
-    FROM "tblAssets"
-    WHERE asset_type_id = $1
-    AND current_status = 'Active'
-    AND parent_asset_id IS NULL
-    ORDER BY text
+      a.asset_id, 
+      a.text as asset_name, 
+      a.serial_number, 
+      a.description, 
+      a.current_status,
+      at.text as asset_type_name
+    FROM "tblAssets" a
+    JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE a.asset_type_id = $1
+    AND a.current_status = 'Active'
+    AND a.parent_asset_id IS NULL
+    ORDER BY a.text
   `;
 
-  return await db.query(query, [asset_type_id]);
+  return await db.query(query, [parentAssetTypeId]);
 };
 
 // Get assets expiring within 30 days
@@ -723,6 +747,14 @@ const createAsset = async (assetData) => {
     group_id,
     org_id,
     created_by,
+    // Depreciation fields
+    salvage_value,
+    useful_life_years,
+    depreciation_rate,
+    current_book_value,
+    accumulated_depreciation,
+    last_depreciation_calc_date,
+    depreciation_start_date
   } = assetData;
 
   const client = await db.connect();
@@ -735,6 +767,31 @@ const createAsset = async (assetData) => {
       console.log('🔢 Generating asset ID inside transaction...');
       finalAssetId = await generateCustomId("asset", 3);
       console.log('🔢 Generated asset ID:', finalAssetId);
+    }
+
+    // Use the serial number as provided and increment the sequence in database
+    let finalSerialNumber = serial_number;
+    
+    console.log(`🔢 Using provided serial number: ${finalSerialNumber}`);
+    
+    // Validate that serial number is provided
+    if (!finalSerialNumber || finalSerialNumber === '') {
+      throw new Error('Serial number is required. Please generate a serial number first.');
+    }
+    
+    // Extract the last 5 digits from the serial number to update last_gen_seq_no
+    if (finalSerialNumber && finalSerialNumber.length >= 5) {
+      const last5Digits = finalSerialNumber.slice(-5);
+      const sequenceNumber = parseInt(last5Digits);
+      
+      if (!isNaN(sequenceNumber)) {
+        // Update the last_gen_seq_no in tblAssetTypes to this sequence number
+        await client.query(
+          'UPDATE "tblAssetTypes" SET last_gen_seq_no = $1 WHERE asset_type_id = $2',
+          [sequenceNumber, asset_type_id]
+        );
+        console.log(`🔢 Updated last_gen_seq_no to ${sequenceNumber} for asset type ${asset_type_id}`);
+      }
     }
 
     // Insert asset
@@ -761,11 +818,18 @@ const createAsset = async (assetData) => {
         org_id,
         created_by,
         changed_by,
+        salvage_value,
+        useful_life_years,
+        depreciation_rate,
+        current_book_value,
+        accumulated_depreciation,
+        last_depreciation_calc_date,
+        depreciation_start_date,
         created_on,
         changed_on
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
       RETURNING *
     `;
@@ -774,7 +838,7 @@ const createAsset = async (assetData) => {
       finalAssetId,
       asset_type_id,
       text,
-      serial_number,
+      finalSerialNumber,
       description,
       branch_id,
       purchase_vendor_id,
@@ -791,6 +855,14 @@ const createAsset = async (assetData) => {
       group_id,
       org_id,
       created_by,
+      created_by, // changed_by
+      salvage_value,
+      useful_life_years,
+      depreciation_rate,
+      current_book_value,
+      accumulated_depreciation,
+      last_depreciation_calc_date,
+      depreciation_start_date
     ];
 
     const result = await client.query(query, values);

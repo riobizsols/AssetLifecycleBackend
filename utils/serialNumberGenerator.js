@@ -61,8 +61,8 @@ const addToPrintQueue = async (serialNumber, orgId, createdBy) => {
 /**
  * Generate serial number with format: AssetType + Year + Month + 5-digit sequence
  * Example: 1250700301 (AssetType: AST001 -> 12, Year: 50, Month: 07, Sequence: 00301)
- * Now uses last_gen_seq_no from tblAssetTypes table for each asset type
- * NOTE: This function only generates the serial number without incrementing the sequence
+ * This function ONLY PREVIEWS the next serial number - does NOT increment the database
+ * The sequence is only incremented when an asset is actually created
  */
 const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
   try {
@@ -74,40 +74,29 @@ const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
     // Convert asset type ID to serial format (AST001 -> 12)
     const formattedAssetTypeId = convertAssetTypeToSerialFormat(assetTypeId);
     
-    // Get the last 5 digits of the most recent serial number for this asset type
-    const lastSerialQuery = `
-      SELECT serial_number 
-      FROM "tblAssets" 
-      WHERE asset_type_id = $1 
-      AND serial_number IS NOT NULL 
-      AND serial_number != ''
-      ORDER BY created_on DESC 
-      LIMIT 1
+    // Get current sequence from tblAssetTypes table (READ ONLY - no increment)
+    const seqQuery = `
+      SELECT COALESCE(last_gen_seq_no, 0) AS current_seq
+      FROM "tblAssetTypes" 
+      WHERE asset_type_id = $1
     `;
     
-    const lastSerialResult = await pool.query(lastSerialQuery, [assetTypeId]);
+    const seqResult = await pool.query(seqQuery, [assetTypeId]);
     
-    let nextSequence = 1; // Default to 1 if no previous serial numbers
-    
-    if (lastSerialResult.rows.length > 0) {
-      const lastSerialNumber = lastSerialResult.rows[0].serial_number;
-      
-      // Extract the last 5 digits from the serial number
-      if (lastSerialNumber && lastSerialNumber.length >= 5) {
-        const last5Digits = lastSerialNumber.slice(-5);
-        const lastSequence = parseInt(last5Digits);
-        
-        if (!isNaN(lastSequence)) {
-          nextSequence = lastSequence + 1;
-          console.log(`📊 Found last serial: ${lastSerialNumber}, last 5 digits: ${last5Digits}, next sequence: ${nextSequence}`);
-        }
-      }
+    if (seqResult.rows.length === 0) {
+      throw new Error(`Asset type ${assetTypeId} not found`);
     }
     
-    // Generate the serial number without updating the database
+    const currentSeq = parseInt(seqResult.rows[0].current_seq) || 0;
+    const nextSequence = currentSeq + 1; // Preview the NEXT sequence (current + 1)
+    
+    console.log(`🔍 Debug: currentSeq type: ${typeof currentSeq}, value: ${currentSeq}`);
+    console.log(`🔍 Debug: nextSequence type: ${typeof nextSequence}, value: ${nextSequence}`);
+    
+    // Generate the serial number (preview only)
     const serialNumber = `${formattedAssetTypeId}${reversedYear}${month}${nextSequence.toString().padStart(5, '0')}`;
     
-    console.log(`📝 Generated serial number preview: ${serialNumber} (Next Sequence: ${nextSequence}) for asset type: ${assetTypeId}`);
+    console.log(`👀 Preview serial number: ${serialNumber} (Current DB: ${currentSeq}, Next: ${nextSequence}) for asset type: ${assetTypeId}`);
     
     return {
       success: true,
@@ -116,11 +105,12 @@ const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
       assetTypeId: formattedAssetTypeId,
       year: year,
       month: month,
-      orgId: orgId
+      orgId: orgId,
+      isPreview: true
     };
     
   } catch (error) {
-    console.error('❌ Error generating serial number:', error);
+    console.error('❌ Error previewing serial number:', error);
     return {
       success: false,
       error: error.message
@@ -191,7 +181,7 @@ const getCurrentSequence = async (assetTypeId, orgId = 'ORG001') => {
       };
     }
     
-    const currentSequence = result.rows[0].current_sequence || 0;
+    const currentSequence = parseInt(result.rows[0].current_sequence) || 0;
     
     // Generate the last used serial number for display
     const lastUsedSerial = `${formattedAssetTypeId}${reversedYear}${month}${currentSequence.toString().padStart(5, '0')}`;
@@ -207,6 +197,67 @@ const getCurrentSequence = async (assetTypeId, orgId = 'ORG001') => {
     
   } catch (error) {
     console.error('❌ Error getting current sequence:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Preview the next serial number without incrementing the sequence
+ * This is for display purposes only
+ */
+const previewNextSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
+  try {
+    const now = new Date();
+    const year = now.getFullYear().toString().slice(-2);
+    const reversedYear = year.split('').reverse().join('');
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+    
+    // Convert asset type ID to serial format (AST001 -> 12)
+    const formattedAssetTypeId = convertAssetTypeToSerialFormat(assetTypeId);
+    
+    // Get current sequence from tblAssetTypes table (READ ONLY)
+    const query = `
+      SELECT COALESCE(last_gen_seq_no, 0) as current_sequence
+      FROM "tblAssetTypes" 
+      WHERE asset_type_id = $1
+    `;
+    
+    const result = await pool.query(query, [assetTypeId]);
+    
+    if (result.rows.length === 0) {
+      return {
+        success: false,
+        error: `Asset type ${assetTypeId} not found`
+      };
+    }
+    
+    const currentSequence = parseInt(result.rows[0].current_sequence) || 0;
+    const nextSequence = currentSequence + 1;
+    
+    console.log(`🔍 Debug preview: currentSequence type: ${typeof currentSequence}, value: ${currentSequence}`);
+    console.log(`🔍 Debug preview: nextSequence type: ${typeof nextSequence}, value: ${nextSequence}`);
+    
+    // Generate the next serial number (preview only)
+    const nextSerial = `${formattedAssetTypeId}${reversedYear}${month}${nextSequence.toString().padStart(5, '0')}`;
+    
+    console.log(`👀 Preview next serial number: ${nextSerial} (Current: ${currentSequence}, Next: ${nextSequence}) for asset type: ${assetTypeId}`);
+    
+    return {
+      success: true,
+      serialNumber: nextSerial,
+      sequence: nextSequence,
+      assetTypeId: formattedAssetTypeId,
+      year: year,
+      month: month,
+      orgId: orgId,
+      isPreview: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Error previewing next serial number:', error);
     return {
       success: false,
       error: error.message
@@ -369,6 +420,7 @@ module.exports = {
   generateSerialNumber,
   generateSerialNumberAndQueue,
   getCurrentSequence,
+  previewNextSerialNumber,
   getSerialNumberStats,
   getPrintQueue,
   updatePrintQueueStatus,

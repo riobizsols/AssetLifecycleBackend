@@ -14,7 +14,8 @@ const addAssetType = async (req, res) => {
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
             maint_type_id = null,  // from frontend
-            maint_lead_type = null  // from frontend
+            maint_lead_type = null,  // from frontend
+            depreciation_type = 'ND'  // from frontend
         } = req.body;
 
         // Get org_id and user_id from authenticated user
@@ -73,7 +74,8 @@ const addAssetType = async (req, res) => {
                     is_child,
                     parent_asset_type_id,
                     maint_type_id,
-                    maint_lead_type
+                    maint_lead_type,
+                    depreciation_type
                 );
                 break; // Success, exit the loop
             } catch (err) {

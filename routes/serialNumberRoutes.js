@@ -3,7 +3,8 @@ const router = express.Router();
 const { 
   generateSerialNumber, 
   generateSerialNumberAndQueue,
-  getCurrentSequence, 
+  getCurrentSequence,
+  previewNextSerialNumber, 
   getSerialNumberStats,
   getPrintQueue,
   updatePrintQueueStatus,
@@ -117,7 +118,7 @@ router.get('/current/:assetTypeId', protect, async (req, res) => {
   }
 });
 
-// Get next sequence number for an asset type (without generating)
+// Preview next sequence number for an asset type (without generating/incrementing)
 router.get('/next/:assetTypeId', protect, async (req, res) => {
   try {
     const { assetTypeId } = req.params;
@@ -130,37 +131,29 @@ router.get('/next/:assetTypeId', protect, async (req, res) => {
       });
     }
     
-    const result = await getCurrentSequence(assetTypeId, orgId);
+    const result = await previewNextSerialNumber(assetTypeId, orgId);
     
     if (result.success) {
-      const nextSequence = result.currentSequence + 1;
-      const now = new Date();
-      const year = now.getFullYear().toString().slice(-2);
-      const reversedYear = year.split('').reverse().join('');
-      const month = (now.getMonth() + 1).toString().padStart(2, '0');
-      
-      const nextSerialNumber = `${result.assetTypeId}${reversedYear}${month}${nextSequence.toString().padStart(5, '0')}`;
-      
       res.json({
         success: true,
         data: {
-          currentSequence: result.currentSequence,
-          nextSequence: nextSequence,
-          nextSerialNumber: nextSerialNumber,
+          serialNumber: result.serialNumber,
+          sequence: result.sequence,
           assetTypeId: result.assetTypeId,
-          year: year,
-          month: month
+          year: result.year,
+          month: result.month,
+          isPreview: result.isPreview
         }
       });
     } else {
       res.status(500).json({
         success: false,
-        message: 'Failed to get next sequence',
+        message: 'Failed to preview next sequence',
         error: result.error
       });
     }
   } catch (error) {
-    console.error('Error getting next sequence:', error);
+    console.error('Error previewing next sequence:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
