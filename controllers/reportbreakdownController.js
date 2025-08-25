@@ -43,10 +43,12 @@ const getUpcomingMaintenanceDate = async (req, res) => {
       return res.status(400).json({ error: 'Asset ID is required' });
     }
 
-    const maintenanceData = await model.getUpcomingMaintenanceWithRecommendation(assetId);
+    const maintenanceDate = await model.getUpcomingMaintenanceDate(assetId);
     
     res.status(200).json({ 
-      data: maintenanceData
+      data: {
+        upcoming_maintenance_date: maintenanceDate
+      }
     });
   } catch (err) {
     console.error('Error fetching upcoming maintenance date:', err);
@@ -61,14 +63,15 @@ const createBreakdownReport = async (req, res) => {
       asset_id,
       atbrrc_id,
       reported_by,
-      is_create_maintenance,
+      decision_code,
+      priority,
       description
     } = req.body;
 
     // Validate required fields
-    if (!asset_id || !atbrrc_id || !reported_by || !description) {
+    if (!asset_id || !atbrrc_id || !reported_by || !decision_code || !priority || !description) {
       return res.status(400).json({ 
-        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description' 
+        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, decision_code, priority, description' 
       });
     }
 
@@ -82,7 +85,8 @@ const createBreakdownReport = async (req, res) => {
       asset_id,
       atbrrc_id,
       reported_by,
-      is_create_maintenance: is_create_maintenance || false,
+      decision_code,
+      priority,
       description,
       org_id
     };

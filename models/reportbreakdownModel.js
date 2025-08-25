@@ -30,7 +30,9 @@ const getBreakdownReasonCodes = async (orgId = 'ORG001', assetTypeId = null) => 
   return result.rows;
 };
 
-// Get upcoming maintenance date for an asset
+
+
+// Get upcoming maintenance date for an asset (simplified version)
 const getUpcomingMaintenanceDate = async (assetId) => {
   // Get the next maintenance date (including overdue maintenance)
   const query = `
@@ -63,40 +65,14 @@ const getUpcomingMaintenanceDate = async (assetId) => {
   return workflowResult.rows.length > 0 ? workflowResult.rows[0].act_sch_date : null;
 };
 
-// Get upcoming maintenance date with recommendation for an asset
-const getUpcomingMaintenanceWithRecommendation = async (assetId) => {
-  const maintenanceDate = await getUpcomingMaintenanceDate(assetId);
-  
-  if (!maintenanceDate) {
-    return {
-      upcoming_maintenance_date: null,
-      create_maintenance_recommendation: 'Yes' // Default to Yes if no maintenance scheduled
-    };
-  }
-  
-  // Calculate days difference
-  const currentDate = new Date();
-  const maintenanceDateTime = new Date(maintenanceDate);
-  const timeDifference = maintenanceDateTime.getTime() - currentDate.getTime();
-  const daysDifference = Math.ceil(timeDifference / (1000 * 3600 * 24));
-  
-  // If difference is less than 30 days, recommend "No", otherwise "Yes"
-  const recommendation = daysDifference < 30 ? 'No' : 'Yes';
-  
-  return {
-    upcoming_maintenance_date: maintenanceDate,
-    create_maintenance_recommendation: recommendation,
-    days_until_maintenance: daysDifference
-  };
-};
-
 // Create a new breakdown report
 const createBreakdownReport = async (breakdownData) => {
   const {
     asset_id,
     atbrrc_id,
     reported_by,
-    is_create_maintenance,
+    decision_code,
+    priority,
     description,
     org_id
   } = breakdownData;
@@ -114,11 +90,12 @@ const createBreakdownReport = async (breakdownData) => {
       asset_id, 
       atbrrc_id, 
       reported_by, 
-      is_create_maintenance, 
+      decision_code, 
+      priority,
       status, 
       description, 
       org_id
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
     RETURNING *
   `;
 
@@ -127,8 +104,9 @@ const createBreakdownReport = async (breakdownData) => {
     asset_id,
     atbrrc_id,
     reported_by,
-    is_create_maintenance,
-    'CR', // Default status for new breakdown reports (Pending)
+    decision_code,
+    priority,
+    'CR', // Default status for new breakdown reports (Created)
     description,
     org_id
   ];
@@ -143,6 +121,5 @@ module.exports = {
   getBreakdownReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
-  getUpcomingMaintenanceWithRecommendation,
   createBreakdownReport
 };
