@@ -762,12 +762,14 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
           maint_type_id,
           vendor_id,
           at_main_freq_id,
+          maintained_by,
+          notes,
           status,
           act_maint_st_date,
           created_by,
           created_on,
           org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12)
       `;
       
       // Use a default maint_type_id if it's null
@@ -780,6 +782,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
         maintTypeId,
         workflowData.vendor_id,
         workflowData.at_main_freq_id,
+        null, // maintained_by - will be set when maintenance is performed
+        null, // notes - will be set when maintenance is performed
         'IN', // Initial status
         workflowData.act_maint_st_date,
         'system', // created_by
