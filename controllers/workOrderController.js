@@ -23,6 +23,11 @@ const getAllWorkOrders = async (req, res) => {
         const formattedData = result.rows.map(row => ({
             // Work Order Details
             ams_id: row.ams_id,
+            wo_id: row.wo_id,
+            wfamsh_id: row.wfamsh_id,
+            final_approver_name: row.final_approver_name,
+            approval_date: row.approval_date,
+            recent_activities: row.recent_activities || [],
             maint_type_id: row.maint_type_id,
             maintenance_type_name: row.maintenance_type_name,
             act_maint_st_date: row.act_maint_st_date,
@@ -129,6 +134,11 @@ const getWorkOrderById = async (req, res) => {
         const formattedData = {
             // Work Order Details
             ams_id: workOrder.ams_id,
+            wo_id: workOrder.wo_id,
+            wfamsh_id: workOrder.wfamsh_id,
+            final_approver_name: workOrder.final_approver_name,
+            approval_date: workOrder.approval_date,
+            recent_activities: workOrder.recent_activities || [],
             maint_type_id: workOrder.maint_type_id,
             maintenance_type_name: workOrder.maintenance_type_name,
             act_maint_st_date: workOrder.act_maint_st_date,
