@@ -34,9 +34,77 @@ const getReasonCodes = async (req, res) => {
   }
 };
 
+// GET /api/reportbreakdown/upcoming-maintenance/:assetId
+const getUpcomingMaintenanceDate = async (req, res) => {
+  try {
+    const { assetId } = req.params;
+    
+    if (!assetId) {
+      return res.status(400).json({ error: 'Asset ID is required' });
+    }
+
+    const maintenanceData = await model.getUpcomingMaintenanceWithRecommendation(assetId);
+    
+    res.status(200).json({ 
+      data: maintenanceData
+    });
+  } catch (err) {
+    console.error('Error fetching upcoming maintenance date:', err);
+    res.status(500).json({ error: 'Failed to fetch upcoming maintenance date' });
+  }
+};
+
+// POST /api/reportbreakdown/create
+const createBreakdownReport = async (req, res) => {
+  try {
+    const {
+      asset_id,
+      atbrrc_id,
+      reported_by,
+      is_create_maintenance,
+      description
+    } = req.body;
+
+    // Validate required fields
+    if (!asset_id || !atbrrc_id || !reported_by || !description) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description' 
+      });
+    }
+
+    // Get org_id from authenticated user
+    const org_id = req.user?.org_id;
+    if (!org_id) {
+      return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    }
+
+    const breakdownData = {
+      asset_id,
+      atbrrc_id,
+      reported_by,
+      is_create_maintenance: is_create_maintenance || false,
+      description,
+      org_id
+    };
+
+    const result = await model.createBreakdownReport(breakdownData);
+    
+    res.status(201).json({ 
+      success: true,
+      message: 'Breakdown report created successfully',
+      data: result
+    });
+  } catch (err) {
+    console.error('Error creating breakdown report:', err);
+    res.status(500).json({ error: 'Failed to create breakdown report' });
+  }
+};
+
 module.exports = {
   getReasonCodes,
-  getAllReports
+  getAllReports,
+  getUpcomingMaintenanceDate,
+  createBreakdownReport
 };
 
 
