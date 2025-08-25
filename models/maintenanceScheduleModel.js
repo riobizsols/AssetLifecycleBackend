@@ -395,6 +395,88 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
     return await db.query(query, values);
 };
 
+// Check if asset type requires workflow
+const checkAssetTypeWorkflow = async (asset_type_id) => {
+    const query = `
+        SELECT COUNT(*) as workflow_count
+        FROM "tblWFATSeqs"
+        WHERE asset_type_id = $1
+    `;
+    
+    const result = await db.query(query, [asset_type_id]);
+    return result.rows[0].workflow_count > 0;
+};
+
+// Generate next AMS_ID for direct maintenance schedules
+const getNextAMSId = async () => {
+    const query = `
+        SELECT MAX(
+            CASE 
+                WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
+                WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
+                ELSE 0
+            END
+        ) as max_num 
+        FROM "tblAssetMaintSch"
+    `;
+    
+    const result = await db.query(query);
+    const nextId = (result.rows[0].max_num || 0) + 1;
+    return `ams${nextId.toString().padStart(3, '0')}`;
+};
+
+// Insert direct maintenance schedule (bypassing workflow)
+const insertDirectMaintenanceSchedule = async (scheduleData) => {
+    const {
+        ams_id,
+        asset_id,
+        maint_type_id,
+        vendor_id,
+        at_main_freq_id,
+        maintained_by,
+        notes,
+        status,
+        act_maint_st_date,
+        created_by,
+        org_id
+    } = scheduleData;
+    
+    const query = `
+        INSERT INTO "tblAssetMaintSch" (
+            ams_id,
+            wfamsh_id,
+            asset_id,
+            maint_type_id,
+            vendor_id,
+            at_main_freq_id,
+            maintained_by,
+            notes,
+            status,
+            act_maint_st_date,
+            created_by,
+            created_on,
+            org_id
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11)
+        RETURNING *
+    `;
+    
+    const values = [
+        ams_id,
+        asset_id,
+        maint_type_id,
+        vendor_id,
+        at_main_freq_id,
+        maintained_by,
+        notes,
+        status,
+        act_maint_st_date,
+        created_by,
+        org_id
+    ];
+    
+    return await db.query(query, values);
+};
+
 module.exports = {
     getAssetTypesRequiringMaintenance,
     getAssetsByAssetType,
@@ -411,5 +493,8 @@ module.exports = {
     isMaintenanceDue,
     getAllMaintenanceSchedules,
     getMaintenanceScheduleById,
-    updateMaintenanceSchedule
+    updateMaintenanceSchedule,
+    checkAssetTypeWorkflow,
+    getNextAMSId,
+    insertDirectMaintenanceSchedule
 }; 

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
     generateMaintenanceSchedules,
+    generateMaintenanceSchedulesWithWorkflowBypass,
     getMaintenanceSchedulesForAsset,
     getAssetTypesRequiringMaintenance,
     getMaintenanceFrequencyForAssetType,
@@ -14,8 +15,14 @@ const { protect } = require('../middlewares/authMiddleware');
 // Generate maintenance schedules (protected for manual access)
 router.post('/generate', protect, generateMaintenanceSchedules);
 
+// Generate maintenance schedules with workflow bypass (protected for manual access)
+router.post('/generate-with-bypass', protect, generateMaintenanceSchedulesWithWorkflowBypass);
+
 // Generate maintenance schedules (unprotected for cron jobs)
 router.post('/generate-cron', generateMaintenanceSchedules);
+
+// Generate maintenance schedules with workflow bypass (unprotected for cron jobs)
+router.post('/generate-cron-with-bypass', generateMaintenanceSchedulesWithWorkflowBypass);
 
 // Get all maintenance schedules from tblAssetMaintSch (protected)
 router.get('/all', protect, getAllMaintenanceSchedules);
