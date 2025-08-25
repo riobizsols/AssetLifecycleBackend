@@ -178,17 +178,6 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001') => {
                 ORDER BY wfd.sequence DESC, wfd.created_on DESC
                 LIMIT 1
             ) as approval_date
-            ) as final_approver_name,
-            -- Get final approval date (changed_on of the same record)
-            (
-                SELECT wfd.changed_on
-                FROM "tblWFAssetMaintSch_D" wfd
-                WHERE wfd.wfamsh_id = ams.wfamsh_id
-                  AND wfd.org_id = ams.org_id
-                  AND wfd.status = 'UA'
-                ORDER BY wfd.sequence DESC, wfd.created_on DESC
-                LIMIT 1
-            ) as approval_date
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
