@@ -61,15 +61,21 @@ const createBreakdownReport = async (req, res) => {
       asset_id,
       atbrrc_id,
       reported_by,
-      is_create_maintenance,
-      description
+      description,
+      decision_code
     } = req.body;
 
     // Validate required fields
-    if (!asset_id || !atbrrc_id || !reported_by || !description) {
+    if (!asset_id || !atbrrc_id || !reported_by || !description || !decision_code) {
       return res.status(400).json({ 
-        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description' 
+        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description, decision_code' 
       });
+    }
+
+    // Validate decision code
+    const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
+    if (!validDecisionCodes.includes(decision_code)) {
+      return res.status(400).json({ error: 'Invalid decision code. Must be BF01, BF02, or BF03' });
     }
 
     // Get org_id from authenticated user
@@ -82,8 +88,8 @@ const createBreakdownReport = async (req, res) => {
       asset_id,
       atbrrc_id,
       reported_by,
-      is_create_maintenance: is_create_maintenance || false,
       description,
+      decision_code,
       org_id
     };
 
