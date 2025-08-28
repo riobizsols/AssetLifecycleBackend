@@ -320,7 +320,7 @@ const getDepartmentWiseAssetAssignments = async (dept_id) => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
         WHERE aa.dept_id = $1 
-        AND at.assignment_type = 'Department'
+        AND at.assignment_type = 'department'
         AND aa.action = 'A' 
         AND aa.latest_assignment_flag = true
         ORDER BY a.text
