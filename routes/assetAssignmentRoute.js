@@ -21,7 +21,7 @@ router.get("/:id", controller.getAssetAssignmentById);
 // GET /api/asset-assignments/details/:id - Get asset assignment with detailed information
 router.get("/details/:id", controller.getAssetAssignmentWithDetails);
 
-// GET /api/asset-assignments/dept/:dept_id - Get asset assignments by department
+// GET /api/asset-assignments/dept/:dept_id - Get asset assignments history by department
 router.get("/dept/:dept_id", controller.getAssetAssignmentsByDept);
 
 // GET /api/asset-assignments/employee/:employee_id - Get asset assignments History by employee
@@ -42,7 +42,7 @@ router.get("/org/:org_id", controller.getAssetAssignmentsByOrg);
 // GET /api/asset-assignments/department/:dept_id/assignments - Get department-wise asset assignments
 router.get("/department/:dept_id/assignments", controller.getDepartmentWiseAssetAssignments);
 
-// PUT /api/asset-assignments/:id - Update asset assignment
+// PUT /api/asset-assignments/:id - Update asset assignment 
 router.put("/:id", controller.updateAssetAssignment);
 
 // PUT /api/asset-assignments/asset/:asset_id - Update asset assignment by asset_id (only for action="A" and latest_assignment_flag=true)

@@ -146,38 +146,6 @@ const getAllAssets = async (req, res) => {
   }
 };
 
-// const addAsset = async (req, res) => {
-//   try {
-//     // Get the user's branch_code through their department
-//     const getUserBranchQuery = `
-//       SELECT d.branch_code 
-//       FROM "tblDepartments" d
-//       JOIN "tblUsers" u ON u.dept_id = d.dept_id
-//       WHERE u.user_id = $1
-//     `;
-//     const branchResult = await db.query(getUserBranchQuery, [req.user.user_id]);
-//     const branch_id = branchResult.rows[0]?.branch_code;
-
-//     if (!branch_id) {
-//       return res.status(400).json({ error: "User's branch not found" });
-//     }
-
-//     // Add branch_id and created_by to the asset data
-//     const assetData = {
-//       ...req.body,
-//       branch_id,
-//       ext_id: crypto.randomUUID(),
-//       created_by: req.user.user_id,
-//       changed_by: req.user.user_id
-//     };
-
-//     const asset = await model.insertAsset(assetData);
-//     res.status(201).json(asset);
-//   } catch (err) {
-//     console.error("Error adding asset:", err);
-//     res.status(500).json({ error: "Failed to add asset" });
-//   }
-// };
 
 const updateAsset = async (req, res) => {
   const { asset_id } = req.params;

@@ -31,7 +31,9 @@ const getBreakdownReasonCodes = async (orgId = 'ORG001', assetTypeId = null) => 
   return result.rows;
 };
 
-// Get upcoming maintenance date for an asset
+
+
+// Get upcoming maintenance date for an asset (simplified version)
 const getUpcomingMaintenanceDate = async (assetId) => {
   // Get the next maintenance date (including overdue maintenance)
   const query = `
@@ -357,6 +359,5 @@ module.exports = {
   getBreakdownReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
-  getUpcomingMaintenanceWithRecommendation,
   createBreakdownReport
 };

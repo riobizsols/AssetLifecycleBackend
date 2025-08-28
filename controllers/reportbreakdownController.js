@@ -43,10 +43,12 @@ const getUpcomingMaintenanceDate = async (req, res) => {
       return res.status(400).json({ error: 'Asset ID is required' });
     }
 
-    const maintenanceData = await model.getUpcomingMaintenanceWithRecommendation(assetId);
+    const maintenanceDate = await model.getUpcomingMaintenanceDate(assetId);
     
     res.status(200).json({ 
-      data: maintenanceData
+      data: {
+        upcoming_maintenance_date: maintenanceDate
+      }
     });
   } catch (err) {
     console.error('Error fetching upcoming maintenance date:', err);
