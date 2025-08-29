@@ -34,6 +34,7 @@ const cronJobRoutes = require("./routes/cronJobRoutes");
 const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
 const scrapSalesRoutes = require("./routes/scrapSalesRoutes");
 const workOrderRoutes = require("./routes/workOrderRoutes");
+const assetDocsRoutes = require("./routes/assetDocsRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -89,6 +90,7 @@ app.use("/api/cron-jobs", cronJobRoutes);
 app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
 app.use("/api/work-orders", workOrderRoutes);
+app.use("/api", assetDocsRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
