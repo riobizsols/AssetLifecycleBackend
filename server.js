@@ -35,6 +35,10 @@ const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
 const scrapSalesRoutes = require("./routes/scrapSalesRoutes");
 const workOrderRoutes = require("./routes/workOrderRoutes");
 const assetDocsRoutes = require("./routes/assetDocsRoutes");
+const assetGroupDocsRoutes = require("./routes/assetGroupDocsRoutes");
+const assetTypeDocsRoutes = require("./routes/assetTypeDocsRoutes");
+const vendorDocsRoutes = require("./routes/vendorDocsRoutes");
+const assetMaintDocsRoutes = require("./routes/assetMaintDocsRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -91,6 +95,10 @@ app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
 app.use("/api/work-orders", workOrderRoutes);
 app.use("/api", assetDocsRoutes);
+app.use("/api/asset-group-docs", assetGroupDocsRoutes);
+app.use("/api/asset-type-docs", assetTypeDocsRoutes);
+app.use("/api/vendor-docs", vendorDocsRoutes);
+app.use("/api/asset-maint-docs", assetMaintDocsRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
