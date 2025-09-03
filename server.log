@@ -1,0 +1,605 @@
+Server is listening on port 4000
+Initializing cron jobs...
+📅 [CRON] Maintenance schedule generation scheduled for every minute
+Cron jobs initialized successfully
+[INCOMING REQUEST] GET /api/doc-type-objects/object-type/vendor
+[INCOMING REQUEST] GET /api/doc-type-objects
+[INCOMING REQUEST] GET /api/doc-type-objects/object-type/vendor
+[INCOMING REQUEST] GET /api/doc-type-objects/object-type/asset
+[INCOMING REQUEST] GET /api/doc-type-objects/doc-type/invoice
+[INCOMING REQUEST] GET /api/doc-type-objects/1
+[INCOMING REQUEST] GET /api/doc-type-objects/object-type/vendor
+🕐 [CRON] Starting scheduled maintenance schedule generation at: 2025-09-03T07:59:00.012Z
+[INCOMING REQUEST] POST /api/maintenance-schedules/generate-cron
+Starting maintenance schedule generation...
+Using date for comparison: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time)
+Found 20 asset types requiring maintenance
+Processing asset type: AT001 - Laptop
+Found 5 assets for asset type AT001
+Processing asset: ASS001 - Apple Laptop
+Asset ASS001 has in-progress maintenance schedules, skipping
+Processing asset: ASS002 - Dell XPS 13
+Asset ASS002 has in-progress workflow schedules, skipping
+Processing asset: ASS003 - HP EliteBook 840
+Asset ASS003 has in-progress workflow schedules, skipping
+Processing asset: ASS004 - Laptop
+Processing frequency: 30 days for asset ASS004
+Asset ASS004 purchased on: Wed Dec 10 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Dec 10 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Jan 09 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 30 days)
+Maintenance not due for asset ASS004 with frequency 30 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Dec 30 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Jan 09 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS005 - Laptop
+Asset ASS005 has in-progress workflow schedules, skipping
+Processing asset type: AT002 - Desktop
+Found 3 assets for asset type AT002
+Processing asset: ASS006 - Dell OptiPlex 7090
+Processing frequency: 90 days for asset ASS006
+Asset ASS006 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS006 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sun Oct 19 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS007 - HP ProDesk 400 G7
+Processing frequency: 90 days for asset ASS007
+Asset ASS007 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS007 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sun Oct 19 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS059 - Desktop
+Processing frequency: 90 days for asset ASS059
+Asset ASS059 purchased on: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS059 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Nov 01 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT003 - Monitor
+Found 2 assets for asset type AT003
+Processing asset: ASS008 - Samsung 24 inch
+Processing frequency: 180 days for asset ASS008
+Asset ASS008 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS008 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS009 - LG UltraWide 29WL50S
+Processing frequency: 180 days for asset ASS009
+Asset ASS009 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS009 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT004 - Key Board
+Found 2 assets for asset type AT004
+Processing asset: ASS010 - Logitech MX Keys
+Processing frequency: 180 days for asset ASS010
+Asset ASS010 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS010 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS011 - Redgear Blaze
+Processing frequency: 180 days for asset ASS011
+Asset ASS011 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS011 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT005 - Mouse
+Found 2 assets for asset type AT005
+Processing asset: ASS012 - Logitech MX Master 3
+Processing frequency: 180 days for asset ASS012
+Asset ASS012 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS012 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS013 - HP Wireless 200
+Processing frequency: 180 days for asset ASS013
+Asset ASS013 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS013 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT006 - CPU
+Found 2 assets for asset type AT006
+Processing asset: ASS014 - 	Intel Core i7 12th Gen Boxed
+Processing frequency: 90 days for asset ASS014
+Asset ASS014 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS014 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS015 - AMD Ryzen 7 5800X
+Processing frequency: 90 days for asset ASS015
+Asset ASS015 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS015 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT007 - UPS
+Found 2 assets for asset type AT007
+Processing asset: ASS016 - APC Back-UPS 600VA
+Processing frequency: 90 days for asset ASS016
+Asset ASS016 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS016 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS017 - Luminous 1000VA
+Processing frequency: 90 days for asset ASS017
+Asset ASS017 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS017 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT008 - Projector
+Found 2 assets for asset type AT008
+Processing asset: ASS018 - Epson EB-E01
+Processing frequency: 108 days for asset ASS018
+Asset ASS018 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 108 days)
+Maintenance not due for asset ASS018 with frequency 108 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS019 - BenQ MS560
+Processing frequency: 108 days for asset ASS019
+Asset ASS019 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 108 days)
+Maintenance not due for asset ASS019 with frequency 108 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT009 - Router
+Found 2 assets for asset type AT009
+Processing asset: ASS020 - TP-Link Archer C6
+Processing frequency: 90 days for asset ASS020
+Asset ASS020 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS020 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS021 - Netgear R6700AX
+Processing frequency: 90 days for asset ASS021
+Asset ASS021 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS021 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT010 - Fire Extinguisher
+Found 3 assets for asset type AT010
+Processing asset: ASS022 - SafePro 6kg ABC
+Processing frequency: 180 days for asset ASS022
+Asset ASS022 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS022 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS023 - Minimax CO2 4.5kg
+Processing frequency: 180 days for asset ASS023
+Asset ASS023 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS023 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: AST00001 - Apple Laptop
+Processing frequency: 180 days for asset AST00001
+Asset AST00001 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset AST00001 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT011 - CCTV Camera
+Found 2 assets for asset type AT011
+Processing asset: ASS024 - Hikvision Dome DS-2CD1323G0
+Processing frequency: 90 days for asset ASS024
+Asset ASS024 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS024 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS025 - CP Plus Bullet CP-UNC-TA24L2
+Processing frequency: 90 days for asset ASS025
+Asset ASS025 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS025 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT012 - Mobile Phone
+Found 2 assets for asset type AT012
+No maintenance frequency found for asset type AT012
+Processing asset type: AT013 - AC Unit
+Found 2 assets for asset type AT013
+Processing asset: ASS028 - Daikin 1.5 Ton Split AC
+Processing frequency: 90 days for asset ASS028
+Asset ASS028 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS028 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS029 - Voltas 2 Ton Inverter AC
+Processing frequency: 90 days for asset ASS029
+Asset ASS029 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS029 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT014 - Generator
+Found 1 assets for asset type AT014
+Processing asset: ASS030 - Honda EU 7000i
+Processing frequency: 90 days for asset ASS030
+Asset ASS030 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS030 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT015 - MicroSoft 365 license
+Found 2 assets for asset type AT015
+Processing asset: ASS031 - Microsoft 365 Business Standard
+Processing frequency: 180 days for asset ASS031
+Asset ASS031 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS031 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS032 - Microsoft 365 E3
+Processing frequency: 180 days for asset ASS032
+Asset ASS032 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS032 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT016 - Anti-virus Subscription 
+Found 1 assets for asset type AT016
+Processing asset: ASS033 - Quick Heal Total Security
+Processing frequency: 180 days for asset ASS033
+Asset ASS033 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS033 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT017 - Printer
+Found 3 assets for asset type AT017
+Processing asset: ASS034 - HP LaserJet Pro MFP M126nw
+Processing frequency: 90 days for asset ASS034
+Asset ASS034 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS034 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS035 - Canon PIXMA G3000
+Processing frequency: 90 days for asset ASS035
+Asset ASS035 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS035 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS066 - Printer
+Processing frequency: 90 days for asset ASS066
+Asset ASS066 purchased on: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS066 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Nov 01 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT018 - Table
+Found 3 assets for asset type AT018
+No maintenance frequency found for asset type AT018
+Processing asset type: AT026 - Fan
+Found 3 assets for asset type AT026
+No maintenance frequency found for asset type AT026
+Processing asset type: AT029 - UPS
+Found 1 assets for asset type AT029
+No maintenance frequency found for asset type AT029
+Maintenance schedule generation completed.
+Total assets processed: 36
+Assets skipped: 4
+Schedules created: 0
+📊 [CRON] Maintenance generation response: {
+  status: 200,
+  data: {
+    message: 'Maintenance schedules generated successfully',
+    asset_types_processed: 20,
+    assets_processed: 36,
+    assets_skipped: 4,
+    schedules_created: 0,
+    test_date_used: '2025-09-05T00:00:00.000Z'
+  }
+}
+✅ [CRON] Maintenance schedule generation completed successfully
+🕐 [CRON] Starting scheduled maintenance schedule generation at: 2025-09-03T08:00:00.019Z
+[INCOMING REQUEST] POST /api/maintenance-schedules/generate-cron
+Starting maintenance schedule generation...
+Using date for comparison: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time)
+Found 20 asset types requiring maintenance
+Processing asset type: AT001 - Laptop
+Found 5 assets for asset type AT001
+Processing asset: ASS001 - Apple Laptop
+Asset ASS001 has in-progress maintenance schedules, skipping
+Processing asset: ASS002 - Dell XPS 13
+Asset ASS002 has in-progress workflow schedules, skipping
+Processing asset: ASS003 - HP EliteBook 840
+Asset ASS003 has in-progress workflow schedules, skipping
+Processing asset: ASS004 - Laptop
+Processing frequency: 30 days for asset ASS004
+Asset ASS004 purchased on: Wed Dec 10 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Dec 10 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Jan 09 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 30 days)
+Maintenance not due for asset ASS004 with frequency 30 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Dec 30 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Jan 09 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS005 - Laptop
+Asset ASS005 has in-progress workflow schedules, skipping
+Processing asset type: AT002 - Desktop
+Found 3 assets for asset type AT002
+Processing asset: ASS006 - Dell OptiPlex 7090
+Processing frequency: 90 days for asset ASS006
+Asset ASS006 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS006 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sun Oct 19 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS007 - HP ProDesk 400 G7
+Processing frequency: 90 days for asset ASS007
+Asset ASS007 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS007 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sun Oct 19 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Wed Oct 29 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS059 - Desktop
+Processing frequency: 90 days for asset ASS059
+Asset ASS059 purchased on: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS059 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Nov 01 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT003 - Monitor
+Found 2 assets for asset type AT003
+Processing asset: ASS008 - Samsung 24 inch
+Processing frequency: 180 days for asset ASS008
+Asset ASS008 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS008 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS009 - LG UltraWide 29WL50S
+Processing frequency: 180 days for asset ASS009
+Asset ASS009 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS009 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT004 - Key Board
+Found 2 assets for asset type AT004
+Processing asset: ASS010 - Logitech MX Keys
+Processing frequency: 180 days for asset ASS010
+Asset ASS010 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS010 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS011 - Redgear Blaze
+Processing frequency: 180 days for asset ASS011
+Asset ASS011 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS011 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT005 - Mouse
+Found 2 assets for asset type AT005
+Processing asset: ASS012 - Logitech MX Master 3
+Processing frequency: 180 days for asset ASS012
+Asset ASS012 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS012 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS013 - HP Wireless 200
+Processing frequency: 180 days for asset ASS013
+Asset ASS013 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS013 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT006 - CPU
+Found 2 assets for asset type AT006
+Processing asset: ASS014 - 	Intel Core i7 12th Gen Boxed
+Processing frequency: 90 days for asset ASS014
+Asset ASS014 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS014 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS015 - AMD Ryzen 7 5800X
+Processing frequency: 90 days for asset ASS015
+Asset ASS015 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS015 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT007 - UPS
+Found 2 assets for asset type AT007
+Processing asset: ASS016 - APC Back-UPS 600VA
+Processing frequency: 90 days for asset ASS016
+Asset ASS016 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS016 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS017 - Luminous 1000VA
+Processing frequency: 90 days for asset ASS017
+Asset ASS017 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS017 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT008 - Projector
+Found 2 assets for asset type AT008
+Processing asset: ASS018 - Epson EB-E01
+Processing frequency: 108 days for asset ASS018
+Asset ASS018 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 108 days)
+Maintenance not due for asset ASS018 with frequency 108 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS019 - BenQ MS560
+Processing frequency: 108 days for asset ASS019
+Asset ASS019 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 108 days)
+Maintenance not due for asset ASS019 with frequency 108 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Fri Nov 21 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT009 - Router
+Found 2 assets for asset type AT009
+Processing asset: ASS020 - TP-Link Archer C6
+Processing frequency: 90 days for asset ASS020
+Asset ASS020 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS020 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS021 - Netgear R6700AX
+Processing frequency: 90 days for asset ASS021
+Asset ASS021 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS021 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT010 - Fire Extinguisher
+Found 3 assets for asset type AT010
+Processing asset: ASS022 - SafePro 6kg ABC
+Processing frequency: 180 days for asset ASS022
+Asset ASS022 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS022 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS023 - Minimax CO2 4.5kg
+Processing frequency: 180 days for asset ASS023
+Asset ASS023 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS023 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: AST00001 - Apple Laptop
+Processing frequency: 180 days for asset AST00001
+Asset AST00001 purchased on: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Thu Jul 31 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset AST00001 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Jan 17 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Jan 27 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT011 - CCTV Camera
+Found 2 assets for asset type AT011
+Processing asset: ASS024 - Hikvision Dome DS-2CD1323G0
+Processing frequency: 90 days for asset ASS024
+Asset ASS024 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS024 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS025 - CP Plus Bullet CP-UNC-TA24L2
+Processing frequency: 90 days for asset ASS025
+Asset ASS025 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS025 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT012 - Mobile Phone
+Found 2 assets for asset type AT012
+No maintenance frequency found for asset type AT012
+Processing asset type: AT013 - AC Unit
+Found 2 assets for asset type AT013
+Processing asset: ASS028 - Daikin 1.5 Ton Split AC
+Processing frequency: 90 days for asset ASS028
+Asset ASS028 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS028 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS029 - Voltas 2 Ton Inverter AC
+Processing frequency: 90 days for asset ASS029
+Asset ASS029 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS029 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT014 - Generator
+Found 1 assets for asset type AT014
+Processing asset: ASS030 - Honda EU 7000i
+Processing frequency: 90 days for asset ASS030
+Asset ASS030 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS030 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT015 - MicroSoft 365 license
+Found 2 assets for asset type AT015
+Processing asset: ASS031 - Microsoft 365 Business Standard
+Processing frequency: 180 days for asset ASS031
+Asset ASS031 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS031 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS032 - Microsoft 365 E3
+Processing frequency: 180 days for asset ASS032
+Asset ASS032 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS032 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT016 - Anti-virus Subscription 
+Found 1 assets for asset type AT016
+Processing asset: ASS033 - Quick Heal Total Security
+Processing frequency: 180 days for asset ASS033
+Asset ASS033 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 180 days)
+Maintenance not due for asset ASS033 with frequency 180 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Thu Jan 22 2026 00:00:00 GMT+0530 (India Standard Time), Planned: Sun Feb 01 2026 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT017 - Printer
+Found 3 assets for asset type AT017
+Processing asset: ASS034 - HP LaserJet Pro MFP M126nw
+Processing frequency: 90 days for asset ASS034
+Asset ASS034 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS034 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS035 - Canon PIXMA G3000
+Processing frequency: 90 days for asset ASS035
+Asset ASS035 purchased on: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Tue Aug 05 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS035 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Fri Oct 24 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Mon Nov 03 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset: ASS066 - Printer
+Processing frequency: 90 days for asset ASS066
+Asset ASS066 purchased on: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Date to consider: Wed Aug 13 2025 00:00:00 GMT+0530 (India Standard Time)
+Planned schedule date: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time) (dateToConsider + 90 days)
+Maintenance not due for asset ASS066 with frequency 90 days
+Test date: Fri Sep 05 2025 05:30:00 GMT+0530 (India Standard Time), 10 days before planned: Sat Nov 01 2025 00:00:00 GMT+0530 (India Standard Time), Planned: Tue Nov 11 2025 00:00:00 GMT+0530 (India Standard Time)
+Processing asset type: AT018 - Table
+Found 3 assets for asset type AT018
+No maintenance frequency found for asset type AT018
+Processing asset type: AT026 - Fan
+Found 3 assets for asset type AT026
+No maintenance frequency found for asset type AT026
+Processing asset type: AT029 - UPS
+Found 1 assets for asset type AT029
+No maintenance frequency found for asset type AT029
+Maintenance schedule generation completed.
+Total assets processed: 36
+Assets skipped: 4
+Schedules created: 0
+📊 [CRON] Maintenance generation response: {
+  status: 200,
+  data: {
+    message: 'Maintenance schedules generated successfully',
+    asset_types_processed: 20,
+    assets_processed: 36,
+    assets_skipped: 4,
+    schedules_created: 0,
+    test_date_used: '2025-09-05T00:00:00.000Z'
+  }
+}
+✅ [CRON] Maintenance schedule generation completed successfully
