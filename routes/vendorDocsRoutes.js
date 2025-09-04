@@ -7,7 +7,8 @@ const {
   getDownloadUrl,
   archiveDoc,
   deleteDoc,
-  getDocById
+  getDocById,
+  updateDocArchiveStatus
 } = require('../controllers/vendorDocsController');
 
 const router = express.Router();
@@ -37,6 +38,10 @@ router.get('/:vd_id/download', authorize(['JR001']), getDownloadUrl);
 // Archive vendor document
 // PUT /api/vendor-docs/:vd_id/archive
 router.put('/:vd_id/archive', authorize(['JR001']), archiveDoc);
+
+// Update vendor document archive status
+// PUT /api/vendor-docs/:vd_id/archive-status
+router.put('/:vd_id/archive-status', authorize(['JR001']), updateDocArchiveStatus);
 
 // Delete vendor document
 // DELETE /api/vendor-docs/:vd_id

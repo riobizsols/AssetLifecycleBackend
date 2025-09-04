@@ -2,12 +2,14 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/mini
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const { generateCustomId } = require('../utils/idGenerator');
 const { 
   insertVendorDoc, 
   listVendorDocs, 
   getVendorDocById, 
-  listVendorDocsByType,
+  listVendorDocsByDto,
   checkVendorExists,
+  updateVendorDocArchiveStatus,
   archiveVendorDoc,
   deleteVendorDoc
 } = require('../models/vendorDocsModel');
@@ -22,7 +24,7 @@ const uploadVendorDoc = [
     try {
       const body = req.body || {};
       const vendor_id = body.vendor_id || req.params.vendor_id;
-      const { doc_type, doc_type_name } = body;
+      const { dto_id, doc_type_name } = body;
       const org_id = req.user.org_id;
 
       if (!req.file) {
@@ -52,12 +54,12 @@ const uploadVendorDoc = [
       const doc_path = `${MINIO_BUCKET}/${objectName}`;
 
       // Generate unique document ID
-      const vd_id = `VD${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      const vd_id = await generateCustomId('vendor_doc', 3);
       
       const dbRes = await insertVendorDoc({
         vd_id,
         vendor_id,
-        doc_type: doc_type || null,
+        dto_id: dto_id || null,
         doc_type_name: doc_type_name || null,
         doc_path,
         is_archived: false,
@@ -80,7 +82,7 @@ const uploadVendorDoc = [
 const listDocs = async (req, res) => {
   try {
     const { vendor_id } = req.params;
-    const { doc_type } = req.query;
+    const { dto_id } = req.query;
 
     // Check if vendor exists
     const vendorExists = await checkVendorExists(vendor_id);
@@ -89,8 +91,8 @@ const listDocs = async (req, res) => {
     }
 
     let result;
-    if (doc_type) {
-      result = await listVendorDocsByType(vendor_id, doc_type);
+    if (dto_id) {
+      result = await listVendorDocsByDto(vendor_id, dto_id);
     } else {
       result = await listVendorDocs(vendor_id);
     }
@@ -200,11 +202,107 @@ const getDocById = async (req, res) => {
   }
 };
 
+// Update document archive status
+const updateDocArchiveStatus = async (req, res) => {
+  try {
+    const { vd_id } = req.params;
+    const { is_archived } = req.body;
+
+    if (typeof is_archived !== 'boolean') {
+      return res.status(400).json({ message: 'is_archived must be a boolean value' });
+    }
+
+    // Get current document details
+    const currentDoc = await getVendorDocById(vd_id);
+    if (currentDoc.rows.length === 0) {
+      return res.status(404).json({ message: 'Vendor document not found' });
+    }
+
+    const doc = currentDoc.rows[0];
+    let newDocPath = doc.doc_path;
+    let archivedPath = null;
+
+    if (is_archived) {
+      // Moving to archived folder
+      // doc.doc_path format: org_id/vendors/vendor_id/filename (without bucket name)
+      const pathParts = doc.doc_path.split('/');
+      const bucketName = MINIO_BUCKET; // Use the constant since doc_path doesn't include bucket
+      const fileName = pathParts[pathParts.length - 1];
+      const vendorId = pathParts[pathParts.length - 2];
+      const orgId = pathParts[0]; // org_id is at index 0 since no bucket name
+      
+      // Extract object key from doc_path (doc_path already doesn't have bucket name)
+      const objectKey = doc.doc_path;
+      
+      // Create new path: org_id/vendors/Archived Vendor Document/vendor_id/filename
+      const newObjectName = `${orgId}/vendors/Archived Vendor Document/${vendorId}/${fileName}`;
+      
+      try {
+        // Copy file to archived location
+        await minioClient.copyObject(bucketName, newObjectName, objectKey);
+        
+        // Delete file from original location
+        await minioClient.removeObject(bucketName, objectKey);
+        
+        // Update paths - keep doc_path unchanged, update archived_path
+        newDocPath = doc.doc_path; // Keep original path unchanged
+        archivedPath = newObjectName; // Store the new archived location
+      } catch (minioErr) {
+        console.error('MinIO operation failed:', minioErr);
+        return res.status(500).json({ message: 'Failed to move file to archived location', error: minioErr.message });
+      }
+    } else {
+      // Moving back from archived folder
+      if (doc.archived_path) {
+        // doc.archived_path format: org_id/vendors/Archived Vendor Document/vendor_id/filename (without bucket name)
+        const pathParts = doc.archived_path.split('/');
+        const bucketName = MINIO_BUCKET; // Use the constant since archived_path doesn't include bucket
+        const fileName = pathParts[pathParts.length - 1];
+        const vendorId = pathParts[pathParts.length - 2];
+        const orgId = pathParts[0]; // org_id is at index 0 since no bucket name
+        
+        // Extract object key from archived_path (archived_path already doesn't have bucket name)
+        const objectKey = doc.archived_path;
+        
+        // Create new path: org_id/vendors/vendor_id/filename
+        const newObjectName = `${orgId}/vendors/${vendorId}/${fileName}`;
+        
+        try {
+          // Copy file back to active location
+          await minioClient.copyObject(bucketName, newObjectName, objectKey);
+          
+          // Delete file from archived location
+          await minioClient.removeObject(bucketName, objectKey);
+          
+          // Update paths - keep doc_path unchanged, clear archived_path
+          newDocPath = doc.doc_path; // Keep original path unchanged
+          archivedPath = null; // Clear archived path since we're unarchiving
+        } catch (minioErr) {
+          console.error('MinIO operation failed:', minioErr);
+          return res.status(500).json({ message: 'Failed to move file back to active location', error: minioErr.message });
+        }
+      }
+    }
+
+    // Update database with new paths
+    const result = await updateVendorDocArchiveStatus(vd_id, is_archived, archivedPath);
+
+    return res.json({
+      message: 'Archive status updated successfully',
+      data: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Failed to update archive status', err);
+    return res.status(500).json({ message: 'Failed to update archive status', error: err.message });
+  }
+};
+
 module.exports = { 
   uploadVendorDoc, 
   listDocs, 
   getDownloadUrl, 
   archiveDoc, 
   deleteDoc, 
-  getDocById 
+  getDocById,
+  updateDocArchiveStatus
 };
