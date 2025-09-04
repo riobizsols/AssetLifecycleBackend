@@ -38,6 +38,12 @@ const assetDocsRoutes = require("./routes/assetDocsRoutes");
 const assetRegisterRoutes = require("./routes/assetRegisterRoutes");
 const assetLifecycleRoutes = require("./routes/assetLifecycleRoutes");
 const assetValuationRoutes = require("./routes/assetValuationRoutes");
+const assetGroupDocsRoutes = require("./routes/assetGroupDocsRoutes");
+const assetTypeDocsRoutes = require("./routes/assetTypeDocsRoutes");
+const vendorDocsRoutes = require("./routes/vendorDocsRoutes");
+const assetMaintDocsRoutes = require("./routes/assetMaintDocsRoutes");
+const scrapSalesDocsRoutes = require("./routes/scrapSalesDocsRoutes");
+const docTypeObjectRoutes = require("./routes/docTypeObjectRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -107,6 +113,12 @@ app.use("/api", assetDocsRoutes);
 app.use("/api/asset-register", assetRegisterRoutes);
 app.use("/api/asset-lifecycle", assetLifecycleRoutes);
 app.use("/api/asset-valuation", assetValuationRoutes);
+app.use("/api/asset-group-docs", assetGroupDocsRoutes);
+app.use("/api/asset-type-docs", assetTypeDocsRoutes);
+app.use("/api/vendor-docs", vendorDocsRoutes);
+app.use("/api/asset-maint-docs", assetMaintDocsRoutes);
+app.use("/api/scrap-sales-docs", scrapSalesDocsRoutes);
+app.use("/api/doc-type-objects", docTypeObjectRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
