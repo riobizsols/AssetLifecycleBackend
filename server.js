@@ -35,11 +35,23 @@ const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
 const scrapSalesRoutes = require("./routes/scrapSalesRoutes");
 const workOrderRoutes = require("./routes/workOrderRoutes");
 const assetDocsRoutes = require("./routes/assetDocsRoutes");
+const assetRegisterRoutes = require("./routes/assetRegisterRoutes");
+const assetLifecycleRoutes = require("./routes/assetLifecycleRoutes");
+const assetValuationRoutes = require("./routes/assetValuationRoutes");
 const CronService = require("./services/cronService");
 
 
 const app = express();
 app.use(express.json());
+
+// Configure query parser to handle array parameters
+const qs = require('qs');
+app.set('query parser', (str) => {
+  return qs.parse(str, { 
+    arrayFormat: 'brackets',
+    parseArrays: true 
+  });
+});
 
 // Log every incoming request
 app.use((req, res, next) => {
@@ -60,7 +72,8 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
-app.use("/api", jobRoleRoutes, departmentRoutes);
+app.use("/api/job-roles", jobRoleRoutes);
+app.use("/api/departments", departmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/admin", deptAdminRoutes);
@@ -91,6 +104,9 @@ app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
 app.use("/api/work-orders", workOrderRoutes);
 app.use("/api", assetDocsRoutes);
+app.use("/api/asset-register", assetRegisterRoutes);
+app.use("/api/asset-lifecycle", assetLifecycleRoutes);
+app.use("/api/asset-valuation", assetValuationRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");
