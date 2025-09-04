@@ -126,7 +126,7 @@ const updateDocArchiveStatus = async (req, res) => {
         // Delete file from original location
         await minioClient.removeObject(bucketName, objectKey);
         
-        // Update paths - doc_path stays the same, archived_path stores the new location
+        // Update paths - keep doc_path unchanged, update archived_path
         newDocPath = doc.doc_path; // Keep original path unchanged
         archivedPath = newObjectName; // Store the new archived location
       } catch (minioErr) {
@@ -156,7 +156,7 @@ const updateDocArchiveStatus = async (req, res) => {
           // Delete file from archived location
           await minioClient.removeObject(bucketName, objectKey);
           
-          // Update paths - doc_path stays the same, archived_path is cleared
+          // Update paths - keep doc_path unchanged, clear archived_path
           newDocPath = doc.doc_path; // Keep original path unchanged
           archivedPath = null; // Clear archived path since we're unarchiving
         } catch (minioErr) {
@@ -168,7 +168,7 @@ const updateDocArchiveStatus = async (req, res) => {
 
     // Update database with new paths
     const result = await updateAssetDocArchiveStatus(a_d_id, is_archived, archivedPath);
-    
+
     return res.json({
       message: 'Archive status updated successfully',
       data: result.rows[0]
