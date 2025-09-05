@@ -7,7 +7,8 @@ const {
   getDownloadUrl,
   archiveDoc,
   deleteDoc,
-  getDocById
+  getDocById,
+  updateDocArchiveStatus
 } = require('../controllers/assetGroupDocsController');
 
 // Apply protect middleware to all routes
@@ -36,6 +37,10 @@ router.get('/:agd_id/download', getDownloadUrl);
 // Archive document
 // PUT /api/asset-group-docs/:agd_id/archive
 router.put('/:agd_id/archive', archiveDoc);
+
+// Update document archive status
+// PUT /api/asset-group-docs/:agd_id/archive-status
+router.put('/:agd_id/archive-status', updateDocArchiveStatus);
 
 // Delete document
 // DELETE /api/asset-group-docs/:agd_id

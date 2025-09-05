@@ -4,7 +4,7 @@ const db = require('../config/db');
 const insertAssetGroupDoc = async ({
   agd_id,
   asset_group_id,
-  doc_type,
+  dto_id,
   doc_type_name,
   doc_path,
   is_archived = false,
@@ -13,18 +13,18 @@ const insertAssetGroupDoc = async ({
 }) => {
   const query = `
     INSERT INTO "tblAssetGroupDocs" (
-      agd_id, asset_group_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
+      agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
   `;
-  const values = [agd_id, asset_group_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id];
+  const values = [agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
   return db.query(query, values);
 };
 
 // List asset group documents by group ID
 const listAssetGroupDocs = async (asset_group_id) => {
   const query = `
-    SELECT agd_id, asset_group_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
+    SELECT agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
     FROM "tblAssetGroupDocs"
     WHERE asset_group_id = $1 AND (is_archived = false OR is_archived IS NULL)
     ORDER BY agd_id DESC
@@ -40,15 +40,15 @@ const getAssetGroupDocById = async (agd_id) => {
   return db.query(query, [agd_id]);
 };
 
-// List asset group documents by group ID and document type
-const listAssetGroupDocsByType = async (asset_group_id, doc_type) => {
+// List asset group documents by group ID and dto_id
+const listAssetGroupDocsByDto = async (asset_group_id, dto_id) => {
   const query = `
-    SELECT agd_id, asset_group_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
+    SELECT agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
     FROM "tblAssetGroupDocs"
-    WHERE asset_group_id = $1 AND doc_type = $2 AND (is_archived = false OR is_archived IS NULL)
+    WHERE asset_group_id = $1 AND dto_id = $2 AND (is_archived = false OR is_archived IS NULL)
     ORDER BY agd_id DESC
   `;
-  return db.query(query, [asset_group_id, doc_type]);
+  return db.query(query, [asset_group_id, dto_id]);
 };
 
 // Check if asset group exists
@@ -59,7 +59,19 @@ const checkAssetGroupExists = async (asset_group_id) => {
   return db.query(query, [asset_group_id]);
 };
 
-// Archive asset group document
+// Update asset group document archive status
+const updateAssetGroupDocArchiveStatus = async (agd_id, is_archived, archived_path) => {
+  const query = `
+    UPDATE "tblAssetGroupDocs" 
+    SET is_archived = $2, archived_path = $3
+    WHERE agd_id = $1
+    RETURNING *
+  `;
+  const values = [agd_id, is_archived, archived_path];
+  return db.query(query, values);
+};
+
+// Archive asset group document (legacy function)
 const archiveAssetGroupDoc = async (agd_id, archived_path) => {
   const query = `
     UPDATE "tblAssetGroupDocs"
@@ -83,8 +95,9 @@ module.exports = {
   insertAssetGroupDoc, 
   listAssetGroupDocs, 
   getAssetGroupDocById, 
-  listAssetGroupDocsByType,
+  listAssetGroupDocsByDto,
   checkAssetGroupExists,
+  updateAssetGroupDocArchiveStatus,
   archiveAssetGroupDoc,
   deleteAssetGroupDoc
 };

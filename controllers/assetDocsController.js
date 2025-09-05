@@ -3,6 +3,7 @@ const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
 const { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus } = require('../models/assetDocsModel');
+const { generateCustomId } = require('../utils/idGenerator');
 const db = require('../config/db');
 
 const storage = multer.memoryStorage();
@@ -30,7 +31,7 @@ const uploadAssetDoc = [
 
       const doc_path = `${MINIO_BUCKET}/${objectName}`;
 
-      const a_d_id = `AD${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      const a_d_id = await generateCustomId('asset_doc', 3);
       const dbRes = await insertAssetDoc({
         a_d_id,
         asset_id,
