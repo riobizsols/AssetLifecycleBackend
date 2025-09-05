@@ -513,17 +513,68 @@ const deleteAsset = async (req, res) => {
   } catch (err) {
     console.error("Error deleting asset:", err);
 
-    // Handle foreign key constraint violation
-    if (err.code === '23503' && err.table === 'tblAssetAssignments') {
+    // Handle foreign key constraint violations with specific error messages
+    if (err.code === '23503') {
+      const constraintName = err.constraint;
+      const tableName = err.table;
+      
+      // Map constraint names to user-friendly messages
+      const constraintMessages = {
+        'tblAssetAssignments': 'This asset is currently assigned to an employee. Please unassign it first.',
+        'tblAssetDocs': 'This asset has attached documents. Please delete all documents first.',
+        'tblAssetGroup_D': 'This asset is part of an asset group. Please remove it from the group first.',
+        'tblAssetMaintSch': 'This asset has maintenance schedules. Please delete all maintenance schedules first.',
+        'tblAssetMaintDocs': 'This asset has maintenance documents. Please delete all maintenance documents first.',
+        'tblAssetPropValues': 'This asset has property values. Please delete all property values first.',
+        'tblAssetScrapDet': 'This asset is in scrap details. Please remove it from scrap details first.',
+        'tblAssetDepHist': 'This asset has depreciation history. Please contact administrator.',
+        'tblAssetBRDet': 'This asset has breakdown details. Please contact administrator.',
+        'tblWFAssetMaintSch_H': 'This asset has workflow maintenance schedules. Please contact administrator.'
+      };
+
+      // Get the specific table name from the constraint or error details
+      let specificTable = tableName;
+      if (!specificTable && constraintName) {
+        // Try to extract table name from constraint name
+        for (const table of Object.keys(constraintMessages)) {
+          if (constraintName.includes(table)) {
+            specificTable = table;
+            break;
+          }
+        }
+      }
+
+      const errorMessage = constraintMessages[specificTable] || 
+        `This asset is referenced by other records in the system. Please remove all references first.`;
+
       return res.status(409).json({
-        error: "Cannot delete assigned asset",
-        message: `Asset ${req.params.asset_id} is currently assigned. Please unassign it first.`,
-        code: err.code,
-        assetId: req.params.asset_id
+        error: "Cannot delete asset",
+        message: errorMessage,
+        details: {
+          assetId: req.params.asset_id,
+          constraint: constraintName,
+          table: specificTable,
+          code: err.code
+        },
+        suggestion: "Please check the asset's assignments, documents, maintenance schedules, and other related records before attempting to delete."
       });
     }
 
-    res.status(500).json({ error: "Failed to delete asset" });
+    // Handle other database errors
+    if (err.code === '23502') {
+      return res.status(400).json({
+        error: "Invalid asset data",
+        message: "Required fields are missing for asset deletion.",
+        code: err.code
+      });
+    }
+
+    // Generic error fallback
+    res.status(500).json({ 
+      error: "Failed to delete asset",
+      message: "An unexpected error occurred while deleting the asset. Please try again.",
+      code: err.code || 'UNKNOWN_ERROR'
+    });
   }
 };
 
@@ -544,21 +595,72 @@ const deleteMultipleAssets = async (req, res) => {
   } catch (err) {
     console.error("Error deleting assets:", err);
     
-    // Handle foreign key constraint violation
-    if (err.code === '23503' && err.table === 'tblAssetAssignments') {
-      // Extract the asset ID from the error detail
-      const assetIdMatch = err.detail.match(/\((.*?)\)/);
-      const assetId = assetIdMatch ? assetIdMatch[1] : 'unknown';
+    // Handle foreign key constraint violations with specific error messages
+    if (err.code === '23503') {
+      const constraintName = err.constraint;
+      const tableName = err.table;
       
+      // Map constraint names to user-friendly messages
+      const constraintMessages = {
+        'tblAssetAssignments': 'One or more assets are currently assigned to employees. Please unassign them first.',
+        'tblAssetDocs': 'One or more assets have attached documents. Please delete all documents first.',
+        'tblAssetGroup_D': 'One or more assets are part of asset groups. Please remove them from groups first.',
+        'tblAssetMaintSch': 'One or more assets have maintenance schedules. Please delete all maintenance schedules first.',
+        'tblAssetMaintDocs': 'One or more assets have maintenance documents. Please delete all maintenance documents first.',
+        'tblAssetPropValues': 'One or more assets have property values. Please delete all property values first.',
+        'tblAssetScrapDet': 'One or more assets are in scrap details. Please remove them from scrap details first.',
+        'tblAssetDepHist': 'One or more assets have depreciation history. Please contact administrator.',
+        'tblAssetBRDet': 'One or more assets have breakdown details. Please contact administrator.',
+        'tblWFAssetMaintSch_H': 'One or more assets have workflow maintenance schedules. Please contact administrator.'
+      };
+
+      // Get the specific table name from the constraint or error details
+      let specificTable = tableName;
+      if (!specificTable && constraintName) {
+        // Try to extract table name from constraint name
+        for (const table of Object.keys(constraintMessages)) {
+          if (constraintName.includes(table)) {
+            specificTable = table;
+            break;
+          }
+        }
+      }
+
+      const errorMessage = constraintMessages[specificTable] || 
+        `One or more assets are referenced by other records in the system. Please remove all references first.`;
+
+      // Try to extract specific asset ID from error detail
+      const assetIdMatch = err.detail ? err.detail.match(/\((.*?)\)/) : null;
+      const specificAssetId = assetIdMatch ? assetIdMatch[1] : null;
+
       return res.status(409).json({
-        error: "Cannot delete assigned asset",
-        message: `Asset ${assetId} is currently assigned. Please unassign it first.`,
-        code: err.code,
-        assetId: assetId
+        error: "Cannot delete assets",
+        message: errorMessage,
+        details: {
+          constraint: constraintName,
+          table: specificTable,
+          code: err.code,
+          specificAssetId: specificAssetId
+        },
+        suggestion: "Please check each asset's assignments, documents, maintenance schedules, and other related records before attempting to delete."
       });
     }
 
-    res.status(500).json({ error: "Failed to delete assets" });
+    // Handle other database errors
+    if (err.code === '23502') {
+      return res.status(400).json({
+        error: "Invalid asset data",
+        message: "Required fields are missing for asset deletion.",
+        code: err.code
+      });
+    }
+
+    // Generic error fallback
+    res.status(500).json({ 
+      error: "Failed to delete assets",
+      message: "An unexpected error occurred while deleting the assets. Please try again.",
+      code: err.code || 'UNKNOWN_ERROR'
+    });
   }
 };
 

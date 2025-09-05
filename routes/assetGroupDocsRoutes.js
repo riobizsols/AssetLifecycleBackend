@@ -3,7 +3,7 @@ const router = express.Router();
 const { protect } = require('../middlewares/authMiddleware');
 const {
   uploadAssetGroupDoc,
-  listDocs,
+  listDocs,   
   getDownloadUrl,
   archiveDoc,
   deleteDoc,

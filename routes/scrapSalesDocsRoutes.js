@@ -7,7 +7,8 @@ const {
   getDownloadUrl,
   archiveDoc,
   deleteDoc,
-  getDocById
+  getDocById,
+  updateDocArchiveStatus
 } = require('../controllers/scrapSalesDocsController');
 
 const router = express.Router();
@@ -37,6 +38,10 @@ router.get('/:ssdoc_id/download', authorize(['JR001']), getDownloadUrl);
 // Archive scrap sales document
 // PUT /api/scrap-sales-docs/:ssdoc_id/archive
 router.put('/:ssdoc_id/archive', authorize(['JR001']), archiveDoc);
+
+// Update scrap sales document archive status
+// PUT /api/scrap-sales-docs/:ssdoc_id/archive-status
+router.put('/:ssdoc_id/archive-status', authorize(['JR001']), updateDocArchiveStatus);
 
 // Delete scrap sales document
 // DELETE /api/scrap-sales-docs/:ssdoc_id

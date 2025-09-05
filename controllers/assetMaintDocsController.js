@@ -101,8 +101,9 @@ const listDocsByAsset = async (req, res) => {
     }
 
     return res.json({
+      success: true,
       message: 'Documents retrieved successfully',
-      documents: result.rows
+      data: result.rows
     });
   } catch (err) {
     console.error('Failed to list docs', err);
@@ -130,8 +131,9 @@ const listDocsByWorkOrder = async (req, res) => {
     }
 
     return res.json({
+      success: true,
       message: 'Documents retrieved successfully',
-      documents: result.rows
+      data: result.rows
     });
   } catch (err) {
     console.error('Failed to list docs', err);

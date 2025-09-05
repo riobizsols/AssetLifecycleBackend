@@ -24,10 +24,26 @@ const insertAssetTypeDoc = async ({
 // List asset type documents by asset type ID
 const listAssetTypeDocs = async (asset_type_id) => {
   const query = `
-    SELECT atd_id, asset_type_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblATDocs"
-    WHERE asset_type_id = $1 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY atd_id DESC
+    SELECT 
+      atd.atd_id, 
+      atd.asset_type_id, 
+      atd.dto_id, 
+      atd.doc_type_name, 
+      atd.doc_path, 
+      atd.is_archived, 
+      atd.archived_path, 
+      atd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN atd.doc_path IS NOT NULL THEN 
+          SUBSTRING(atd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblATDocs" atd
+    LEFT JOIN "tblDocTypeObjects" dto ON atd.dto_id = dto.dto_id
+    WHERE atd.asset_type_id = $1
+    ORDER BY atd.atd_id DESC
   `;
   return db.query(query, [asset_type_id]);
 };
@@ -35,7 +51,18 @@ const listAssetTypeDocs = async (asset_type_id) => {
 // Get asset type document by ID
 const getAssetTypeDocById = async (atd_id) => {
   const query = `
-    SELECT * FROM "tblATDocs" WHERE atd_id = $1
+    SELECT 
+      atd.*,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN atd.doc_path IS NOT NULL THEN 
+          SUBSTRING(atd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblATDocs" atd
+    LEFT JOIN "tblDocTypeObjects" dto ON atd.dto_id = dto.dto_id
+    WHERE atd.atd_id = $1
   `;
   return db.query(query, [atd_id]);
 };
@@ -43,10 +70,26 @@ const getAssetTypeDocById = async (atd_id) => {
 // List asset type documents by asset type ID and dto_id
 const listAssetTypeDocsByDto = async (asset_type_id, dto_id) => {
   const query = `
-    SELECT atd_id, asset_type_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblATDocs"
-    WHERE asset_type_id = $1 AND dto_id = $2 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY atd_id DESC
+    SELECT 
+      atd.atd_id, 
+      atd.asset_type_id, 
+      atd.dto_id, 
+      atd.doc_type_name, 
+      atd.doc_path, 
+      atd.is_archived, 
+      atd.archived_path, 
+      atd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN atd.doc_path IS NOT NULL THEN 
+          SUBSTRING(atd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblATDocs" atd
+    LEFT JOIN "tblDocTypeObjects" dto ON atd.dto_id = dto.dto_id
+    WHERE atd.asset_type_id = $1 AND atd.dto_id = $2
+    ORDER BY atd.atd_id DESC
   `;
   return db.query(query, [asset_type_id, dto_id]);
 };

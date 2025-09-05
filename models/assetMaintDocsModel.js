@@ -24,10 +24,26 @@ const insertAssetMaintDoc = async ({
 // List asset maintenance documents by asset ID
 const listAssetMaintDocs = async (asset_id) => {
   const query = `
-    SELECT amd_id, asset_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblAssetMaintDocs"
-    WHERE asset_id = $1 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY amd_id DESC
+    SELECT 
+      amd.amd_id, 
+      amd.asset_id, 
+      amd.dto_id, 
+      amd.doc_type_name, 
+      amd.doc_path, 
+      amd.is_archived, 
+      amd.archived_path, 
+      amd.org_id,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN amd.doc_path IS NOT NULL 
+        THEN SUBSTRING(amd.doc_path FROM '.*/([^/]+)$') 
+        ELSE 'document' 
+      END as file_name
+    FROM "tblAssetMaintDocs" amd
+    LEFT JOIN "tblDocTypeObjects" dto ON amd.dto_id = dto.dto_id
+    WHERE amd.asset_id = $1
+    ORDER BY amd.amd_id DESC
   `;
   return db.query(query, [asset_id]);
 };
@@ -35,10 +51,26 @@ const listAssetMaintDocs = async (asset_id) => {
 // List asset maintenance documents by work order ID (ams_id)
 const listAssetMaintDocsByWorkOrder = async (ams_id) => {
   const query = `
-    SELECT amd.amd_id, amd.asset_id, amd.dto_id, amd.doc_type_name, amd.doc_path, amd.is_archived, amd.archived_path, amd.org_id
+    SELECT 
+      amd.amd_id, 
+      amd.asset_id, 
+      amd.dto_id, 
+      amd.doc_type_name, 
+      amd.doc_path, 
+      amd.is_archived, 
+      amd.archived_path, 
+      amd.org_id,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN amd.doc_path IS NOT NULL 
+        THEN SUBSTRING(amd.doc_path FROM '.*/([^/]+)$') 
+        ELSE 'document' 
+      END as file_name
     FROM "tblAssetMaintDocs" amd
     INNER JOIN "tblAssetMaintSch" ams ON amd.asset_id = ams.asset_id
-    WHERE ams.ams_id = $1 AND (amd.is_archived = false OR amd.is_archived IS NULL)
+    LEFT JOIN "tblDocTypeObjects" dto ON amd.dto_id = dto.dto_id
+    WHERE ams.ams_id = $1
     ORDER BY amd.amd_id DESC
   `;
   return db.query(query, [ams_id]);
@@ -47,7 +79,18 @@ const listAssetMaintDocsByWorkOrder = async (ams_id) => {
 // Get asset maintenance document by ID
 const getAssetMaintDocById = async (amd_id) => {
   const query = `
-    SELECT * FROM "tblAssetMaintDocs" WHERE amd_id = $1
+    SELECT 
+      amd.*,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN amd.doc_path IS NOT NULL 
+        THEN SUBSTRING(amd.doc_path FROM '.*/([^/]+)$') 
+        ELSE 'document' 
+      END as file_name
+    FROM "tblAssetMaintDocs" amd
+    LEFT JOIN "tblDocTypeObjects" dto ON amd.dto_id = dto.dto_id
+    WHERE amd.amd_id = $1
   `;
   return db.query(query, [amd_id]);
 };
@@ -55,10 +98,26 @@ const getAssetMaintDocById = async (amd_id) => {
 // List asset maintenance documents by asset ID and dto_id
 const listAssetMaintDocsByDto = async (asset_id, dto_id) => {
   const query = `
-    SELECT amd_id, asset_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblAssetMaintDocs"
-    WHERE asset_id = $1 AND dto_id = $2 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY amd_id DESC
+    SELECT 
+      amd.amd_id, 
+      amd.asset_id, 
+      amd.dto_id, 
+      amd.doc_type_name, 
+      amd.doc_path, 
+      amd.is_archived, 
+      amd.archived_path, 
+      amd.org_id,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN amd.doc_path IS NOT NULL 
+        THEN SUBSTRING(amd.doc_path FROM '.*/([^/]+)$') 
+        ELSE 'document' 
+      END as file_name
+    FROM "tblAssetMaintDocs" amd
+    LEFT JOIN "tblDocTypeObjects" dto ON amd.dto_id = dto.dto_id
+    WHERE amd.asset_id = $1 AND amd.dto_id = $2
+    ORDER BY amd.amd_id DESC
   `;
   return db.query(query, [asset_id, dto_id]);
 };
@@ -66,10 +125,26 @@ const listAssetMaintDocsByDto = async (asset_id, dto_id) => {
 // List asset maintenance documents by work order ID and dto_id
 const listAssetMaintDocsByWorkOrderAndDto = async (ams_id, dto_id) => {
   const query = `
-    SELECT amd.amd_id, amd.asset_id, amd.dto_id, amd.doc_type_name, amd.doc_path, amd.is_archived, amd.archived_path, amd.org_id
+    SELECT 
+      amd.amd_id, 
+      amd.asset_id, 
+      amd.dto_id, 
+      amd.doc_type_name, 
+      amd.doc_path, 
+      amd.is_archived, 
+      amd.archived_path, 
+      amd.org_id,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN amd.doc_path IS NOT NULL 
+        THEN SUBSTRING(amd.doc_path FROM '.*/([^/]+)$') 
+        ELSE 'document' 
+      END as file_name
     FROM "tblAssetMaintDocs" amd
     INNER JOIN "tblAssetMaintSch" ams ON amd.asset_id = ams.asset_id
-    WHERE ams.ams_id = $1 AND amd.dto_id = $2 AND (amd.is_archived = false OR amd.is_archived IS NULL)
+    LEFT JOIN "tblDocTypeObjects" dto ON amd.dto_id = dto.dto_id
+    WHERE ams.ams_id = $1 AND amd.dto_id = $2
     ORDER BY amd.amd_id DESC
   `;
   return db.query(query, [ams_id, dto_id]);
