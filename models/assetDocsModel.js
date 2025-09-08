@@ -22,10 +22,26 @@ const insertAssetDoc = async ({
 
 const listAssetDocs = async (asset_id) => {
   const query = `
-    SELECT a_d_id, asset_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblAssetDocs"
-    WHERE asset_id = $1 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY a_d_id DESC
+    SELECT 
+      ad.a_d_id, 
+      ad.asset_id, 
+      ad.dto_id, 
+      ad.doc_type_name, 
+      ad.doc_path, 
+      ad.is_archived, 
+      ad.archived_path, 
+      ad.org_id,
+      dto.doc_type,
+      dto.doc_type_text,
+      CASE 
+        WHEN ad.doc_path IS NOT NULL THEN 
+          SPLIT_PART(ad.doc_path, '/', ARRAY_LENGTH(STRING_TO_ARRAY(ad.doc_path, '/'), 1))
+        ELSE NULL
+      END as file_name
+    FROM "tblAssetDocs" ad
+    LEFT JOIN "tblDocTypeObjects" dto ON ad.dto_id = dto.dto_id
+    WHERE ad.asset_id = $1
+    ORDER BY ad.a_d_id DESC
   `;
   return db.query(query, [asset_id]);
 };

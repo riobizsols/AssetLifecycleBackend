@@ -4,7 +4,7 @@ const db = require('../config/db');
 const insertScrapSalesDoc = async ({
   ssdoc_id,
   ssh_id,
-  doc_type,
+  dto_id,
   doc_type_name,
   doc_path,
   is_archived = false,
@@ -13,21 +13,37 @@ const insertScrapSalesDoc = async ({
 }) => {
   const query = `
     INSERT INTO "tblScrapSalesDocs" (
-      ssdoc_id, ssh_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
+      ssdoc_id, ssh_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     RETURNING *
   `;
-  const values = [ssdoc_id, ssh_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id];
+  const values = [ssdoc_id, ssh_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
   return db.query(query, values);
 };
 
 // List scrap sales documents by scrap sale ID
 const listScrapSalesDocs = async (ssh_id) => {
   const query = `
-    SELECT ssdoc_id, ssh_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblScrapSalesDocs"
-    WHERE ssh_id = $1 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY ssdoc_id DESC
+    SELECT 
+      ssd.ssdoc_id, 
+      ssd.ssh_id, 
+      ssd.dto_id,
+      ssd.doc_type_name, 
+      ssd.doc_path, 
+      ssd.is_archived, 
+      ssd.archived_path, 
+      ssd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN ssd.doc_path IS NOT NULL THEN 
+          SUBSTRING(ssd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblScrapSalesDocs" ssd
+    LEFT JOIN "tblDocTypeObjects" dto ON ssd.dto_id = dto.dto_id
+    WHERE ssd.ssh_id = $1
+    ORDER BY ssd.ssdoc_id DESC
   `;
   return db.query(query, [ssh_id]);
 };
@@ -35,7 +51,25 @@ const listScrapSalesDocs = async (ssh_id) => {
 // Get scrap sales document by ID
 const getScrapSalesDocById = async (ssdoc_id) => {
   const query = `
-    SELECT * FROM "tblScrapSalesDocs" WHERE ssdoc_id = $1
+    SELECT 
+      ssd.ssdoc_id, 
+      ssd.ssh_id, 
+      ssd.dto_id,
+      ssd.doc_type_name, 
+      ssd.doc_path, 
+      ssd.is_archived, 
+      ssd.archived_path, 
+      ssd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN ssd.doc_path IS NOT NULL THEN 
+          SUBSTRING(ssd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblScrapSalesDocs" ssd
+    LEFT JOIN "tblDocTypeObjects" dto ON ssd.dto_id = dto.dto_id
+    WHERE ssd.ssdoc_id = $1
   `;
   return db.query(query, [ssdoc_id]);
 };
@@ -43,10 +77,26 @@ const getScrapSalesDocById = async (ssdoc_id) => {
 // List scrap sales documents by scrap sale ID and document type
 const listScrapSalesDocsByType = async (ssh_id, doc_type) => {
   const query = `
-    SELECT ssdoc_id, ssh_id, doc_type, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblScrapSalesDocs"
-    WHERE ssh_id = $1 AND doc_type = $2 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY ssdoc_id DESC
+    SELECT 
+      ssd.ssdoc_id, 
+      ssd.ssh_id, 
+      ssd.dto_id,
+      ssd.doc_type_name, 
+      ssd.doc_path, 
+      ssd.is_archived, 
+      ssd.archived_path, 
+      ssd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN ssd.doc_path IS NOT NULL THEN 
+          SUBSTRING(ssd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblScrapSalesDocs" ssd
+    LEFT JOIN "tblDocTypeObjects" dto ON ssd.dto_id = dto.dto_id
+    WHERE ssd.ssh_id = $1 AND dto.doc_type = $2
+    ORDER BY ssd.ssdoc_id DESC
   `;
   return db.query(query, [ssh_id, doc_type]);
 };

@@ -24,10 +24,26 @@ const insertAssetGroupDoc = async ({
 // List asset group documents by group ID
 const listAssetGroupDocs = async (asset_group_id) => {
   const query = `
-    SELECT agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblAssetGroupDocs"
-    WHERE asset_group_id = $1 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY agd_id DESC
+    SELECT 
+      agd.agd_id, 
+      agd.asset_group_id, 
+      agd.dto_id,
+      agd.doc_type_name, 
+      agd.doc_path, 
+      agd.is_archived, 
+      agd.archived_path, 
+      agd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN agd.doc_path IS NOT NULL THEN 
+          SUBSTRING(agd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblAssetGroupDocs" agd
+    LEFT JOIN "tblDocTypeObjects" dto ON agd.dto_id = dto.dto_id
+    WHERE agd.asset_group_id = $1
+    ORDER BY agd.agd_id DESC
   `;
   return db.query(query, [asset_group_id]);
 };
@@ -35,7 +51,25 @@ const listAssetGroupDocs = async (asset_group_id) => {
 // Get asset group document by ID
 const getAssetGroupDocById = async (agd_id) => {
   const query = `
-    SELECT * FROM "tblAssetGroupDocs" WHERE agd_id = $1
+    SELECT 
+      agd.agd_id, 
+      agd.asset_group_id, 
+      agd.dto_id,
+      agd.doc_type_name, 
+      agd.doc_path, 
+      agd.is_archived, 
+      agd.archived_path, 
+      agd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN agd.doc_path IS NOT NULL THEN 
+          SUBSTRING(agd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblAssetGroupDocs" agd
+    LEFT JOIN "tblDocTypeObjects" dto ON agd.dto_id = dto.dto_id
+    WHERE agd.agd_id = $1
   `;
   return db.query(query, [agd_id]);
 };
@@ -43,10 +77,26 @@ const getAssetGroupDocById = async (agd_id) => {
 // List asset group documents by group ID and dto_id
 const listAssetGroupDocsByDto = async (asset_group_id, dto_id) => {
   const query = `
-    SELECT agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id
-    FROM "tblAssetGroupDocs"
-    WHERE asset_group_id = $1 AND dto_id = $2 AND (is_archived = false OR is_archived IS NULL)
-    ORDER BY agd_id DESC
+    SELECT 
+      agd.agd_id, 
+      agd.asset_group_id, 
+      agd.dto_id,
+      agd.doc_type_name, 
+      agd.doc_path, 
+      agd.is_archived, 
+      agd.archived_path, 
+      agd.org_id,
+      dto.doc_type_text,
+      dto.doc_type,
+      CASE 
+        WHEN agd.doc_path IS NOT NULL THEN 
+          SUBSTRING(agd.doc_path FROM '.*/([^/]+)$')
+        ELSE 'document'
+      END as file_name
+    FROM "tblAssetGroupDocs" agd
+    LEFT JOIN "tblDocTypeObjects" dto ON agd.dto_id = dto.dto_id
+    WHERE agd.asset_group_id = $1 AND agd.dto_id = $2
+    ORDER BY agd.agd_id DESC
   `;
   return db.query(query, [asset_group_id, dto_id]);
 };

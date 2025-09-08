@@ -1,6 +1,10 @@
 const express = require("express");
 const router = express.Router();
+const { protect } = require("../middlewares/authMiddleware");
 const vendorsController = require("../controllers/vendorsController");
+
+// Apply authentication middleware to all routes
+router.use(protect);
 
 router.get("/get-vendors", vendorsController.getAllVendors);
 router.get("/vendor/:vendorId", vendorsController.getVendorById);

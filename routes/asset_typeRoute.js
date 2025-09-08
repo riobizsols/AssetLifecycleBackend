@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { protect } = require('../middlewares/authMiddleware');
 const {
     addAssetType,
     getAllAssetTypes,
@@ -10,6 +11,9 @@ const {
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired
 } = require('../controllers/assetTypeController');
+
+// Apply authentication middleware to all routes
+router.use(protect);
 
 // Add new asset type
 router.post('/', addAssetType);

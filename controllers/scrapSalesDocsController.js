@@ -2,6 +2,7 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/mini
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const db = require('../config/db');
 const { 
   insertScrapSalesDoc, 
   listScrapSalesDocs, 
@@ -22,7 +23,7 @@ const uploadScrapSalesDoc = [
     try {
       const body = req.body || {};
       const ssh_id = body.ssh_id || req.params.ssh_id;
-      const { doc_type, doc_type_name } = body;
+      const { dto_id, doc_type_name } = body;
       const org_id = req.user.org_id;
 
       if (!req.file) {
@@ -42,24 +43,33 @@ const uploadScrapSalesDoc = [
       await ensureBucketExists(MINIO_BUCKET);
 
       const ext = path.extname(req.file.originalname);
-      const hash = crypto.randomBytes(8).toString('hex');
+      const hash = crypto.randomBytes(4).toString('hex'); // Shorter hash
       const objectName = `${org_id}/scrap-sales/${ssh_id}/${Date.now()}_${hash}${ext}`;
 
       await minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
         'Content-Type': req.file.mimetype
       });
 
-      const doc_path = `${MINIO_BUCKET}/${objectName}`;
+      // Use shorter path format to fit in 50-character limit
+      const doc_path = `scrap-sales/${ssh_id}/${Date.now()}_${hash}${ext}`;
 
-      // Generate unique document ID
-      const ssdoc_id = `SSDOC${Date.now()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+      // Generate unique document ID (max 20 characters)
+      const timestamp = Date.now().toString().slice(-8); // Last 8 digits of timestamp
+      const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+      const ssdoc_id = `SSDOC${timestamp}${random}`;
+      
+      console.log('Generated ssdoc_id:', ssdoc_id, 'Length:', ssdoc_id.length);
+      console.log('doc_type_name:', doc_type_name, 'Length:', doc_type_name?.length);
+      console.log('ssh_id:', ssh_id, 'Length:', ssh_id?.length);
+      console.log('org_id:', org_id, 'Length:', org_id?.length);
+      console.log('doc_path:', doc_path, 'Length:', doc_path?.length);
       
       const dbRes = await insertScrapSalesDoc({
         ssdoc_id,
         ssh_id,
-        doc_type: doc_type || null,
-        doc_type_name: doc_type_name || null,
-        doc_path,
+        dto_id: dto_id || null,
+        doc_type_name: doc_type_name ? doc_type_name.substring(0, 50) : null, // Limit to 50 characters
+        doc_path, // Now using shorter path format
         is_archived: false,
         archived_path: null,
         org_id
@@ -117,8 +127,20 @@ const getDownloadUrl = async (req, res) => {
     }
 
     const doc = result.rows[0];
-    const [bucket, ...keyParts] = doc.doc_path.split('/');
-    const objectName = keyParts.join('/');
+    // Handle both old format (bucket/path) and new format (path only)
+    let objectName;
+    if (doc.doc_path.includes('/')) {
+      if (doc.doc_path.startsWith('asset-docs/')) {
+        // Old format: asset-docs/org/scrap-sales/ssh_id/file
+        const [bucket, ...keyParts] = doc.doc_path.split('/');
+        objectName = keyParts.join('/');
+      } else {
+        // New format: scrap-sales/ssh_id/file
+        objectName = doc.doc_path;
+      }
+    } else {
+      objectName = doc.doc_path;
+    }
 
     const respHeaders = {};
     if (mode === 'download') {
@@ -200,11 +222,40 @@ const getDocById = async (req, res) => {
   }
 };
 
+// Update document archive status
+const updateDocArchiveStatus = async (req, res) => {
+  try {
+    const { ssdoc_id } = req.params;
+    const { is_archived, archived_path } = req.body;
+
+    const query = `
+      UPDATE "tblScrapSalesDocs"
+      SET is_archived = $2, archived_path = $3
+      WHERE ssdoc_id = $1
+      RETURNING *
+    `;
+    const result = await db.query(query, [ssdoc_id, is_archived, archived_path]);
+    
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    return res.json({
+      message: 'Document archive status updated successfully',
+      document: result.rows[0]
+    });
+  } catch (err) {
+    console.error('Failed to update archive status', err);
+    return res.status(500).json({ message: 'Failed to update archive status', error: err.message });
+  }
+};
+
 module.exports = { 
   uploadScrapSalesDoc, 
   listDocsByScrapSale,
   getDownloadUrl, 
   archiveDoc, 
   deleteDoc, 
-  getDocById 
+  getDocById,
+  updateDocArchiveStatus
 };
