@@ -13,7 +13,7 @@ const { protect } = require('../middlewares/authMiddleware');
 router.use(protect);
 
 // Get breakdown history with filtering
-router.post('/', getBreakdownHistory);
+router.get('/', getBreakdownHistory);
 
 // Get breakdown history by asset ID
 router.get('/asset/:assetId', getBreakdownHistoryByAsset);

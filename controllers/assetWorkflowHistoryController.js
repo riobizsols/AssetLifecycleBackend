@@ -4,7 +4,48 @@ const model = require('../models/assetWorkflowHistoryModel');
 const getAssetWorkflowHistory = async (req, res) => {
     try {
         const orgId = req.query.orgId || 'ORG001';
-        const filters = req.body || {};
+        const filters = { ...req.body, ...req.query };
+        
+        // Map frontend field names to backend field names
+        if (filters.workOrderId) {
+            filters.work_order_id = filters.workOrderId;
+        }
+        if (filters.assetId) {
+            filters.asset_id = filters.assetId;
+        }
+        if (filters.vendorId) {
+            filters.vendor_id = filters.vendorId;
+        }
+        if (filters.workflowStatus) {
+            filters.workflow_status = filters.workflowStatus;
+        }
+        if (filters.stepStatus) {
+            filters.step_status = filters.stepStatus;
+        }
+        if (filters.plannedScheduleDateFrom) {
+            filters.planned_schedule_date_from = filters.plannedScheduleDateFrom;
+        }
+        if (filters.plannedScheduleDateTo) {
+            filters.planned_schedule_date_to = filters.plannedScheduleDateTo;
+        }
+        if (filters.actualScheduleDateFrom) {
+            filters.actual_schedule_date_from = filters.actualScheduleDateFrom;
+        }
+        if (filters.actualScheduleDateTo) {
+            filters.actual_schedule_date_to = filters.actualScheduleDateTo;
+        }
+        if (filters.workflowCreatedDateFrom) {
+            filters.workflow_created_date_from = filters.workflowCreatedDateFrom;
+        }
+        if (filters.workflowCreatedDateTo) {
+            filters.workflow_created_date_to = filters.workflowCreatedDateTo;
+        }
+        if (filters.assetDescription) {
+            filters.asset_description = filters.assetDescription;
+        }
+        if (filters.vendorName) {
+            filters.vendor_name = filters.vendorName;
+        }
         
         // Add pagination parameters
         const page = parseInt(req.query.page) || 1;
@@ -14,7 +55,26 @@ const getAssetWorkflowHistory = async (req, res) => {
         filters.limit = limit;
         filters.offset = offset;
         
+        // Parse advanced conditions if it's a JSON string
+        if (filters.advancedConditions && typeof filters.advancedConditions === 'string') {
+            try {
+                filters.advancedConditions = JSON.parse(filters.advancedConditions);
+            } catch (error) {
+                console.error('Error parsing advancedConditions:', error);
+                filters.advancedConditions = [];
+            }
+        }
+        
+        // Log advanced conditions for debugging
+        if (filters.advancedConditions) {
+            console.log('Advanced Conditions:', JSON.stringify(filters.advancedConditions, null, 2));
+        }
+        
         console.log('Asset Workflow History Request:', { filters, orgId, page, limit });
+        console.log('🔍 [Controller] Work Order ID filter:', filters.work_order_id);
+        console.log('🔍 [Controller] Asset ID filter:', filters.asset_id);
+        console.log('🔍 [Controller] Vendor ID filter:', filters.vendor_id);
+        console.log('🔍 [Controller] Advanced Conditions:', JSON.stringify(filters.advancedConditions, null, 2));
         
         // Get workflow history and count
         const [historyResult, countResult] = await Promise.all([
@@ -24,6 +84,18 @@ const getAssetWorkflowHistory = async (req, res) => {
         
         const totalCount = countResult.rows[0].total_count;
         const totalPages = Math.ceil(totalCount / limit);
+        
+        // Debug: Log sample data to see what's being returned
+        if (historyResult.rows.length > 0) {
+            console.log('🔍 [Controller] Sample record user data:', {
+                user_id: historyResult.rows[0].user_id,
+                user_name: historyResult.rows[0].user_name,
+                user_email: historyResult.rows[0].user_email,
+                wfamsd_id: historyResult.rows[0].wfamsd_id,
+                wfamsh_id: historyResult.rows[0].wfamsd_id
+            });
+            console.log('🔍 [Controller] All available fields in first record:', Object.keys(historyResult.rows[0]));
+        }
         
         // Format the response data
         const formattedData = historyResult.rows.map(record => ({

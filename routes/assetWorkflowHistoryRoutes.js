@@ -14,7 +14,7 @@ const { protect } = require('../middlewares/authMiddleware');
 router.use(protect);
 
 // Get asset workflow history with filtering
-router.post('/', getAssetWorkflowHistory);
+router.get('/', getAssetWorkflowHistory);
 
 // Get asset workflow history by asset ID
 router.get('/asset/:assetId', getAssetWorkflowHistoryByAsset);

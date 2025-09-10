@@ -160,6 +160,187 @@ const getAssetWorkflowHistory = async (filters = {}, orgId = 'ORG001') => {
         paramIndex++;
     }
     
+    // Handle advanced conditions
+    if (filters.advancedConditions && Array.isArray(filters.advancedConditions)) {
+        console.log('🔍 [Model] Processing advanced conditions:', JSON.stringify(filters.advancedConditions, null, 2));
+        console.log('🔍 [Model] Query before advanced conditions:', query);
+        filters.advancedConditions.forEach(condition => {
+            console.log('🔍 [Model] Processing condition:', { field: condition.field, operator: condition.operator || condition.op, val: condition.val });
+            if (condition.field && (condition.operator || condition.op) && condition.val !== undefined && condition.val !== null && condition.val !== '') {
+                let fieldName = '';
+                let tableAlias = '';
+                
+                // Map frontend field names to database columns
+                switch (condition.field) {
+                    case 'assetName':
+                        fieldName = 'a.description';
+                        tableAlias = 'a';
+                        break;
+                    case 'vendorName':
+                        fieldName = 'v.vendor_name';
+                        tableAlias = 'v';
+                        break;
+                    case 'workflowStatus':
+                        fieldName = 'wfh.status';
+                        tableAlias = 'wfh';
+                        break;
+                    case 'stepStatus':
+                        fieldName = 'wfd.status';
+                        tableAlias = 'wfd';
+                        break;
+                    case 'maintenanceType':
+                        fieldName = 'mt.text';
+                        tableAlias = 'mt';
+                        break;
+                    case 'assignedTo':
+                        fieldName = 'wfd.user_id';
+                        tableAlias = 'wfd';
+                        console.log('🔍 [Model] Mapped assignedTo to wfd.user_id');
+                        break;
+                    case 'department':
+                        fieldName = 'd.text';
+                        tableAlias = 'd';
+                        break;
+                    case 'serialNumber':
+                        fieldName = 'a.serial_number';
+                        tableAlias = 'a';
+                        break;
+                    case 'assetStatus':
+                        fieldName = 'a.current_status';
+                        tableAlias = 'a';
+                        break;
+                    case 'assetType':
+                        fieldName = 'at.text';
+                        tableAlias = 'at';
+                        break;
+                    case 'purchasedCost':
+                        fieldName = 'a.purchased_cost';
+                        tableAlias = 'a';
+                        break;
+                    case 'workflowCreatedDateRange':
+                        fieldName = 'wfh.created_on';
+                        tableAlias = 'wfh';
+                        break;
+                    case 'notes':
+                        fieldName = 'wfd.notes';
+                        tableAlias = 'wfd';
+                        console.log('🔍 [Model] Mapped notes to wfd.notes');
+                        break;
+                    default:
+                        return; // Skip unknown fields
+                }
+                
+                console.log('🔍 [Model] Field mapping result:', { fieldName, tableAlias, operator: condition.operator || condition.op, val: condition.val });
+                
+                if (fieldName && tableAlias) {
+                    const operator = condition.operator || condition.op;
+                    switch (operator) {
+                        case 'equals':
+                            if (Array.isArray(condition.val)) {
+                                const placeholders = condition.val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} IN (${placeholders})`;
+                                queryParams.push(...condition.val);
+                            } else {
+                                query += ` AND ${fieldName} = $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                        case 'not_equals':
+                            if (Array.isArray(condition.val)) {
+                                const placeholders = condition.val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} NOT IN (${placeholders})`;
+                                queryParams.push(...condition.val);
+                            } else {
+                                query += ` AND ${fieldName} != $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                        case 'contains':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'not_contains':
+                            query += ` AND LOWER(${fieldName}) NOT LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'starts_with':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'ends_with':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}`);
+                            paramIndex++;
+                            break;
+                        case 'greater_than':
+                            query += ` AND ${fieldName} > $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'less_than':
+                            query += ` AND ${fieldName} < $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'greater_than_or_equal':
+                            query += ` AND ${fieldName} >= $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'less_than_or_equal':
+                            query += ` AND ${fieldName} <= $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'between':
+                        case 'in_range':
+                            if (Array.isArray(condition.val) && condition.val.length === 2) {
+                                console.log('🔍 [Model] Processing between/in_range date range:', {
+                                    fieldName: fieldName,
+                                    operator: operator,
+                                    values: condition.val,
+                                    startDate: condition.val[0],
+                                    endDate: condition.val[1]
+                                });
+                                query += ` AND ${fieldName} BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+                                queryParams.push(condition.val[0], condition.val[1]);
+                                paramIndex += 2;
+                            }
+                            break;
+                        case 'is_empty':
+                            query += ` AND (${fieldName} IS NULL OR ${fieldName} = '')`;
+                            break;
+                        case 'is_not_empty':
+                            query += ` AND (${fieldName} IS NOT NULL AND ${fieldName} != '')`;
+                            break;
+                        case 'has any':
+                            if (Array.isArray(condition.val)) {
+                                // Extract values from objects if they have value property
+                                const values = condition.val.map(item => 
+                                    typeof item === 'object' && item.value ? item.value : item
+                                );
+                                const placeholders = values.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} = ANY(ARRAY[${placeholders}])`;
+                                queryParams.push(...values);
+                            } else {
+                                query += ` AND ${fieldName} = $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                    }
+                }
+            }
+        });
+        console.log('🔍 [Model] Query after advanced conditions:', query);
+        console.log('🔍 [Model] Query parameters after advanced conditions:', queryParams);
+    }
+    
     // Add ordering
     query += ` ORDER BY wfh.created_on DESC, wfd.sequence ASC`;
     
@@ -188,6 +369,9 @@ const getAssetWorkflowHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
         LEFT JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
+        LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+        LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+        LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
         WHERE wfh.org_id = $1
     `;
     
@@ -265,6 +449,183 @@ const getAssetWorkflowHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         query += ` AND wfd.dept_id = $${paramIndex}`;
         queryParams.push(filters.department_id);
         paramIndex++;
+    }
+    
+    // Handle advanced conditions (same logic as main query)
+    if (filters.advancedConditions && Array.isArray(filters.advancedConditions)) {
+        filters.advancedConditions.forEach(condition => {
+            console.log('🔍 [Model] Processing condition:', { field: condition.field, operator: condition.operator || condition.op, val: condition.val });
+            if (condition.field && (condition.operator || condition.op) && condition.val !== undefined && condition.val !== null && condition.val !== '') {
+                let fieldName = '';
+                let tableAlias = '';
+                
+                // Map frontend field names to database columns
+                switch (condition.field) {
+                    case 'assetName':
+                        fieldName = 'a.description';
+                        tableAlias = 'a';
+                        break;
+                    case 'vendorName':
+                        fieldName = 'v.vendor_name';
+                        tableAlias = 'v';
+                        break;
+                    case 'workflowStatus':
+                        fieldName = 'wfh.status';
+                        tableAlias = 'wfh';
+                        break;
+                    case 'stepStatus':
+                        fieldName = 'wfd.status';
+                        tableAlias = 'wfd';
+                        break;
+                    case 'maintenanceType':
+                        fieldName = 'mt.text';
+                        tableAlias = 'mt';
+                        break;
+                    case 'assignedTo':
+                        fieldName = 'wfd.user_id';
+                        tableAlias = 'wfd';
+                        console.log('🔍 [Model] Mapped assignedTo to wfd.user_id');
+                        break;
+                    case 'department':
+                        fieldName = 'd.text';
+                        tableAlias = 'd';
+                        break;
+                    case 'serialNumber':
+                        fieldName = 'a.serial_number';
+                        tableAlias = 'a';
+                        break;
+                    case 'assetStatus':
+                        fieldName = 'a.current_status';
+                        tableAlias = 'a';
+                        break;
+                    case 'assetType':
+                        fieldName = 'at.text';
+                        tableAlias = 'at';
+                        break;
+                    case 'purchasedCost':
+                        fieldName = 'a.purchased_cost';
+                        tableAlias = 'a';
+                        break;
+                    case 'workflowCreatedDateRange':
+                        fieldName = 'wfh.created_on';
+                        tableAlias = 'wfh';
+                        break;
+                    case 'notes':
+                        fieldName = 'wfd.notes';
+                        tableAlias = 'wfd';
+                        console.log('🔍 [Model] Mapped notes to wfd.notes');
+                        break;
+                    default:
+                        return; // Skip unknown fields
+                }
+                
+                console.log('🔍 [Model] Field mapping result:', { fieldName, tableAlias, operator: condition.operator || condition.op, val: condition.val });
+                
+                if (fieldName && tableAlias) {
+                    const operator = condition.operator || condition.op;
+                    switch (operator) {
+                        case 'equals':
+                            if (Array.isArray(condition.val)) {
+                                const placeholders = condition.val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} IN (${placeholders})`;
+                                queryParams.push(...condition.val);
+                            } else {
+                                query += ` AND ${fieldName} = $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                        case 'not_equals':
+                            if (Array.isArray(condition.val)) {
+                                const placeholders = condition.val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} NOT IN (${placeholders})`;
+                                queryParams.push(...condition.val);
+                            } else {
+                                query += ` AND ${fieldName} != $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                        case 'contains':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'not_contains':
+                            query += ` AND LOWER(${fieldName}) NOT LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'starts_with':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`${condition.val}%`);
+                            paramIndex++;
+                            break;
+                        case 'ends_with':
+                            query += ` AND LOWER(${fieldName}) LIKE LOWER($${paramIndex})`;
+                            queryParams.push(`%${condition.val}`);
+                            paramIndex++;
+                            break;
+                        case 'greater_than':
+                            query += ` AND ${fieldName} > $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'less_than':
+                            query += ` AND ${fieldName} < $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'greater_than_or_equal':
+                            query += ` AND ${fieldName} >= $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'less_than_or_equal':
+                            query += ` AND ${fieldName} <= $${paramIndex}`;
+                            queryParams.push(condition.val);
+                            paramIndex++;
+                            break;
+                        case 'between':
+                        case 'in_range':
+                            if (Array.isArray(condition.val) && condition.val.length === 2) {
+                                console.log('🔍 [Model] Processing between/in_range date range:', {
+                                    fieldName: fieldName,
+                                    operator: operator,
+                                    values: condition.val,
+                                    startDate: condition.val[0],
+                                    endDate: condition.val[1]
+                                });
+                                query += ` AND ${fieldName} BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+                                queryParams.push(condition.val[0], condition.val[1]);
+                                paramIndex += 2;
+                            }
+                            break;
+                        case 'is_empty':
+                            query += ` AND (${fieldName} IS NULL OR ${fieldName} = '')`;
+                            break;
+                        case 'is_not_empty':
+                            query += ` AND (${fieldName} IS NOT NULL AND ${fieldName} != '')`;
+                            break;
+                        case 'has any':
+                            if (Array.isArray(condition.val)) {
+                                // Extract values from objects if they have value property
+                                const values = condition.val.map(item => 
+                                    typeof item === 'object' && item.value ? item.value : item
+                                );
+                                const placeholders = values.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${fieldName} = ANY(ARRAY[${placeholders}])`;
+                                queryParams.push(...values);
+                            } else {
+                                query += ` AND ${fieldName} = $${paramIndex}`;
+                                queryParams.push(condition.val);
+                                paramIndex++;
+                            }
+                            break;
+                    }
+                }
+            }
+        });
     }
     
     return await db.query(query, queryParams);
