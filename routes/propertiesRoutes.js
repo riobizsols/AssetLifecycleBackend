@@ -6,6 +6,12 @@ const { protect } = require('../middlewares/authMiddleware');
 // Apply authentication middleware to all routes
 router.use(protect);
 
+// Get all properties
+router.get('/', PropertiesController.getAllProperties);
+
+// Create asset type with properties
+router.post('/asset-types', PropertiesController.createAssetTypeWithProperties);
+
 // Get all asset types
 router.get('/asset-types', PropertiesController.getAllAssetTypes);
 

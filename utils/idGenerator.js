@@ -30,6 +30,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     // Check if this ID already exists in the target table
     const tableMap = {
         'asset_type': 'tblAssetTypes',
+        'asset_type_prop': 'tblAssetTypeProps',
         'dept_asset': 'tblDeptAssetTypes',
         'department': 'tblDepartments',
         'user': 'tblUsers',
@@ -53,6 +54,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     if (targetTable) {
         const columnMap = {
             'asset_type': 'asset_type_id',
+            'asset_type_prop': 'asset_type_prop_id',
             'dept_asset': 'dept_asset_type_id',
             'department': 'dept_id',
             'user': 'user_id',

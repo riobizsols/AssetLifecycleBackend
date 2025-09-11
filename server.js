@@ -47,6 +47,7 @@ const docTypeObjectRoutes = require("./routes/docTypeObjectRoutes");
 const maintenanceHistoryRoutes = require("./routes/maintenanceHistoryRoutes");
 const assetWorkflowHistoryRoutes = require("./routes/assetWorkflowHistoryRoutes");
 const breakdownHistoryRoutes = require("./routes/breakdownHistoryRoutes");
+const assetSerialPrintRoutes = require("./routes/assetSerialPrintRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -125,6 +126,7 @@ app.use("/api/doc-type-objects", docTypeObjectRoutes);
 app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
+app.use("/api/asset-serial-print", assetSerialPrintRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

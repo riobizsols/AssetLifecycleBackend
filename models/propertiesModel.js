@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { generateCustomId } = require('../utils/idGenerator');
 
 class PropertiesModel {
   // Get properties for a specific asset type
@@ -101,6 +102,107 @@ class PropertiesModel {
     } catch (error) {
       console.error('Error fetching asset types:', error);
       throw error;
+    }
+  }
+
+  // Get all properties
+  static async getAllProperties(orgId) {
+    try {
+      const query = `
+        SELECT 
+          prop_id,
+          property,
+          int_status
+        FROM "tblProps"
+        WHERE org_id = $1 
+        AND int_status = 1
+        ORDER BY property
+      `;
+      
+      const result = await db.query(query, [orgId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching all properties:', error);
+      throw error;
+    }
+  }
+
+  // Map properties to existing asset type
+  static async mapPropertiesToAssetType(assetTypeId, propertyIds, orgId, createdBy) {
+    const client = await db.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // First, verify that the asset type exists
+      const assetTypeCheckQuery = `
+        SELECT asset_type_id FROM "tblAssetTypes"
+        WHERE asset_type_id = $1 AND org_id = $2
+      `;
+      
+      const assetTypeResult = await client.query(assetTypeCheckQuery, [assetTypeId, orgId]);
+      
+      if (assetTypeResult.rows.length === 0) {
+        throw new Error(`Asset type ${assetTypeId} not found`);
+      }
+      
+      // Clear existing property mappings for this asset type
+      const deleteExistingQuery = `
+        DELETE FROM "tblAssetTypeProps"
+        WHERE asset_type_id = $1 AND org_id = $2
+      `;
+      
+      await client.query(deleteExistingQuery, [assetTypeId, orgId]);
+      
+      // Map new properties to the asset type
+      const mappedProperties = [];
+      
+      if (propertyIds && propertyIds.length > 0) {
+        for (const propId of propertyIds) {
+          // Verify that the property exists
+          const propertyCheckQuery = `
+            SELECT prop_id FROM "tblProps"
+            WHERE prop_id = $1 AND org_id = $2 AND int_status = 1
+          `;
+          
+          const propertyResult = await client.query(propertyCheckQuery, [propId, orgId]);
+          
+          if (propertyResult.rows.length === 0) {
+            throw new Error(`Property ${propId} not found or inactive`);
+          }
+          
+          // Generate unique asset_type_prop_id in ATP001 format
+          const assetTypePropId = await generateCustomId("asset_type_prop", 3);
+          
+          const mappingQuery = `
+            INSERT INTO "tblAssetTypeProps" (
+              asset_type_prop_id, asset_type_id, prop_id, org_id
+            ) VALUES ($1, $2, $3, $4)
+          `;
+          
+          await client.query(mappingQuery, [
+            assetTypePropId,
+            assetTypeId,
+            propId,
+            orgId
+          ]);
+          
+          mappedProperties.push(propId);
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      return {
+        mappedProperties: mappedProperties
+      };
+      
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error mapping properties to asset type:', error);
+      throw error;
+    } finally {
+      client.release();
     }
   }
 }
