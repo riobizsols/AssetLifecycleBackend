@@ -4,7 +4,17 @@ const model = require('../models/breakdownHistoryModel');
 const getBreakdownHistory = async (req, res) => {
     try {
         const orgId = req.query.orgId || 'ORG001';
-        const filters = req.body || {};
+        const filters = req.query || {};
+        
+        // Parse advancedConditions if it exists
+        if (filters.advancedConditions) {
+            try {
+                filters.advancedConditions = JSON.parse(filters.advancedConditions);
+            } catch (error) {
+                console.error('Error parsing advancedConditions:', error);
+                filters.advancedConditions = [];
+            }
+        }
         
         // Add pagination parameters
         const page = parseInt(req.query.page) || 1;

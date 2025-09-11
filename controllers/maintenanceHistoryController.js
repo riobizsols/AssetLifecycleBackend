@@ -15,6 +15,7 @@ const getMaintenanceHistory = async (req, res) => {
             maintenance_end_date_to,
             status,
             maintenance_type_id,
+            advancedConditions,
             page = 1,
             limit = 50
         } = req.query;
@@ -32,6 +33,22 @@ const getMaintenanceHistory = async (req, res) => {
         if (maintenance_end_date_to) filters.maintenance_end_date_to = maintenance_end_date_to;
         if (status) filters.status = status;
         if (maintenance_type_id) filters.maintenance_type_id = maintenance_type_id;
+
+        // Parse and add advanced conditions
+        if (advancedConditions) {
+            try {
+                filters.advancedConditions = typeof advancedConditions === 'string' 
+                    ? JSON.parse(advancedConditions) 
+                    : advancedConditions;
+                console.log('🔍 [MaintenanceHistoryController] Advanced conditions:', filters.advancedConditions);
+            } catch (error) {
+                console.error('❌ [MaintenanceHistoryController] Error parsing advanced conditions:', error);
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid advanced conditions format'
+                });
+            }
+        }
 
         // Add pagination
         const pageNum = parseInt(page);

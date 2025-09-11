@@ -113,6 +113,229 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
         paramIndex++;
     }
     
+    // Process advanced conditions
+    if (filters.advancedConditions && Array.isArray(filters.advancedConditions) && filters.advancedConditions.length > 0) {
+        console.log('🔍 [MaintenanceHistoryModel] Processing advanced conditions:', filters.advancedConditions);
+        filters.advancedConditions.forEach((condition, index) => {
+            console.log(`🔍 [MaintenanceHistoryModel] Processing condition ${index + 1}:`, condition);
+            if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
+                const { field, op, val } = condition;
+                
+                // Map frontend field names to database column names
+                let dbField = field;
+                console.log(`🔍 [MaintenanceHistoryModel] Original field: ${field}, op: ${op}, val: ${val}`);
+                if (field === 'assetName') {
+                    dbField = 'a.description';
+                } else if (field === 'assetType') {
+                    dbField = 'at.text';
+                } else if (field === 'vendorName') {
+                    dbField = 'v.vendor_name';
+                } else if (field === 'maintenanceType') {
+                    dbField = 'mt.text';
+                } else if (field === 'workOrderStatus') {
+                    dbField = 'ams.status';
+                    // Map full words to short codes for work order status
+                    if (val === 'Completed') val = 'CO';
+                    else if (val === 'Initiated') val = 'IN';
+                    else if (val === 'Open') val = 'OP';
+                    else if (val === 'In Progress') val = 'IP';
+                    else if (val === 'Cancelled') val = 'CA';
+                    else if (val === 'On Hold') val = 'OH';
+                    // Keep existing short codes as is
+                    else if (val === 'CO' || val === 'IN' || val === 'OP' || val === 'IP' || val === 'CA' || val === 'OH') {
+                        // Already in correct format, no change needed
+                    }
+                } else if (field === 'notes') {
+                    dbField = 'ams.notes';
+                } else if (field === 'assetId') {
+                    dbField = 'ams.asset_id';
+                } else if (field === 'workOrderId') {
+                    dbField = 'ams.wo_id';
+                } else if (field === 'vendorId') {
+                    dbField = 'ams.vendor_id';
+                } else if (field === 'cost') {
+                    // Cost in frontend is actually po_number, not purchased_cost
+                    // Handle null values by treating them as 0 for comparison
+                    dbField = 'COALESCE(CAST(ams.po_number AS NUMERIC), 0)';
+                } else if (field === 'purchasedCost') {
+                    dbField = 'CAST(a.purchased_cost AS NUMERIC)';
+                } else if (field === 'serialNumber') {
+                    dbField = 'a.serial_number';
+                } else if (field === 'assetStatus') {
+                    dbField = 'a.current_status';
+                } else if (field === 'purchasedOn') {
+                    dbField = 'a.purchased_on';
+                } else if (field === 'downtime') {
+                    // Downtime is calculated as: 8 if technician_name exists, otherwise N/A
+                    // For filtering, we need to handle both numeric and 'N/A' cases
+                    if (op === '=' && val === 'N/A') {
+                        query += ` AND ams.technician_name IS NULL`;
+                    } else if (op === '!=' && val === 'N/A') {
+                        query += ` AND ams.technician_name IS NOT NULL`;
+                    } else if (op === '=' && val === 8) {
+                        query += ` AND ams.technician_name IS NOT NULL`;
+                    } else if (op === '!=' && val === 8) {
+                        query += ` AND ams.technician_name IS NULL`;
+                    } else if (op === '=' && val > 8) {
+                        // No records have downtime = val if val > 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '>' && val >= 8) {
+                        // No records have downtime > val if val >= 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '>=' && val > 8) {
+                        // No records have downtime >= val if val > 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '<' && val <= 8) {
+                        // All records with technician have downtime < val if val > 8
+                        if (val > 8) {
+                            query += ` AND ams.technician_name IS NOT NULL`;
+                        } else {
+                            query += ` AND ams.technician_name IS NULL`;
+                        }
+                    } else if (op === '<=' && val >= 8) {
+                        // All records with technician have downtime <= val if val >= 8
+                        if (val >= 8) {
+                            query += ` AND ams.technician_name IS NOT NULL`;
+                        } else {
+                            query += ` AND ams.technician_name IS NULL`;
+                        }
+                    } else {
+                        // For other cases, skip
+                        console.log('⚠️ [MaintenanceHistoryModel] Unsupported downtime filter:', op, val);
+                        return;
+                    }
+                    return;
+                } else if (field === 'poNumber') {
+                    dbField = 'ams.po_number';
+                } else if (field === 'invoice') {
+                    dbField = 'ams.invoice';
+                } else if (field === 'technicianName') {
+                    dbField = 'ams.technician_name';
+                } else if (field === 'technicianEmail') {
+                    dbField = 'ams.technician_email';
+                } else if (field === 'technicianPhone') {
+                    dbField = 'ams.technician_phno';
+                } else if (field === 'maintainedBy') {
+                    dbField = 'ams.maintained_by';
+                } else if (field === 'createdBy') {
+                    dbField = 'ams.created_by';
+                } else if (field === 'changedBy') {
+                    dbField = 'ams.changed_by';
+                } else if (field === 'maintenanceStartDate') {
+                    dbField = 'ams.act_maint_st_date';
+                } else if (field === 'maintenanceEndDate') {
+                    dbField = 'ams.act_main_end_date';
+                } else if (field === 'vendorContactPerson') {
+                    dbField = 'v.contact_person_name';
+                } else if (field === 'vendorEmail') {
+                    dbField = 'v.contact_person_email';
+                } else if (field === 'vendorPhone') {
+                    dbField = 'v.contact_person_number';
+                } else if (field === 'vendorAddress') {
+                    dbField = 'CONCAT(v.address_line1, \', \', v.city, \', \', v.state, \' \', v.pincode)';
+                } else {
+                    // Unknown field - skip this condition to prevent errors
+                    console.log('⚠️ [MaintenanceHistoryModel] Unknown field in advanced condition:', field, '- skipping condition');
+                    return;
+                }
+                
+                console.log(`🔍 [MaintenanceHistoryModel] Mapped field: ${field} -> ${dbField}, final val: ${val}`);
+                
+                // Build the condition based on operator
+                switch (op) {
+                    case '=':
+                        // Handle array values for multiselect fields
+                        if (Array.isArray(val)) {
+                            if (val.length === 0) {
+                                // Empty array - no results
+                                query += ` AND 1=0`;
+                            } else {
+                                const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${dbField} IN (${placeholders})`;
+                                queryParams.push(...val);
+                            }
+                        } else {
+                            query += ` AND ${dbField} = $${paramIndex}`;
+                            queryParams.push(val);
+                            paramIndex++;
+                        }
+                        break;
+                    case '!=':
+                        // Handle array values for multiselect fields
+                        if (Array.isArray(val)) {
+                            if (val.length === 0) {
+                                // Empty array - all results
+                                // No condition added
+                            } else {
+                                const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${dbField} NOT IN (${placeholders})`;
+                                queryParams.push(...val);
+                            }
+                        } else {
+                            query += ` AND ${dbField} != $${paramIndex}`;
+                            queryParams.push(val);
+                            paramIndex++;
+                        }
+                        break;
+                    case 'contains':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'not_contains':
+                        query += ` AND LOWER(${dbField}) NOT LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'starts_with':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'ends_with':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}`);
+                        paramIndex++;
+                        break;
+                    case '>':
+                        query += ` AND ${dbField} > $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '>=':
+                        query += ` AND ${dbField} >= $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '<':
+                        query += ` AND ${dbField} < $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '<=':
+                        query += ` AND ${dbField} <= $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case 'in':
+                        if (Array.isArray(val) && val.length > 0) {
+                            const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                            query += ` AND ${dbField} IN (${placeholders})`;
+                            queryParams.push(...val);
+                        }
+                        break;
+                    case 'not_in':
+                        if (Array.isArray(val) && val.length > 0) {
+                            const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                            query += ` AND ${dbField} NOT IN (${placeholders})`;
+                            queryParams.push(...val);
+                        }
+                        break;
+                }
+            }
+        });
+    }
+    
     // Add ordering
     query += ` ORDER BY ams.act_maint_st_date DESC, ams.created_on DESC`;
     
@@ -205,6 +428,227 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         query += ` AND ams.maint_type_id = $${paramIndex}`;
         queryParams.push(filters.maintenance_type_id);
         paramIndex++;
+    }
+    
+    // Process advanced conditions (same logic as in getMaintenanceHistory)
+    if (filters.advancedConditions && Array.isArray(filters.advancedConditions) && filters.advancedConditions.length > 0) {
+        filters.advancedConditions.forEach(condition => {
+            if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
+                const { field, op, val } = condition;
+                
+                // Map frontend field names to database column names
+                let dbField = field;
+                console.log(`🔍 [MaintenanceHistoryModel] Original field: ${field}, op: ${op}, val: ${val}`);
+                if (field === 'assetName') {
+                    dbField = 'a.description';
+                } else if (field === 'assetType') {
+                    dbField = 'at.text';
+                } else if (field === 'vendorName') {
+                    dbField = 'v.vendor_name';
+                } else if (field === 'maintenanceType') {
+                    dbField = 'mt.text';
+                } else if (field === 'workOrderStatus') {
+                    dbField = 'ams.status';
+                    // Map full words to short codes for work order status
+                    if (val === 'Completed') val = 'CO';
+                    else if (val === 'Initiated') val = 'IN';
+                    else if (val === 'Open') val = 'OP';
+                    else if (val === 'In Progress') val = 'IP';
+                    else if (val === 'Cancelled') val = 'CA';
+                    else if (val === 'On Hold') val = 'OH';
+                    // Keep existing short codes as is
+                    else if (val === 'CO' || val === 'IN' || val === 'OP' || val === 'IP' || val === 'CA' || val === 'OH') {
+                        // Already in correct format, no change needed
+                    }
+                } else if (field === 'notes') {
+                    dbField = 'ams.notes';
+                } else if (field === 'assetId') {
+                    dbField = 'ams.asset_id';
+                } else if (field === 'workOrderId') {
+                    dbField = 'ams.wo_id';
+                } else if (field === 'vendorId') {
+                    dbField = 'ams.vendor_id';
+                } else if (field === 'cost') {
+                    // Cost in frontend is actually po_number, not purchased_cost
+                    // Handle null values by treating them as 0 for comparison
+                    dbField = 'COALESCE(CAST(ams.po_number AS NUMERIC), 0)';
+                } else if (field === 'purchasedCost') {
+                    dbField = 'CAST(a.purchased_cost AS NUMERIC)';
+                } else if (field === 'serialNumber') {
+                    dbField = 'a.serial_number';
+                } else if (field === 'assetStatus') {
+                    dbField = 'a.current_status';
+                } else if (field === 'purchasedOn') {
+                    dbField = 'a.purchased_on';
+                } else if (field === 'downtime') {
+                    // Downtime is calculated as: 8 if technician_name exists, otherwise N/A
+                    // For filtering, we need to handle both numeric and 'N/A' cases
+                    if (op === '=' && val === 'N/A') {
+                        query += ` AND ams.technician_name IS NULL`;
+                    } else if (op === '!=' && val === 'N/A') {
+                        query += ` AND ams.technician_name IS NOT NULL`;
+                    } else if (op === '=' && val === 8) {
+                        query += ` AND ams.technician_name IS NOT NULL`;
+                    } else if (op === '!=' && val === 8) {
+                        query += ` AND ams.technician_name IS NULL`;
+                    } else if (op === '=' && val > 8) {
+                        // No records have downtime = val if val > 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '>' && val >= 8) {
+                        // No records have downtime > val if val >= 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '>=' && val > 8) {
+                        // No records have downtime >= val if val > 8 (since max is 8)
+                        query += ` AND 1=0`;
+                    } else if (op === '<' && val <= 8) {
+                        // All records with technician have downtime < val if val > 8
+                        if (val > 8) {
+                            query += ` AND ams.technician_name IS NOT NULL`;
+                        } else {
+                            query += ` AND ams.technician_name IS NULL`;
+                        }
+                    } else if (op === '<=' && val >= 8) {
+                        // All records with technician have downtime <= val if val >= 8
+                        if (val >= 8) {
+                            query += ` AND ams.technician_name IS NOT NULL`;
+                        } else {
+                            query += ` AND ams.technician_name IS NULL`;
+                        }
+                    } else {
+                        // For other cases, skip
+                        console.log('⚠️ [MaintenanceHistoryModel] Unsupported downtime filter:', op, val);
+                        return;
+                    }
+                    return;
+                } else if (field === 'poNumber') {
+                    dbField = 'ams.po_number';
+                } else if (field === 'invoice') {
+                    dbField = 'ams.invoice';
+                } else if (field === 'technicianName') {
+                    dbField = 'ams.technician_name';
+                } else if (field === 'technicianEmail') {
+                    dbField = 'ams.technician_email';
+                } else if (field === 'technicianPhone') {
+                    dbField = 'ams.technician_phno';
+                } else if (field === 'maintainedBy') {
+                    dbField = 'ams.maintained_by';
+                } else if (field === 'createdBy') {
+                    dbField = 'ams.created_by';
+                } else if (field === 'changedBy') {
+                    dbField = 'ams.changed_by';
+                } else if (field === 'maintenanceStartDate') {
+                    dbField = 'ams.act_maint_st_date';
+                } else if (field === 'maintenanceEndDate') {
+                    dbField = 'ams.act_main_end_date';
+                } else if (field === 'vendorContactPerson') {
+                    dbField = 'v.contact_person_name';
+                } else if (field === 'vendorEmail') {
+                    dbField = 'v.contact_person_email';
+                } else if (field === 'vendorPhone') {
+                    dbField = 'v.contact_person_number';
+                } else if (field === 'vendorAddress') {
+                    dbField = 'CONCAT(v.address_line1, \', \', v.city, \', \', v.state, \' \', v.pincode)';
+                } else {
+                    // Unknown field - skip this condition to prevent errors
+                    console.log('⚠️ [MaintenanceHistoryModel] Unknown field in advanced condition:', field, '- skipping condition');
+                    return;
+                }
+                
+                console.log(`🔍 [MaintenanceHistoryModel] Mapped field: ${field} -> ${dbField}, final val: ${val}`);
+                
+                // Build the condition based on operator
+                switch (op) {
+                    case '=':
+                        // Handle array values for multiselect fields
+                        if (Array.isArray(val)) {
+                            if (val.length === 0) {
+                                // Empty array - no results
+                                query += ` AND 1=0`;
+                            } else {
+                                const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${dbField} IN (${placeholders})`;
+                                queryParams.push(...val);
+                            }
+                        } else {
+                            query += ` AND ${dbField} = $${paramIndex}`;
+                            queryParams.push(val);
+                            paramIndex++;
+                        }
+                        break;
+                    case '!=':
+                        // Handle array values for multiselect fields
+                        if (Array.isArray(val)) {
+                            if (val.length === 0) {
+                                // Empty array - all results
+                                // No condition added
+                            } else {
+                                const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                                query += ` AND ${dbField} NOT IN (${placeholders})`;
+                                queryParams.push(...val);
+                            }
+                        } else {
+                            query += ` AND ${dbField} != $${paramIndex}`;
+                            queryParams.push(val);
+                            paramIndex++;
+                        }
+                        break;
+                    case 'contains':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'not_contains':
+                        query += ` AND LOWER(${dbField}) NOT LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'starts_with':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`${val}%`);
+                        paramIndex++;
+                        break;
+                    case 'ends_with':
+                        query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                        queryParams.push(`%${val}`);
+                        paramIndex++;
+                        break;
+                    case '>':
+                        query += ` AND ${dbField} > $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '>=':
+                        query += ` AND ${dbField} >= $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '<':
+                        query += ` AND ${dbField} < $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case '<=':
+                        query += ` AND ${dbField} <= $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        break;
+                    case 'in':
+                        if (Array.isArray(val) && val.length > 0) {
+                            const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                            query += ` AND ${dbField} IN (${placeholders})`;
+                            queryParams.push(...val);
+                        }
+                        break;
+                    case 'not_in':
+                        if (Array.isArray(val) && val.length > 0) {
+                            const placeholders = val.map(() => `$${paramIndex++}`).join(',');
+                            query += ` AND ${dbField} NOT IN (${placeholders})`;
+                            queryParams.push(...val);
+                        }
+                        break;
+                }
+            }
+        });
     }
     
     return await db.query(query, queryParams);

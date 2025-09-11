@@ -173,6 +173,165 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
         paramIndex++;
     }
     
+    // Process advanced conditions
+    if (filters.advancedConditions && Array.isArray(filters.advancedConditions) && filters.advancedConditions.length > 0) {
+        console.log('🔍 [BreakdownHistoryModel] Processing advanced conditions:', filters.advancedConditions);
+        filters.advancedConditions.forEach((condition, index) => {
+            console.log(`🔍 [BreakdownHistoryModel] Processing condition ${index + 1}:`, condition);
+            if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
+                const { field, op } = condition;
+                let val = condition.val;
+                
+                // Map frontend field names to database column names
+                let dbField = field;
+                console.log(`🔍 [BreakdownHistoryModel] Original field: ${field}, op: ${op}, val: ${val}`);
+                
+                if (field === 'assetName') {
+                    // For asset name, check both description and serial number
+                    if (op === 'contains' || op === 'like') {
+                        query += ` AND (LOWER(COALESCE(a.description, '')) LIKE LOWER($${paramIndex}) OR LOWER(COALESCE(a.serial_number, '')) LIKE LOWER($${paramIndex}))`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        return; // Skip the normal processing below
+                    } else if (op === 'not contains' || op === 'not like') {
+                        query += ` AND NOT (LOWER(COALESCE(a.description, '')) LIKE LOWER($${paramIndex}) OR LOWER(COALESCE(a.serial_number, '')) LIKE LOWER($${paramIndex}))`;
+                        queryParams.push(`%${val}%`);
+                        paramIndex++;
+                        return; // Skip the normal processing below
+                    } else {
+                        dbField = 'COALESCE(a.description, a.serial_number)';
+                    }
+                } else if (field === 'assetType') {
+                    dbField = 'at.text';
+                } else if (field === 'vendorName') {
+                    dbField = 'v.vendor_name';
+                } else if (field === 'workOrderStatus') {
+                    dbField = 'ams.status';
+                    // Map full words to short codes for work order status
+                    if (val === 'Completed') val = 'CO';
+                    else if (val === 'Initiated') val = 'IN';
+                    else if (val === 'Open') val = 'OP';
+                    else if (val === 'In Progress') val = 'IP';
+                    else if (val === 'Cancelled') val = 'CA';
+                    else if (val === 'On Hold') val = 'OH';
+                    else if (val === 'NULL' || val === 'No Work Order') {
+                        // Handle "No Work Order" case - show records where work order status is null
+                        if (op === '=' || op === 'equals') {
+                            query += ` AND ams.status IS NULL`;
+                            return; // Skip the normal processing below
+                        } else if (op === '!=' || op === 'not equals') {
+                            query += ` AND ams.status IS NOT NULL`;
+                            return; // Skip the normal processing below
+                        }
+                    }
+                    
+                    // For work order status, we need to handle null values properly
+                    // If filtering for a specific status, only show records that have that status (not null)
+                    if (op === '=' || op === 'equals') {
+                        query += ` AND ams.status = $${paramIndex} AND ams.status IS NOT NULL`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        return; // Skip the normal processing below
+                    } else if (op === '!=' || op === 'not equals') {
+                        query += ` AND (ams.status != $${paramIndex} OR ams.status IS NULL)`;
+                        queryParams.push(val);
+                        paramIndex++;
+                        return; // Skip the normal processing below
+                    }
+                } else if (field === 'breakdownReason') {
+                    dbField = 'brc.text';
+                } else if (field === 'breakdownStatus') {
+                    dbField = 'brd.status';
+                } else if (field === 'description') {
+                    dbField = 'brd.description';
+                } else if (field === 'reportedBy') {
+                    dbField = 'u.full_name';
+                } else if (field === 'priority') {
+                    // Priority field doesn't exist in breakdown table, skip this condition
+                    console.log(`⚠️ [BreakdownHistoryModel] Priority field not available in breakdown table, skipping condition`);
+                    return;
+                } else if (field === 'resolutionTime') {
+                    // Resolution time field doesn't exist in breakdown table, skip this condition
+                    console.log(`⚠️ [BreakdownHistoryModel] Resolution time field not available in breakdown table, skipping condition`);
+                    return;
+                } else if (field === 'cost') {
+                    dbField = 'ams.po_number';
+                } else if (field === 'rootCause') {
+                    dbField = 'brc.text';
+                } else if (field === 'serialNumber') {
+                    dbField = 'a.serial_number';
+                } else if (field === 'assetStatus') {
+                    dbField = 'a.current_status';
+                } else if (field === 'branch') {
+                    dbField = 'b.branch_name';
+                } else if (field === 'reportedByEmail') {
+                    dbField = 'u.email';
+                } else if (field === 'vendorEmail') {
+                    dbField = 'v.vendor_email';
+                }
+                
+                console.log(`🔍 [BreakdownHistoryModel] Mapped field: ${dbField}, op: ${op}, val: ${val}`);
+                
+                // Handle different operators
+                if (op === '=' || op === 'equals') {
+                    if (Array.isArray(val)) {
+                        // Handle IN operator for multiselect
+                        const placeholders = val.map(() => `$${paramIndex + val.indexOf(val)}`).join(', ');
+                        query += ` AND ${dbField} IN (${placeholders})`;
+                        val.forEach(v => queryParams.push(v));
+                        paramIndex += val.length;
+                    } else {
+                        query += ` AND ${dbField} = $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                    }
+                } else if (op === '!=' || op === 'not equals') {
+                    if (Array.isArray(val)) {
+                        // Handle NOT IN operator for multiselect
+                        const placeholders = val.map(() => `$${paramIndex + val.indexOf(val)}`).join(', ');
+                        query += ` AND ${dbField} NOT IN (${placeholders})`;
+                        val.forEach(v => queryParams.push(v));
+                        paramIndex += val.length;
+                    } else {
+                        query += ` AND ${dbField} != $${paramIndex}`;
+                        queryParams.push(val);
+                        paramIndex++;
+                    }
+                } else if (op === 'contains' || op === 'like') {
+                    query += ` AND LOWER(${dbField}) LIKE LOWER($${paramIndex})`;
+                    queryParams.push(`%${val}%`);
+                    paramIndex++;
+                } else if (op === 'not contains' || op === 'not like') {
+                    query += ` AND LOWER(${dbField}) NOT LIKE LOWER($${paramIndex})`;
+                    queryParams.push(`%${val}%`);
+                    paramIndex++;
+                } else if (op === '>=' || op === 'greater than or equal') {
+                    query += ` AND COALESCE(CAST(${dbField} AS NUMERIC), 0) >= $${paramIndex}`;
+                    queryParams.push(parseFloat(val) || 0);
+                    paramIndex++;
+                } else if (op === '<=' || op === 'less than or equal') {
+                    query += ` AND COALESCE(CAST(${dbField} AS NUMERIC), 0) <= $${paramIndex}`;
+                    queryParams.push(parseFloat(val) || 0);
+                    paramIndex++;
+                } else if (op === '>' || op === 'greater than') {
+                    query += ` AND COALESCE(CAST(${dbField} AS NUMERIC), 0) > $${paramIndex}`;
+                    queryParams.push(parseFloat(val) || 0);
+                    paramIndex++;
+                } else if (op === '<' || op === 'less than') {
+                    query += ` AND COALESCE(CAST(${dbField} AS NUMERIC), 0) < $${paramIndex}`;
+                    queryParams.push(parseFloat(val) || 0);
+                    paramIndex++;
+                } else if (op === 'is null' || op === 'is empty') {
+                    query += ` AND (${dbField} IS NULL OR ${dbField} = '')`;
+                } else if (op === 'is not null' || op === 'is not empty') {
+                    query += ` AND (${dbField} IS NOT NULL AND ${dbField} != '')`;
+                }
+                
+                console.log(`🔍 [BreakdownHistoryModel] Added condition: ${dbField} ${op} ${val}`);
+            }
+        });
+    }
+    
     // Add ordering
     query += ` ORDER BY brd.created_on DESC`;
     
@@ -187,6 +346,9 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
             queryParams.push(filters.offset);
         }
     }
+    
+    // console.log('🔍 [BreakdownHistoryModel] Final SQL Query:', query);
+    // console.log('🔍 [BreakdownHistoryModel] Query Parameters:', queryParams);
     
     return await db.query(query, queryParams);
 };
