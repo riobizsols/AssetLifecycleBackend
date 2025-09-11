@@ -91,6 +91,31 @@ const addAssetType = async (req, res) => {
             }
         }
 
+        // Check if result is defined
+        if (!result || !result.rows || result.rows.length === 0) {
+            throw new Error('Failed to create asset type');
+        }
+
+        // Handle property mapping if properties are provided
+        const { properties } = req.body;
+        console.log('🔍 Properties received:', properties);
+        console.log('🔍 Properties type:', typeof properties);  
+        console.log('🔍 Is array:', Array.isArray(properties));
+        console.log('🔍 Length:', properties?.length);
+        
+        if (properties && Array.isArray(properties) && properties.length > 0) {
+            try {
+                console.log(`📋 Mapping ${properties.length} properties to asset type ${asset_type_id}`);
+                await model.mapAssetTypeToProperties(asset_type_id, properties, org_id, created_by);
+                console.log(`✅ Successfully mapped ${properties.length} properties to asset type ${asset_type_id}`);
+            } catch (propErr) {
+                console.error('❌ Error mapping properties:', propErr);
+                // Don't fail the entire operation, just log the error
+            }
+        } else {
+            console.log('⚠️ No properties provided or properties array is empty');
+        }
+
         res.status(201).json({
             message: "Asset type added successfully",
             asset_type: result.rows[0]
@@ -339,6 +364,140 @@ const deleteAssetType = async (req, res) => {
     }
 };
 
+// GET /api/asset-types/properties - Get all properties
+const getAllProperties = async (req, res) => {
+    try {
+        const org_id = req.user.org_id;
+        const properties = await model.getAllProperties(org_id);
+        
+        res.status(200).json({
+            success: true,
+            data: properties,
+            count: properties.length
+        });
+    } catch (err) {
+        console.error("Error fetching properties:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to fetch properties",
+            details: err.message 
+        });
+    }
+};
+
+// GET /api/asset-types/:id/properties - Get properties for a specific asset type
+const getAssetTypeProperties = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const org_id = req.user.org_id;
+        
+        console.log('🔍 Controller: Fetching properties for asset type:', id, 'org:', org_id);
+        
+        const properties = await model.getAssetTypeProperties(id, org_id);
+        
+        console.log('✅ Controller: Found properties:', properties.length);
+        
+        res.status(200).json({
+            success: true,
+            data: properties,
+            count: properties.length
+        });
+    } catch (err) {
+        console.error("❌ Controller: Error fetching asset type properties:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to fetch asset type properties",
+            details: err.message 
+        });
+    }
+};
+
+// POST /api/asset-types/:id/properties - Add individual property to asset type
+const mapAssetTypeProperties = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { properties } = req.body;
+        const org_id = req.user.org_id;
+        const created_by = req.user.user_id;
+        
+        if (!properties || !Array.isArray(properties) || properties.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Properties array is required"
+            });
+        }
+        
+        // If only one property, use the individual add function
+        if (properties.length === 1) {
+            const result = await model.addAssetTypeProperty(id, properties[0], org_id, created_by);
+            
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.message
+                });
+            }
+            
+            return res.status(200).json({
+                success: true,
+                message: "Property added successfully",
+                asset_type_prop_id: result.asset_type_prop_id
+            });
+        }
+        
+        // For multiple properties, use the replace function
+        await model.mapAssetTypeToProperties(id, properties, org_id, created_by);
+        
+        res.status(200).json({
+            success: true,
+            message: "Properties mapped successfully",
+            mapped_count: properties.length
+        });
+    } catch (err) {
+        console.error("Error mapping asset type properties:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to map properties",
+            details: err.message 
+        });
+    }
+};
+
+// DELETE /api/asset-types/properties/:assetTypePropId - Delete individual property mapping
+const deleteAssetTypeProperty = async (req, res) => {
+    try {
+        const { assetTypePropId } = req.params;
+        
+        if (!assetTypePropId) {
+            return res.status(400).json({
+                success: false,
+                error: "Asset type property ID is required"
+            });
+        }
+        
+        const result = await model.deleteAssetTypeProperty(assetTypePropId);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: "Property mapping not found"
+            });
+        }
+        
+        res.status(200).json({
+            success: true,
+            message: "Property mapping deleted successfully"
+        });
+    } catch (err) {
+        console.error("Error deleting asset type property:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to delete property mapping",
+            details: err.message 
+        });
+    }
+};
+
 module.exports = {
     addAssetType,
     getAllAssetTypes,
@@ -347,5 +506,9 @@ module.exports = {
     deleteAssetType,
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
-    getAssetTypesByGroupRequired
+    getAssetTypesByGroupRequired,
+    getAllProperties,
+    getAssetTypeProperties,
+    mapAssetTypeProperties,
+    deleteAssetTypeProperty
 };
