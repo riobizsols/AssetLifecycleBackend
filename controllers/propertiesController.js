@@ -80,6 +80,40 @@ class PropertiesController {
     }
   }
 
+  // Add new property value
+  static async addPropertyValue(req, res) {
+    try {
+      const { propId, value } = req.body;
+      const orgId = req.user.org_id;
+
+      console.log(`Adding property value for propId: ${propId}, value: ${value}, org: ${orgId}`);
+
+      if (!propId || !value) {
+        return res.status(400).json({
+          success: false,
+          message: 'Property ID and value are required'
+        });
+      }
+
+      const newValue = await PropertiesModel.addPropertyValue(propId, value, orgId);
+      
+      console.log(`Successfully added property value:`, newValue);
+
+      res.json({
+        success: true,
+        data: newValue,
+        message: 'Property value added successfully'
+      });
+    } catch (error) {
+      console.error('Error in addPropertyValue:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to add property value',
+        error: error.message
+      });
+    }
+  }
+
   // Get all asset types
   static async getAllAssetTypes(req, res) {
     try {
