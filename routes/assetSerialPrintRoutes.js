@@ -7,19 +7,19 @@ const { protect } = require('../middlewares/authMiddleware');
 router.use(protect);
 
 // Add serial number to print queue
-router.post('/', AssetSerialPrintController.addToPrintQueue);
+router.post('/', AssetSerialPrintController.addToPrintQueue); //..
 
 // Get all serial numbers in print queue
-router.get('/', AssetSerialPrintController.getAllPrintQueue);
+router.get('/', AssetSerialPrintController.getAllPrintQueue); //..
 
 // Get print queue by status
-router.get('/status/:status', AssetSerialPrintController.getPrintQueueByStatus);
+router.get('/status/:status', AssetSerialPrintController.getPrintQueueByStatus); //.. New or completed 
 
 // Get print queue item by ID
 router.get('/:psnqId', AssetSerialPrintController.getPrintQueueById);
 
 // Update print status
-router.put('/:psnqId/status', AssetSerialPrintController.updatePrintStatus);
+router.put('/:psnqId/status', AssetSerialPrintController.updatePrintStatus); //....
 
 // Delete from print queue
 router.delete('/:psnqId', AssetSerialPrintController.deleteFromPrintQueue);

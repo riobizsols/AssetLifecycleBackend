@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { generateCustomId } = require('../utils/idGenerator');
 
 const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, depreciation_type = 'ND') => {
     const query = `
@@ -168,6 +169,160 @@ const deleteAssetType = async (asset_type_id) => {
         throw error;
     }
 };
+    
+// Property mapping functions
+const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, created_by) => {
+    try {
+        console.log('🔍 mapAssetTypeToProperties called with:', {
+            asset_type_id,
+            property_ids,
+            org_id,
+            created_by
+        });
+
+        // First, delete existing mappings for this asset type
+        console.log('🗑️ Deleting existing mappings for asset type:', asset_type_id);
+        await db.query(
+            'DELETE FROM "tblAssetTypeProps" WHERE asset_type_id = $1',
+            [asset_type_id]
+        );
+
+        // Insert new mappings
+        if (property_ids && property_ids.length > 0) {
+            console.log(`📝 Inserting ${property_ids.length} property mappings...`);
+            const insertPromises = property_ids.map(async (prop_id, index) => {
+                console.log(`📝 Processing property ${index + 1}/${property_ids.length}: ${prop_id}`);
+                const asset_type_prop_id = await generateCustomId('atp', 3);
+                console.log(`🔢 Generated asset_type_prop_id: ${asset_type_prop_id}`);
+                
+                const query = `
+                    INSERT INTO "tblAssetTypeProps" (
+                        asset_type_prop_id, asset_type_id, prop_id, org_id
+                    ) VALUES ($1, $2, $3, $4)
+                `;
+                console.log('📝 Executing insert query with values:', [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+                return db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+            });
+            
+            await Promise.all(insertPromises);
+            console.log('✅ All property mappings inserted successfully');
+        } else {
+            console.log('⚠️ No property IDs provided for mapping');
+        }
+
+        return { success: true };
+    } catch (error) {
+        console.error('❌ Error mapping asset type to properties:', error);
+        throw error;
+    }
+};
+
+const getAssetTypeProperties = async (asset_type_id, org_id) => {
+    try {
+        console.log('🔍 Fetching properties for asset type:', asset_type_id, 'org:', org_id);
+        
+        const query = `
+            SELECT 
+                p.prop_id,
+                p.property,
+                p.int_status,
+                atp.asset_type_prop_id
+            FROM "tblProps" p
+            INNER JOIN "tblAssetTypeProps" atp ON p.prop_id = atp.prop_id
+            WHERE atp.asset_type_id = $1 
+            AND p.org_id = $2 
+            AND p.int_status = 1
+            ORDER BY p.property
+        `;
+        
+        const result = await db.query(query, [asset_type_id, org_id]);
+        console.log('✅ Found properties:', result.rows.length);
+        console.log('Properties:', result.rows);
+        return result.rows;
+    } catch (error) {
+        console.error('❌ Error fetching asset type properties:', error);
+        throw error;
+    }
+};
+
+const getAllProperties = async (org_id) => {
+    try {
+        const query = `
+            SELECT 
+                prop_id,
+                property,
+                int_status
+            FROM "tblProps"
+            WHERE org_id = $1 
+            AND int_status = 1
+            ORDER BY property
+        `;
+        
+        const result = await db.query(query, [org_id]);
+        return result.rows;
+    } catch (error) {
+        console.error('Error fetching all properties:', error);
+        throw error;
+    }
+};
+
+// Add individual property to asset type (without deleting existing ones)
+const addAssetTypeProperty = async (asset_type_id, prop_id, org_id, created_by) => {
+    try {
+        console.log('➕ Adding individual property to asset type:', { asset_type_id, prop_id, org_id });
+        
+        // Check if mapping already exists
+        const existingCheck = await db.query(`
+            SELECT asset_type_prop_id FROM "tblAssetTypeProps" 
+            WHERE asset_type_id = $1 AND prop_id = $2
+        `, [asset_type_id, prop_id]);
+        
+        if (existingCheck.rows.length > 0) {
+            console.log('⚠️ Property mapping already exists');
+            return { success: false, message: 'Property already mapped to this asset type' };
+        }
+        
+        // Generate new asset_type_prop_id
+        const asset_type_prop_id = await generateCustomId('atp', 3);
+        console.log('🔢 Generated asset_type_prop_id:', asset_type_prop_id);
+        
+        // Insert new mapping
+        const query = `
+            INSERT INTO "tblAssetTypeProps" (
+                asset_type_prop_id, asset_type_id, prop_id, org_id
+            ) VALUES ($1, $2, $3, $4)
+        `;
+        
+        await db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+        console.log('✅ Property mapping added successfully');
+        
+        return { success: true, asset_type_prop_id };
+    } catch (error) {
+        console.error('❌ Error adding asset type property mapping:', error);
+        throw error;
+    }
+};
+
+// Delete individual asset type property mapping
+const deleteAssetTypeProperty = async (asset_type_prop_id) => {
+    try {
+        console.log('🗑️ Deleting asset type property mapping:', asset_type_prop_id);
+        
+        const query = `
+            DELETE FROM "tblAssetTypeProps" 
+            WHERE asset_type_prop_id = $1
+            RETURNING *
+        `;
+        
+        const result = await db.query(query, [asset_type_prop_id]);
+        console.log('✅ Asset type property mapping deleted:', result.rows.length > 0 ? 'Success' : 'Not found');
+        
+        return result;
+    } catch (error) {
+        console.error('❌ Error deleting asset type property mapping:', error);
+        throw error;
+    }
+};
 
 module.exports = {
     insertAssetType,
@@ -179,5 +334,10 @@ module.exports = {
     checkAssetTypeReferences,
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
-    getAssetTypesByGroupRequired
+    getAssetTypesByGroupRequired,
+    mapAssetTypeToProperties,
+    getAssetTypeProperties,
+    getAllProperties,
+    addAssetTypeProperty,
+    deleteAssetTypeProperty
 }; 
