@@ -7,10 +7,10 @@ const { protect } = require('../middlewares/authMiddleware');
 router.use(protect);
 
 // Get all properties
-router.get('/', PropertiesController.getAllProperties);
+router.get('/', PropertiesController.getAllProperties); //..
 
 // Create asset type with properties
-router.post('/asset-types', PropertiesController.createAssetTypeWithProperties);
+router.post('/asset-types', PropertiesController.createAssetTypeWithProperties); //...
 
 // Get all asset types
 router.get('/asset-types', PropertiesController.getAllAssetTypes);
