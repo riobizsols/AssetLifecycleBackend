@@ -330,6 +330,100 @@ class AuditLogModel {
             throw error;
         }
     }
+
+    /**
+     * Get all audit logs with filtering and pagination
+     * @param {Object} filters - Filter options
+     * @returns {Promise<Object>} Audit logs with pagination info
+     */
+    static async getAllAuditLogs(filters) {
+        try {
+            const { org_id, app_id, event_id, user_id, start_date, end_date, page, limit } = filters;
+            
+            // Build WHERE clause for filtering
+            let whereConditions = ['al.org_id = $1'];
+            let queryParams = [org_id];
+            let paramIndex = 2;
+
+            if (app_id) {
+                whereConditions.push(`al.app_id = $${paramIndex}`);
+                queryParams.push(app_id);
+                paramIndex++;
+            }
+
+            if (event_id) {
+                whereConditions.push(`al.event_id = $${paramIndex}`);
+                queryParams.push(event_id);
+                paramIndex++;
+            }
+
+            if (user_id) {
+                whereConditions.push(`al.user_id = $${paramIndex}`);
+                queryParams.push(user_id);
+                paramIndex++;
+            }
+
+            if (start_date) {
+                whereConditions.push(`al.created_on >= $${paramIndex}`);
+                queryParams.push(start_date);
+                paramIndex++;
+            }
+
+            if (end_date) {
+                whereConditions.push(`al.created_on <= $${paramIndex}`);
+                queryParams.push(end_date);
+                paramIndex++;
+            }
+
+            const whereClause = whereConditions.join(' AND ');
+
+            // Get total count for pagination
+            const countQuery = `
+                SELECT COUNT(*) as total_count
+                FROM "tblAuditLogs" al
+                WHERE ${whereClause}
+            `;
+            const countResult = await db.query(countQuery, queryParams);
+            const total_count = parseInt(countResult.rows[0].total_count);
+
+            // Calculate offset for pagination
+            const offset = (page - 1) * limit;
+
+            // Get audit logs with pagination and joins for readable names
+            const auditLogsQuery = `
+                SELECT 
+                    al.al_id,
+                    al.user_id,
+                    al.app_id,
+                    al.event_id,
+                    al.text,
+                    al.created_on,
+                    al.org_id,
+                    u.full_name as user_name,
+                    u.email as user_email,
+                    a.text as app_name,
+                    e.text as event_name
+                FROM "tblAuditLogs" al
+                LEFT JOIN "tblUsers" u ON al.user_id = u.user_id
+                LEFT JOIN "tblApps" a ON al.app_id = a.app_id
+                LEFT JOIN "tblEvents" e ON al.event_id = e.event_id
+                WHERE ${whereClause}
+                ORDER BY al.created_on DESC
+                LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+            `;
+            
+            queryParams.push(limit, offset);
+            const auditLogsResult = await db.query(auditLogsQuery, queryParams);
+
+            return {
+                audit_logs: auditLogsResult.rows,
+                total_count
+            };
+        } catch (error) {
+            console.error('Error in getAllAuditLogs:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = AuditLogModel;

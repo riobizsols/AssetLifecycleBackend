@@ -6,7 +6,19 @@ const { generateCustomId } = require('../utils/idGenerator');
 // Get all prodserv
 exports.getAllProdserv = async (req, res) => {
   try {
-    const result = await db.query(`SELECT * FROM "tblProdServs"`);
+    // Filter by organization if user is authenticated
+    const orgId = req.user?.org_id;
+    let query = `SELECT * FROM "tblProdServs"`;
+    let params = [];
+    
+    if (orgId) {
+      query += ` WHERE org_id = $1`;
+      params = [orgId];
+    }
+    
+    query += ` ORDER BY description, brand, model`;
+    
+    const result = await db.query(query, params);
     res.status(200).json(result.rows);
   } catch (error) {
     console.error("Error fetching prodserv:", error);

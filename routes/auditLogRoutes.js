@@ -164,4 +164,43 @@ router.get('/stats', AuditLogController.getAuditLogStats);
  */
 router.get('/check/:appId/:eventId', AuditLogController.checkEventEnabled);
 
+    /**
+ * @route GET /api/audit-logs
+ * @description Get all audit logs with filtering options
+ * @query {string} [app_id] - Filter by application ID
+ * @query {string} [event_id] - Filter by event ID
+ * @query {string} [user_id] - Filter by user ID
+ * @query {string} [start_date] - Filter by start date (YYYY-MM-DD)
+ * @query {string} [end_date] - Filter by end date (YYYY-MM-DD)
+ * @query {number} [page=1] - Page number for pagination
+ * @query {number} [limit=50] - Number of records per page
+ * @returns {Object} Paginated audit logs with filtering
+ * @example
+ * GET /api/audit-logs?app_id=App005&start_date=2024-01-01&end_date=2024-01-31&page=1&limit=20
+ * Response: {
+ *   "success": true,
+ *   "message": "Audit logs retrieved successfully",
+ *   "data": {
+ *     "audit_logs": [
+ *       {
+ *         "al_id": "AL001",
+ *         "user_id": "USR001",
+ *         "app_id": "App005",
+ *         "event_id": "Eve005",
+ *         "text": "User created a new asset",
+ *         "created_on": "2024-01-15T10:30:00.000Z",
+ *         "org_id": "ORG001"
+ *       }
+ *     ],
+ *     "pagination": {
+ *       "current_page": 1,
+ *       "per_page": 20,
+ *       "total_count": 150,
+ *       "total_pages": 8
+ *     }
+ *   }
+ * }
+ */
+router.get('/', AuditLogController.getAllAuditLogs);
+
 module.exports = router;

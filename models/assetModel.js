@@ -30,6 +30,24 @@ const getAssetById = async (asset_id) => {
   return await db.query(query, [asset_id]);
 };
 
+const getAssetProperties = async (asset_id) => {
+  const query = `
+    SELECT 
+      apv.apv_id,
+      apv.asset_id,
+      apv.asset_type_prop_id,
+      apv.value,
+      p.property,
+      p.prop_id
+    FROM "tblAssetPropValues" apv
+    LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+    WHERE apv.asset_id = $1
+    ORDER BY p.property
+  `;
+
+  return await db.query(query, [asset_id]);
+};
+
 const getAssetsByAssetType = async (asset_type_id) => {
   const query = `
         SELECT 
@@ -174,8 +192,8 @@ const getAssetWithDetails = async (asset_id) => {
             at.parent_asset_type_id,
             pat.text as parent_asset_type_name,
             b.text as branch_name,
-            v.text as vendor_name,
-            ps.text as prod_serv_name
+            v.vendor_name,
+            ps.description as prod_serv_name
         FROM "tblAssets" a
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
@@ -890,6 +908,7 @@ const getAssetsCount = async () => {
 module.exports = {
   getAllAssets,
   getAssetById,
+  getAssetProperties,
   getAssetsByAssetType,
   getAssetsByBranch,
   getAssetsByVendor,

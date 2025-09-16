@@ -36,4 +36,11 @@ router.get('/apps', AppEventsController.getAllApps);
  */
 router.get('/events', AppEventsController.getAllEvents);
 
+/**
+ * @route GET /api/app-events/unique-events
+ * @description Get all unique events directly from tblEvents
+ * @returns {Object} Response with unique events
+ */
+router.get('/unique-events', AppEventsController.getUniqueEvents);
+
 module.exports = router;

@@ -210,6 +210,39 @@ class AppEventsController {
             });
         }
     }
+
+    /**
+     * Get all unique events directly from tblEvents
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    static async getUniqueEvents(req, res) {
+        try {
+            const events = await AppEventsModel.getUniqueEvents();
+
+            const response = {
+                success: true,
+                message: `Found ${events.length} unique events`,
+                data: {
+                    events: events.map(event => ({
+                        event_id: event.event_id,
+                        text: event.event_text
+                    }))
+                }
+            };
+
+            res.status(200).json(response);
+
+        } catch (error) {
+            console.error('Error in getUniqueEvents controller:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Internal server error while fetching unique events',
+                data: null,
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    }
 }
 
 module.exports = AppEventsController;

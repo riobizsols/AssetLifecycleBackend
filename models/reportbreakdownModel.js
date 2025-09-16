@@ -27,7 +27,13 @@ const getBreakdownReasonCodes = async (orgId = 'ORG001', assetTypeId = null) => 
     params.push(assetTypeId);
   }
   query += ' ORDER BY text ASC';
+  
+  console.log('Reason codes query:', query);
+  console.log('Reason codes params:', params);
+  
   const result = await pool.query(query, params);
+  console.log('Reason codes result:', result.rows.length, 'rows');
+  
   return result.rows;
 };
 
@@ -355,9 +361,66 @@ const createBreakdownReport = async (breakdownData) => {
 
 
 
+// Update breakdown report
+const updateBreakdownReport = async (abrId, updateData) => {
+  const client = await pool.connect();
+  try {
+    const {
+      atbrrc_id,
+      description,
+      reported_by_type,
+      decision_code,
+      priority,
+      reported_by_user_id,
+      reported_by_dept_id
+    } = updateData;
+
+    // Validate required fields
+    if (!atbrrc_id || !description || !decision_code) {
+      throw new Error('Missing required fields: atbrrc_id, description, decision_code');
+    }
+
+    // Validate decision code
+    const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
+    if (!validDecisionCodes.includes(decision_code)) {
+      throw new Error('Invalid decision code. Must be BF01, BF02, or BF03');
+    }
+
+    const updateQuery = `
+      UPDATE "tblAssetBRDet" 
+      SET 
+        atbrrc_id = $1,
+        description = $2,
+        decision_code = $3
+      WHERE abr_id = $4
+      RETURNING *
+    `;
+
+    const updateValues = [
+      atbrrc_id,
+      description,
+      decision_code,
+      abrId
+    ];
+
+    const result = await client.query(updateQuery, updateValues);
+    
+    if (result.rows.length === 0) {
+      throw new Error('Breakdown report not found');
+    }
+
+    return result.rows[0];
+  } catch (err) {
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getBreakdownReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
-  createBreakdownReport
+  createBreakdownReport,
+  updateBreakdownReport
 };

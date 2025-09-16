@@ -2,10 +2,30 @@ const userModel = require("../models/userModel");
 
 exports.getAllUsers = async (req, res) => {
     try {
-        const users = await userModel.getAllUsers();
-        res.json(users);
+        console.log('getAllUsers controller called');
+        const orgId = req.user?.org_id;
+        
+        // Use the new function that includes branch information
+        const users = orgId 
+            ? await userModel.getAllUsersWithBranch(orgId)
+            : await userModel.getAllUsers();
+            
+        console.log('Users from model:', users.length);
+        
+        const response = {
+            success: true,
+            message: `Found ${users.length} users`,
+            data: users
+        };
+        
+        console.log('Sending response:', response);
+        res.json(response);
     } catch (error) {
-        res.status(500).json({ error: "Failed to fetch users" });
+        console.error('Error in getAllUsers controller:', error);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to fetch users" 
+        });
     }
 };
 
