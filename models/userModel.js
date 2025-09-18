@@ -104,14 +104,22 @@ const getUserWithBranch = async (userId) => {
             u.user_id,
             u.full_name,
             u.email,
+            u.phone,
+            u.job_role_id,
+            u.int_status,
             u.dept_id,
+            u.created_on,
+            u.changed_on,
+            u.last_accessed,
             d.text as dept_name,
             d.branch_code,
             b.branch_id,
-            b.text as branch_name
+            b.text as branch_name,
+            jr.text as job_role_name
         FROM "tblUsers" u
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblBranches" b ON d.branch_code = b.branch_code
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
         WHERE u.user_id = $1
     `;
     
@@ -126,14 +134,22 @@ const getAllUsersWithBranch = async (orgId) => {
             u.user_id,
             u.full_name,
             u.email,
+            u.phone,
+            u.job_role_id,
+            u.int_status,
             u.dept_id,
+            u.created_on,
+            u.changed_on,
+            u.last_accessed,
             d.text as dept_name,
             d.branch_code,
             b.branch_id,
-            b.text as branch_name
+            b.text as branch_name,
+            jr.text as job_role_name
         FROM "tblUsers" u
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblBranches" b ON d.branch_code = b.branch_code
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
         WHERE u.org_id = $1
         ORDER BY u.full_name
     `;

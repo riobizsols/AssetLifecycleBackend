@@ -234,6 +234,27 @@ const getAssetsByAssetType = async (req, res) => {
     }
 };
 
+// GET /api/assets/printers - Get printer assets using organization settings
+const getPrinterAssets = async (req, res) => {
+    try {
+        const result = await model.getPrinterAssets();
+        res.status(200).json({
+            success: true,
+            message: "Printer assets retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Error fetching printer assets:", err);
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch printer assets",
+            error: err.message 
+        });
+    }
+};
+
 // GET /api/assets/branch/:branch_id - Get assets by branch
 const getAssetsByBranch = async (req, res) => {
     try {
@@ -689,7 +710,7 @@ const getAssetById = async (req, res) => {
     const propertiesResult = await model.getAssetProperties(id);
     const properties = {};
     propertiesResult.rows.forEach(prop => {
-      properties[prop.prop_id] = prop.value;
+      properties[prop.property] = prop.value;
     });
     
     const asset = result.rows[0];
@@ -1003,6 +1024,7 @@ module.exports = {
   getPotentialParentAssets,
   getAssetById,
   getAssetsByAssetType,
+  getPrinterAssets,
   getAssetsByBranch,
   getAssetsByVendor,
   getAssetsByStatus,

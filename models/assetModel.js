@@ -64,6 +64,30 @@ const getAssetsByAssetType = async (asset_type_id) => {
   return await db.query(query, [asset_type_id]);
 };
 
+const getPrinterAssets = async () => {
+  const query = `
+        SELECT 
+            a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+            a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+            a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
+        FROM "tblAssets" a
+        WHERE a.asset_type_id = (
+            SELECT asset_type_id 
+            FROM "tblAssetTypes" 
+            WHERE text = (
+                SELECT value 
+                FROM "tblOrgSettings" 
+                WHERE key = 'printer_asset_type'
+            )
+        )
+        AND a.current_status != 'SCRAPPED'
+        ORDER BY a.created_on DESC
+    `;
+
+  return await db.query(query);
+};
+
 const getAssetsByBranch = async (branch_id) => {
   const query = `
         SELECT 
@@ -910,6 +934,7 @@ module.exports = {
   getAssetById,
   getAssetProperties,
   getAssetsByAssetType,
+  getPrinterAssets,
   getAssetsByBranch,
   getAssetsByVendor,
   getAssetsByStatus,

@@ -10,6 +10,7 @@ const {
     updatePassword
 } = require('../models/userModel');
 const { sendResetEmail } = require('../utils/mailer');
+const { getUserRoles } = require('../models/userJobRoleModel');
 require('dotenv').config();
 
 // 🔐 JWT Creator
@@ -41,6 +42,9 @@ const login = async (req, res) => {
         [user.org_id, user.user_id]
     );
 
+    // Fetch all user roles from tblUserJobRoles
+    const userRoles = await getUserRoles(user.user_id);
+    
     const token = generateToken(user);
     res.json({
         token,
@@ -49,8 +53,9 @@ const login = async (req, res) => {
             email: user.email,
             org_id: user.org_id,
             user_id: user.user_id,
-            job_role_id: user.job_role_id,
-            emp_int_id: user.emp_int_id
+            job_role_id: user.job_role_id, // Keep for backward compatibility
+            emp_int_id: user.emp_int_id,
+            roles: userRoles // Add all roles
         }
     });
 };

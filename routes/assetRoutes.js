@@ -53,6 +53,9 @@ router.put("/:asset_id", controller.updateAsset);
 // DELETE /api/assets/:asset_id - Delete single asset
 router.delete("/:asset_id", controller.deleteAsset);
 
+// GET /api/assets/printers - Get printer assets using organization settings
+router.get("/printers", controller.getPrinterAssets);
+
 // GET /api/assets/:id - Get asset by ID (MUST BE LAST to avoid conflicts)
 router.get("/:id", controller.getAssetById);  //......
 
