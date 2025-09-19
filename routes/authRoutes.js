@@ -5,6 +5,7 @@ const {
     register,
     forgotPassword,
     resetPassword,
+    refreshToken,
     updateOwnPassword
 } = require('../controllers/authController');
 
@@ -13,6 +14,7 @@ const authorize = require('../middlewares/authorize');
 
 // 🟢 Public routes
 router.post('/login', login);
+router.post('/refresh', refreshToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 

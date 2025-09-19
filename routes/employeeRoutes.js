@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/employeeController");
+const bulkController = require("../controllers/employeeBulkUploadController");
 const { protect } = require("../middlewares/authMiddleware");
 
 // Apply authentication middleware to all routes
@@ -27,6 +28,12 @@ router.delete("/users/:user_id/roles/:user_job_role_id", controller.deleteUserRo
 
 // PUT /api/employees/users/:user_id/roles/:user_job_role_id - Update a specific role assignment
 router.put("/users/:user_id/roles/:user_job_role_id", controller.updateUserRole);
+
+// Bulk upload routes
+router.post("/check-existing", bulkController.checkExistingEmployees);
+router.post("/validate-bulk-upload", bulkController.validateBulkUploadEmployees);
+router.post("/trial-upload", bulkController.trialUploadEmployees);
+router.post("/commit-bulk-upload", bulkController.commitBulkUploadEmployees);
 
 // GET /api/employees/:id - Get employee by ID (must be last to avoid conflicts)
 router.get("/:id", controller.getEmployeeById);

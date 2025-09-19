@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/assetController");
+const bulkController = require("../controllers/assetBulkUploadController");
 const { authorize } = require("../middlewares/authorize");
 const { protect } = require("../middlewares/authMiddleware");
 
@@ -98,5 +99,11 @@ router.delete("/:id", controller.deleteAsset);
 
 // DELETE /api/assets - Delete multiple assets
 router.delete("/", controller.deleteMultipleAssets);
+
+// Bulk upload routes
+router.post("/check-existing", bulkController.checkExistingAssets);
+router.post("/validate-bulk-upload", bulkController.validateBulkUploadAssets);
+router.post("/trial-upload", bulkController.trialUploadAssets);
+router.post("/commit-bulk-upload", bulkController.commitBulkUploadAssets);
 
 module.exports = router;

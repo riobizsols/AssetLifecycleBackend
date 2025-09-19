@@ -7,7 +7,8 @@ const {
     createUser,
     setResetToken,
     findUserByResetToken,
-    updatePassword
+    updatePassword,
+    getUserWithBranch
 } = require('../models/userModel');
 const { sendResetEmail } = require('../utils/mailer');
 const { getUserRoles } = require('../models/userJobRoleModel');
@@ -45,6 +46,9 @@ const login = async (req, res) => {
     // Fetch all user roles from tblUserJobRoles
     const userRoles = await getUserRoles(user.user_id);
     
+    // Fetch user with branch information
+    const userWithBranch = await getUserWithBranch(user.user_id);
+    
     const token = generateToken(user);
     res.json({
         token,
@@ -55,7 +59,12 @@ const login = async (req, res) => {
             user_id: user.user_id,
             job_role_id: user.job_role_id, // Keep for backward compatibility
             emp_int_id: user.emp_int_id,
-            roles: userRoles // Add all roles
+            roles: userRoles, // Add all roles
+            branch_id: userWithBranch?.branch_id || null,
+            branch_name: userWithBranch?.branch_name || null,
+            branch_code: userWithBranch?.branch_code || null,
+            dept_id: userWithBranch?.dept_id || null,
+            dept_name: userWithBranch?.dept_name || null
         }
     });
 };
@@ -150,6 +159,60 @@ const resetPassword = async (req, res) => {
 };
 
 
+// 🔄 Refresh Token
+const refreshToken = async (req, res) => {
+    const { token } = req.body;
+    
+    if (!token) {
+        return res.status(400).json({ success: false, message: 'Token is required' });
+    }
+
+    try {
+        // Verify the existing token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        // Check if user still exists and is active
+        const user = await findUserByEmail(decoded.email);
+        if (!user) {
+            return res.status(401).json({ success: false, message: 'User not found' });
+        }
+
+        // Fetch current user roles
+        const userRoles = await getUserRoles(user.user_id);
+        
+        // Fetch user with branch information
+        const userWithBranch = await getUserWithBranch(user.user_id);
+        
+        // Generate new token
+        const newToken = generateToken(user);
+        
+        res.json({
+            success: true,
+            token: newToken,
+            user: {
+                full_name: user.full_name,
+                email: user.email,
+                org_id: user.org_id,
+                user_id: user.user_id,
+                job_role_id: user.job_role_id,
+                emp_int_id: user.emp_int_id,
+                roles: userRoles,
+                branch_id: userWithBranch?.branch_id || null,
+                branch_name: userWithBranch?.branch_name || null,
+                branch_code: userWithBranch?.branch_code || null,
+                dept_id: userWithBranch?.dept_id || null,
+                dept_name: userWithBranch?.dept_name || null
+            }
+        });
+    } catch (error) {
+        console.error('Token refresh error:', error);
+        return res.status(401).json({ 
+            success: false, 
+            message: 'Invalid or expired token' 
+        });
+    }
+};
+
 // 🔐 Super Admin: Update Own Password
 const updateOwnPassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
@@ -185,6 +248,7 @@ module.exports = {
     register,
     forgotPassword,
     resetPassword,
+    refreshToken,
     updateOwnPassword,
 };
 
