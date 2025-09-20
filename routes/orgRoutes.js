@@ -3,6 +3,7 @@ const router = express.Router();
 
 const {
     getOrganizationsController,
+    getOrganizationByIdController,
     addOrganizationController,
     updateOrganizationController,
     deleteOrganizationsController,
@@ -14,6 +15,9 @@ router.use(protect);
 
 // GET all organizations
 router.get("/", getOrganizationsController);
+
+// GET organization by ID
+router.get("/:orgId", getOrganizationByIdController);
 
 // POST new organization
 router.post("/", addOrganizationController);

@@ -323,6 +323,55 @@ class AuditLogController {
             });
         }
     }
+    
+    /**
+     * Get all audit logs with filtering options
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    static async getAllAuditLogs(req, res) {
+        try {
+            const { app_id, event_id, user_id, start_date, end_date, page = 1, limit = 50 } = req.query;
+            const org_id = req.user.org_id;
+
+            // Build filter object
+            const filters = {
+                org_id,
+                app_id: app_id || null,
+                event_id: event_id || null,
+                user_id: user_id || null,
+                start_date: start_date || null,
+                end_date: end_date || null,
+                page: parseInt(page),
+                limit: parseInt(limit)
+            };
+
+            // Get audit logs with filters
+            const result = await AuditLogModel.getAllAuditLogs(filters);
+
+            res.status(200).json({
+                success: true,
+                message: 'Audit logs retrieved successfully',
+                data: {
+                    audit_logs: result.audit_logs,
+                    pagination: {
+                        current_page: filters.page,
+                        per_page: filters.limit,
+                        total_count: result.total_count,
+                        total_pages: Math.ceil(result.total_count / filters.limit)
+                    }
+                }
+            });
+        } catch (error) {
+            console.error('Error in getAllAuditLogs:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Internal server error while fetching audit logs',
+                data: null,
+                error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            });
+        }
+    }
 }
 
 module.exports = AuditLogController;

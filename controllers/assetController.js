@@ -149,11 +149,19 @@ const getAllAssets = async (req, res) => {
 
 const updateAsset = async (req, res) => {
   const { asset_id } = req.params;
+  
+  // Get user's branch information
+  const userModel = require("../models/userModel");
+  const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+  const userBranchId = userWithBranch?.branch_id;
+  
+  console.log("User branch ID for update:", userBranchId);
+  
   const {
     asset_type_id,
     serial_number,
     description,
-    branch_id,
+    branch_id = userBranchId, // Use user's branch if not provided
     purchase_vendor_id,
     service_vendor_id,
     prod_serv_id,
@@ -221,6 +229,27 @@ const getAssetsByAssetType = async (req, res) => {
         res.status(500).json({ 
             success: false,
             message: "Failed to fetch assets by type",
+            error: err.message 
+        });
+    }
+};
+
+// GET /api/assets/printers - Get printer assets using organization settings
+const getPrinterAssets = async (req, res) => {
+    try {
+        const result = await model.getPrinterAssets();
+        res.status(200).json({
+            success: true,
+            message: "Printer assets retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Error fetching printer assets:", err);
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch printer assets",
             error: err.message 
         });
     }
@@ -670,11 +699,24 @@ const deleteMultipleAssets = async (req, res) => {
 const getAssetById = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await model.getAssetById(id);
+    
+    // Use getAssetWithDetails to get complete asset information
+    const result = await model.getAssetWithDetails(id);
     if (!result.rows || result.rows.length === 0) {
       return res.status(404).json({ error: 'Asset not found' });
     }
-    res.status(200).json(result.rows[0]);
+    
+    // Fetch asset properties
+    const propertiesResult = await model.getAssetProperties(id);
+    const properties = {};
+    propertiesResult.rows.forEach(prop => {
+      properties[prop.property] = prop.value;
+    });
+    
+    const asset = result.rows[0];
+    asset.properties = properties;
+    
+    res.status(200).json(asset);
   } catch (err) {
     console.error('Error fetching asset by ID:', err);
     res.status(500).json({ error: 'Failed to fetch asset by ID' });
@@ -687,13 +729,20 @@ const createAsset = async (req, res) => {
         console.log("Received asset data:", req.body);
         console.log("User info:", req.user);
         
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log("User branch ID:", userBranchId);
+        
         const {
             asset_type_id,
             asset_id,
             text,
             serial_number,
             description,
-            branch_id,
+            branch_id = userBranchId, // Use user's branch if not provided
             purchase_vendor_id,
             service_vendor_id,
             prod_serv_id, // Accept prod_serv_id from frontend
@@ -975,6 +1024,7 @@ module.exports = {
   getPotentialParentAssets,
   getAssetById,
   getAssetsByAssetType,
+  getPrinterAssets,
   getAssetsByBranch,
   getAssetsByVendor,
   getAssetsByStatus,

@@ -131,6 +131,28 @@ class AppEventsModel {
             throw error;
         }
     }
+
+    /**
+     * Get all unique events directly from tblEvents table
+     * @returns {Promise<Array>} Array of unique events
+     */
+    static async getUniqueEvents() {
+        try {
+            const query = `
+                SELECT DISTINCT
+                    event_id,
+                    text as event_text
+                FROM "tblEvents"
+                ORDER BY text ASC
+            `;
+            
+            const result = await db.query(query);
+            return result.rows;
+        } catch (error) {
+            console.error('Error in getUniqueEvents:', error);
+            throw error;
+        }
+    }
 }
 
 module.exports = AppEventsModel;

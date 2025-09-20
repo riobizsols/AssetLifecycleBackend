@@ -50,6 +50,7 @@ const breakdownHistoryRoutes = require("./routes/breakdownHistoryRoutes");
 const assetSerialPrintRoutes = require("./routes/assetSerialPrintRoutes");
 const appEventsRoutes = require("./routes/appEventsRoutes");
 const auditLogRoutes = require("./routes/auditLogRoutes");
+const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const CronService = require("./services/cronService");
 
 
@@ -131,6 +132,7 @@ app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/asset-serial-print", assetSerialPrintRoutes);
 app.use("/api/app-events", appEventsRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
+app.use("/api/audit-log-configs", auditLogConfigRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

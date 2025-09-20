@@ -157,9 +157,9 @@ const getNavigationStructure = async (job_role_id, platform = 'D') => {
  * @param {string} platform - Platform filter ('D' for Desktop, 'M' for Mobile)
  * @returns {Promise<Array>} Array of user's navigation items
  */
-// Get user's navigation based on their job role
+// Get user's navigation based on their job roles (supports multiple roles)
 const getUserNavigation = async (user_id, platform = 'D') => {
-    // First get the user's job role
+    // Get all user's job roles
     const userJobRoleQuery = await db.query(
         `SELECT job_role_id FROM "tblUserJobRoles" 
          WHERE user_id = $1`,
@@ -170,10 +170,100 @@ const getUserNavigation = async (user_id, platform = 'D') => {
         return [];
     }
     
-    const job_role_id = userJobRoleQuery.rows[0].job_role_id;
+    const job_role_ids = userJobRoleQuery.rows.map(row => row.job_role_id);
     
-    // Then get the navigation for that job role with platform filter
-    return await getNavigationStructure(job_role_id, platform);
+    // Get navigation for all roles and combine permissions
+    return await getCombinedNavigationStructure(job_role_ids, platform);
+};
+
+// Get combined navigation structure for multiple job roles
+const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
+    try {
+        // Get navigation items for all job roles
+        const allNavigationItems = await db.query(`
+            SELECT 
+                jrn.job_role_nav_id as id,
+                jrn.job_role_id,
+                jrn.parent_id,
+                jrn.app_id,
+                jrn.label,
+                jrn.is_group,
+                jrn.sequence as seq,
+                jrn.access_level,
+                jrn.mob_desk as mobile_desktop,
+                jr.text as job_role_name
+            FROM "tblJobRoleNav" jrn
+            JOIN "tblJobRoles" jr ON jrn.job_role_id = jr.job_role_id
+            WHERE jrn.job_role_id = ANY($1) 
+            AND jrn.int_status = 1
+            AND (jrn.mob_desk = $2 OR jrn.mob_desk IS NULL)
+            ORDER BY jrn.sequence, jrn.label
+        `, [job_role_ids, platform]);
+
+        // Group items by app_id and combine permissions
+        const combinedItems = {};
+        
+        allNavigationItems.rows.forEach(item => {
+            const appId = item.app_id;
+            
+            if (!combinedItems[appId]) {
+                // First time seeing this app_id
+                combinedItems[appId] = {
+                    id: item.id,
+                    job_role_id: item.job_role_id,
+                    parent_id: item.parent_id,
+                    app_id: item.app_id,
+                    label: item.label,
+                    is_group: item.is_group,
+                    seq: item.seq,
+                    access_level: item.access_level,
+                    mobile_desktop: item.mobile_desktop,
+                    job_role_name: item.job_role_name,
+                    roles: [item.job_role_name]
+                };
+            } else {
+                // Combine permissions - use highest access level
+                const currentAccess = combinedItems[appId].access_level;
+                const newAccess = item.access_level;
+                
+                // Access level hierarchy: A (Full) > D (Read) > NULL (No Access)
+                if (newAccess === 'A' || (newAccess === 'D' && currentAccess !== 'A')) {
+                    combinedItems[appId].access_level = newAccess;
+                }
+                
+                // Add role name if not already present
+                if (!combinedItems[appId].roles.includes(item.job_role_name)) {
+                    combinedItems[appId].roles.push(item.job_role_name);
+                }
+            }
+        });
+
+        // Convert to array and sort
+        const navigationItems = Object.values(combinedItems).sort((a, b) => a.seq - b.seq);
+        
+        // Build hierarchical structure
+        const itemMap = new Map();
+        const topLevelItems = [];
+        
+        // First pass: create all items
+        navigationItems.forEach(item => {
+            itemMap.set(item.id, { ...item, children: [] });
+        });
+        
+        // Second pass: build hierarchy
+        navigationItems.forEach(item => {
+            if (item.parent_id && itemMap.has(item.parent_id)) {
+                itemMap.get(item.parent_id).children.push(itemMap.get(item.id));
+            } else {
+                topLevelItems.push(itemMap.get(item.id));
+            }
+        });
+        
+        return topLevelItems;
+    } catch (error) {
+        console.error('Error getting combined navigation structure:', error);
+        return [];
+    }
 };
 
 module.exports = {
@@ -183,5 +273,6 @@ module.exports = {
     updateNavigationItem,
     deleteNavigationItem,
     getNavigationStructure,
-    getUserNavigation
+    getUserNavigation,
+    getCombinedNavigationStructure
 }; 

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const controller = require("../controllers/assetController");
+const bulkController = require("../controllers/assetBulkUploadController");
 const { authorize } = require("../middlewares/authorize");
 const { protect } = require("../middlewares/authMiddleware");
 
@@ -53,6 +54,9 @@ router.put("/:asset_id", controller.updateAsset);
 // DELETE /api/assets/:asset_id - Delete single asset
 router.delete("/:asset_id", controller.deleteAsset);
 
+// GET /api/assets/printers - Get printer assets using organization settings
+router.get("/printers", controller.getPrinterAssets);
+
 // GET /api/assets/:id - Get asset by ID (MUST BE LAST to avoid conflicts)
 router.get("/:id", controller.getAssetById);  //......
 
@@ -95,5 +99,11 @@ router.delete("/:id", controller.deleteAsset);
 
 // DELETE /api/assets - Delete multiple assets
 router.delete("/", controller.deleteMultipleAssets);
+
+// Bulk upload routes
+router.post("/check-existing", bulkController.checkExistingAssets);
+router.post("/validate-bulk-upload", bulkController.validateBulkUploadAssets);
+router.post("/trial-upload", bulkController.trialUploadAssets);
+router.post("/commit-bulk-upload", bulkController.commitBulkUploadAssets);
 
 module.exports = router;

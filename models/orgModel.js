@@ -5,6 +5,11 @@ const getAllOrganizations = async () => {
   return result.rows;
 };
 
+const getOrganizationById = async (orgId) => {
+  const result = await db.query(`SELECT * FROM "tblOrgs" WHERE org_id = $1`, [orgId]);
+  return result.rows[0];
+};
+
 const addOrganization = async (org) => {
   const { org_id, org_code, text, org_city, int_status = 1, valid_from, valid_to } = org;
 
@@ -82,6 +87,7 @@ const deleteOrganizations = async (org_id = []) => {
 
 module.exports = {
   getAllOrganizations,
+  getOrganizationById,
   addOrganization,
   updateOrganization,
   deleteOrganizations,

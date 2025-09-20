@@ -1,5 +1,6 @@
 const { 
     getAllOrganizations,
+    getOrganizationById,
     addOrganization,
     updateOrganization,
     deleteOrganizations,
@@ -14,6 +15,20 @@ const getOrganizationsController = async (req, res) => {
         res.status(200).json(data);
     } catch (err) {
         console.error("Error fetching organizations:", err);
+        res.status(500).json({ message: "Internal server error" });
+    }
+};
+
+const getOrganizationByIdController = async (req, res) => {
+    try {
+        const { orgId } = req.params;
+        const data = await getOrganizationById(orgId);
+        if (!data) {
+            return res.status(404).json({ message: "Organization not found" });
+        }
+        res.status(200).json(data);
+    } catch (err) {
+        console.error("Error fetching organization:", err);
         res.status(500).json({ message: "Internal server error" });
     }
 };
@@ -110,6 +125,7 @@ const deleteOrganizationsController = async (req, res) => {
 
 module.exports = {
     getOrganizationsController,
+    getOrganizationByIdController,
     addOrganizationController,
     updateOrganizationController,
     deleteOrganizationsController,

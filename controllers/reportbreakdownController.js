@@ -21,16 +21,23 @@ const getReasonCodes = async (req, res) => {
   try {
     const { asset_type_id: assetTypeId, org_id: orgId } = req.query;
 
+    console.log('Reason codes request params:', { assetTypeId, orgId });
+
     if (!orgId) {
       return res.status(400).json({ error: 'Missing organization ID' });
     }
 
     const rows = await model.getBreakdownReasonCodes(orgId, assetTypeId || null);
+    console.log('Reason codes from database:', rows.length, 'rows');
+    
     const data = rows.map(r => ({ id: r.atbrrc_id, text: r.text, asset_type_id: r.asset_type_id }));
     res.status(200).json({ data });
   } catch (err) {
     console.error('Error fetching reason codes:', err);
-    res.status(500).json({ error: 'Failed to fetch reason codes' });
+    res.status(500).json({ 
+      error: 'Failed to fetch reason codes',
+      details: err.message 
+    });
   }
 };
 
@@ -52,7 +59,10 @@ const getUpcomingMaintenanceDate = async (req, res) => {
     });
   } catch (err) {
     console.error('Error fetching upcoming maintenance date:', err);
-    res.status(500).json({ error: 'Failed to fetch upcoming maintenance date' });
+    res.status(500).json({ 
+      error: 'Failed to fetch upcoming maintenance date',
+      details: err.message 
+    });
   }
 };
 
@@ -108,11 +118,54 @@ const createBreakdownReport = async (req, res) => {
   }
 };
 
+// PUT /api/reportbreakdown/update/:id
+const updateBreakdownReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      atbrrc_id,
+      description,
+      decision_code
+    } = req.body;
+
+    // Validate required fields
+    if (!atbrrc_id || !description || !decision_code) {
+      return res.status(400).json({ 
+        error: 'Missing required fields: atbrrc_id, description, decision_code' 
+      });
+    }
+
+    // Validate decision code
+    const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
+    if (!validDecisionCodes.includes(decision_code)) {
+      return res.status(400).json({ error: 'Invalid decision code. Must be BF01, BF02, or BF03' });
+    }
+
+    const updateData = {
+      atbrrc_id,
+      description,
+      decision_code
+    };
+
+    const result = await model.updateBreakdownReport(id, updateData);
+    
+    res.status(200).json({ 
+      success: true,
+      message: 'Breakdown report updated successfully',
+      data: result
+    });
+  } catch (err) {
+    console.error('Error updating breakdown report:', err);
+    res.status(500).json({ error: 'Failed to update breakdown report' });
+  }
+};
+
 module.exports = {
   getReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
-  createBreakdownReport
+  createBreakdownReport,
+  updateBreakdownReport
 };
 
 

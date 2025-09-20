@@ -24,4 +24,7 @@ router.get('/properties/:propId/values', PropertiesController.getPropertyValues)
 // Get all properties with their values for a specific asset type
 router.get('/asset-types/:assetTypeId/properties-with-values', PropertiesController.getPropertiesWithValues);
 
+// Add new property value
+router.post('/property-values', PropertiesController.addPropertyValue);
+
 module.exports = router; 
