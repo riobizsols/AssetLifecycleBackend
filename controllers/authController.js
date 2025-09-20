@@ -50,7 +50,8 @@ const login = async (req, res) => {
             org_id: user.org_id,
             user_id: user.user_id,
             job_role_id: user.job_role_id,
-            emp_int_id: user.emp_int_id
+            emp_int_id: user.emp_int_id,
+            language_code: user.language_code
         }
     });
 };
