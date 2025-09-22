@@ -12,36 +12,13 @@ const protect = async (req, res, next) => {
 
     try {
         const token = authHeader.split(' ')[1];
-        console.log('Verifying token, length:', token.length);
-        console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
-        
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        console.log('Token decoded successfully:', { 
-            user_id: decoded.user_id, 
-            email: decoded.email,
-            exp: decoded.exp,
-            iat: decoded.iat
-        });
 
         // Fetch current user roles from tblUserJobRoles
-        let userRoles = [];
-        try {
-            userRoles = await getUserRoles(decoded.user_id);
-            console.log(`Successfully fetched ${userRoles.length} roles for user ${decoded.user_id}`);
-        } catch (roleError) {
-            console.error('Error fetching user roles:', roleError);
-            // Continue with empty roles array rather than failing completely
-        }
+        const userRoles = await getUserRoles(decoded.user_id);
 
         // Fetch user with branch information
-        let userWithBranch = null;
-        try {
-            userWithBranch = await getUserWithBranch(decoded.user_id);
-            console.log(`Successfully fetched branch info for user ${decoded.user_id}`);
-        } catch (branchError) {
-            console.error('Error fetching user branch info:', branchError);
-            // Continue with null branch info rather than failing completely
-        }
+        const userWithBranch = await getUserWithBranch(decoded.user_id);
 
         // Attach full decoded info with current roles and branch information
         req.user = {
@@ -60,17 +37,7 @@ const protect = async (req, res, next) => {
 
         next();
     } catch (err) {
-        console.error('Auth middleware error:', err);
-        console.error('Error type:', err.name);
-        console.error('Error message:', err.message);
-        
-        if (err.name === 'JsonWebTokenError') {
-            return res.status(401).json({ message: 'Invalid token. Please login again.' });
-        } else if (err.name === 'TokenExpiredError') {
-            return res.status(401).json({ message: 'Token expired. Please login again.' });
-        } else {
-            return res.status(401).json({ message: 'Authentication failed. Please login again.' });
-        }
+        return res.status(401).json({ message: 'Session expired. Please login again.' });
     }
 };
 

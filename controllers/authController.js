@@ -16,21 +16,13 @@ require('dotenv').config();
 
 // 🔐 JWT Creator
 const generateToken = (user) => {
-    const payload = {
+    return jwt.sign({
         org_id: user.org_id,
         user_id: user.user_id,
         email: user.email,
         job_role_id: user.job_role_id,
         emp_int_id: user.emp_int_id
-    };
-    
-    console.log('Generating JWT token with payload:', payload);
-    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
-    
-    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
-    console.log('Generated token length:', token.length);
-    
-    return token;
+    }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
 // 🔑 Login
@@ -65,9 +57,6 @@ const login = async (req, res) => {
             email: user.email,
             org_id: user.org_id,
             user_id: user.user_id,
-            // job_role_id: user.job_role_id,
-            emp_int_id: user.emp_int_id,
-            language_code: user.language_code,
             job_role_id: user.job_role_id, // Keep for backward compatibility
             emp_int_id: user.emp_int_id,
             roles: userRoles, // Add all roles
