@@ -65,6 +65,9 @@ const login = async (req, res) => {
             email: user.email,
             org_id: user.org_id,
             user_id: user.user_id,
+            // job_role_id: user.job_role_id,
+            emp_int_id: user.emp_int_id,
+            language_code: user.language_code,
             job_role_id: user.job_role_id, // Keep for backward compatibility
             emp_int_id: user.emp_int_id,
             roles: userRoles, // Add all roles

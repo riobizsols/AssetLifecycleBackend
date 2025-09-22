@@ -3,7 +3,10 @@ const db = require('../config/db');
 //  Find user by email (used for login)
 const findUserByEmail = async (email) => {
     const result = await db.query(
-        'SELECT * FROM "tblUsers" WHERE email = $1',
+        `SELECT u.*, e.language_code 
+         FROM "tblUsers" u 
+         LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id 
+         WHERE u.email = $1`,
         [email]
     );
     return result.rows[0];
