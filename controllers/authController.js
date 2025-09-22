@@ -16,13 +16,21 @@ require('dotenv').config();
 
 // 🔐 JWT Creator
 const generateToken = (user) => {
-    return jwt.sign({
+    const payload = {
         org_id: user.org_id,
         user_id: user.user_id,
         email: user.email,
         job_role_id: user.job_role_id,
         emp_int_id: user.emp_int_id
-    }, process.env.JWT_SECRET, { expiresIn: '7d' });
+    };
+    
+    console.log('Generating JWT token with payload:', payload);
+    console.log('JWT_SECRET exists:', !!process.env.JWT_SECRET);
+    
+    const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: '7d' });
+    console.log('Generated token length:', token.length);
+    
+    return token;
 };
 
 // 🔑 Login
