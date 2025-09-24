@@ -49,6 +49,18 @@ const login = async (req, res) => {
     // Fetch user with branch information
     const userWithBranch = await getUserWithBranch(user.user_id);
     
+    // Fetch language_code from employee table if emp_int_id exists
+    let language_code = 'en'; // default language
+    if (user.emp_int_id) {
+        const employeeResult = await db.query(
+            'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
+            [user.emp_int_id]
+        );
+        if (employeeResult.rows.length > 0) {
+            language_code = employeeResult.rows[0].language_code || 'en';
+        }
+    }
+    
     const token = generateToken(user);
     res.json({
         token,
@@ -64,7 +76,8 @@ const login = async (req, res) => {
             branch_name: userWithBranch?.branch_name || null,
             branch_code: userWithBranch?.branch_code || null,
             dept_id: userWithBranch?.dept_id || null,
-            dept_name: userWithBranch?.dept_name || null
+            dept_name: userWithBranch?.dept_name || null,
+            language_code: language_code
         }
     });
 };
@@ -183,6 +196,18 @@ const refreshToken = async (req, res) => {
         // Fetch user with branch information
         const userWithBranch = await getUserWithBranch(user.user_id);
         
+        // Fetch language_code from employee table if emp_int_id exists
+        let language_code = 'en'; // default language
+        if (user.emp_int_id) {
+            const employeeResult = await db.query(
+                'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
+                [user.emp_int_id]
+            );
+            if (employeeResult.rows.length > 0) {
+                language_code = employeeResult.rows[0].language_code || 'en';
+            }
+        }
+        
         // Generate new token
         const newToken = generateToken(user);
         
@@ -201,7 +226,8 @@ const refreshToken = async (req, res) => {
                 branch_name: userWithBranch?.branch_name || null,
                 branch_code: userWithBranch?.branch_code || null,
                 dept_id: userWithBranch?.dept_id || null,
-                dept_name: userWithBranch?.dept_name || null
+                dept_name: userWithBranch?.dept_name || null,
+                language_code: language_code
             }
         });
     } catch (error) {
