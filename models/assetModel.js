@@ -999,6 +999,106 @@ const getBulkUploadReferenceData = async () => {
   }
 };
 
+// Helper function to validate property values against allowed values
+const validatePropertyValue = async (client, assetTypePropId, value, orgId) => {
+  if (!value || value.trim() === '') {
+    return { isValid: true, error: null };
+  }
+  
+  const trimmedValue = value.trim();
+  
+  // First, get the actual prop_id from asset_type_prop_id
+  const propIdQuery = `
+    SELECT prop_id FROM "tblAssetTypeProps" 
+    WHERE asset_type_prop_id = $1 AND org_id = $2
+  `;
+  
+  const propIdResult = await client.query(propIdQuery, [assetTypePropId, orgId]);
+  
+  if (propIdResult.rows.length === 0) {
+    return { 
+      isValid: false, 
+      error: `Asset type property ID '${assetTypePropId}' not found for organization '${orgId}'` 
+    };
+  }
+  
+  const actualPropId = propIdResult.rows[0].prop_id;
+  
+  // Now check if the property value exists in tblAssetPropListValues for this actual prop_id and org
+  // Using exact case-sensitive matching
+  const query = `
+    SELECT aplv_id, value FROM "tblAssetPropListValues" 
+    WHERE prop_id = $1 AND org_id = $2
+  `;
+  
+  const result = await client.query(query, [actualPropId, orgId]);
+  
+  // Check for exact case-sensitive match
+  const exactMatch = result.rows.find(row => row.value === trimmedValue);
+  
+  if (!exactMatch) {
+    // Get all valid values for this property to show in error message
+    const validValues = result.rows.map(row => row.value).join(', ');
+    
+    return { 
+      isValid: false, 
+      error: `Property value '${trimmedValue}' is not valid for property '${assetTypePropId}' (prop_id: ${actualPropId}). Valid values (case-sensitive): ${validValues || 'None found'}` 
+    };
+  }
+  
+  return { isValid: true, error: null };
+};
+
+// Helper function to validate property values without requiring a client (for trial upload)
+const validatePropertyValueStandalone = async (assetTypePropId, value, orgId) => {
+  if (!value || value.trim() === '') {
+    return { isValid: true, error: null };
+  }
+  
+  const trimmedValue = value.trim();
+  
+  // First, get the actual prop_id from asset_type_prop_id
+  const propIdQuery = `
+    SELECT prop_id FROM "tblAssetTypeProps" 
+    WHERE asset_type_prop_id = $1 AND org_id = $2
+  `;
+  
+  const propIdResult = await db.query(propIdQuery, [assetTypePropId, orgId]);
+  
+  if (propIdResult.rows.length === 0) {
+    return { 
+      isValid: false, 
+      error: `Asset type property ID '${assetTypePropId}' not found for organization '${orgId}'` 
+    };
+  }
+  
+  const actualPropId = propIdResult.rows[0].prop_id;
+  
+  // Now check if the property value exists in tblAssetPropListValues for this actual prop_id and org
+  // Using exact case-sensitive matching
+  const query = `
+    SELECT aplv_id, value FROM "tblAssetPropListValues" 
+    WHERE prop_id = $1 AND org_id = $2
+  `;
+  
+  const result = await db.query(query, [actualPropId, orgId]);
+  
+  // Check for exact case-sensitive match
+  const exactMatch = result.rows.find(row => row.value === trimmedValue);
+  
+  if (!exactMatch) {
+    // Get all valid values for this property to show in error message
+    const validValues = result.rows.map(row => row.value).join(', ');
+    
+    return { 
+      isValid: false, 
+      error: `Property value '${trimmedValue}' is not valid for property '${assetTypePropId}' (prop_id: ${actualPropId}). Valid values (case-sensitive): ${validValues || 'None found'}` 
+    };
+  }
+  
+  return { isValid: true, error: null };
+};
+
 // Helper function to validate and format dates
 const validateAndFormatDate = (dateString) => {
   if (!dateString || dateString.trim() === '' || dateString.toLowerCase() === 'null') {
@@ -1016,10 +1116,29 @@ const validateAndFormatDate = (dateString) => {
     return dateString;
   }
   
+  // Check if it's in DD-MM-YYYY format
+  const ddMMyyyyRegex = /^\d{2}-\d{2}-\d{4}$/;
+  if (ddMMyyyyRegex.test(dateString)) {
+    const parts = dateString.split('-');
+    const day = parts[0];
+    const month = parts[1];
+    const year = parts[2];
+    
+    // Create date in YYYY-MM-DD format
+    const formattedDate = `${year}-${month}-${day}`;
+    const date = new Date(formattedDate);
+    
+    if (isNaN(date.getTime())) {
+      throw new Error(`Invalid date format: ${dateString}. Expected DD-MM-YYYY or YYYY-MM-DD`);
+    }
+    
+    return formattedDate;
+  }
+  
   // Try to parse other common formats and convert to YYYY-MM-DD
   const date = new Date(dateString);
   if (isNaN(date.getTime())) {
-    throw new Error(`Invalid date format: ${dateString}. Expected YYYY-MM-DD`);
+    throw new Error(`Invalid date format: ${dateString}. Expected DD-MM-YYYY or YYYY-MM-DD`);
   }
   
   // Convert to YYYY-MM-DD format
@@ -1255,21 +1374,49 @@ const bulkUpsertAssets = async (csvData, created_by, user_org_id, user_branch_id
         if (row.properties && Object.keys(row.properties).length > 0) {
           console.log('Saving property values for asset:', finalAssetId, row.properties);
           
+          // Validate all property values first
+          const propertyValidationErrors = [];
+          for (const [propId, value] of Object.entries(row.properties)) {
+            if (value && value.trim() !== '') {
+              const validation = await validatePropertyValue(client, propId, value, finalOrgId);
+              if (!validation.isValid) {
+                propertyValidationErrors.push(validation.error);
+              }
+            }
+          }
+          
+          // If there are validation errors, throw an error
+          if (propertyValidationErrors.length > 0) {
+            throw new Error(`Property validation failed: ${propertyValidationErrors.join('; ')}`);
+          }
+          
           // First, delete existing property values for this asset
           await client.query('DELETE FROM "tblAssetPropValues" WHERE asset_id = $1', [finalAssetId]);
           
           // Then insert new property values
-          for (const [propId, value] of Object.entries(row.properties)) {
+          for (const [assetTypePropId, value] of Object.entries(row.properties)) {
             if (value && value.trim() !== '') {
-              // Generate a unique apv_id
-              const timestamp = Date.now().toString().slice(-6);
-              const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-              const apvId = `APV${timestamp}${random}`;
+              // Get the actual prop_id from asset_type_prop_id
+              const propIdQuery = `
+                SELECT prop_id FROM "tblAssetTypeProps" 
+                WHERE asset_type_prop_id = $1 AND org_id = $2
+              `;
               
-              await client.query(
-                'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5)',
-                [apvId, finalAssetId, finalOrgId, propId, value]
-              );
+              const propIdResult = await client.query(propIdQuery, [assetTypePropId, finalOrgId]);
+              
+              if (propIdResult.rows.length > 0) {
+                const actualPropId = propIdResult.rows[0].prop_id;
+                
+                // Generate a unique apv_id
+                const timestamp = Date.now().toString().slice(-6);
+                const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+                const apvId = `APV${timestamp}${random}`;
+                
+                await client.query(
+                  'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5)',
+                  [apvId, finalAssetId, finalOrgId, actualPropId, value]
+                );
+              }
             }
           }
         }
@@ -1306,5 +1453,6 @@ module.exports = {
   ...module.exports,
   checkExistingAssetIds,
   getBulkUploadReferenceData,
-  bulkUpsertAssets
+  bulkUpsertAssets,
+  validatePropertyValueStandalone
 };

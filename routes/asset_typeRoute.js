@@ -13,7 +13,9 @@ const {
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,
-    deleteAssetTypeProperty
+    deleteAssetTypeProperty,
+    trialBulkUpload,
+    commitBulkUpload
 } = require('../controllers/assetTypeController');
 
 // Apply authentication middleware to all routes
@@ -54,5 +56,9 @@ router.put('/:id', updateAssetType);
 
 // Delete asset type
 router.delete('/:id', deleteAssetType);
+
+// Bulk upload endpoints
+router.post('/trial-upload', trialBulkUpload);
+router.post('/commit-bulk-upload', commitBulkUpload);
 
 module.exports = router;

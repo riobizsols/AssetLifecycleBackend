@@ -129,7 +129,13 @@ const trialUploadAssets = async (req, res) => {
             });
         }
 
-        // Simulate trial upload results
+        if (!req.user || !req.user.user_id) {
+            return res.status(401).json({ error: "User not authenticated" });
+        }
+
+        const user_org_id = req.user.org_id;
+        
+        // Simulate trial upload results with property validation
         const existingAssetIds = await model.checkExistingAssetIds(
             csvData.map(row => row.asset_id).filter(id => id)
         );
@@ -138,14 +144,53 @@ const trialUploadAssets = async (req, res) => {
         let newRecords = 0;
         let updatedRecords = 0;
         let errors = 0;
+        const validationErrors = [];
         
-        csvData.forEach(row => {
-            if (existingIds.includes(row.asset_id)) {
-                updatedRecords++;
-            } else {
-                newRecords++;
+        // Validate each row including property values
+        for (let i = 0; i < csvData.length; i++) {
+            const row = csvData[i];
+            const rowNumber = i + 2; // +2 because CSV has header row and 0-based index
+            const assetIdentifier = row.asset_id || row.serial_number || `Row ${rowNumber}`;
+            
+            // Debug: Check if int_status is in the row data
+            if (row.hasOwnProperty('int_status')) {
+                console.log(`🔍 Backend found int_status in row ${rowNumber}:`, row.int_status);
             }
-        });
+            
+            console.log(`🔍 Backend processing row ${rowNumber}:`, {
+                assetIdentifier,
+                properties: row.properties,
+                orgId: user_org_id,
+                allKeys: Object.keys(row)
+            });
+            
+            try {
+                // Check if asset exists
+                if (existingIds.includes(row.asset_id)) {
+                    updatedRecords++;
+                } else {
+                    newRecords++;
+                }
+                
+                // Validate property values if they exist
+                if (row.properties && Object.keys(row.properties).length > 0) {
+                    for (const [propId, value] of Object.entries(row.properties)) {
+                        if (value && value.trim() !== '') {
+                            console.log(`🔍 Backend validating property: ${propId} = "${value}" for org ${user_org_id}`);
+                            const validation = await model.validatePropertyValueStandalone(propId, value, user_org_id);
+                            console.log(`🔍 Backend validation result:`, validation);
+                            if (!validation.isValid) {
+                                errors++;
+                                validationErrors.push(`Asset ${assetIdentifier}: ${validation.error}`);
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                errors++;
+                validationErrors.push(`Asset ${assetIdentifier}: ${error.message}`);
+            }
+        }
         
         res.json({
             success: true,
@@ -154,7 +199,8 @@ const trialUploadAssets = async (req, res) => {
                 newRecords,
                 updatedRecords,
                 errors,
-                totalProcessed: newRecords + updatedRecords
+                totalProcessed: newRecords + updatedRecords,
+                validationErrors: validationErrors.slice(0, 10) // Limit to first 10 errors
             }
         });
     } catch (error) {
