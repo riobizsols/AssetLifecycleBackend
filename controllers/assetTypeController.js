@@ -1,6 +1,30 @@
 const model = require("../models/assetTypeModel");
 const { generateCustomId } = require("../utils/idGenerator");
 
+// Helper function to convert parent asset type text to ID
+const convertParentAssetTypeToId = async (parentValue, org_id) => {
+    if (!parentValue || parentValue.trim() === '') return null;
+    
+    // If it's already an ID format (AT001, AT002, etc.)
+    if (/^AT\d{3}$/.test(parentValue)) {
+        return parentValue;
+    }
+    
+    // If it's text, find the matching asset type
+    try {
+        const allAssetTypes = await model.getAllAssetTypes();
+        const matchingAssetType = allAssetTypes.rows.find(at => 
+            at.org_id === org_id && 
+            at.text.toLowerCase() === parentValue.toLowerCase()
+        );
+        
+        return matchingAssetType ? matchingAssetType.asset_type_id : parentValue;
+    } catch (error) {
+        console.error('Error converting parent asset type:', error);
+        return parentValue;
+    }
+};
+
 // POST /api/asset-types - Add new asset type
 const addAssetType = async (req, res) => {
     try {
@@ -498,6 +522,248 @@ const deleteAssetTypeProperty = async (req, res) => {
     }
 };
 
+    // POST /api/asset-types/trial-upload - Trial bulk upload for asset types
+const trialBulkUpload = async (req, res) => {
+    try {
+        console.log('🔍 Asset Types Trial Bulk Upload - Received data:', req.body);
+        
+        const { csvData } = req.body;
+        const org_id = req.user.org_id;
+        const created_by = req.user.user_id;
+        
+        if (!csvData || !Array.isArray(csvData)) {
+            return res.status(400).json({
+                success: false,
+                error: "csvData is required and must be an array"
+            });
+        }
+        
+        console.log(`🔍 Processing ${csvData.length} asset type records`);
+        
+        let totalRows = csvData.length;
+        let newRecords = 0;
+        let updatedRecords = 0;
+        let errors = 0;
+        let validationErrors = [];
+        
+        // Process each record
+        for (let i = 0; i < csvData.length; i++) {
+            const record = csvData[i];
+            console.log(`🔍 Processing record ${i + 1}:`, record);
+            
+            try {
+                // Convert parent_asset_type_id from text to ID if needed
+                if (record.parent_asset_type_id && record.parent_asset_type_id.trim() !== '') {
+                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, org_id);
+                    if (parentAssetTypeId !== record.parent_asset_type_id) {
+                        console.log(`🔄 Converted parent asset type '${record.parent_asset_type_id}' to ID '${parentAssetTypeId}'`);
+                        record.parent_asset_type_id = parentAssetTypeId;
+                    }
+                }
+                
+                // Check if asset type already exists (by asset_type_id)
+                const existingAssetType = await model.getAssetTypeById(record.asset_type_id);
+                
+                if (existingAssetType.rows.length > 0) {
+                    console.log(`📝 Asset type '${record.asset_type_id}' already exists - would update`);
+                    updatedRecords++;
+                } else {
+                    console.log(`✨ Asset type '${record.asset_type_id}' is new - would create`);
+                    newRecords++;
+                }
+                
+                // Validate properties if provided
+                if (record.properties && Array.isArray(record.properties) && record.properties.length > 0) {
+                    for (const propId of record.properties) {
+                        const propExists = await model.checkPropertyExists(propId, org_id);
+                        if (!propExists.rows.length) {
+                            validationErrors.push(`Row ${i + 1}: Property with ID '${propId}' does not exist`);
+                        }
+                    }
+                }
+                
+            } catch (recordError) {
+                console.error(`❌ Error processing record ${i + 1}:`, recordError);
+                errors++;
+                validationErrors.push(`Row ${i + 1}: ${recordError.message}`);
+            }
+        }
+        
+        const trialResults = {
+            totalRows,
+            newRecords,
+            updatedRecords,
+            errors,
+            validationErrors
+        };
+        
+        console.log('🔍 Trial results:', trialResults);
+        
+        res.status(200).json({
+            success: true,
+            trialResults,
+            message: `Trial upload completed. ${newRecords} new, ${updatedRecords} updated, ${errors} errors.`
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in trial bulk upload:', error);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error during trial upload",
+            message: error.message
+        });
+    }
+};
+
+// POST /api/asset-types/commit-bulk-upload - Commit bulk upload for asset types
+const commitBulkUpload = async (req, res) => {
+    try {
+        console.log('🔍 Asset Types Commit Bulk Upload - Received data:', req.body);
+        
+        const { csvData } = req.body;
+        const org_id = req.user.org_id;
+        const created_by = req.user.user_id;
+        
+        if (!csvData || !Array.isArray(csvData)) {
+            return res.status(400).json({
+                success: false,
+                error: "csvData is required and must be an array"
+            });
+        }
+        
+        console.log(`🔍 Committing ${csvData.length} asset type records`);
+        
+        let inserted = 0;
+        let updated = 0;
+        let errors = 0;
+        let totalProcessed = 0;
+        
+        // Process each record
+        for (let i = 0; i < csvData.length; i++) {
+            const record = csvData[i];
+            console.log(`🔍 Processing record ${i + 1}:`, record);
+            
+            try {
+                totalProcessed++;
+                
+                // Convert parent_asset_type_id from text to ID if needed
+                if (record.parent_asset_type_id && record.parent_asset_type_id.trim() !== '') {
+                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, org_id);
+                    if (parentAssetTypeId !== record.parent_asset_type_id) {
+                        console.log(`🔄 Converted parent asset type '${record.parent_asset_type_id}' to ID '${parentAssetTypeId}'`);
+                        record.parent_asset_type_id = parentAssetTypeId;
+                    }
+                }
+                
+                // Check if asset type already exists (by asset_type_id)
+                const existingAssetType = await model.getAssetTypeById(record.asset_type_id);
+                
+                if (existingAssetType.rows.length > 0) {
+                    // Update existing asset type
+                    console.log(`📝 Updating existing asset type '${record.asset_type_id}'`);
+                    const updateData = {
+                        org_id,
+                        int_status: record.int_status,
+                        maint_required: (record.maint_required === 'true' || record.maint_required === true) ? 1 : 0,
+                        assignment_type: record.assignment_type,
+                        inspection_required: (record.inspection_required === 'true' || record.inspection_required === true),
+                        group_required: (record.group_required === 'true' || record.group_required === true),
+                        text: record.text,
+                        is_child: (record.is_child === 'true' || record.is_child === true),
+                        parent_asset_type_id: record.parent_asset_type_id || null,
+                        maint_type_id: record.maint_type_id || null,
+                        maint_lead_type: record.maint_lead_type || null,
+                        depreciation_type: record.depreciation_type || 'ND'
+                    };
+                    
+                    await model.updateAssetType(existingAssetType.rows[0].asset_type_id, updateData, created_by);
+                    
+                    // Update properties if provided
+                    if (record.properties && Array.isArray(record.properties)) {
+                        // Remove existing property mappings
+                        await model.deleteAssetTypePropertyMappings(existingAssetType.rows[0].asset_type_id);
+                        // Add new property mappings only if there are properties
+                        if (record.properties.length > 0) {
+                            await model.mapAssetTypeToProperties(existingAssetType.rows[0].asset_type_id, record.properties, org_id, created_by);
+                        }
+                    }
+                    
+                    updated++;
+                } else {
+                    // Create new asset type
+                    console.log(`✨ Creating new asset type '${record.text}' with ID '${record.asset_type_id}'`);
+                    
+                    // Use provided asset_type_id
+                    let asset_type_id = record.asset_type_id;
+                    
+                    // Retry logic for unique constraint
+                    let retryCount = 0;
+                    const maxRetries = 5;
+                    let result;
+                    
+                    while (retryCount < maxRetries) {
+                        try {
+                            result = await model.insertAssetType(
+                                org_id, asset_type_id, record.int_status || 1,
+                                (record.maint_required === 'true' || record.maint_required === true) ? 1 : 0, record.assignment_type || 'user',
+                                (record.inspection_required === 'true' || record.inspection_required === true), (record.group_required === 'true' || record.group_required === true),
+                                created_by, record.text, (record.is_child === 'true' || record.is_child === true),
+                                record.parent_asset_type_id || null, record.maint_type_id || null,
+                                record.maint_lead_type || null, record.depreciation_type || 'ND'
+                            );
+                            break; // Success, exit the loop
+                        } catch (err) {
+                            if (err.code === '23505' && err.constraint === 'tblAssetType_UK' && retryCount < maxRetries - 1) {
+                                // Duplicate key error, generate a new ID and retry
+                                console.warn(`Duplicate asset_type_id ${asset_type_id}, generating new ID...`);
+                                asset_type_id = await generateCustomId("asset_type", 3);
+                                retryCount++;
+                            } else {
+                                // Re-throw the error if it's not a duplicate key or we've exhausted retries
+                                throw err;
+                            }
+                        }
+                    }
+                    
+                    // Map properties if provided
+                    if (record.properties && Array.isArray(record.properties) && record.properties.length > 0) {
+                        await model.mapAssetTypeToProperties(asset_type_id, record.properties, org_id, created_by);
+                    }
+                    
+                    inserted++;
+                }
+                
+            } catch (recordError) {
+                console.error(`❌ Error processing record ${i + 1}:`, recordError);
+                errors++;
+            }
+        }
+        
+        const results = {
+            inserted,
+            updated,
+            errors,
+            totalProcessed
+        };
+        
+        console.log('🔍 Commit results:', results);
+        
+        res.status(200).json({
+            success: true,
+            results,
+            message: `Bulk upload completed. ${inserted} inserted, ${updated} updated, ${errors} errors.`
+        });
+        
+    } catch (error) {
+        console.error('❌ Error in commit bulk upload:', error);
+        res.status(500).json({
+            success: false,
+            error: "Internal server error during commit upload",
+            message: error.message
+        });
+    }
+};
+
 module.exports = {
     addAssetType,
     getAllAssetTypes,
@@ -510,5 +776,7 @@ module.exports = {
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,
-    deleteAssetTypeProperty
+    deleteAssetTypeProperty,
+    trialBulkUpload,
+    commitBulkUpload
 };

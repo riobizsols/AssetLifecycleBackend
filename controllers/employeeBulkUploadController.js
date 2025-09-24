@@ -70,15 +70,63 @@ const trialUploadEmployees = async (req, res) => {
       });
     }
 
-    // Simulate trial results
+    // Check which employees already exist
+    const employeeIds = csvData.map(row => row.employee_id).filter(id => id);
+    const existingIds = await model.checkExistingEmployeeIds(employeeIds);
+    
+    let newRecords = 0;
+    let updatedRecords = 0;
+    let errors = 0;
+    const validationErrors = [];
+
+    for (const row of csvData) {
+      try {
+        // Basic validation
+        if (!row.employee_id) {
+          validationErrors.push(`Employee missing employee_id`);
+          errors++;
+          continue;
+        }
+        
+        if (!row.name) {
+          validationErrors.push(`Employee ${row.employee_id}: Missing name`);
+          errors++;
+          continue;
+        }
+        
+        if (!row.email_id) {
+          validationErrors.push(`Employee ${row.employee_id}: Missing email_id`);
+          errors++;
+          continue;
+        }
+        
+        if (!row.dept_id) {
+          validationErrors.push(`Employee ${row.employee_id}: Missing dept_id`);
+          errors++;
+          continue;
+        }
+
+        // Check if employee exists
+        if (existingIds.includes(row.employee_id)) {
+          updatedRecords++;
+        } else {
+          newRecords++;
+        }
+      } catch (error) {
+        validationErrors.push(`Employee ${row.employee_id || 'unknown'}: ${error.message}`);
+        errors++;
+      }
+    }
+
     const results = {
       success: true,
       message: 'Trial upload completed',
-      results: {
+      trialResults: {
         totalRows: csvData.length,
-        newRecords: Math.floor(csvData.length * 0.7), // Simulate 70% new
-        updatedRecords: Math.floor(csvData.length * 0.3), // Simulate 30% updates
-        errors: 0
+        newRecords,
+        updatedRecords,
+        errors,
+        validationErrors
       }
     };
 
@@ -105,7 +153,8 @@ const commitBulkUploadEmployees = async (req, res) => {
     }
 
     const created_by = req.user.user_id;
-    const results = await model.bulkUpsertEmployees(csvData, created_by);
+    const org_id = req.user.org_id;
+    const results = await model.bulkUpsertEmployees(csvData, created_by, org_id);
     
     res.json({
       success: true,

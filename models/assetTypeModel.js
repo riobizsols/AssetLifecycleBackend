@@ -187,10 +187,12 @@ const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, cre
             [asset_type_id]
         );
 
-        // Insert new mappings
+        // Insert new mappings sequentially to avoid ID conflicts
         if (property_ids && property_ids.length > 0) {
             console.log(`📝 Inserting ${property_ids.length} property mappings...`);
-            const insertPromises = property_ids.map(async (prop_id, index) => {
+            
+            for (let index = 0; index < property_ids.length; index++) {
+                const prop_id = property_ids[index];
                 console.log(`📝 Processing property ${index + 1}/${property_ids.length}: ${prop_id}`);
                 const asset_type_prop_id = await generateCustomId('atp', 3);
                 console.log(`🔢 Generated asset_type_prop_id: ${asset_type_prop_id}`);
@@ -201,10 +203,10 @@ const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, cre
                     ) VALUES ($1, $2, $3, $4)
                 `;
                 console.log('📝 Executing insert query with values:', [asset_type_prop_id, asset_type_id, prop_id, org_id]);
-                return db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
-            });
+                await db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+                console.log(`✅ Property mapping ${index + 1} inserted successfully`);
+            }
             
-            await Promise.all(insertPromises);
             console.log('✅ All property mappings inserted successfully');
         } else {
             console.log('⚠️ No property IDs provided for mapping');
@@ -324,6 +326,38 @@ const deleteAssetTypeProperty = async (asset_type_prop_id) => {
     }
 };
 
+// Get asset type by text/name
+const getAssetTypeByText = async (text, org_id) => {
+    const query = `
+        SELECT asset_type_id, text, org_id
+        FROM "tblAssetTypes"
+        WHERE text = $1 AND org_id = $2
+    `;
+    
+    return await db.query(query, [text, org_id]);
+};
+
+// Check if property exists
+const checkPropertyExists = async (prop_id, org_id) => {
+    const query = `
+        SELECT prop_id
+        FROM "tblProps"
+        WHERE prop_id = $1 AND org_id = $2
+    `;
+    
+    return await db.query(query, [prop_id, org_id]);
+};
+
+// Delete all property mappings for an asset type
+const deleteAssetTypePropertyMappings = async (asset_type_id) => {
+    const query = `
+        DELETE FROM "tblAssetTypeProps"
+        WHERE asset_type_id = $1
+    `;
+    
+    return await db.query(query, [asset_type_id]);
+};
+
 module.exports = {
     insertAssetType,
     getAllAssetTypes,
@@ -339,5 +373,8 @@ module.exports = {
     getAssetTypeProperties,
     getAllProperties,
     addAssetTypeProperty,
-    deleteAssetTypeProperty
+    deleteAssetTypeProperty,
+    getAssetTypeByText,
+    checkPropertyExists,
+    deleteAssetTypePropertyMappings
 }; 
