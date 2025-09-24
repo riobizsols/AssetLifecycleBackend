@@ -412,14 +412,27 @@ const updateAsset = async (asset_id, {
     // Update properties if provided
     if (properties && Object.keys(properties).length > 0) {
       // First, delete existing properties
-      await client.query('DELETE FROM "tblAssetProperties" WHERE asset_id = $1', [asset_id]);
+      await client.query('DELETE FROM "tblAssetPropValues" WHERE asset_id = $1', [asset_id]);
 
       // Then insert new properties
-      for (const [assetTypePropId, value] of Object.entries(properties)) {
-        await client.query(
-          'INSERT INTO "tblAssetProperties" (asset_id, asset_type_prop_id, value) VALUES ($1, $2, $3)',
-          [asset_id, assetTypePropId, value]
-        );
+      // Need to convert property names to asset_type_prop_id
+      for (const [propertyName, value] of Object.entries(properties)) {
+        // Get asset_type_prop_id from property name
+        const propQuery = `
+          SELECT atp.asset_type_prop_id 
+          FROM "tblAssetTypeProps" atp
+          JOIN "tblProps" p ON atp.prop_id = p.prop_id
+          WHERE p.property = $1 AND atp.asset_type_id = $2
+        `;
+        const propResult = await client.query(propQuery, [propertyName, asset_type_id]);
+        
+        if (propResult.rows.length > 0) {
+          const assetTypePropId = propResult.rows[0].asset_type_prop_id;
+          await client.query(
+            'INSERT INTO "tblAssetPropValues" (asset_id, asset_type_prop_id, value) VALUES ($1, $2, $3)',
+            [asset_id, assetTypePropId, value]
+          );
+        }
       }
     }
 
