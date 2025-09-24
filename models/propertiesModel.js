@@ -49,6 +49,58 @@ class PropertiesModel {
     }
   }
 
+  // Create a new property value
+  static async createPropertyValue(propId, value, orgId, createdBy) {
+    try {
+      const { generateCustomId } = require('../utils/idGenerator');
+      
+      // Generate unique APLV ID
+      const aplvId = await generateCustomId('aplv', 3);
+      
+      const query = `
+        INSERT INTO "tblAssetPropListValues" (
+          aplv_id,
+          prop_id,
+          value,
+          int_status,
+          org_id
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING aplv_id
+      `;
+      
+      const result = await db.query(query, [aplvId, propId, value, 1, orgId]);
+      console.log(`✅ Created new property value: ${value} for property ${propId} with ID ${aplvId}`);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error creating property value:', error);
+      throw error;
+    }
+  }
+
+  // Check if property value exists (case-insensitive)
+  static async findPropertyValue(propId, value, orgId) {
+    try {
+      const query = `
+        SELECT 
+          aplv_id,
+          value,
+          int_status
+        FROM "tblAssetPropListValues"
+        WHERE prop_id = $1 
+        AND org_id = $2 
+        AND int_status = 1
+        AND LOWER(value) = LOWER($3)
+        ORDER BY value
+      `;
+      
+      const result = await db.query(query, [propId, orgId, value]);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error finding property value:', error);
+      throw error;
+    }
+  }
+
   // Get all properties with their values for a specific asset type
   static async getPropertiesWithValues(assetTypeId, orgId) {
     try {
