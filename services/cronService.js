@@ -51,7 +51,7 @@ class CronService {
                     'User-Agent': 'CronService/1.0'
                 },
                 data: {
-                    test_date: "2025-09-05"
+                    // test_date: "2025-09-05"
                 }
             };
 

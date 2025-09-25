@@ -47,7 +47,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
   }
 };
 
-const getMaintenanceNotificationsByUser = async (userId, orgId = 'ORG001') => {
+const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => {
   const query = `
     SELECT DISTINCT
       wfh.wfamsh_id,
@@ -59,9 +59,9 @@ const getMaintenanceNotificationsByUser = async (userId, orgId = 'ORG001') => {
       at.text as asset_type_name,
       at.maint_type_id,
       mt.text as maint_type_name,
-      -- Get the current action user (person with AP status)
+      -- Get the current action user (person with AP or UA status)
       current_action_user.full_name as current_action_user_name,
-      current_action_user.user_id as current_action_user_id,
+      current_action_user.emp_int_id as current_action_user_id,
       current_action_user.email as current_action_user_email,
       -- Calculate cutoff date: pl_sch_date - maint_lead_type
       (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
@@ -73,37 +73,59 @@ const getMaintenanceNotificationsByUser = async (userId, orgId = 'ORG001') => {
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
-    -- Get the current action user (person with AP status)
+    -- Get the current action user (person with AP or UA status)
     LEFT JOIN (
-      SELECT wfd2.wfamsh_id, wfd2.user_id, u2.full_name, u2.email
+      SELECT 
+        wfd2.wfamsh_id, 
+        wfd2.user_id,
+        CASE 
+          WHEN u2.full_name IS NOT NULL THEN u2.full_name
+          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN u3.full_name
+          ELSE 'Unknown User'
+        END as full_name,
+        CASE 
+          WHEN u2.email IS NOT NULL THEN u2.email
+          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN u3.email
+          ELSE NULL
+        END as email,
+        CASE 
+          WHEN u2.emp_int_id IS NOT NULL THEN u2.emp_int_id
+          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN wfd2.user_id
+          ELSE NULL
+        END as emp_int_id
       FROM "tblWFAssetMaintSch_D" wfd2
       LEFT JOIN "tblUsers" u2 ON wfd2.user_id = u2.user_id
-      WHERE wfd2.status = 'AP'
+      LEFT JOIN "tblUsers" u3 ON wfd2.user_id = u3.emp_int_id
+      WHERE wfd2.status IN ('AP', 'UA')  -- Include both AP and UA status
         AND wfd2.wfamsd_id IN (
           SELECT MAX(wfd3.wfamsd_id)
           FROM "tblWFAssetMaintSch_D" wfd3
           WHERE wfd3.wfamsh_id = wfd2.wfamsh_id
-            AND wfd3.status = 'AP'
+            AND wfd3.status IN ('AP', 'UA')  -- Include both AP and UA status
         )
     ) current_action_user ON wfh.wfamsh_id = current_action_user.wfamsh_id
-    -- Check if the requesting user is involved in this workflow
+    -- Check if the requesting employee is involved in this workflow using emp_int_id
     WHERE wfh.org_id = $1 
-      AND wfh.status IN ('IN', 'IP')
+      AND wfh.status IN ('IN', 'IP', 'CO')  -- Include CO status as well
       AND EXISTS (
         SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+        LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
-          AND wfd.user_id = $2
+          AND (
+            (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL) OR  -- Normal case: user_id exists and has emp_int_id
+            (wfd.user_id = $2)  -- Fallback case: user_id is actually emp_int_id
+          )
           AND wfd.status IN ('IN', 'IP', 'AP', 'UA', 'UR')
       )
     ORDER BY wfh.pl_sch_date ASC
   `;
   try {
-    const result = await pool.query(query, [orgId, userId]);
+    const result = await pool.query(query, [orgId, empIntId]);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId, userId]);
+    console.error('Query Parameters:', [orgId, empIntId]);
     throw error;
   }
 };
