@@ -44,3 +44,30 @@ exports.getAllDeptAssets = () => {
     ORDER BY da.dept_asset_type_id
   `);
 };
+
+exports.getAssetTypesByDepartment = (dept_id) => {
+    return db.query(`
+    SELECT 
+        at.asset_type_id,
+        at.text AS asset_type_name,
+        at.assignment_type,
+        at.group_required,
+        at.inspection_required,
+        at.maint_required,
+        at.is_child,
+        at.parent_asset_type_id,
+        at.maint_type_id,
+        at.maint_lead_type,
+        at.depreciation_type,
+        da.dept_asset_type_id,
+        da.dept_id,
+        d.text AS dept_name
+    FROM "tblDeptAssetTypes" da
+    JOIN "tblAssetTypes" at ON da.asset_type_id = at.asset_type_id
+    JOIN "tblDepartments" d ON da.dept_id = d.dept_id
+    WHERE da.dept_id = $1 
+    AND da.int_status = 1 
+    AND at.int_status = 1
+    ORDER BY at.text
+  `, [dept_id]);
+};

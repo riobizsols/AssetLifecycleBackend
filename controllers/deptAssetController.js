@@ -131,9 +131,58 @@ const fetchAllDeptAssets = async (req, res) => {
     }
 };
 
+const getAssetTypesByDepartment = async (req, res) => {
+    try {
+        const { dept_id } = req.params;
+        
+        // Validation
+        if (!dept_id) {
+            return res.status(400).json({ 
+                error: "Department ID is required",
+                message: "Please provide a valid department ID" 
+            });
+        }
+
+        // Check if department exists
+        const deptCheck = await db.query(
+            `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
+            [dept_id]
+        );
+
+        if (deptCheck.rows.length === 0) {
+            return res.status(404).json({ 
+                error: "Department not found",
+                message: "The specified department does not exist" 
+            });
+        }
+
+        const result = await model.getAssetTypesByDepartment(dept_id);
+        
+        res.status(200).json({
+            success: true,
+            message: "Asset types retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            department: {
+                dept_id: dept_id,
+                dept_name: deptCheck.rows[0].text
+            },
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Error fetching asset types by department:", err);
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to fetch asset types by department",
+            message: "An internal server error occurred" 
+        });
+    }
+};
+
 module.exports = {
     addDeptAsset,
     getAllAssetTypes,
     deleteDeptAsset,
     fetchAllDeptAssets,
+    getAssetTypesByDepartment,
 };
