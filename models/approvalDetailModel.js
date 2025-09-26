@@ -754,7 +754,12 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
           a.asset_type_id,
           wfh.maint_type_id,
           a.service_vendor_id as vendor_id,
-          wfh.at_main_freq_id
+          wfh.at_main_freq_id,
+          -- Determine maintained_by based on service_vendor_id
+          CASE 
+            WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
+            ELSE 'Inhouse'
+          END as maintained_by
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
@@ -772,6 +777,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      
      const workflowData = workflowResult.rows[0];
      console.log('Workflow data:', workflowData);
+     console.log('Maintained by will be set to:', workflowData.maintained_by);
+     console.log('Service vendor ID:', workflowData.vendor_id);
      
            // Insert maintenance record
       const insertQuery = `
@@ -802,7 +809,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
         maintTypeId,
         workflowData.vendor_id,
         workflowData.at_main_freq_id,
-        null, // maintained_by - will be set when maintenance is performed
+        workflowData.maintained_by, // Set based on service_vendor_id
         null, // notes - will be set when maintenance is performed
         'IN', // Initial status
         workflowData.act_maint_st_date,

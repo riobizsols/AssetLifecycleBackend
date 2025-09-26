@@ -181,7 +181,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
               int_status = $15,
               org_id = $16,
               changed_by = $17,
-              changed_on = CURRENT_TIMESTAMP
+              changed_on = NOW()::timestamp(3)
             WHERE employee_id = $1
           `, [
             finalEmployeeId,
@@ -213,7 +213,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
               created_by, created_on, changed_by, changed_on
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-              $17, CURRENT_TIMESTAMP, $17, CURRENT_TIMESTAMP
+              $17, NOW()::timestamp(3), $17, NOW()::timestamp(3)
             )
           `, [
             finalEmpIntId,

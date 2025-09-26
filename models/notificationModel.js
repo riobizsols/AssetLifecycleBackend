@@ -55,65 +55,66 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
       wfh.asset_id,
       wfh.status as header_status,
       a.asset_type_id,
-      at.maint_lead_type,
-      at.text as asset_type_name,
+      CASE 
+        WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+        ELSE at.maint_lead_type::text
+      END as maint_lead_type,
+      COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
       at.maint_type_id,
-      mt.text as maint_type_name,
-      -- Get the current action user (person with AP or UA status)
-      current_action_user.full_name as current_action_user_name,
-      current_action_user.emp_int_id as current_action_user_id,
+      COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
+      -- Get the current action user (person with AP or UA status) - simplified approach
+      COALESCE(current_action_user.full_name, 'Unknown User') as current_action_user_name,
+      COALESCE(current_action_user.emp_int_id::text, current_action_user.user_id::text) as current_action_user_id,
       current_action_user.email as current_action_user_email,
       -- Calculate cutoff date: pl_sch_date - maint_lead_type
-      (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
+      (wfh.pl_sch_date - INTERVAL '1 day' * CAST(
+        CASE 
+          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+          ELSE at.maint_lead_type::text
+        END AS INTEGER
+      )) as cutoff_date,
       -- Calculate days until due
       EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
       -- Calculate days until cutoff
-      EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+      EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * CAST(
+        CASE 
+          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+          ELSE at.maint_lead_type::text
+        END AS INTEGER
+      )) - CURRENT_DATE)) as days_until_cutoff
     FROM "tblWFAssetMaintSch_H" wfh
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
-    -- Get the current action user (person with AP or UA status)
+    -- Simplified current action user subquery
     LEFT JOIN (
       SELECT 
         wfd2.wfamsh_id, 
         wfd2.user_id,
-        CASE 
-          WHEN u2.full_name IS NOT NULL THEN u2.full_name
-          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN u3.full_name
-          ELSE 'Unknown User'
-        END as full_name,
-        CASE 
-          WHEN u2.email IS NOT NULL THEN u2.email
-          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN u3.email
-          ELSE NULL
-        END as email,
-        CASE 
-          WHEN u2.emp_int_id IS NOT NULL THEN u2.emp_int_id
-          WHEN wfd2.user_id LIKE 'EMP_INT_%' THEN wfd2.user_id
-          ELSE NULL
-        END as emp_int_id
+        COALESCE(u2.full_name, u3.full_name, 'Unknown User') as full_name,
+        COALESCE(u2.email, u3.email) as email,
+        COALESCE(u2.emp_int_id::text, u3.emp_int_id::text, wfd2.user_id::text) as emp_int_id
       FROM "tblWFAssetMaintSch_D" wfd2
       LEFT JOIN "tblUsers" u2 ON wfd2.user_id = u2.user_id
       LEFT JOIN "tblUsers" u3 ON wfd2.user_id = u3.emp_int_id
-      WHERE wfd2.status IN ('AP', 'UA')  -- Include both AP and UA status
-        AND wfd2.wfamsd_id IN (
+      WHERE wfd2.status IN ('AP', 'UA')
+        AND wfd2.wfamsd_id = (
           SELECT MAX(wfd3.wfamsd_id)
           FROM "tblWFAssetMaintSch_D" wfd3
           WHERE wfd3.wfamsh_id = wfd2.wfamsh_id
-            AND wfd3.status IN ('AP', 'UA')  -- Include both AP and UA status
+            AND wfd3.status IN ('AP', 'UA')
         )
     ) current_action_user ON wfh.wfamsh_id = current_action_user.wfamsh_id
-    -- Check if the requesting employee is involved in this workflow using emp_int_id
+    -- Check if the requesting employee is involved in this workflow
     WHERE wfh.org_id = $1 
-      AND wfh.status IN ('IN', 'IP', 'CO')  -- Include CO status as well
+      AND wfh.status IN ('IN', 'IP', 'CO')
       AND EXISTS (
         SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
         LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
           AND (
-            (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL) OR  -- Normal case: user_id exists and has emp_int_id
-            (wfd.user_id = $2)  -- Fallback case: user_id is actually emp_int_id
+            (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL) OR
+            (wfd.user_id = $2)
           )
           AND wfd.status IN ('IN', 'IP', 'AP', 'UA', 'UR')
       )

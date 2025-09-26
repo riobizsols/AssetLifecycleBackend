@@ -60,7 +60,11 @@ const getUserNotifications = async (req, res) => {
       });
     }
 
+    console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}`);
+    
     const notifications = await getMaintenanceNotificationsByUser(userId, orgId);
+    
+    console.log(`Found ${notifications.length} notifications for user ${userId}`);
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
@@ -91,10 +95,18 @@ const getUserNotifications = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getUserNotifications:', error);
+    console.error('Error details:', {
+      message: error.message,
+      stack: error.stack,
+      userId: req.params.userId,
+      orgId: req.query.orgId
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve user maintenance notifications',
-      error: error.message
+      error: error.message,
+      userId: req.params.userId
     });
   }
 };
