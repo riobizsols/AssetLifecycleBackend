@@ -15,11 +15,11 @@ const getAllReports = async (orgId) => {
 };
 
 // Reason Codes
-const getBreakdownReasonCodes = async (orgId = 'ORG001', assetTypeId = null) => {
+const getBreakdownReasonCodes = async (orgId, assetTypeId = null) => {
   let query = `
     SELECT atbrrc_id, asset_type_id, text, instatus, org_id
     FROM "tblATBRReasonCodes"
-    WHERE instatus = 'A' AND org_id = $1
+    WHERE instatus = '1' AND org_id = $1
   `;
   const params = [orgId];
   if (assetTypeId) {

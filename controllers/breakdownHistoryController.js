@@ -276,7 +276,7 @@ const getBreakdownHistorySummary = async (req, res) => {
 // Get available filter options
 const getBreakdownFilterOptions = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.query.orgId;
         
         console.log('Breakdown Filter Options Request:', { orgId });
         
@@ -300,7 +300,7 @@ const getBreakdownFilterOptions = async (req, res) => {
 // Export breakdown history
 const exportBreakdownHistory = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.query.orgId;
         const exportType = req.query.type || 'csv'; // 'pdf' or 'csv'
         const filters = req.body || {};
         
