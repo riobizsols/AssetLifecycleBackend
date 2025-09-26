@@ -2,6 +2,15 @@ const pool = require('../config/db');
 const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
 
+// Helper function to convert emp_int_id to user_id
+const getUserIdByEmpIntId = async (empIntId) => {
+  const result = await pool.query(
+    'SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1',
+    [empIntId]
+  );
+  return result.rows.length > 0 ? result.rows[0].user_id : null;
+};
+
 const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
   console.log('=== getApprovalDetailByAssetId called ===');
   console.log('Asset ID:', assetId);
@@ -50,8 +59,16 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         at.maint_type_id,
         mt.text as maint_type_name,
-        u.full_name as user_name,
-        u.email,
+        CASE 
+          WHEN u.full_name IS NOT NULL THEN u.full_name
+          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.full_name
+          ELSE 'Unknown User'
+        END as user_name,
+        CASE 
+          WHEN u.email IS NOT NULL THEN u.email
+          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.email
+          ELSE NULL
+        END as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
         -- Calculate days until due
@@ -64,6 +81,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
       LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
       LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+      LEFT JOIN "tblUsers" u_emp ON wfd.user_id = u_emp.emp_int_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
       WHERE wfd.org_id = $1 
         AND wfh.asset_id = $2
@@ -202,8 +220,14 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
   }
 };
 
-const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001') => {
+const approveMaintenance = async (assetId, empIntId, note = null, orgId = 'ORG001') => {
   try {
+    // Convert emp_int_id to user_id
+    const userId = await getUserIdByEmpIntId(empIntId);
+    if (!userId) {
+      throw new Error('User not found with the provided employee ID');
+    }
+    
     // Get current workflow details - get the latest record for each user
     const currentQuery = `
       SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
@@ -226,8 +250,12 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
       throw new Error('No workflow found for this asset');
     }
     
-    // Find current user's step
-    const currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    // Find current user's step - handle both user_id and emp_int_id cases
+    let currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    if (!currentUserStep) {
+      // Try finding by emp_int_id
+      currentUserStep = workflowDetails.find(w => w.user_id === empIntId);
+    }
     if (!currentUserStep) {
       throw new Error('User not found in workflow');
     }
@@ -252,7 +280,7 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, userId, 'UA', note, orgId]
+        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UA', note, orgId]
       );
     
     console.log(`Inserted history record: ${wfamhisId} for user ${userId} approval`);
@@ -280,7 +308,7 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [nextWfamhisId, nextUserStep.wfamsh_id, nextUserStep.wfamsd_id, userId, 'AP', null, orgId]
+        [nextWfamhisId, nextUserStep.wfamsh_id, nextUserStep.wfamsd_id, empIntId, 'AP', null, orgId]
       );
       
       console.log(`Inserted history record: ${nextWfamhisId} for next user ${nextUserStep.user_id} status change`);
@@ -315,8 +343,14 @@ const approveMaintenance = async (assetId, userId, note = null, orgId = 'ORG001'
   }
 };
 
-const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
+const rejectMaintenance = async (assetId, empIntId, reason, orgId = 'ORG001') => {
   try {
+    // Convert emp_int_id to user_id
+    const userId = await getUserIdByEmpIntId(empIntId);
+    if (!userId) {
+      throw new Error('User not found with the provided employee ID');
+    }
+    
     // Get current workflow details - get the latest record for each user
     const currentQuery = `
       SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
@@ -339,8 +373,12 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
       throw new Error('No workflow found for this asset');
     }
     
-    // Find current user's step
-    const currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    // Find current user's step - handle both user_id and emp_int_id cases
+    let currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    if (!currentUserStep) {
+      // Try finding by emp_int_id
+      currentUserStep = workflowDetails.find(w => w.user_id === empIntId);
+    }
     if (!currentUserStep) {
       throw new Error('User not found in workflow');
     }
@@ -365,7 +403,7 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, userId, 'UR', reason, orgId]
+        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UR', reason, orgId]
       );
     
     console.log(`Inserted history record: ${wfamhisId} for user ${userId} rejection`);
@@ -411,7 +449,7 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [prevWfamhisId, previousApprovedUser.wfamsh_id, previousApprovedUser.wfamsd_id, userId, 'AP', null, orgId]
+        [prevWfamhisId, previousApprovedUser.wfamsh_id, previousApprovedUser.wfamsd_id, empIntId, 'AP', null, orgId]
       );
       
       console.log(`Inserted history record: ${prevWfamhisId} for previous user ${previousApprovedUser.user_id} status revert`);
@@ -440,75 +478,39 @@ const rejectMaintenance = async (assetId, userId, reason, orgId = 'ORG001') => {
       console.log('All users have rejected - ending workflow as CA');
       await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
     } else {
-      // Find next user and update their status to AP
-      const nextUserStep = workflowDetails.find(w => w.sequence > currentUserStep.sequence);
-      console.log('Reject - Current user sequence:', currentUserStep.sequence);
-      console.log('Reject - Next user step:', nextUserStep);
-      
-      if (nextUserStep) {
-        console.log('Reject - Updating next user:', nextUserStep.user_id, 'to AP status');
-        
-        // Update next user's status to AP (Approval Pending)
-        await pool.query(
-          `UPDATE "tblWFAssetMaintSch_D" 
-           SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
-           WHERE wfamsd_id = $3`,
-          ['AP', userId.substring(0, 20), nextUserStep.wfamsd_id]
-        );
-        
-        console.log(`Updated next user ${nextUserStep.user_id} status to AP`);
-        
-        // Insert history record for next user status change
-        const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-        const nextHistoryIdResult = await pool.query(nextHistoryIdQuery);
-        const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
-        const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
-        
-        await pool.query(
-          `INSERT INTO "tblWFAssetMaintHist" (
-            wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
-          ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-          [nextWfamhisId, nextUserStep.wfamsh_id, nextUserStep.wfamsd_id, userId, 'AP', null, orgId]
-        );
-        
-        console.log(`Inserted history record: ${nextWfamhisId} for next user ${nextUserStep.user_id} status change`);
-      } else {
-        console.log('Reject - No next user found (current user is last in sequence)');
-        
-        // Check if this rejection creates a deadlock (no more path forward)
-        const deadlockCheckQuery = `
-          SELECT 
-            COUNT(*) as total_users,
-            COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-            COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-            COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-          FROM (
-          SELECT DISTINCT wfd.user_id, 
-                 FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1
-        ) latest_status
-      `;
-      
-      const deadlockResult = await pool.query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
-      const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
-      
-      console.log(`Deadlock check - Total: ${total_users}, Rejected: ${rejected_users}, Approved: ${approved_users}, Pending: ${pending_users}`);
-      
-      // Check if all users have rejected OR if there's no approved user to return to
-      const allUsersRejected = parseInt(rejected_users) === parseInt(total_users);
-      const noApprovedUserToReturnTo = parseInt(approved_users) === 0;
-      const noPendingUsers = parseInt(pending_users) === 0;
-      
-      console.log(`Deadlock analysis - All users rejected: ${allUsersRejected}, No approved user to return to: ${noApprovedUserToReturnTo}, No pending users: ${noPendingUsers}`);
-      
-      // Mark as CA if all users have rejected or there's no path forward
-      if (allUsersRejected || (noApprovedUserToReturnTo && noPendingUsers)) {
-        console.log('No path forward - setting workflow to CA');
-        await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
-      } else {
-        console.log('Workflow can continue - there are approved users to return to');
-      }
+      // Check if this rejection creates a deadlock (no more path forward)
+      const deadlockCheckQuery = `
+        SELECT 
+          COUNT(*) as total_users,
+          COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
+          COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
+          COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
+        FROM (
+        SELECT DISTINCT wfd.user_id, 
+               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1
+      ) latest_status
+    `;
+    
+    const deadlockResult = await pool.query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
+    const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
+    
+    console.log(`Deadlock check - Total: ${total_users}, Rejected: ${rejected_users}, Approved: ${approved_users}, Pending: ${pending_users}`);
+    
+    // Check if all users have rejected OR if there's no approved user to return to
+    const allUsersRejected = parseInt(rejected_users) === parseInt(total_users);
+    const noApprovedUserToReturnTo = parseInt(approved_users) === 0;
+    const noPendingUsers = parseInt(pending_users) === 0;
+    
+    console.log(`Deadlock analysis - All users rejected: ${allUsersRejected}, No approved user to return to: ${noApprovedUserToReturnTo}, No pending users: ${noPendingUsers}`);
+    
+    // Mark as CA if all users have rejected or there's no path forward
+    if (allUsersRejected || (noApprovedUserToReturnTo && noPendingUsers)) {
+      console.log('No path forward - setting workflow to CA');
+      await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
+    } else {
+      console.log('Workflow can continue - there are approved users to return to');
     }
   }
     
@@ -532,8 +534,16 @@ const getWorkflowHistory = async (assetId, orgId = 'ORG001') => {
         wh.action_on,
         wh.action,
         wh.notes,
-        u.full_name as user_name,
-        wfd_user.full_name as affected_user_name,
+        CASE 
+          WHEN u.full_name IS NOT NULL THEN u.full_name
+          WHEN wh.action_by LIKE 'EMP_INT_%' THEN u_emp.full_name
+          ELSE 'System'
+        END as user_name,
+        CASE 
+          WHEN wfd_user.full_name IS NOT NULL THEN wfd_user.full_name
+          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN wfd_user_emp.full_name
+          ELSE 'Unknown User'
+        END as affected_user_name,
         jr.text as job_role_name,
         d.text as dept_name,
         wfd.sequence,
@@ -542,7 +552,9 @@ const getWorkflowHistory = async (assetId, orgId = 'ORG001') => {
       INNER JOIN "tblWFAssetMaintSch_D" wfd ON wh.wfamsd_id = wfd.wfamsd_id
       INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
       LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+      LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
       LEFT JOIN "tblUsers" wfd_user ON wfd.user_id = wfd_user.user_id
+      LEFT JOIN "tblUsers" wfd_user_emp ON wfd.user_id = wfd_user_emp.emp_int_id
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
       WHERE wfh.asset_id = $1 AND wh.org_id = $2
@@ -654,7 +666,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   }
 };
 
- const getMaintenanceApprovals = async (userId, orgId = 'ORG001') => {
+ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
    try {
      const query = `
        SELECT DISTINCT
@@ -671,7 +683,11 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          a.description as asset_description,
          v.vendor_name,
          d.text as department_name,
-         u.full_name as employee_name,
+         CASE 
+          WHEN u.full_name IS NOT NULL THEN u.full_name
+          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.full_name
+          ELSE 'Unknown User'
+        END as employee_name,
          mt.text as maintenance_type_name,
          -- Calculate days until due
          EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
@@ -682,17 +698,21 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
        LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-       LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-       LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+      LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+      LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+      LEFT JOIN "tblUsers" u_emp ON wfd.user_id = u_emp.emp_int_id
+      LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
        WHERE wfd.org_id = $1 
-         AND wfd.user_id = $2
+         AND (
+           (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL) OR
+           (wfd.user_id = $2)
+         )
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
 
-     const result = await pool.query(query, [orgId, userId]);
+     const result = await pool.query(query, [orgId, empIntId]);
      return result.rows;
    } catch (error) {
      console.error('Error in getMaintenanceApprovals:', error);

@@ -46,6 +46,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'asset_doc': 'tblAssetDocs',
         'asset_type_doc': 'tblATDocs',
         'asset_group_doc': 'tblAssetGroupDocs',
+        'aplv': 'tblAssetPropListValues',
         'vendor_doc': 'tblVendorDocs',
         'asset_maint_doc': 'tblAssetMaintDocs',
         'atp': 'tblAssetTypeProps',

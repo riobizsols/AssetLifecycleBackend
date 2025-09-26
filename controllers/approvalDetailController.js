@@ -81,17 +81,17 @@ const getApprovalDetail = async (req, res) => {
 const approveMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
-    const { userId, note } = req.body;
+      const { empIntId, note } = req.body;
     const orgId = req.query.orgId || 'ORG001';
 
-    if (!assetId || !userId) {
+    if (!assetId || !empIntId) {
       return res.status(400).json({
         success: false,
-        message: 'Asset ID and User ID are required'
+        message: 'Asset ID and Employee ID are required'
       });
     }
 
-    const result = await approveMaintenance(assetId, userId, note, orgId);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId);
 
     res.json({
       success: true,
@@ -113,13 +113,13 @@ const approveMaintenanceAction = async (req, res) => {
 const rejectMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
-    const { userId, reason } = req.body;
+    const { empIntId, reason } = req.body;
     const orgId = req.query.orgId || 'ORG001';
 
-    if (!assetId || !userId) {
+    if (!assetId || !empIntId) {
       return res.status(400).json({
         success: false,
-        message: 'Asset ID and User ID are required'
+        message: 'Asset ID and Employee ID are required'
       });
     }
 
@@ -130,7 +130,7 @@ const rejectMaintenanceAction = async (req, res) => {
       });
     }
 
-    const result = await rejectMaintenance(assetId, userId, reason.trim(), orgId);
+    const result = await rejectMaintenance(assetId, empIntId, reason.trim(), orgId);
 
     res.json({
       success: true,
@@ -198,17 +198,17 @@ const getWorkflowHistoryController = async (req, res) => {
 // Get maintenance approvals for the current user
 const getMaintenanceApprovalsController = async (req, res) => {
   try {
-    const userId = req.user.user_id; // Get from auth middleware
+    const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || 'ORG001';
 
-    if (!userId) {
+    if (!empIntId) {
       return res.status(400).json({
         success: false,
-        message: 'User ID is required'
+        message: 'Employee ID is required'
       });
     }
 
-    const maintenanceApprovals = await getMaintenanceApprovals(userId, orgId);
+    const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId);
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({

@@ -3,22 +3,22 @@ require('dotenv').config();
 
 const config = {
   development: {
-    PORT: process.env.PORT || 4000,
+    PORT: process.env.PORT || 5000,
     DATABASE_URL: process.env.DATABASE_URL,
     JWT_SECRET: process.env.JWT_SECRET,
     FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
-    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:4000',
-    API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:4000/api',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5000',
+    API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:5000/api',
     ENVIRONMENT: 'development',
     CORS_ORIGINS: ['http://localhost:5173', 'http://localhost:3000']
   },
   production: {
-    PORT: process.env.PORT || 4000,
+    PORT: process.env.PORT || 5000,
     DATABASE_URL: process.env.DATABASE_URL,
     JWT_SECRET: process.env.JWT_SECRET,
     FRONTEND_URL: process.env.FRONTEND_URL || 'http://103.27.234.248',
-    BACKEND_URL: process.env.BACKEND_URL || 'http://103.27.234.248:4000',
-    API_BASE_URL: process.env.API_BASE_URL || 'http://103.27.234.248:4000/api',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://103.27.234.248:5000',
+    API_BASE_URL: process.env.API_BASE_URL || 'http://103.27.234.248:5000/api',
     ENVIRONMENT: 'production',
     CORS_ORIGINS: [
       process.env.FRONTEND_URL || 'http://103.27.234.248',

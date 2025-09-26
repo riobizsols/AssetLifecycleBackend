@@ -50,13 +50,13 @@ const getAllNotifications = async (req, res) => {
 // Get maintenance notifications for a specific user
 const getUserNotifications = async (req, res) => {
   try {
-    const { userId } = req.params;
+    const { userId } = req.params; // This is now emp_int_id
     const orgId = req.query.orgId || 'ORG001';
     
     if (!userId) {
       return res.status(400).json({
         success: false,
-        message: 'User ID is required'
+        message: 'Employee ID is required'
       });
     }
 

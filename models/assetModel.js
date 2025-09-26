@@ -412,14 +412,27 @@ const updateAsset = async (asset_id, {
     // Update properties if provided
     if (properties && Object.keys(properties).length > 0) {
       // First, delete existing properties
-      await client.query('DELETE FROM "tblAssetProperties" WHERE asset_id = $1', [asset_id]);
+      await client.query('DELETE FROM "tblAssetPropValues" WHERE asset_id = $1', [asset_id]);
 
       // Then insert new properties
-      for (const [assetTypePropId, value] of Object.entries(properties)) {
-        await client.query(
-          'INSERT INTO "tblAssetProperties" (asset_id, asset_type_prop_id, value) VALUES ($1, $2, $3)',
-          [asset_id, assetTypePropId, value]
-        );
+      // Need to convert property names to asset_type_prop_id
+      for (const [propertyName, value] of Object.entries(properties)) {
+        // Get asset_type_prop_id from property name
+        const propQuery = `
+          SELECT atp.asset_type_prop_id 
+          FROM "tblAssetTypeProps" atp
+          JOIN "tblProps" p ON atp.prop_id = p.prop_id
+          WHERE p.property = $1 AND atp.asset_type_id = $2
+        `;
+        const propResult = await client.query(propQuery, [propertyName, asset_type_id]);
+        
+        if (propResult.rows.length > 0) {
+          const assetTypePropId = propResult.rows[0].asset_type_prop_id;
+          await client.query(
+            'INSERT INTO "tblAssetPropValues" (asset_id, asset_type_prop_id, value) VALUES ($1, $2, $3)',
+            [asset_id, assetTypePropId, value]
+          );
+        }
       }
     }
 
@@ -1000,7 +1013,7 @@ const getBulkUploadReferenceData = async () => {
 };
 
 // Helper function to validate property values against allowed values
-const validatePropertyValue = async (client, assetTypePropId, value, orgId) => {
+const validatePropertyValue = async (client, assetTypePropId, value, orgId, createdBy = 'system') => {
   if (!value || value.trim() === '') {
     return { isValid: true, error: null };
   }
@@ -1024,33 +1037,67 @@ const validatePropertyValue = async (client, assetTypePropId, value, orgId) => {
   
   const actualPropId = propIdResult.rows[0].prop_id;
   
-  // Now check if the property value exists in tblAssetPropListValues for this actual prop_id and org
-  // Using exact case-sensitive matching
+  // Get all existing property values for this property
   const query = `
     SELECT aplv_id, value FROM "tblAssetPropListValues" 
-    WHERE prop_id = $1 AND org_id = $2
+    WHERE prop_id = $1 AND org_id = $2 AND int_status = 1
+    ORDER BY value
   `;
   
   const result = await client.query(query, [actualPropId, orgId]);
+  const existingValues = result.rows;
   
-  // Check for exact case-sensitive match
-  const exactMatch = result.rows.find(row => row.value === trimmedValue);
-  
-  if (!exactMatch) {
-    // Get all valid values for this property to show in error message
-    const validValues = result.rows.map(row => row.value).join(', ');
-    
-    return { 
-      isValid: false, 
-      error: `Property value '${trimmedValue}' is not valid for property '${assetTypePropId}' (prop_id: ${actualPropId}). Valid values (case-sensitive): ${validValues || 'None found'}` 
-    };
+  // 1. Check for exact case-sensitive match first
+  const exactMatch = existingValues.find(row => row.value === trimmedValue);
+  if (exactMatch) {
+    return { isValid: true, error: null };
   }
   
-  return { isValid: true, error: null };
+  // 2. Check for case-insensitive match
+  const caseInsensitiveMatch = existingValues.find(row => 
+    row.value.toLowerCase() === trimmedValue.toLowerCase()
+  );
+  
+  if (caseInsensitiveMatch) {
+    // Use the correct case value
+    return { isValid: true, error: null, correctedValue: caseInsensitiveMatch.value };
+  }
+  
+  // 3. No match found - create new property value (this is commit mode)
+  try {
+    const { generateCustomId } = require('../utils/idGenerator');
+    
+    // Generate unique APLV ID
+    const aplvId = await generateCustomId('aplv', 3);
+    
+    const insertQuery = `
+      INSERT INTO "tblAssetPropListValues" (
+        aplv_id,
+        prop_id,
+        value,
+        int_status,
+        org_id
+      ) VALUES ($1, $2, $3, $4, $5)
+      RETURNING aplv_id
+    `;
+    
+    await client.query(insertQuery, [aplvId, actualPropId, trimmedValue, 1, orgId]);
+    
+    console.log(`✅ Auto-created new property value: '${trimmedValue}' for property '${actualPropId}' with ID ${aplvId}`);
+    
+    return { isValid: true, error: null };
+    
+  } catch (error) {
+    console.error('Error creating new property value:', error);
+    return { 
+      isValid: false, 
+      error: `Failed to create new property value '${trimmedValue}' for property '${assetTypePropId}': ${error.message}` 
+    };
+  }
 };
 
 // Helper function to validate property values without requiring a client (for trial upload)
-const validatePropertyValueStandalone = async (assetTypePropId, value, orgId) => {
+const validatePropertyValueStandalone = async (assetTypePropId, value, orgId, createdBy = 'system', isTrial = true) => {
   if (!value || value.trim() === '') {
     return { isValid: true, error: null };
   }
@@ -1074,29 +1121,81 @@ const validatePropertyValueStandalone = async (assetTypePropId, value, orgId) =>
   
   const actualPropId = propIdResult.rows[0].prop_id;
   
-  // Now check if the property value exists in tblAssetPropListValues for this actual prop_id and org
-  // Using exact case-sensitive matching
+  // Get all existing property values for this property
   const query = `
     SELECT aplv_id, value FROM "tblAssetPropListValues" 
-    WHERE prop_id = $1 AND org_id = $2
+    WHERE prop_id = $1 AND org_id = $2 AND int_status = 1
+    ORDER BY value
   `;
   
   const result = await db.query(query, [actualPropId, orgId]);
+  const existingValues = result.rows;
   
-  // Check for exact case-sensitive match
-  const exactMatch = result.rows.find(row => row.value === trimmedValue);
+  // 1. Check for exact case-sensitive match first
+  const exactMatch = existingValues.find(row => row.value === trimmedValue);
+  if (exactMatch) {
+    return { isValid: true, error: null };
+  }
   
-  if (!exactMatch) {
-    // Get all valid values for this property to show in error message
-    const validValues = result.rows.map(row => row.value).join(', ');
-    
+  // 2. Check for case-insensitive match
+  const caseInsensitiveMatch = existingValues.find(row => 
+    row.value.toLowerCase() === trimmedValue.toLowerCase()
+  );
+  
+  if (caseInsensitiveMatch) {
+    // Show warning but accept it - user typed wrong case
     return { 
-      isValid: false, 
-      error: `Property value '${trimmedValue}' is not valid for property '${assetTypePropId}' (prop_id: ${actualPropId}). Valid values (case-sensitive): ${validValues || 'None found'}` 
+      isValid: true, 
+      warning: `Case mismatch: '${trimmedValue}' should be '${caseInsensitiveMatch.value}' for property '${assetTypePropId}'`,
+      correctedValue: caseInsensitiveMatch.value
     };
   }
   
-  return { isValid: true, error: null };
+  // 3. No match found
+  if (isTrial) {
+    // In trial mode, just indicate that a new value would be created
+    return { 
+      isValid: true, 
+      info: `Will create new property value: '${trimmedValue}' for property '${assetTypePropId}'`,
+      newValue: trimmedValue
+    };
+  } else {
+    // In commit mode, actually create the new property value
+    try {
+      const { generateCustomId } = require('../utils/idGenerator');
+      
+      // Generate unique APLV ID
+      const aplvId = await generateCustomId('aplv', 3);
+      
+      const insertQuery = `
+        INSERT INTO "tblAssetPropListValues" (
+          aplv_id,
+          prop_id,
+          value,
+          int_status,
+          org_id
+        ) VALUES ($1, $2, $3, $4, $5)
+        RETURNING aplv_id
+      `;
+      
+      await db.query(insertQuery, [aplvId, actualPropId, trimmedValue, 1, orgId]);
+      
+      console.log(`✅ Auto-created new property value: '${trimmedValue}' for property '${actualPropId}' with ID ${aplvId}`);
+      
+      return { 
+        isValid: true, 
+        info: `Auto-created new property value: '${trimmedValue}' for property '${assetTypePropId}'`,
+        newValue: trimmedValue
+      };
+      
+    } catch (error) {
+      console.error('Error creating new property value:', error);
+      return { 
+        isValid: false, 
+        error: `Failed to create new property value '${trimmedValue}' for property '${assetTypePropId}': ${error.message}` 
+      };
+    }
+  }
 };
 
 // Helper function to validate and format dates
@@ -1378,7 +1477,7 @@ const bulkUpsertAssets = async (csvData, created_by, user_org_id, user_branch_id
           const propertyValidationErrors = [];
           for (const [propId, value] of Object.entries(row.properties)) {
             if (value && value.trim() !== '') {
-              const validation = await validatePropertyValue(client, propId, value, finalOrgId);
+              const validation = await validatePropertyValue(client, propId, value, finalOrgId, created_by);
               if (!validation.isValid) {
                 propertyValidationErrors.push(validation.error);
               }

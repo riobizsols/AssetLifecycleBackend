@@ -145,6 +145,8 @@ const trialUploadAssets = async (req, res) => {
         let updatedRecords = 0;
         let errors = 0;
         const validationErrors = [];
+        const infoMessages = [];
+        const warningMessages = [];
         
         // Validate each row including property values
         for (let i = 0; i < csvData.length; i++) {
@@ -177,11 +179,18 @@ const trialUploadAssets = async (req, res) => {
                     for (const [propId, value] of Object.entries(row.properties)) {
                         if (value && value.trim() !== '') {
                             console.log(`🔍 Backend validating property: ${propId} = "${value}" for org ${user_org_id}`);
-                            const validation = await model.validatePropertyValueStandalone(propId, value, user_org_id);
+                            const validation = await model.validatePropertyValueStandalone(propId, value, user_org_id, req.user.user_id, true); // isTrial = true
                             console.log(`🔍 Backend validation result:`, validation);
+                            
                             if (!validation.isValid) {
                                 errors++;
                                 validationErrors.push(`Asset ${assetIdentifier}: ${validation.error}`);
+                            } else if (validation.warning) {
+                                // Show warning but don't count as error
+                                warningMessages.push(`Asset ${assetIdentifier}: ${validation.warning}`);
+                            } else if (validation.info) {
+                                // Show info about auto-created values - this is NOT an error
+                                infoMessages.push(`Asset ${assetIdentifier}: ${validation.info}`);
                             }
                         }
                     }
@@ -191,7 +200,7 @@ const trialUploadAssets = async (req, res) => {
                 validationErrors.push(`Asset ${assetIdentifier}: ${error.message}`);
             }
         }
-        
+    
         res.json({
             success: true,
             trialResults: {
@@ -200,7 +209,9 @@ const trialUploadAssets = async (req, res) => {
                 updatedRecords,
                 errors,
                 totalProcessed: newRecords + updatedRecords,
-                validationErrors: validationErrors.slice(0, 10) // Limit to first 10 errors
+                validationErrors: validationErrors.slice(0, 10), // Limit to first 10 errors
+                warningMessages: warningMessages.slice(0, 10), // Limit to first 10 warnings
+                infoMessages: infoMessages.slice(0, 10) // Limit to first 10 info messages
             }
         });
     } catch (error) {
