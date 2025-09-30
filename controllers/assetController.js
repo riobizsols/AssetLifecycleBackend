@@ -791,6 +791,49 @@ const createAsset = async (req, res) => {
             }
         }
 
+        // Check and create vendor product service record if prod_serv_id exists
+        if (prod_serv_id && purchase_vendor_id) {
+            console.log('🔍 Checking vendor product service for prod_serv_id:', prod_serv_id, 'vendor_id:', purchase_vendor_id);
+            
+            // Check if the combination already exists in tblVendorProdService
+            const existingVendorProdService = await db.query(
+                `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
+                 WHERE prod_serv_id = $1 AND vendor_id = $2 AND org_id = $3`,
+                [prod_serv_id, purchase_vendor_id, org_id]
+            );
+            
+            if (existingVendorProdService.rows.length === 0) {
+                console.log('📝 Creating new vendor product service record...');
+                
+                // Generate continuous ven_prod_serv_id
+                const venProdServResult = await db.query(
+                    `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
+                     ORDER BY ven_prod_serv_id DESC LIMIT 1`
+                );
+                
+                let newNumber = 1;
+                if (venProdServResult.rows.length > 0) {
+                    const lastId = venProdServResult.rows[0].ven_prod_serv_id;
+                    if (/^VPS\d+$/.test(lastId)) {
+                        newNumber = parseInt(lastId.replace('VPS', '')) + 1;
+                    }
+                }
+                
+                const ven_prod_serv_id = `VPS${String(newNumber).padStart(3, '0')}`;
+                
+                // Insert new vendor product service record
+                await db.query(
+                    `INSERT INTO "tblVendorProdService" (ven_prod_serv_id, prod_serv_id, vendor_id, org_id)
+                     VALUES ($1, $2, $3, $4)`,
+                    [ven_prod_serv_id, prod_serv_id, purchase_vendor_id, org_id]
+                );
+                
+                console.log('✅ Created vendor product service record:', ven_prod_serv_id);
+            } else {
+                console.log('✅ Vendor product service record already exists:', existingVendorProdService.rows[0].ven_prod_serv_id);
+            }
+        }
+
         // Generate or validate asset_id
         let finalAssetId = asset_id;
         if (!asset_id) {
