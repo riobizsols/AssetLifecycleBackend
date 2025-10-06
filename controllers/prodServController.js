@@ -54,6 +54,56 @@ exports.getModelsByAssetTypeAndBrand = async (req, res) => {
   }
 };
 
+// Find prod_serv_id by brand and model
+exports.findByBrandAndModel = async (req, res) => {
+  const { brand, model } = req.query;
+  
+  if (!brand || !model) {
+    return res.status(400).json({ 
+      success: false, 
+      message: 'Both brand and model are required' 
+    });
+  }
+
+  try {
+    console.log('🔍 Searching for prod_serv_id with brand:', brand, 'model:', model);
+    
+    const result = await db.query(
+      `SELECT prod_serv_id, brand, model, description FROM "tblProdServs" 
+       WHERE brand = $1 AND model = $2 AND status = '1' 
+       LIMIT 1`,
+      [brand, model]
+    );
+    
+    if (result.rows.length > 0) {
+      const prodServ = result.rows[0];
+      console.log('✅ Found prod_serv_id:', prodServ.prod_serv_id);
+      res.status(200).json({ 
+        success: true, 
+        data: {
+          prod_serv_id: prodServ.prod_serv_id,
+          brand: prodServ.brand,
+          model: prodServ.model,
+          description: prodServ.description
+        }
+      });
+    } else {
+      console.log('❌ No matching prod_serv_id found');
+      res.status(404).json({ 
+        success: false, 
+        message: 'No matching product service found for the given brand and model' 
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error finding prod_serv_id:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to find product service', 
+      error: error.message 
+    });
+  }
+};
+
 // Removed custom generateProdServId function - using generateCustomId from idGenerator instead
 
 // add ProdServ
