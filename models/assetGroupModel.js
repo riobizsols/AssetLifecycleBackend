@@ -81,6 +81,9 @@ const createAssetGroup = async (org_id, text, asset_ids, created_by) => {
             detailResults.push(detailResult.rows[0]);
         }
         
+        // Update group_id in tblAssets for all assets in this group
+        await updateAssetsGroupId(client, asset_ids, assetgroup_h_id);
+        
         await client.query('COMMIT');
         
         return {
@@ -154,6 +157,9 @@ const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) =>
     try {
         await client.query('BEGIN');
         
+        // Get current asset IDs in this group
+        const currentAssetIds = await getAssetIdsInGroup(client, assetgroup_h_id);
+        
         // Update header
         const headerResult = await client.query(`
             UPDATE "tblAssetGroup_H"
@@ -167,6 +173,12 @@ const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) =>
             DELETE FROM "tblAssetGroup_D"
             WHERE assetgroup_h_id = $1
         `, [assetgroup_h_id]);
+        
+        // Clear group_id from assets that are no longer in this group
+        const removedAssetIds = currentAssetIds.filter(id => !asset_ids.includes(id));
+        if (removedAssetIds.length > 0) {
+            await clearAssetsGroupId(client, removedAssetIds);
+        }
         
         // Generate sequential detail IDs
         const detailIds = await generateSequentialDetailIds(asset_ids.length);
@@ -184,6 +196,9 @@ const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) =>
             detailResults.push(detailResult.rows[0]);
         }
         
+        // Update group_id in tblAssets for all assets in this group
+        await updateAssetsGroupId(client, asset_ids, assetgroup_h_id);
+        
         await client.query('COMMIT');
         
         return {
@@ -199,12 +214,60 @@ const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) =>
     }
 };
 
+// Update group_id in tblAssets when assets are added to a group
+const updateAssetsGroupId = async (client, asset_ids, group_id) => {
+    if (!asset_ids || asset_ids.length === 0) return;
+    
+    const placeholders = asset_ids.map((_, index) => `$${index + 2}`).join(',');
+    const query = `
+        UPDATE "tblAssets"
+        SET group_id = $1, changed_on = CURRENT_TIMESTAMP
+        WHERE asset_id IN (${placeholders})
+    `;
+    
+    const values = [group_id, ...asset_ids];
+    await client.query(query, values);
+};
+
+// Clear group_id in tblAssets when assets are removed from a group
+const clearAssetsGroupId = async (client, asset_ids) => {
+    if (!asset_ids || asset_ids.length === 0) return;
+    
+    const placeholders = asset_ids.map((_, index) => `$${index + 1}`).join(',');
+    const query = `
+        UPDATE "tblAssets"
+        SET group_id = NULL, changed_on = CURRENT_TIMESTAMP
+        WHERE asset_id IN (${placeholders})
+    `;
+    
+    await client.query(query, asset_ids);
+};
+
+// Get asset IDs that are currently in a group
+const getAssetIdsInGroup = async (client, assetgroup_h_id) => {
+    const query = `
+        SELECT asset_id FROM "tblAssetGroup_D"
+        WHERE assetgroup_h_id = $1
+    `;
+    
+    const result = await client.query(query, [assetgroup_h_id]);
+    return result.rows.map(row => row.asset_id);
+};
+
 // Delete asset group
 const deleteAssetGroup = async (assetgroup_h_id) => {
     const client = await db.connect();
     
     try {
         await client.query('BEGIN');
+        
+        // Get asset IDs that are currently in this group
+        const currentAssetIds = await getAssetIdsInGroup(client, assetgroup_h_id);
+        
+        // Clear group_id from tblAssets for all assets in this group
+        if (currentAssetIds.length > 0) {
+            await clearAssetsGroupId(client, currentAssetIds);
+        }
         
         // Delete details first
         await client.query(`
@@ -237,5 +300,8 @@ module.exports = {
     getAllAssetGroups,
     getAssetGroupById,
     updateAssetGroup,
-    deleteAssetGroup
+    deleteAssetGroup,
+    updateAssetsGroupId,
+    clearAssetsGroupId,
+    getAssetIdsInGroup
 };
