@@ -176,7 +176,8 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
         act_sch_date,
         status,
         created_by,
-        org_id
+        org_id,
+        isBreakdown = false
     } = scheduleData;
     
     const query = `
@@ -199,10 +200,13 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
         RETURNING *
     `;
     
+    // Only set MT004 when explicitly coming from breakdown screen (isBreakdown)
+    const headerMaintTypeId = isBreakdown ? 'MT004' : maint_type_id;
+
     const values = [
         wfamsh_id,
         at_main_freq_id,
-        maint_type_id,
+        headerMaintTypeId,
         asset_id,
         group_id,
         vendor_id,

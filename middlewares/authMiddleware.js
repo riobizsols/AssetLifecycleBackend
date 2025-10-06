@@ -14,6 +14,10 @@ const protect = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+        console.log('=== Auth Middleware Debug ===');
+        console.log('decoded token:', decoded);
+        console.log('decoded.emp_int_id:', decoded.emp_int_id);
+
         // Fetch current user roles from tblUserJobRoles
         const userRoles = await getUserRoles(decoded.user_id);
 

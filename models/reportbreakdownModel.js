@@ -217,7 +217,7 @@ const createBreakdownReport = async (breakdownData) => {
         const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
           wfamsh_id,
           at_main_freq_id,
-          maint_type_id,
+          maint_type_id: 'MT004',
           asset_id,
           group_id: null,
           vendor_id: assetRow ? assetRow.service_vendor_id : null,
@@ -225,15 +225,17 @@ const createBreakdownReport = async (breakdownData) => {
           act_sch_date: nowDate,
           status: 'IP',
           created_by: reported_by,
-          org_id
+          org_id,
+          isBreakdown: true
         });
         // Create first detail step as IN, others PD
         const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
-        for (const seq of seqsRes.rows) {
+        for (let i = 0; i < seqsRes.rows.length; i++) {
+          const seq = seqsRes.rows[i];
           const wfamsd_id = await msModel.getNextWFAMSDId();
           // Fetch approvers for step
           const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
-          const firstDetailStatus = 'IN';
+          const firstDetailStatus = i === 0 ? 'AP' : 'IN';
           await msModel.insertWorkflowMaintenanceScheduleDetail({
             wfamsd_id,
             wfamsh_id: headerRes.rows[0].wfamsh_id,
@@ -283,7 +285,7 @@ const createBreakdownReport = async (breakdownData) => {
         const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
           wfamsh_id,
           at_main_freq_id,
-          maint_type_id,
+          maint_type_id: 'MT004',
           asset_id,
           group_id: null,
           vendor_id: assetRow ? assetRow.service_vendor_id : null,
@@ -291,10 +293,12 @@ const createBreakdownReport = async (breakdownData) => {
           act_sch_date: nowDate,
           status: 'IP',
           created_by: reported_by,
-          org_id
+          org_id,
+          isBreakdown: true
         });
         const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
-        for (const seq of seqsRes.rows) {
+        for (let i = 0; i < seqsRes.rows.length; i++) {
+          const seq = seqsRes.rows[i];
           const wfamsd_id = await msModel.getNextWFAMSDId();
           const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
           await msModel.insertWorkflowMaintenanceScheduleDetail({
@@ -304,7 +308,7 @@ const createBreakdownReport = async (breakdownData) => {
             user_id: jobRolesRes.rows[0]?.emp_int_id || null,
             dept_id: jobRolesRes.rows[0]?.dept_id || null,
             sequence: seq.seqs_no,
-            status: 'IN',
+            status: i === 0 ? 'AP' : 'IN',
             notes: `Breakdown ${abr_id}`,
             created_by: reported_by,
             org_id
