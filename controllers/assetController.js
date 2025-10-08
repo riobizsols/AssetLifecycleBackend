@@ -179,6 +179,15 @@ const updateAsset = async (req, res) => {
   } = req.body;
 
   try {
+    // Get existing asset to retrieve org_id if not provided
+    let finalOrgId = org_id || req.user?.org_id;
+    if (!finalOrgId) {
+      const existingAsset = await model.getAssetById(asset_id);
+      if (existingAsset.rows.length > 0) {
+        finalOrgId = existingAsset.rows[0].org_id;
+      }
+    }
+    
     const updatedAsset = await model.updateAsset(asset_id, {
       asset_type_id,
       serial_number,
@@ -196,7 +205,7 @@ const updateAsset = async (req, res) => {
       warranty_period,
       parent_asset_id,
       group_id,
-      org_id,
+      org_id: finalOrgId,
       properties
     });
 
