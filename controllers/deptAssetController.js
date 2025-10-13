@@ -89,18 +89,21 @@ const addDeptAsset = async (req, res) => {
 
 const getAllAssetTypes = async (req, res) => {
     try {
-        console.log('Fetching all asset types...');
+        console.log('Fetching all asset types for department assignment...');
         const result = await db.query(
             `SELECT 
                 asset_type_id, 
                 text,
+                assignment_type,
                 group_required,
                 COALESCE(is_child, false) as is_child,
                 parent_asset_type_id
              FROM "tblAssetTypes" 
-             WHERE int_status = 1`
+             WHERE int_status = 1 
+             AND assignment_type = 'department'
+             ORDER BY text`
         );
-        console.log(`Found ${result.rows.length} asset types:`, result.rows);
+        console.log(`Found ${result.rows.length} department asset types:`, result.rows);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);
