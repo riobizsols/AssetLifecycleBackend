@@ -18,13 +18,20 @@ const getAllAssets = async () => {
 
 const getAssetById = async (asset_id) => {
   const query = `
-                SELECT 
-            asset_id, asset_type_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        FROM "tblAssets"
-        WHERE asset_id = $1
+        SELECT 
+            a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, 
+            a.purchased_cost, a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, 
+            a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
+            a.created_by, a.created_on, a.changed_by, a.changed_on,
+            pv.vendor_name AS purchase_vendor_name,
+            sv.vendor_name AS service_vendor_name,
+            u.full_name AS purchased_by_name
+        FROM "tblAssets" a
+        LEFT JOIN "tblVendors" pv ON a.purchase_vendor_id = pv.vendor_id
+        LEFT JOIN "tblVendors" sv ON a.service_vendor_id = sv.vendor_id
+        LEFT JOIN "tblUsers" u ON a.purchased_by = u.user_id
+        WHERE a.asset_id = $1
     `;
 
   return await db.query(query, [asset_id]);
@@ -216,13 +223,17 @@ const getAssetWithDetails = async (asset_id) => {
             at.parent_asset_type_id,
             pat.text as parent_asset_type_name,
             b.text as branch_name,
-            v.vendor_name,
+            pv.vendor_name as purchase_vendor_name,
+            sv.vendor_name as service_vendor_name,
+            u.full_name as purchased_by_name,
             ps.description as prod_serv_name
         FROM "tblAssets" a
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-        LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
+        LEFT JOIN "tblVendors" pv ON a.purchase_vendor_id = pv.vendor_id
+        LEFT JOIN "tblVendors" sv ON a.service_vendor_id = sv.vendor_id
+        LEFT JOIN "tblUsers" u ON a.purchased_by = u.user_id
         LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
         WHERE a.asset_id = $1
     `;
