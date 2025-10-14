@@ -43,7 +43,10 @@ const getAssetAssignmentsByEmployee = async (employee_id) => {
             asset_assign_id, dept_id, asset_id, org_id, employee_int_id,
             action, action_on, action_by, latest_assignment_flag
         FROM "tblAssetAssignments"
-        WHERE employee_int_id = $1
+        WHERE employee_int_id = $1 OR employee_int_id = (
+            SELECT emp_int_id FROM "tblEmployees" 
+            WHERE employee_id = $1
+        )
         ORDER BY action_on DESC
     `;
 

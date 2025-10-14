@@ -185,7 +185,7 @@ const createBreakdownReport = async (breakdownData) => {
 
     const appendWorkOrderNote = (currentWo, suffix) => {
       const base = currentWo ? String(currentWo) : '';
-      return base && base.length > 0 ? `${base} - Breakdown: ${suffix}` : `Breakdown: ${suffix}`;
+      return base && base.length > 0 ? `${base} - ${suffix}` : `${suffix}`;
     };
 
     if (decision_code === 'BF01') {

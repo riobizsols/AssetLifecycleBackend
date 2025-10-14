@@ -211,6 +211,27 @@ const getAssetTypesByGroupRequired = async (req, res) => {
     }
 };
 
+// GET /api/asset-types/maint-required - Get asset types where maint_required is true
+const getAssetTypesByMaintRequired = async (req, res) => {
+    try {
+        const result = await model.getAssetTypesByMaintRequired();
+        res.status(200).json({
+            success: true,
+            message: "Asset types with maintenance required retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Error fetching asset types by maint required:", err);
+        res.status(500).json({ 
+            success: false,
+            message: "Failed to fetch asset types by maintenance required",
+            error: err.message 
+        });
+    }
+};
+
 // GET /api/asset-types/:id - Get asset type by ID
 const getAssetTypeById = async (req, res) => {
     try {
@@ -773,6 +794,7 @@ module.exports = {
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
+    getAssetTypesByMaintRequired,
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,

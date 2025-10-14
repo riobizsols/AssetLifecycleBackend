@@ -10,6 +10,7 @@ const {
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
+    getAssetTypesByMaintRequired,
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,
@@ -35,6 +36,9 @@ router.get('/assignment-type/:assignment_type', getAssetTypesByAssignmentType);
 
 // Get asset types where group_required is true
 router.get('/group-required', getAssetTypesByGroupRequired);
+
+// Get asset types where maint_required is true
+router.get('/maint-required', getAssetTypesByMaintRequired);
 
 // Get all properties
 router.get('/properties', getAllProperties);

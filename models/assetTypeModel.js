@@ -155,6 +155,22 @@ const getAssetTypesByGroupRequired = async () => {
     return await db.query(query);
 };
 
+const getAssetTypesByMaintRequired = async () => {
+    const query = `
+        SELECT 
+            org_id, asset_type_id, int_status, maint_required,
+            assignment_type, inspection_required, group_required, created_by,
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_type_id, maint_lead_type, depreciation_type
+        FROM "tblAssetTypes"
+        WHERE maint_required = true
+        AND int_status = 1
+        ORDER BY text
+    `;
+    
+    return await db.query(query);
+};
+
 const deleteAssetType = async (asset_type_id) => {
     try {
         const query = `
@@ -369,6 +385,7 @@ module.exports = {
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
+    getAssetTypesByMaintRequired,
     mapAssetTypeToProperties,
     getAssetTypeProperties,
     getAllProperties,
