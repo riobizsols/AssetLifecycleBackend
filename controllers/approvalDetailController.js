@@ -1,9 +1,9 @@
-const { getApprovalDetailByAssetId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getMaintenanceApprovals } = require('../models/approvalDetailModel');
+const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
 
 // Get approval detail by asset ID
 const getApprovalDetail = async (req, res) => {
   try {
-    const { assetId } = req.params;
+    const { assetId } = req.params; // can be asset_id or wfamsh_id
     const orgId = req.query.orgId || 'ORG001';
 
     if (!assetId) {
@@ -201,14 +201,23 @@ const getMaintenanceApprovalsController = async (req, res) => {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || 'ORG001';
 
-    if (!empIntId) {
-      return res.status(400).json({
-        success: false,
-        message: 'Employee ID is required'
+    console.log('=== getMaintenanceApprovalsController ===');
+    console.log('empIntId:', empIntId);
+    console.log('orgId:', orgId);
+    console.log('req.user:', req.user);
+
+    if (!empIntId || empIntId === '') {
+      console.log('ERROR: Employee ID is missing or empty');
+      return res.json({
+        success: true,
+        message: 'No maintenance approvals found - Employee ID not available',
+        data: [],
+        timestamp: new Date().toISOString()
       });
     }
 
     const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId);
+    console.log('Found maintenance approvals:', maintenanceApprovals.length);
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({
@@ -282,10 +291,151 @@ const getActionType = (status) => {
   }
 };
 
+// Get all maintenance workflows for an asset (separated by wfamsh_id)
+const getAllMaintenanceWorkflows = async (req, res) => {
+  try {
+    const { assetId } = req.params;
+    const orgId = req.query.orgId || 'ORG001';
+
+    if (!assetId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Asset ID is required'
+      });
+    }
+
+    const workflows = await getAllMaintenanceWorkflowsByAssetId(assetId, orgId);
+
+    if (workflows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: 'No maintenance workflows found for this asset'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Maintenance workflows retrieved successfully',
+      data: workflows,
+      count: workflows.length
+    });
+
+  } catch (error) {
+    console.error('Error in getAllMaintenanceWorkflows:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve maintenance workflows',
+      error: error.message
+    });
+  }
+};
+
+// Get workflow history by wfamsh_id (specific workflow)
+const getWorkflowHistoryByWfamshIdController = async (req, res) => {
+  try {
+    const { wfamshId } = req.params;
+    const orgId = req.query.orgId || 'ORG001';
+
+    if (!wfamshId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Workflow ID (wfamsh_id) is required'
+      });
+    }
+
+    const history = await getWorkflowHistoryByWfamshId(wfamshId, orgId);
+
+    res.json({
+      success: true,
+      message: 'Workflow history retrieved successfully',
+      data: history,
+      count: history.length
+    });
+
+  } catch (error) {
+    console.error('Error in getWorkflowHistoryByWfamshIdController:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve workflow history',
+      error: error.message
+    });
+  }
+};
+
+// Get approval detail by wfamsh_id (specific workflow)
+const getApprovalDetailByWfamshIdController = async (req, res) => {
+  try {
+    const { wfamshId } = req.params;
+    const orgId = req.query.orgId || 'ORG001';
+
+    if (!wfamshId) {
+      return res.status(400).json({
+        success: false,
+        message: 'WFAMSH ID is required'
+      });
+    }
+
+    const approvalDetail = await getApprovalDetailByWfamshId(wfamshId, orgId);
+
+    if (!approvalDetail) {
+      return res.status(404).json({
+        success: false,
+        message: 'No approval detail found for this workflow'
+      });
+    }
+
+    // Format the response for frontend
+    const formattedDetail = {
+      // Basic info
+      wfamsdId: approvalDetail.wfamsdId,
+      wfamshId: approvalDetail.wfamshId,
+      assetId: approvalDetail.assetId,
+      assetTypeId: approvalDetail.assetTypeId,
+      assetTypeName: approvalDetail.assetTypeName,
+      vendorId: approvalDetail.vendorId,
+      vendorName: approvalDetail.vendorName,
+      maintenanceType: approvalDetail.maintenanceType,
+      dueDate: approvalDetail.dueDate,
+      cutoffDate: approvalDetail.cutoffDate,
+      actionBy: approvalDetail.actionBy,
+      userId: approvalDetail.userId,
+      userEmail: approvalDetail.userEmail,
+      status: approvalDetail.status,
+      sequence: approvalDetail.sequence,
+      daysUntilDue: approvalDetail.daysUntilDue,
+      daysUntilCutoff: approvalDetail.daysUntilCutoff,
+      isUrgent: approvalDetail.isUrgent,
+      isOverdue: approvalDetail.isOverdue,
+      notes: approvalDetail.notes,
+      checklist: approvalDetail.checklist,
+      vendorDetails: approvalDetail.vendorDetails,
+      workflowSteps: approvalDetail.workflowSteps,
+      workflowDetails: approvalDetail.workflowDetails
+    };
+
+    res.json({
+      success: true,
+      data: formattedDetail,
+      message: 'Approval detail fetched successfully'
+    });
+
+  } catch (error) {
+    console.error('Error in getApprovalDetailByWfamshId controller:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getApprovalDetail,
+  getApprovalDetailByWfamshId: getApprovalDetailByWfamshIdController,
   approveMaintenanceAction,
   rejectMaintenanceAction,
   getWorkflowHistory: getWorkflowHistoryController,
-  getMaintenanceApprovals: getMaintenanceApprovalsController
+  getWorkflowHistoryByWfamshId: getWorkflowHistoryByWfamshIdController,
+  getMaintenanceApprovals: getMaintenanceApprovalsController,
+  getAllMaintenanceWorkflows
 }; 

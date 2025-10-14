@@ -18,13 +18,20 @@ const getAllAssets = async () => {
 
 const getAssetById = async (asset_id) => {
   const query = `
-                SELECT 
-            asset_id, asset_type_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        FROM "tblAssets"
-        WHERE asset_id = $1
+        SELECT 
+            a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, 
+            a.purchased_cost, a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, 
+            a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
+            a.created_by, a.created_on, a.changed_by, a.changed_on,
+            pv.vendor_name AS purchase_vendor_name,
+            sv.vendor_name AS service_vendor_name,
+            u.full_name AS purchased_by_name
+        FROM "tblAssets" a
+        LEFT JOIN "tblVendors" pv ON a.purchase_vendor_id = pv.vendor_id
+        LEFT JOIN "tblVendors" sv ON a.service_vendor_id = sv.vendor_id
+        LEFT JOIN "tblUsers" u ON a.purchased_by = u.user_id
+        WHERE a.asset_id = $1
     `;
 
   return await db.query(query, [asset_id]);
@@ -216,13 +223,17 @@ const getAssetWithDetails = async (asset_id) => {
             at.parent_asset_type_id,
             pat.text as parent_asset_type_name,
             b.text as branch_name,
-            v.vendor_name,
+            pv.vendor_name as purchase_vendor_name,
+            sv.vendor_name as service_vendor_name,
+            u.full_name as purchased_by_name,
             ps.description as prod_serv_name
         FROM "tblAssets" a
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-        LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
+        LEFT JOIN "tblVendors" pv ON a.purchase_vendor_id = pv.vendor_id
+        LEFT JOIN "tblVendors" sv ON a.service_vendor_id = sv.vendor_id
+        LEFT JOIN "tblUsers" u ON a.purchased_by = u.user_id
         LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
         WHERE a.asset_id = $1
     `;
@@ -417,9 +428,9 @@ const updateAsset = async (asset_id, {
       // Then insert new properties
       // Need to convert property names to asset_type_prop_id
       for (const [propertyName, value] of Object.entries(properties)) {
-        // Get asset_type_prop_id from property name
+        // Get prop_id from property name
         const propQuery = `
-          SELECT atp.asset_type_prop_id 
+          SELECT p.prop_id 
           FROM "tblAssetTypeProps" atp
           JOIN "tblProps" p ON atp.prop_id = p.prop_id
           WHERE p.property = $1 AND atp.asset_type_id = $2
@@ -427,10 +438,15 @@ const updateAsset = async (asset_id, {
         const propResult = await client.query(propQuery, [propertyName, asset_type_id]);
         
         if (propResult.rows.length > 0) {
-          const assetTypePropId = propResult.rows[0].asset_type_prop_id;
+          const propId = propResult.rows[0].prop_id;
+          // Generate a unique apv_id
+          const timestamp = Date.now().toString().slice(-6);
+          const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+          const apvId = `APV${timestamp}${random}`;
+          
           await client.query(
-            'INSERT INTO "tblAssetPropValues" (asset_id, asset_type_prop_id, value) VALUES ($1, $2, $3)',
-            [asset_id, assetTypePropId, value]
+            'INSERT INTO "tblAssetPropValues" (apv_id, asset_id, org_id, asset_type_prop_id, value) VALUES ($1, $2, $3, $4, $5)',
+            [apvId, asset_id, org_id, propId, value]
           );
         }
       }
@@ -1294,29 +1310,21 @@ const bulkUpsertAssets = async (csvData, created_by, user_org_id, user_branch_id
           console.log(`🔢 Generated asset ID for bulk upload: ${finalAssetId}`);
         }
         
-        // Generate serial_number if not provided (same as Add Assets screen)
+        // Generate serial_number if not provided (transaction-safe, row-by-row)
         if (!finalSerialNumber) {
-          const serialResult = await generateSerialNumber(row.asset_type_id, finalOrgId);
-          if (serialResult.success) {
-            finalSerialNumber = serialResult.serialNumber;
-            console.log(`🔢 Generated serial number for bulk upload: ${finalSerialNumber}`);
-            
-            // Update the sequence number in the database (same as Add Assets screen)
-            if (finalSerialNumber && finalSerialNumber.length >= 5) {
-              const last5Digits = finalSerialNumber.slice(-5);
-              const sequenceNumber = parseInt(last5Digits);
-              
-              if (!isNaN(sequenceNumber)) {
-                await client.query(
-                  'UPDATE "tblAssetTypes" SET last_gen_seq_no = $1 WHERE asset_type_id = $2',
-                  [sequenceNumber, row.asset_type_id]
-                );
-                console.log(`🔢 Updated last_gen_seq_no to ${sequenceNumber} for asset type ${row.asset_type_id}`);
-              }
-            }
-          } else {
-            throw new Error(`Failed to generate serial number: ${serialResult.error}`);
-          }
+          // Atomically increment sequence within this transaction and get the new value
+          const seqResult = await client.query(
+            'UPDATE "tblAssetTypes" SET last_gen_seq_no = COALESCE(last_gen_seq_no, 0) + 1 WHERE asset_type_id = $1 RETURNING last_gen_seq_no',
+            [row.asset_type_id]
+          );
+          const nextSequence = parseInt(seqResult.rows[0].last_gen_seq_no);
+          const now = new Date();
+          const year = now.getFullYear().toString().slice(-2);
+          const reversedYear = year.split('').reverse().join('');
+          const month = String(now.getMonth() + 1).padStart(2, '0');
+          const formattedAssetTypeId = convertAssetTypeToSerialFormat(row.asset_type_id);
+          finalSerialNumber = `${formattedAssetTypeId}${reversedYear}${month}${String(nextSequence).padStart(5, '0')}`;
+          console.log(`🔢 Generated serial number for bulk upload (tx-safe): ${finalSerialNumber}`);
         }
         
         // Validate and format date fields
@@ -1495,7 +1503,7 @@ const bulkUpsertAssets = async (csvData, created_by, user_org_id, user_branch_id
           // Then insert new property values
           for (const [assetTypePropId, value] of Object.entries(row.properties)) {
             if (value && value.trim() !== '') {
-              // Get the actual prop_id from asset_type_prop_id
+              // Get the prop_id from asset_type_prop_id
               const propIdQuery = `
                 SELECT prop_id FROM "tblAssetTypeProps" 
                 WHERE asset_type_prop_id = $1 AND org_id = $2

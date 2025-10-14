@@ -14,7 +14,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
       a.asset_type_id,
       at.maint_lead_type,
       at.text as asset_type_name,
-      at.maint_type_id,
+      COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       mt.text as maint_type_name,
       u.full_name as user_name,
       u.email,
@@ -28,7 +28,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
     INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-    LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
     WHERE wfd.org_id = $1 
       AND wfd.status IN ('IN', 'IP', 'AP')
@@ -60,7 +60,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
         ELSE at.maint_lead_type::text
       END as maint_lead_type,
       COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
-      at.maint_type_id,
+      COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
       -- Get the current action user (person with AP or UA status) - simplified approach
       COALESCE(current_action_user.full_name, 'Unknown User') as current_action_user_name,
@@ -85,7 +85,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
     FROM "tblWFAssetMaintSch_H" wfh
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-    LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     -- Simplified current action user subquery
     LEFT JOIN (
       SELECT 

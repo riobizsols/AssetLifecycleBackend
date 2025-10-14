@@ -89,17 +89,32 @@ const addDeptAsset = async (req, res) => {
 
 const getAllAssetTypes = async (req, res) => {
     try {
-        console.log('Fetching all asset types...');
-        const result = await db.query(
-            `SELECT 
+        const { assignment_type } = req.query;
+        
+        let query = `SELECT 
                 asset_type_id, 
                 text,
+                assignment_type,
                 group_required,
                 COALESCE(is_child, false) as is_child,
                 parent_asset_type_id
              FROM "tblAssetTypes" 
-             WHERE int_status = 1`
-        );
+             WHERE int_status = 1`;
+        
+        const params = [];
+        
+        // If assignment_type is provided, filter by it
+        if (assignment_type) {
+            query += ` AND assignment_type = $1`;
+            params.push(assignment_type);
+            console.log(`Fetching asset types with assignment_type = '${assignment_type}'...`);
+        } else {
+            console.log('Fetching all active asset types...');
+        }
+        
+        query += ` ORDER BY text`;
+        
+        const result = await db.query(query, params);
         console.log(`Found ${result.rows.length} asset types:`, result.rows);
         res.status(200).json(result.rows);
     } catch (err) {

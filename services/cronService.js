@@ -20,8 +20,8 @@ class CronService {
 
     // Schedule maintenance schedule generation
     scheduleMaintenanceGeneration() {
-        // Run every minute
-        cron.schedule('* * * * *', async () => {
+        // Run every day at 12:00 AM (midnight)
+        cron.schedule('0 0 * * *', async () => {
             console.log('🕐 [CRON] Starting scheduled maintenance schedule generation at:', new Date().toISOString());
             
             try {
@@ -35,7 +35,7 @@ class CronService {
             timezone: "Asia/Kolkata" // IST timezone
         });
 
-        console.log('📅 [CRON] Maintenance schedule generation scheduled for every minute');
+        console.log('📅 [CRON] Maintenance schedule generation scheduled for every day at 12:00 AM (IST)');
     }
 
     // Call the maintenance schedule generation API
@@ -83,8 +83,10 @@ class CronService {
     getCronStatus() {
         return {
             maintenanceGeneration: {
-                schedule: '* * * * *', // Every minute
-                description: 'Generate maintenance schedules for assets every minute'
+                schedule: '0 0 * * *', // Every day at 12:00 AM
+                description: 'Generate maintenance schedules for assets every day at 12:00 AM (IST)',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at midnight IST'
             }
         };
     }

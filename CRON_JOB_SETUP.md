@@ -6,7 +6,7 @@ This document explains the cron job setup for automatically generating maintenan
 ## What the Cron Job Does
 
 The cron job calls the maintenance schedule generation API endpoint:
-- **Route**: `POST /api/maintenance-schedules/generate`
+- **Route**: `POST /api/maintenance-schedules/generate-cron`
 - **Function**: `generateMaintenanceSchedules` in `maintenanceScheduleController.js`
 - **Schedule**: Every day at 12:00 AM (IST timezone)
 
@@ -34,6 +34,7 @@ The cron job calls the maintenance schedule generation API endpoint:
 ### Automatic Cron Job
 - **Schedule**: `0 0 * * *` (Every day at 12 AM IST)
 - **Function**: Automatically calls maintenance generation
+- **Frequency**: Once per day at midnight
 
 ### Manual Trigger (for testing)
 - **Endpoint**: `POST /api/cron/trigger-maintenance`
