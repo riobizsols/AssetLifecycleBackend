@@ -1204,6 +1204,12 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
   console.log('=== getApprovalDetailByWfamshId called ===');
   console.log('WFAMSH ID:', wfamshId);
   console.log('Org ID:', orgId);
+  
+  // Validate wfamshId is a valid integer
+  if (!wfamshId || isNaN(parseInt(wfamshId, 10))) {
+    throw new Error('Invalid wfamshId: must be a valid integer');
+  }
+  
   try {
     // First, let's check if there are any records for this wfamsh_id at all
     const basicQuery = `

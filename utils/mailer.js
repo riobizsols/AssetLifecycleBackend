@@ -10,7 +10,9 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendResetEmail = async (to, token) => {
-    const resetLink = `${FRONTEND_URL}/reset-password?token=${token}`;
+    // Ensure no double slashes in the URL
+    const baseUrl = FRONTEND_URL.endsWith('/') ? FRONTEND_URL.slice(0, -1) : FRONTEND_URL;
+    const resetLink = `${baseUrl}/reset-password?token=${token}`;
 
     try {
         const info = await transporter.sendMail({

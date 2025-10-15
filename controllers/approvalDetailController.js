@@ -368,14 +368,23 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
     const { wfamshId } = req.params;
     const orgId = req.query.orgId || 'ORG001';
 
-    if (!wfamshId) {
+    if (!wfamshId || wfamshId.trim() === '') {
       return res.status(400).json({
         success: false,
         message: 'WFAMSH ID is required'
       });
     }
 
-    const approvalDetail = await getApprovalDetailByWfamshId(wfamshId, orgId);
+    // Validate that wfamshId is a valid integer
+    const wfamshIdNum = parseInt(wfamshId, 10);
+    if (isNaN(wfamshIdNum)) {
+      return res.status(400).json({
+        success: false,
+        message: 'WFAMSH ID must be a valid integer'
+      });
+    }
+
+    const approvalDetail = await getApprovalDetailByWfamshId(wfamshIdNum, orgId);
 
     if (!approvalDetail) {
       return res.status(404).json({
