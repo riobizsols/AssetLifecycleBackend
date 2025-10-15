@@ -55,6 +55,18 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         a.asset_type_id,
         a.service_vendor_id as vendor_id,
         v.vendor_name,
+        v.company_name,
+        v.company_email,
+        v.contact_person_name,
+        v.contact_person_email,
+        v.contact_person_number,
+        v.address_line1,
+        v.address_line2,
+        v.city,
+        v.state,
+        v.pincode,
+        v.gst_number,
+        v.cin_number,
         at.maint_lead_type,
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
@@ -70,11 +82,23 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
           ELSE NULL
         END as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
-        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
+        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) as cutoff_date,
         -- Calculate days until due
         EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
         -- Calculate days until cutoff
-        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) - CURRENT_DATE)) as days_until_cutoff
       FROM "tblWFAssetMaintSch_D" wfd
       INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
@@ -1030,16 +1054,40 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         a.asset_type_id,
         a.service_vendor_id as vendor_id,
         v.vendor_name,
+        v.company_name,
+        v.company_email,
+        v.contact_person_name,
+        v.contact_person_email,
+        v.contact_person_number,
+        v.address_line1,
+        v.address_line2,
+        v.city,
+        v.state,
+        v.pincode,
+        v.gst_number,
+        v.cin_number,
         at.maint_lead_type,
         at.text as asset_type_name,
         at.maint_type_id,
         mt.text as maint_type_name,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
-        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
+        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) as cutoff_date,
         -- Calculate days until due
         EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
         -- Calculate days until cutoff
-        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) - CURRENT_DATE)) as days_until_cutoff
       FROM "tblWFAssetMaintSch_H" wfh
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
@@ -1205,9 +1253,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
   console.log('WFAMSH ID:', wfamshId);
   console.log('Org ID:', orgId);
   
-  // Validate wfamshId is a valid integer
-  if (!wfamshId || isNaN(parseInt(wfamshId, 10))) {
-    throw new Error('Invalid wfamshId: must be a valid integer');
+  // Validate wfamshId is a valid string
+  if (!wfamshId || typeof wfamshId !== 'string' || wfamshId.trim().length === 0) {
+    throw new Error('Invalid wfamshId: must be a valid string');
   }
   
   try {
@@ -1250,6 +1298,18 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         a.asset_type_id,
         a.service_vendor_id as vendor_id,
         v.vendor_name,
+        v.company_name,
+        v.company_email,
+        v.contact_person_name,
+        v.contact_person_email,
+        v.contact_person_number,
+        v.address_line1,
+        v.address_line2,
+        v.city,
+        v.state,
+        v.pincode,
+        v.gst_number,
+        v.cin_number,
         at.maint_lead_type,
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
@@ -1265,11 +1325,23 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           ELSE NULL
         END as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
-        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
+        (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) as cutoff_date,
         -- Calculate days until due
         EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
         -- Calculate days until cutoff
-        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
+        )) - CURRENT_DATE)) as days_until_cutoff
       FROM "tblWFAssetMaintSch_D" wfd
       INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
@@ -1391,7 +1463,20 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         checklist: checklistItems,
         vendorDetails: {
           vendorName: firstRecord.vendor_name,
-          vendorId: firstRecord.vendor_id
+          vendorId: firstRecord.vendor_id,
+          vendor_name: firstRecord.vendor_name,
+          company_name: firstRecord.company_name,
+          company_email: firstRecord.company_email,
+          contact_person_name: firstRecord.contact_person_name,
+          contact_person_email: firstRecord.contact_person_email,
+          contact_person_number: firstRecord.contact_person_number,
+          address_line1: firstRecord.address_line1,
+          address_line2: firstRecord.address_line2,
+          city: firstRecord.city,
+          state: firstRecord.state,
+          pincode: firstRecord.pincode,
+          gst_number: firstRecord.gst_number,
+          cin_number: firstRecord.cin_number
         },
         workflowSteps: workflowSteps,
         workflowDetails: approvalDetails

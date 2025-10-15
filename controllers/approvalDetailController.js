@@ -375,16 +375,15 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       });
     }
 
-    // Validate that wfamshId is a valid integer
-    const wfamshIdNum = parseInt(wfamshId, 10);
-    if (isNaN(wfamshIdNum)) {
+    // Validate that wfamshId is not empty and is a valid string
+    if (typeof wfamshId !== 'string' || wfamshId.trim().length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'WFAMSH ID must be a valid integer'
+        message: 'WFAMSH ID must be a valid string'
       });
     }
 
-    const approvalDetail = await getApprovalDetailByWfamshId(wfamshIdNum, orgId);
+    const approvalDetail = await getApprovalDetailByWfamshId(wfamshId, orgId);
 
     if (!approvalDetail) {
       return res.status(404).json({
