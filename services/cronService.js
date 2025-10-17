@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const axios = require('axios');
 const { BACKEND_URL } = require('../config/environment');
+const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 
 class CronService {
     constructor() {
@@ -15,7 +16,21 @@ class CronService {
         // Schedule maintenance schedule generation every 24 hours at 12 AM
         this.scheduleMaintenanceGeneration();
         
+        // Schedule workflow escalation every day at 9 AM
+        this.scheduleWorkflowEscalation();
+        
         console.log('Cron jobs initialized successfully');
+    }
+
+    // Schedule workflow escalation for overdue approvals
+    scheduleWorkflowEscalation() {
+        try {
+            startWorkflowEscalationCron();
+            console.log('📅 [CRON] Workflow Cutoff Date Escalation: Scheduled for every day at 9:00 AM (IST)');
+            console.log('   → Automatically escalates overdue workflows to next approver when cutoff date is exceeded');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule workflow escalation:', error.message);
+        }
     }
 
     // Schedule maintenance schedule generation
@@ -87,6 +102,14 @@ class CronService {
                 description: 'Generate maintenance schedules for assets every day at 12:00 AM (IST)',
                 timezone: 'Asia/Kolkata',
                 nextRun: 'Daily at midnight IST'
+            },
+            workflowCutoffEscalation: {
+                name: 'Workflow Cutoff Date Escalation',
+                schedule: '0 9 * * *', // Every day at 9:00 AM
+                description: 'Automatically escalates maintenance approval workflows to next approver when cutoff date is exceeded and current approver has not taken action',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 9:00 AM IST',
+                purpose: 'Ensures timely maintenance approvals by escalating to next superior when deadlines are missed'
             }
         };
     }

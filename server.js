@@ -106,6 +106,7 @@ app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
 app.use("/api/serial-numbers", serialNumberRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/approval-detail", approvalDetailRoutes);
+app.use("/api/workflow-escalation", require("./routes/workflowEscalationRoutes"));
 app.use("/api/reportbreakdown", reportbreakdownRoutes);
 app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);

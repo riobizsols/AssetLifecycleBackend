@@ -1,7 +1,29 @@
 const model = require("../models/assetModel");
 const db = require("../config/db");
+const {
+    logAssetCreationApiCalled,
+    logCheckingVendor,
+    logVendorValidated,
+    logGeneratingAssetId,
+    logAssetIdGenerated,
+    logInsertingAssetToDatabase,
+    logAssetInsertedToDatabase,
+    logInsertingAssetProperties,
+    logAssetCreated,
+    logAssetsRetrieved,
+    logUnauthorizedAccess,
+    logMissingRequiredFields,
+    logInvalidVendor,
+    logDuplicateAssetId,
+    logAssetCreationError,
+    logAssetRetrievalError,
+    logDatabaseConstraintViolation
+} = require("../eventLoggers/assetEventLogger");
 
 const addAsset = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         console.log("Received asset data:", req.body);
         console.log("User info:", req.user);
@@ -28,30 +50,111 @@ const addAsset = async (req, res) => {
             org_id
         } = req.body;
 
+        // Step 1: Log API called with full request data
+        await logAssetCreationApiCalled({
+            assetName: text,
+            method: req.method,
+            url: req.originalUrl,
+            userId,
+            requestBody: {
+                asset_type_id,
+                asset_id,
+                text,
+                serial_number,
+                branch_id,
+                purchase_vendor_id,
+                service_vendor_id,
+                purchased_cost,
+                purchased_on,
+                current_status,
+                warranty_period
+            }
+        });
+
         if (!req.user || !req.user.user_id) {
+            // WARNING: Unauthorized access attempt
+            await logUnauthorizedAccess({
+                operation: 'creation',
+                duration: Date.now() - startTime
+            });
+            
             return res.status(401).json({ error: "User not authenticated or user_id missing" });
         }
 
         const created_by = req.user.user_id;
 
         if (!text || !org_id) {
+            // WARNING: Missing required fields
+            await logMissingRequiredFields({
+                text,
+                orgId: org_id,
+                assetTypeId: asset_type_id,
+                userId: created_by,
+                duration: Date.now() - startTime
+            });
+            
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
+        // Step 2: Validate vendors if provided
         if (purchase_vendor_id) {
+            await logCheckingVendor({
+                vendorId: purchase_vendor_id,
+                vendorType: 'purchase',
+                userId: created_by
+            });
+            
             const vendorExists = await model.checkVendorExists(purchase_vendor_id);
             if (vendorExists.rows.length === 0) {
                 console.warn("Invalid purchase_vendor_id:", purchase_vendor_id);
+                
+                // WARNING: Invalid vendor
+                await logInvalidVendor({
+                    vendorId: purchase_vendor_id,
+                    vendorType: 'purchase',
+                    assetName: text,
+                    userId: created_by,
+                    duration: Date.now() - startTime
+                });
+                
                 return res.status(400).json({ error: `Vendor with ID '${purchase_vendor_id}' does not exist` });
             }
+            
+            await logVendorValidated({
+                vendorId: purchase_vendor_id,
+                vendorType: 'purchase',
+                userId: created_by
+            });
         }
         
         if (service_vendor_id) {
+            await logCheckingVendor({
+                vendorId: service_vendor_id,
+                vendorType: 'service',
+                userId: created_by
+            });
+            
             const vendorExists = await model.checkVendorExists(service_vendor_id);
             if (vendorExists.rows.length === 0) {
                 console.warn("Invalid service_vendor_id:", service_vendor_id);
+                
+                // WARNING: Invalid service vendor
+                await logInvalidVendor({
+                    vendorId: service_vendor_id,
+                    vendorType: 'service',
+                    assetName: text,
+                    userId: created_by,
+                    duration: Date.now() - startTime
+                });
+                
                 return res.status(400).json({ error: `Vendor with ID '${service_vendor_id}' does not exist` });
             }
+            
+            await logVendorValidated({
+                vendorId: service_vendor_id,
+                vendorType: 'service',
+                userId: created_by
+            });
         }
         // If you want to re-enable prod_serv_id validation, uncomment and update this block:
         // if (prod_serv_id) {
@@ -62,13 +165,23 @@ const addAsset = async (req, res) => {
         //     }
         // }
 
-        // Generate or validate asset_id
+        // Step 3: Generate or validate asset_id
         let finalAssetId = asset_id;
         if (!asset_id) {
+            await logGeneratingAssetId({ userId: created_by });
             finalAssetId = await model.generateAssetId();
+            await logAssetIdGenerated({ assetId: finalAssetId, userId: created_by });
         } else {
             const existingAssetId = await model.checkAssetIdExists(asset_id);
             if (existingAssetId.rows.length > 0) {
+                // WARNING: Duplicate asset_id
+                await logDuplicateAssetId({
+                    assetId: asset_id,
+                    assetName: text,
+                    userId: created_by,
+                    duration: Date.now() - startTime
+                });
+                
                 return res.status(409).json({ error: "Asset with this asset_id already exists" });
             }
         }
@@ -100,12 +213,44 @@ const addAsset = async (req, res) => {
             created_by
         };
 
-        // Insert asset
+        // Step 4: Insert asset to database
+        await logInsertingAssetToDatabase({
+            assetId: finalAssetId,
+            assetName: text,
+            assetData: {
+                asset_type_id,
+                branch_id,
+                purchase_vendor_id,
+                service_vendor_id,
+                purchased_cost,
+                purchased_on,
+                current_status,
+                warranty_period
+            },
+            userId: created_by
+        });
+        
         const result = await model.insertAsset(assetData);
         const { asset_id: insertedAssetId } = result.rows[0];
+        
+        await logAssetInsertedToDatabase({
+            assetId: insertedAssetId,
+            assetName: text,
+            insertedData: result.rows[0],
+            userId: created_by
+        });
 
-        // Insert properties if any
+        // Step 5: Insert properties if any
         if (req.body.properties && Object.keys(req.body.properties).length > 0) {
+            const propertyCount = Object.keys(req.body.properties).length;
+            
+            await logInsertingAssetProperties({
+                assetId: insertedAssetId,
+                propertyCount,
+                properties: req.body.properties,
+                userId: created_by
+            });
+            
             console.log('Saving property values:', req.body.properties);
             for (const [propId, value] of Object.entries(req.body.properties)) {
                 if (value) {
@@ -119,6 +264,15 @@ const addAsset = async (req, res) => {
             }
         }
 
+        // Step 6: Asset created successfully (final summary)
+        await logAssetCreated({
+            assetId: insertedAssetId,
+            assetName: text,
+            assetTypeId: asset_type_id,
+            userId: created_by,
+            duration: Date.now() - startTime
+        });
+
         res.status(201).json({
             message: "Asset added successfully",
             asset: result.rows[0]
@@ -126,6 +280,30 @@ const addAsset = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding asset:", err);
+        
+        // Determine if it's a critical error or just an error
+        const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42'));
+        
+        if (isDbError) {
+            // CRITICAL: Database constraint violation
+            await logDatabaseConstraintViolation({
+                assetName: req.body.text,
+                assetTypeId: req.body.asset_type_id,
+                error: err,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            // ERROR: General creation error
+            await logAssetCreationError({
+                assetName: req.body.text,
+                assetTypeId: req.body.asset_type_id,
+                error: err,
+                userId,
+                duration: Date.now() - startTime
+            });
+        }
+        
         res.status(500).json({
             error: "Internal server error",
             message: err.message,
@@ -137,11 +315,32 @@ const addAsset = async (req, res) => {
 
 // GET /api/assets - Get all assets
 const getAllAssets = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const assets = await model.getAllAssets();
+    
+    // INFO: Assets retrieved successfully
+    await logAssetsRetrieved({
+        operation: 'getAllAssets',
+        count: assets.rows?.length || 0,
+        userId,
+        duration: Date.now() - startTime
+    });
+    
     res.json(assets);
   } catch (err) {
     console.error("Error fetching assets:", err);
+    
+    // ERROR: Failed to fetch assets
+    await logAssetRetrievalError({
+        operation: 'getAllAssets',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+    });
+    
     res.status(500).json({ error: "Failed to fetch assets" });
   }
 };
