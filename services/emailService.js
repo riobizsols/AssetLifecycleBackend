@@ -119,7 +119,133 @@ const sendRoleAssignmentEmail = async (userData, newRoles, organizationName) => 
   }
 };
 
+// ROLE-BASED WORKFLOW: Send workflow notification to all users with a specific role
+const sendWorkflowNotificationToRole = async (workflowData, jobRoleId, orgId = 'ORG001') => {
+    try {
+        const db = require('../config/db');
+        
+        console.log('Sending workflow notification to role:', jobRoleId);
+        
+        // Get all users with this job role
+        const usersQuery = `
+            SELECT u.user_id, u.emp_int_id, u.full_name, u.email, jr.text as job_role_name
+            FROM "tblUserJobRoles" ujr
+            INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+            INNER JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
+            WHERE ujr.job_role_id = $1 AND u.int_status = 1 AND u.email IS NOT NULL
+        `;
+        
+        const usersResult = await db.query(usersQuery, [jobRoleId]);
+        const users = usersResult.rows;
+        
+        if (users.length === 0) {
+            console.log('No users found with role:', jobRoleId);
+            return { success: false, message: 'No users found with specified role' };
+        }
+        
+        console.log(`Found ${users.length} users with role ${jobRoleId}`);
+        
+        // Send email to each user
+        const emailPromises = users.map(async (user) => {
+            try {
+                const mailOptions = {
+                    from: `"Asset Management System" <${process.env.EMAIL_USER}>`,
+                    to: user.email,
+                    subject: `🔔 Workflow Approval Required - ${workflowData.assetTypeName || 'Asset Maintenance'}`,
+                    html: `
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <style>
+                                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+                                .header { background-color: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 5px 5px 0 0; }
+                                .content { background-color: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
+                                .detail-row { margin: 10px 0; padding: 10px; background-color: white; border-left: 3px solid #4CAF50; }
+                                .label { font-weight: bold; color: #555; }
+                                .value { color: #333; }
+                                .urgent { color: #f44336; font-weight: bold; }
+                                .button { display: inline-block; padding: 12px 24px; margin: 20px 0; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; }
+                                .footer { text-align: center; margin-top: 20px; color: #888; font-size: 12px; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <div class="header">
+                                    <h2>🔔 Workflow Approval Required</h2>
+                                </div>
+                                <div class="content">
+                                    <p>Hello <strong>${user.full_name}</strong>,</p>
+                                    <p>A workflow requires approval from your role: <strong>${user.job_role_name}</strong></p>
+                                    <p>${workflowData.isUrgent ? '<span class="urgent">⚠️ URGENT: This maintenance is past the cutoff date!</span>' : ''}</p>
+                                    
+                                    <div class="detail-row">
+                                        <span class="label">Asset Type:</span>
+                                        <span class="value">${workflowData.assetTypeName || 'N/A'}</span>
+                                    </div>
+                                    
+                                    <div class="detail-row">
+                                        <span class="label">Maintenance Type:</span>
+                                        <span class="value">${workflowData.maintenanceType || 'Regular Maintenance'}</span>
+                                    </div>
+                                    
+                                    <div class="detail-row">
+                                        <span class="label">Due Date:</span>
+                                        <span class="value">${workflowData.dueDate ? new Date(workflowData.dueDate).toLocaleDateString() : 'N/A'}</span>
+                                    </div>
+                                    
+                                    <div class="detail-row">
+                                        <span class="label">Days Until Due:</span>
+                                        <span class="value">${workflowData.daysUntilDue || 0} days</span>
+                                    </div>
+                                    
+                                    <p><strong>Note:</strong> Any ${user.job_role_name} can approve this workflow. The first person to approve will move the workflow forward.</p>
+                                    
+                                    <div style="text-align: center;">
+                                        <a href="${process.env.FRONTEND_URL || 'http://localhost:3000'}/maintenance-approval" class="button">View & Approve</a>
+                                    </div>
+                                    
+                                    <div class="footer">
+                                        <p>This is an automated notification from Asset Management System.</p>
+                                        <p>If you believe you received this email in error, please contact your system administrator.</p>
+                                    </div>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                    `
+                };
+                
+                await transporter.sendMail(mailOptions);
+                console.log(`Workflow notification sent to ${user.email} (${user.full_name})`);
+                return { success: true, email: user.email };
+            } catch (error) {
+                console.error(`Failed to send email to ${user.email}:`, error);
+                return { success: false, email: user.email, error: error.message };
+            }
+        });
+        
+        const results = await Promise.all(emailPromises);
+        const successCount = results.filter(r => r.success).length;
+        
+        console.log(`Workflow notifications sent: ${successCount}/${users.length} successful`);
+        
+        return {
+            success: true,
+            totalUsers: users.length,
+            successCount: successCount,
+            failCount: users.length - successCount,
+            results: results
+        };
+        
+    } catch (error) {
+        console.error('Error in sendWorkflowNotificationToRole:', error);
+        throw error;
+    }
+};
+
 module.exports = {
-  sendWelcomeEmail,
-  sendRoleAssignmentEmail
+    sendWelcomeEmail,
+    sendRoleAssignmentEmail,
+    sendWorkflowNotificationToRole
 };

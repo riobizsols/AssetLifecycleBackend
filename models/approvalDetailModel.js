@@ -38,10 +38,12 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
     const statusResult = await pool.query(statusQuery, [assetId, orgId]);
     console.log('Status check - All records for asset:', statusResult.rows);
     
+    // ROLE-BASED WORKFLOW: Query now shows job role instead of specific user
     const query = `
       SELECT 
         wfd.wfamsd_id,
         wfd.wfamsh_id,
+        wfd.job_role_id,
         wfd.user_id,
         wfd.sequence,
         wfd.status as detail_status,
@@ -71,16 +73,11 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        CASE 
-          WHEN u.full_name IS NOT NULL THEN u.full_name
-          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.full_name
-          ELSE 'Unknown User'
-        END as user_name,
-        CASE 
-          WHEN u.email IS NOT NULL THEN u.email
-          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.email
-          ELSE NULL
-        END as email,
+        jr.text as job_role_name,
+        -- ROLE-BASED: Always show role name (user_id is not used)
+        -- To see who actually approved, check tblWFAssetMaintHist.action_by
+        jr.text as user_name,
+        NULL as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
           CASE 
@@ -104,21 +101,13 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
       LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-      LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-      LEFT JOIN "tblUsers" u_emp ON wfd.user_id = u_emp.emp_int_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
       WHERE wfd.org_id = $1 
         AND wfh.asset_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
-        AND wfd.user_id IS NOT NULL
-        AND wfd.wfamsd_id IN (
-          SELECT MAX(wfd2.wfamsd_id)
-          FROM "tblWFAssetMaintSch_D" wfd2
-          WHERE wfd2.user_id = wfd.user_id 
-            AND wfd2.wfamsh_id = wfd.wfamsh_id
-            AND wfd2.org_id = wfd.org_id
-        )
+        AND wfd.job_role_id IS NOT NULL
       ORDER BY wfd.sequence ASC
     `;
 
@@ -174,31 +163,33 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         // Determine status and description based on detail_status
         let status, description, title;
         
+        // ROLE-BASED: Always show role name (user_id is never used)
+        // To see who approved, query tblWFAssetMaintHist
         switch (detail.detail_status) {
           case 'AP':
-            status = 'completed'; // Green for current action user
+            status = 'completed'; // Green for current action step
             title = 'In Progress';
-            description = `Action pending by ${detail.user_name}`;
+            description = `Action pending by any ${detail.job_role_name}`;
             break;
           case 'UA':
             status = 'approved'; // Blue for approved
             title = 'Approved';
-            description = `Approved by ${detail.user_name}`;
+            description = `Approved by ${detail.job_role_name}`;
             break;
           case 'UR':
             status = 'rejected'; // Red for rejected
             title = 'Rejected';
-            description = `Rejected by ${detail.user_name}`;
+            description = `Rejected by ${detail.job_role_name}`;
             break;
           case 'IN':
             status = 'pending'; // Gray for initial
             title = 'Awaiting';
-            description = `Waiting for approval from ${detail.user_name}`;
+            description = `Waiting for approval from any ${detail.job_role_name}`;
             break;
           default:
             status = 'pending';
             title = 'Awaiting';
-            description = `Waiting for approval from ${detail.user_name}`;
+            description = `Waiting for approval from any ${detail.job_role_name}`;
         }
         
         console.log(`Mapped status for ${detail.user_name}:`, {
@@ -208,13 +199,13 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         });
         
         workflowSteps.push({
-          id: `user-${detail.user_id}`,
+          id: `role-${detail.job_role_id}-${index + 1}`,
           title: title,
           status: status,
           description: description,
           date: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '',
           time: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
-          user: { id: detail.user_id, name: detail.user_name },
+          role: { id: detail.job_role_id, name: detail.job_role_name },
           notes: detail.notes || null,
           changed_by: detail.changed_by,
           changed_on: detail.changed_on
@@ -253,59 +244,57 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       throw new Error('User not found with the provided employee ID');
     }
     
-    // Get current workflow details - get the latest record for each user
-    const currentQuery = `
-      SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-      FROM "tblWFAssetMaintSch_D" wfd
-      INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-      WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-        AND wfd.wfamsd_id = (
-          SELECT MAX(wfd2.wfamsd_id) 
-          FROM "tblWFAssetMaintSch_D" wfd2 
-          WHERE wfd2.user_id = wfd.user_id 
-            AND wfd2.wfamsh_id = wfd.wfamsh_id
-        )
-      ORDER BY wfd.sequence ASC
+    // ROLE-BASED WORKFLOW: Get user's roles
+    const userRolesQuery = `
+      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
     `;
+    const userRolesResult = await pool.query(userRolesQuery, [userId]);
+    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
+    
+    if (userRoleIds.length === 0) {
+      throw new Error('User has no assigned roles');
+    }
     
     // Detect whether the identifier is a wfamsh_id or asset_id
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
     let currentResult;
     if (isWfamshId) {
+      // ROLE-BASED: Find workflow step where user has the required role
       const byHeaderQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.wfamsd_id = (
-            SELECT MAX(wfd2.wfamsd_id)
-            FROM "tblWFAssetMaintSch_D" wfd2
-            WHERE wfd2.user_id = wfd.user_id
-              AND wfd2.wfamsh_id = wfd.wfamsh_id
-          )
+          AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId]);
+      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
-      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId]);
+      // ROLE-BASED: Find workflow step where user has the required role
+      const currentQuery = `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+          AND wfd.job_role_id = ANY($3::varchar[])
+        ORDER BY wfd.sequence ASC
+      `;
+      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      throw new Error('No workflow found for this asset');
+      throw new Error('No workflow found for this asset or user does not have required role');
     }
     
-    // Find current user's step - handle both user_id and emp_int_id cases
-    let currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    // ROLE-BASED: Find the current step that needs approval (status AP)
+    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
     if (!currentUserStep) {
-      // Try finding by emp_int_id
-      currentUserStep = workflowDetails.find(w => w.user_id === empIntId);
-    }
-    if (!currentUserStep) {
-      throw new Error('User not found in workflow');
+      throw new Error('No pending approval step found for your role');
     }
     
-    // Update current user's status to UA (User Approved)
+    // ROLE-BASED: Update workflow step status to UA (User Approved)
+    // user_id remains NULL - only job_role_id is used
     await pool.query(
       `UPDATE "tblWFAssetMaintSch_D" 
        SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
@@ -313,22 +302,22 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       ['UA', note, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
     
-    console.log(`Updated current user ${userId} status to UA`);
+    console.log(`Updated workflow step ${currentUserStep.wfamsd_id} status to UA, approved by user ${userId} (${empIntId}) - user_id remains NULL, tracked in history`);
     
-    // Insert history record for current user approval
+    // Insert history record - ROLE-BASED: action_by stores the actual user who approved
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
     const historyIdResult = await pool.query(historyIdQuery);
     const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
     const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
     
-          await pool.query(
-        `INSERT INTO "tblWFAssetMaintHist" (
-          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
-        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UA', note, orgId]
-      );
+    await pool.query(
+      `INSERT INTO "tblWFAssetMaintHist" (
+        wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+      ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+      [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UA', note, orgId]
+    );
     
-    console.log(`Inserted history record: ${wfamhisId} for user ${userId} approval`);
+    console.log(`Inserted history record: ${wfamhisId} - User ${empIntId} approved workflow step`);
     
     // Find next user and update their status to AP
     const nextUserStep = workflowDetails.find(w => w.sequence > currentUserStep.sequence);
@@ -397,57 +386,57 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User not found with the provided employee ID');
     }
     
+    // ROLE-BASED WORKFLOW: Get user's roles
+    const userRolesQuery = `
+      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
+    `;
+    const userRolesResult = await pool.query(userRolesQuery, [userId]);
+    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
+    
+    if (userRoleIds.length === 0) {
+      throw new Error('User has no assigned roles');
+    }
+    
     // Detect whether the identifier is a wfamsh_id or asset_id
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
     let currentResult;
     if (isWfamshId) {
+      // ROLE-BASED: Find workflow step where user has the required role
       const byHeaderQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.wfamsd_id = (
-            SELECT MAX(wfd2.wfamsd_id)
-            FROM "tblWFAssetMaintSch_D" wfd2
-            WHERE wfd2.user_id = wfd.user_id
-              AND wfd2.wfamsh_id = wfd.wfamsh_id
-          )
+          AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId]);
+      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
+      // ROLE-BASED: Find workflow step where user has the required role
       const currentQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
         WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-          AND wfd.wfamsd_id = (
-            SELECT MAX(wfd2.wfamsd_id) 
-            FROM "tblWFAssetMaintSch_D" wfd2 
-            WHERE wfd2.user_id = wfd.user_id 
-              AND wfd2.wfamsh_id = wfd.wfamsh_id
-          )
+          AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId]);
+      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      throw new Error('No workflow found for this asset');
+      throw new Error('No workflow found for this asset or user does not have required role');
     }
     
-    // Find current user's step - handle both user_id and emp_int_id cases
-    let currentUserStep = workflowDetails.find(w => w.user_id === userId);
+    // ROLE-BASED: Find the current step that needs approval (status AP)
+    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
     if (!currentUserStep) {
-      // Try finding by emp_int_id
-      currentUserStep = workflowDetails.find(w => w.user_id === empIntId);
-    }
-    if (!currentUserStep) {
-      throw new Error('User not found in workflow');
+      throw new Error('No pending approval step found for your role');
     }
     
-    // Update current user's status to UR (User Rejected)
+    // ROLE-BASED: Update workflow step status to UR (User Rejected)
+    // user_id remains NULL - only job_role_id is used
     await pool.query(
       `UPDATE "tblWFAssetMaintSch_D" 
        SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
@@ -455,22 +444,22 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       ['UR', reason, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
     
-    console.log(`Updated current user ${userId} status to UR`);
+    console.log(`Updated workflow step ${currentUserStep.wfamsd_id} status to UR, rejected by user ${userId} (${empIntId}) - user_id remains NULL, tracked in history`);
     
-    // Insert history record for current user rejection
+    // Insert history record - ROLE-BASED: action_by stores the actual user who rejected
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
     const historyIdResult = await pool.query(historyIdQuery);
     const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
     const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
     
-          await pool.query(
-        `INSERT INTO "tblWFAssetMaintHist" (
-          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
-        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UR', reason, orgId]
-      );
+    await pool.query(
+      `INSERT INTO "tblWFAssetMaintHist" (
+        wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+      ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
+      [wfamhisId, currentUserStep.wfamsh_id, currentUserStep.wfamsd_id, empIntId, 'UR', reason, orgId]
+    );
     
-    console.log(`Inserted history record: ${wfamhisId} for user ${userId} rejection`);
+    console.log(`Inserted history record: ${wfamhisId} - User ${empIntId} rejected workflow step`);
     
     // Find the previous approved user and update their status back to AP
     const previousApprovedUserQuery = `
@@ -839,9 +828,9 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   }
 };
 
- const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
    try {
-     console.log('=== getMaintenanceApprovals model ===');
+     console.log('=== getMaintenanceApprovals model (ROLE-BASED) ===');
      console.log('empIntId:', empIntId);
      console.log('orgId:', orgId);
      
@@ -851,6 +840,29 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        return [];
      }
      
+     // ROLE-BASED: Get user's roles first
+     const userQuery = `SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`;
+     const userResult = await pool.query(userQuery, [empIntId]);
+     
+     if (userResult.rows.length === 0) {
+       console.log('User not found with emp_int_id:', empIntId);
+       return [];
+     }
+     
+     const userId = userResult.rows[0].user_id;
+     
+     const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
+     const rolesResult = await pool.query(rolesQuery, [userId]);
+     const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
+     
+     if (userRoleIds.length === 0) {
+       console.log('User has no assigned roles');
+       return [];
+     }
+     
+     console.log('User roles:', userRoleIds);
+     
+     // ROLE-BASED: Query workflows where user's roles match workflow steps
      const query = `
        SELECT DISTINCT
          wfh.wfamsh_id,
@@ -866,11 +878,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          a.description as asset_description,
          v.vendor_name,
          d.text as department_name,
-         CASE 
-          WHEN u.full_name IS NOT NULL THEN u.full_name
-          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.full_name
-          ELSE 'Unknown User'
-        END as employee_name,
+         jr.text as job_role_name,
          mt.text as maintenance_type_name,
          -- Calculate days until due
          EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
@@ -880,24 +888,18 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
        INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
        LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-      LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-      LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-      LEFT JOIN "tblUsers" u_emp ON wfd.user_id = u_emp.emp_int_id
-      LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+       LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
        WHERE wfd.org_id = $1 
-         AND (
-           (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL AND u.emp_int_id != '') OR
-           (wfd.user_id = $2 AND wfd.user_id IS NOT NULL AND wfd.user_id != '') OR
-           (u.user_id = $2 AND u.user_id IS NOT NULL AND u.user_id != '') OR
-           (u_emp.emp_int_id = $2 AND u_emp.emp_int_id IS NOT NULL AND u_emp.emp_int_id != '')
-         )
+         AND wfd.job_role_id = ANY($2::varchar[])
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
 
-     const result = await pool.query(query, [orgId, empIntId]);
+     const result = await pool.query(query, [orgId, userRoleIds]);
      console.log('Query executed successfully, found rows:', result.rows.length);
      console.log('Sample row (if any):', result.rows[0] || 'No rows found');
      return result.rows;
@@ -922,24 +924,6 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
       console.log('Creating maintenance record for wfamsh_id:', wfamshId);
       console.log('Org ID:', orgId);
       
-      // Get the next auto-increment ID for ams_id
-      // Get the latest ams_id and extract the numeric part
-      const maxIdQuery = `
-        SELECT MAX(
-          CASE 
-            WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-            WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-            ELSE 0
-          END
-        ) as max_num 
-        FROM "tblAssetMaintSch"
-      `;
-      const maxIdResult = await pool.query(maxIdQuery);
-      const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-      const amsId = `ams${nextId.toString().padStart(3, '0')}`;
-      
-      console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
-     
            // Get maintenance details from workflow header
       const workflowQuery = `
         SELECT 
@@ -958,6 +942,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
               AND d.org_id = $2 
               AND d.notes ILIKE '%breakdown%'
           ) as has_breakdown_note,
+          -- detect BF01/BF03 breakdown with existing schedule (renamed to bf01_notes for compatibility)
+          (
+            SELECT d.notes
+            FROM "tblWFAssetMaintSch_D" d
+            WHERE d.wfamsh_id = wfh.wfamsh_id
+              AND d.org_id = $2
+              AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%')
+            LIMIT 1
+          ) as bf01_notes,
           -- Determine maintained_by based on service_vendor_id
           CASE 
             WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
@@ -982,12 +975,200 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      console.log('Workflow data:', workflowData);
      console.log('Maintained by will be set to:', workflowData.maintained_by);
      console.log('Service vendor ID:', workflowData.vendor_id);
+     console.log('BF01 notes:', workflowData.bf01_notes);
+     
+     // Check if this is a BF01 or BF03 breakdown with existing schedule
+     let existingAmsId = null;
+     let breakdownId = null;
+     let breakdownReasonCode = null;
+     let isBF03Postpone = false;
+     
+     // Check for BF01 breakdown
+     if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
+       // Extract breakdown ID from notes: BF01-Breakdown-{ABR_ID}
+       const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+       if (abrMatch && abrMatch[1]) {
+         breakdownId = abrMatch[1];
+         console.log('Found BF01 breakdown ID:', breakdownId);
+         
+         // Get breakdown reason code from tblAssetBRDet
+         const breakdownQuery = `
+           SELECT brd.abr_id, brd.atbrrc_id, brd.description, brc.text as breakdown_reason
+           FROM "tblAssetBRDet" brd
+           LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+           WHERE brd.abr_id = $1 AND brd.org_id = $2
+         `;
+         const breakdownResult = await pool.query(breakdownQuery, [breakdownId, orgId]);
+         if (breakdownResult.rows.length > 0) {
+           breakdownReasonCode = breakdownResult.rows[0].breakdown_reason || breakdownResult.rows[0].atbrrc_id;
+           console.log('Found breakdown reason:', breakdownReasonCode);
+         }
+       }
+       
+       // Extract existing schedule ID if present
+       if (workflowData.bf01_notes.includes('ExistingSchedule')) {
+         const match = workflowData.bf01_notes.match(/ExistingSchedule-([^-\s]+)/);
+         if (match && match[1]) {
+           existingAmsId = match[1];
+           console.log('Found BF01 with existing schedule:', existingAmsId);
+         }
+       }
+     }
+     
+     // Check for BF03 breakdown (Postpone)
+     if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF03-Breakdown')) {
+       isBF03Postpone = true;
+       console.log('Found BF03 postpone breakdown - will update wo_id only');
+       
+       // Extract breakdown ID for work order tracking
+       const abrMatch = workflowData.bf01_notes.match(/BF03-Breakdown-([A-Z0-9]+)/);
+       if (abrMatch && abrMatch[1]) {
+         breakdownId = abrMatch[1];
+         console.log('BF03 breakdown ID:', breakdownId);
+         
+         // Get breakdown reason code from tblAssetBRDet
+         const breakdownQuery = `
+           SELECT brd.abr_id, brd.atbrrc_id, brd.description, brc.text as breakdown_reason
+           FROM "tblAssetBRDet" brd
+           LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+           WHERE brd.abr_id = $1 AND brd.org_id = $2
+         `;
+         const breakdownResult = await pool.query(breakdownQuery, [breakdownId, orgId]);
+         if (breakdownResult.rows.length > 0) {
+           breakdownReasonCode = breakdownResult.rows[0].breakdown_reason || breakdownResult.rows[0].atbrrc_id;
+           console.log('Found BF03 breakdown reason:', breakdownReasonCode);
+         }
+       }
+       
+       // Extract existing schedule ID if present
+       if (workflowData.bf01_notes.includes('ExistingSchedule')) {
+         const match = workflowData.bf01_notes.match(/ExistingSchedule-([^-\s]+)/);
+         if (match && match[1]) {
+           existingAmsId = match[1];
+           console.log('Found BF03 with existing schedule:', existingAmsId);
+         }
+       }
+     }
+     
+     // Generate work order ID
+     let workOrderId = null;
+     if (breakdownId) {
+       // Format: WO-{WFAMSH_ID}-{ABR_ID}-{BREAKDOWN_REASON} for breakdown workflows
+       workOrderId = `WO-${wfamshId}-${breakdownId}`;
+       if (breakdownReasonCode) {
+         // Add breakdown reason to work order ID for reference
+         workOrderId = `${workOrderId}-${breakdownReasonCode.substring(0, 20).replace(/\s/g, '_')}`;
+       }
+       console.log('Generated work order ID for breakdown:', workOrderId);
+     } else {
+       // Format: WO-{WFAMSH_ID} for regular workflows
+       workOrderId = `WO-${wfamshId}`;
+       console.log('Generated work order ID for regular workflow:', workOrderId);
+     }
+     
+     // Decide maintenance type
+     // If any detail note contains 'breakdown', force MT004; otherwise use header value or default to MT002
+     const isBreakdown = !!workflowData.has_breakdown_note;
+     const maintTypeId = isBreakdown ? 'MT004' : (workflowData.maint_type_id || 'MT002');
+     
+     // If BF03 with existing schedule, update only wo_id
+     if (isBF03Postpone && existingAmsId) {
+       console.log('BF03 detected - Updating wo_id only for existing maintenance schedule:', existingAmsId);
+       
+       const updateQuery = `
+         UPDATE "tblAssetMaintSch"
+         SET wo_id = $1,
+             changed_by = 'system',
+             changed_on = CURRENT_TIMESTAMP
+         WHERE ams_id = $2 AND org_id = $3
+         RETURNING ams_id, wo_id
+       `;
+       
+       const updateParams = [
+         workOrderId,
+         existingAmsId,
+         orgId
+       ];
+       
+       console.log('BF03 update query params:', updateParams);
+       const updateResult = await pool.query(updateQuery, updateParams);
+       
+       if (updateResult.rows.length === 0) {
+         console.error('Failed to update existing schedule for BF03.');
+       } else {
+         console.log('BF03: wo_id updated successfully:', existingAmsId, updateResult.rows[0].wo_id);
+       }
+       
+       return existingAmsId;
+     }
+     
+     // If BF01 with existing schedule, update it instead of creating new one
+     if (existingAmsId && !isBF03Postpone) {
+       console.log('BF01 detected - Updating existing maintenance schedule:', existingAmsId);
+       
+       const updateQuery = `
+         UPDATE "tblAssetMaintSch"
+         SET act_maint_st_date = CURRENT_DATE,
+             wfamsh_id = $1,
+             maint_type_id = $2,
+             vendor_id = $3,
+             at_main_freq_id = $4,
+             maintained_by = $5,
+             changed_by = 'system',
+             changed_on = CURRENT_TIMESTAMP
+         WHERE ams_id = $6 AND org_id = $7
+         RETURNING ams_id, wo_id
+       `;
+       
+       const updateParams = [
+         workflowData.wfamsh_id,
+         maintTypeId,
+         workflowData.vendor_id,
+         workflowData.at_main_freq_id,
+         workflowData.maintained_by,
+         existingAmsId,
+         orgId
+       ];
+       
+       console.log('Update query params:', updateParams);
+       const updateResult = await pool.query(updateQuery, updateParams);
+       
+       if (updateResult.rows.length === 0) {
+         console.error('Failed to update existing schedule. Creating new one instead.');
+         // Fall through to create new record
+       } else {
+         console.log('Maintenance schedule updated successfully. wo_id remains unchanged:', existingAmsId, updateResult.rows[0].wo_id);
+         return existingAmsId;
+       }
+     }
+     
+     // Create new maintenance record (default behavior or if update failed)
+     console.log('Creating new maintenance record');
+     
+      // Get the next auto-increment ID for ams_id
+      // Get the latest ams_id and extract the numeric part
+      const maxIdQuery = `
+        SELECT MAX(
+          CASE 
+            WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
+            WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
+            ELSE 0
+          END
+        ) as max_num 
+        FROM "tblAssetMaintSch"
+      `;
+      const maxIdResult = await pool.query(maxIdQuery);
+      const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
+      const amsId = `ams${nextId.toString().padStart(3, '0')}`;
+      
+      console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
      
            // Insert maintenance record
       const insertQuery = `
         INSERT INTO "tblAssetMaintSch" (
           ams_id,
           wfamsh_id,
+          wo_id,
           asset_id,
           maint_type_id,
           vendor_id,
@@ -999,17 +1180,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
           created_by,
           created_on,
           org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13)
       `;
-      
-      // Decide maintenance type
-      // If any detail note contains 'breakdown', force MT004; otherwise use header value or default to MT002
-      const isBreakdown = !!workflowData.has_breakdown_note;
-      const maintTypeId = isBreakdown ? 'MT004' : (workflowData.maint_type_id || 'MT002');
       
       const insertParams = [
         amsId,
         workflowData.wfamsh_id,
+        workOrderId, // Work order ID with breakdown information
         workflowData.asset_id,
         maintTypeId,
         workflowData.vendor_id,

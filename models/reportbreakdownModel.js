@@ -189,20 +189,10 @@ const createBreakdownReport = async (breakdownData) => {
     };
 
     if (decision_code === 'BF01') {
-      // Prepone: tie to current maintenance schedule when present, otherwise create new
-      if (existingSchedule) {
-        const updateRes = await client.query(
-          `UPDATE "tblAssetMaintSch"
-           SET act_maint_st_date = $1,
-               wo_id = $2,
-               changed_on = CURRENT_TIMESTAMP
-           WHERE ams_id = $3
-           RETURNING *`,
-          [nowISODateOnly, appendWorkOrderNote(existingSchedule.wo_id, abr_id), existingSchedule.ams_id]
-        );
-        maintenanceResult = updateRes.rows[0];
-      } else if (hasWorkflow) {
-        // Create workflow H/D entries
+      // Prepone: create workflow if required, or direct schedule if no workflow
+      // Always create workflow even if existing schedule exists (for approval process)
+      if (hasWorkflow) {
+        // Create workflow H/D entries for BF01
         // Determine frequency/maint_type if available
         let at_main_freq_id = null;
         let maint_type_id = null;
@@ -228,7 +218,7 @@ const createBreakdownReport = async (breakdownData) => {
           org_id,
           isBreakdown: true
         });
-        // Create first detail step as IN, others PD
+        // Create first detail step as AP (Approval Pending), others IN (Inactive)
         const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
         for (let i = 0; i < seqsRes.rows.length; i++) {
           const seq = seqsRes.rows[i];
@@ -236,6 +226,10 @@ const createBreakdownReport = async (breakdownData) => {
           // Fetch approvers for step
           const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
           const firstDetailStatus = i === 0 ? 'AP' : 'IN';
+          // Add BF01 marker to notes to identify this as a prepone breakdown
+          const noteText = existingSchedule 
+            ? `BF01-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
+            : `BF01-Breakdown-${abr_id}`;
           await msModel.insertWorkflowMaintenanceScheduleDetail({
             wfamsd_id,
             wfamsh_id: headerRes.rows[0].wfamsh_id,
@@ -244,14 +238,26 @@ const createBreakdownReport = async (breakdownData) => {
             dept_id: jobRolesRes.rows[0]?.dept_id || null,
             sequence: seq.seqs_no,
             status: firstDetailStatus,
-            notes: `Breakdown ${abr_id}`,
+            notes: noteText,
             created_by: reported_by,
             org_id
           });
         }
         maintenanceResult = headerRes.rows[0];
+      } else if (existingSchedule) {
+        // No workflow but existing schedule: update the existing schedule directly
+        // Note: wo_id is not updated, only the maintenance date is preponed
+        const updateRes = await client.query(
+          `UPDATE "tblAssetMaintSch"
+           SET act_maint_st_date = $1,
+               changed_on = CURRENT_TIMESTAMP
+           WHERE ams_id = $2
+           RETURNING *`,
+          [nowISODateOnly, existingSchedule.ams_id]
+        );
+        maintenanceResult = updateRes.rows[0];
       } else {
-        // Direct create schedule in AMS
+        // No workflow and no existing schedule: create direct schedule in AMS
         const ams_id = await msModel.getNextAMSId();
         const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
           ams_id,
@@ -334,17 +340,68 @@ const createBreakdownReport = async (breakdownData) => {
         maintenanceResult = insertDirectRes.rows[0];
       }
     } else if (decision_code === 'BF03') {
-      // Postpone: only update work order of existing IN schedule if present
-      if (existingSchedule) {
-        const updateRes = await client.query(
-          `UPDATE "tblAssetMaintSch"
-           SET wo_id = $1,
-               changed_on = CURRENT_TIMESTAMP
-           WHERE ams_id = $2
-           RETURNING *`,
-          [appendWorkOrderNote(existingSchedule.wo_id, abr_id), existingSchedule.ams_id]
-        );
-        maintenanceResult = updateRes.rows[0];
+      // Postpone: Create workflow for approval without immediate changes to schedule
+      if (hasWorkflow) {
+        // Create workflow for BF03 postpone breakdown
+        let at_main_freq_id = null;
+        let maint_type_id = null;
+        if (assetRow && assetRow.asset_type_id) {
+          const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
+          if (freqRes.rows && freqRes.rows.length > 0) {
+            at_main_freq_id = freqRes.rows[0].at_main_freq_id;
+            maint_type_id = freqRes.rows[0].maint_type_id;
+          }
+        }
+        
+        const wfamsh_id = await msModel.getNextWFAMSHId();
+        
+        // Create workflow header with BF03 postpone information
+        const noteText = existingSchedule 
+          ? `BF03-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
+          : `BF03-Breakdown-${abr_id}`;
+        
+        const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
+          wfamsh_id,
+          at_main_freq_id,
+          maint_type_id: 'MT004', // Breakdown maintenance
+          asset_id,
+          group_id: null,
+          vendor_id: assetRow ? assetRow.service_vendor_id : null,
+          pl_sch_date: nowDate,
+          act_sch_date: nowDate,
+          status: 'IP',
+          created_by: reported_by,
+          org_id,
+          isBreakdown: true
+        });
+        
+        // Create workflow details for each approver
+        const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
+        for (let i = 0; i < seqsRes.rows.length; i++) {
+          const seq = seqsRes.rows[i];
+          const wfamsd_id = await msModel.getNextWFAMSDId();
+          const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
+          const firstDetailStatus = i === 0 ? 'AP' : 'IN';
+          
+          await msModel.insertWorkflowMaintenanceScheduleDetail({
+            wfamsd_id,
+            wfamsh_id: headerRes.rows[0].wfamsh_id,
+            job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
+            user_id: jobRolesRes.rows[0]?.emp_int_id || null,
+            dept_id: jobRolesRes.rows[0]?.dept_id || null,
+            sequence: seq.seqs_no,
+            status: firstDetailStatus,
+            notes: noteText,
+            created_by: reported_by,
+            org_id
+          });
+        }
+        maintenanceResult = headerRes.rows[0];
+      } else {
+        // No workflow: Just return existing schedule without changes
+        if (existingSchedule) {
+          maintenanceResult = existingSchedule;
+        }
       }
     }
 

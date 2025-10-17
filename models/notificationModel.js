@@ -1,11 +1,12 @@
 const pool = require('../config/db');
 
 const getMaintenanceNotifications = async (orgId = 'ORG001') => {
+  // ROLE-BASED WORKFLOW: Fetch all users with the required job role
   const query = `
     SELECT 
       wfd.wfamsd_id,
       wfd.wfamsh_id,
-      wfd.user_id,
+      wfd.job_role_id,
       wfd.sequence,
       wfd.status as detail_status,
       wfh.pl_sch_date,
@@ -16,6 +17,9 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
       at.text as asset_type_name,
       COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       mt.text as maint_type_name,
+      jr.text as job_role_name,
+      u.user_id,
+      u.emp_int_id,
       u.full_name as user_name,
       u.email,
       -- Calculate cutoff date: pl_sch_date - maint_lead_type
@@ -29,12 +33,16 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-    LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+    LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+    -- Join with all users who have this job role
+    LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+    LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
     WHERE wfd.org_id = $1 
       AND wfd.status IN ('IN', 'IP', 'AP')
       AND wfh.status IN ('IN', 'IP')
-      AND wfd.user_id IS NOT NULL
-    ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC
+      AND wfd.job_role_id IS NOT NULL
+      AND u.int_status = 1
+    ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
   try {
     const result = await pool.query(query, [orgId]);
@@ -48,6 +56,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
 };
 
 const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => {
+  // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
   const query = `
     SELECT DISTINCT
       wfh.wfamsh_id,
@@ -62,10 +71,9 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
       COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
       COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
-      -- Get the current action user (person with AP or UA status) - simplified approach
-      COALESCE(current_action_user.full_name, 'Unknown User') as current_action_user_name,
-      COALESCE(current_action_user.emp_int_id::text, current_action_user.user_id::text) as current_action_user_id,
-      current_action_user.email as current_action_user_email,
+      -- Get the current action role and users
+      COALESCE(current_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
+      current_action_role.job_role_id as current_action_role_id,
       -- Calculate cutoff date: pl_sch_date - maint_lead_type
       (wfh.pl_sch_date - INTERVAL '1 day' * CAST(
         CASE 
@@ -86,36 +94,33 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-    -- Simplified current action user subquery
+    -- Get current action role (workflow step with AP status)
     LEFT JOIN (
       SELECT 
-        wfd2.wfamsh_id, 
-        wfd2.user_id,
-        COALESCE(u2.full_name, u3.full_name, 'Unknown User') as full_name,
-        COALESCE(u2.email, u3.email) as email,
-        COALESCE(u2.emp_int_id::text, u3.emp_int_id::text, wfd2.user_id::text) as emp_int_id
+        wfd2.wfamsh_id,
+        wfd2.job_role_id,
+        jr2.text as job_role_name
       FROM "tblWFAssetMaintSch_D" wfd2
-      LEFT JOIN "tblUsers" u2 ON wfd2.user_id = u2.user_id
-      LEFT JOIN "tblUsers" u3 ON wfd2.user_id = u3.emp_int_id
-      WHERE wfd2.status IN ('AP', 'UA')
+      LEFT JOIN "tblJobRoles" jr2 ON wfd2.job_role_id = jr2.job_role_id
+      WHERE wfd2.status IN ('AP', 'IN')
         AND wfd2.wfamsd_id = (
           SELECT MAX(wfd3.wfamsd_id)
           FROM "tblWFAssetMaintSch_D" wfd3
           WHERE wfd3.wfamsh_id = wfd2.wfamsh_id
-            AND wfd3.status IN ('AP', 'UA')
+            AND wfd3.status IN ('AP', 'IN')
         )
-    ) current_action_user ON wfh.wfamsh_id = current_action_user.wfamsh_id
-    -- Check if the requesting employee is involved in this workflow
+    ) current_action_role ON wfh.wfamsh_id = current_action_role.wfamsh_id
+    -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
       AND wfh.status IN ('IN', 'IP', 'CO')
       AND EXISTS (
-        SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
-        LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
+        SELECT 1 
+        FROM "tblWFAssetMaintSch_D" wfd
+        INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+        INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
-          AND (
-            (u.emp_int_id = $2 AND u.emp_int_id IS NOT NULL) OR
-            (wfd.user_id = $2)
-          )
+          AND u.emp_int_id = $2
+          AND u.int_status = 1
           AND wfd.status IN ('IN', 'IP', 'AP', 'UA', 'UR')
       )
     ORDER BY wfh.pl_sch_date ASC

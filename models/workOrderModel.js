@@ -82,7 +82,41 @@ const getAllWorkOrders = async (orgId = 'ORG001') => {
                   AND wfd.status = 'UA'
                 ORDER BY wfd.sequence DESC, wfd.created_on DESC
                 LIMIT 1
-            ) as approval_date
+            ) as approval_date,
+            -- Get breakdown information if this is a breakdown maintenance
+            (
+                SELECT json_build_object(
+                    'abr_id', brd.abr_id,
+                    'breakdown_reason_code', brd.atbrrc_id,
+                    'breakdown_reason', brc.text,
+                    'breakdown_description', brd.description,
+                    'decision_code', brd.decision_code,
+                    'reported_by', brd.reported_by,
+                    'reported_on', brd.created_on
+                )
+                FROM "tblAssetBRDet" brd
+                LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+                WHERE brd.asset_id = ams.asset_id
+                  AND brd.org_id = ams.org_id
+                  AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                  AND (
+                    -- Method 1: Match by wo_id containing abr_id
+                    (ams.wo_id IS NOT NULL AND ams.wo_id ILIKE '%' || brd.abr_id || '%')
+                    OR
+                    -- Method 2: Match by workflow notes containing abr_id
+                    (ams.wfamsh_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+                        WHERE wfd.wfamsh_id = ams.wfamsh_id
+                          AND wfd.org_id = ams.org_id
+                          AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+                    ))
+                    OR
+                    -- Method 3: For breakdown maintenance (MT004), get most recent breakdown
+                    (ams.maint_type_id = 'MT004')
+                  )
+                ORDER BY brd.created_on DESC
+                LIMIT 1
+            ) as breakdown_info
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
@@ -90,7 +124,7 @@ const getAllWorkOrders = async (orgId = 'ORG001') => {
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         WHERE ams.org_id = $1 AND ams.status = 'IN' AND ams.maintained_by = 'Vendor'
         ORDER BY ams.created_on DESC
-    `;
+`;
     
     return await db.query(query, [orgId]);
 };
@@ -177,7 +211,41 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001') => {
                   AND wfd.status = 'UA'
                 ORDER BY wfd.sequence DESC, wfd.created_on DESC
                 LIMIT 1
-            ) as approval_date
+            ) as approval_date,
+            -- Get breakdown information if this is a breakdown maintenance
+            (
+                SELECT json_build_object(
+                    'abr_id', brd.abr_id,
+                    'breakdown_reason_code', brd.atbrrc_id,
+                    'breakdown_reason', brc.text,
+                    'breakdown_description', brd.description,
+                    'decision_code', brd.decision_code,
+                    'reported_by', brd.reported_by,
+                    'reported_on', brd.created_on
+                )
+                FROM "tblAssetBRDet" brd
+                LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+                WHERE brd.asset_id = ams.asset_id
+                  AND brd.org_id = ams.org_id
+                  AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                  AND (
+                    -- Method 1: Match by wo_id containing abr_id
+                    (ams.wo_id IS NOT NULL AND ams.wo_id ILIKE '%' || brd.abr_id || '%')
+                    OR
+                    -- Method 2: Match by workflow notes containing abr_id
+                    (ams.wfamsh_id IS NOT NULL AND EXISTS (
+                        SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+                        WHERE wfd.wfamsh_id = ams.wfamsh_id
+                          AND wfd.org_id = ams.org_id
+                          AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+                    ))
+                    OR
+                    -- Method 3: For breakdown maintenance (MT004), get most recent breakdown
+                    (ams.maint_type_id = 'MT004')
+                  )
+                ORDER BY brd.created_on DESC
+                LIMIT 1
+            ) as breakdown_info
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id

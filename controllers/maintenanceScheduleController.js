@@ -405,11 +405,13 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 
                                 console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                                 
+                                // ROLE-BASED WORKFLOW: Store only job_role_id, not user_id
+                                // This allows all users with this role to receive notifications and approve
                                 const scheduleDetailData = {
                                     wfamsd_id: wfamsdId,
                                     wfamsh_id: wfamshId,
                                     job_role_id: jobRole.job_role_id,
-                                    user_id: jobRole.emp_int_id, // Use emp_int_id from tblWFJobRole
+                                    user_id: null, // Changed: No specific user, role-based instead
                                     dept_id: jobRole.dept_id,
                                     sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
                                     status: status, // 'AP' for sequence 10, 'IN' for others
@@ -419,7 +421,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 };
                                 
                                 await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                                console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, user ${jobRole.emp_int_id}, status: ${status}`);
+                                console.log(`Created workflow maintenance schedule detail (ROLE-BASED): ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, status: ${status}`);
                                 totalDetailsCreated++;
                             }
                         }

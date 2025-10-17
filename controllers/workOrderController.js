@@ -80,7 +80,10 @@ const getAllWorkOrders = async (req, res) => {
                 contact_person: row.contact_person_name,
                 email: row.vendor_email,
                 phone: row.vendor_phone
-            }
+            },
+            
+            // Breakdown Details (if applicable)
+            breakdown_info: row.breakdown_info || null
         }));
         
         console.log(`Successfully fetched ${formattedData.length} work orders with status 'IN' and maintained_by 'Vendor'`);
@@ -191,7 +194,10 @@ const getWorkOrderById = async (req, res) => {
                 contact_person: workOrder.contact_person_name,
                 email: workOrder.vendor_email,
                 phone: workOrder.vendor_phone
-            }
+            },
+            
+            // Breakdown Details (if applicable)
+            breakdown_info: workOrder.breakdown_info || null
         };
         
         console.log(`Successfully fetched work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);

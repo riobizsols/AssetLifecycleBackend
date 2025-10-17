@@ -39,12 +39,13 @@ const sendResetEmail = async (to, token) => {
 };
 
 // Import email service functions
-const { sendWelcomeEmail, sendRoleAssignmentEmail } = require('../services/emailService');
+const { sendWelcomeEmail, sendRoleAssignmentEmail, sendWorkflowNotificationToRole } = require('../services/emailService');
 
 module.exports = { 
     sendResetEmail,
     sendWelcomeEmail,
-    sendRoleAssignmentEmail
+    sendRoleAssignmentEmail,
+    sendWorkflowNotificationToRole
 };
 
 

@@ -429,6 +429,21 @@ const getNextAMSId = async () => {
     return `ams${nextId.toString().padStart(3, '0')}`;
 };
 
+// Generate work order ID for maintenance schedule
+const generateWorkOrderId = (ams_id, wfamsh_id = null, abr_id = null, breakdown_reason = null) => {
+    if (wfamsh_id && abr_id) {
+        // Format: WO-{WFAMSH_ID}-{ABR_ID}-{BREAKDOWN_REASON}
+        let workOrderId = `WO-${wfamsh_id}-${abr_id}`;
+        if (breakdown_reason) {
+            workOrderId = `${workOrderId}-${breakdown_reason.substring(0, 20).replace(/\s/g, '_')}`;
+        }
+        return workOrderId;
+    } else {
+        // Format: WO-{AMS_ID} for direct schedules
+        return `WO-${ams_id}`;
+    }
+};
+
 // Insert direct maintenance schedule (bypassing workflow)
 const insertDirectMaintenanceSchedule = async (scheduleData) => {
     const {
@@ -445,10 +460,14 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
         org_id
     } = scheduleData;
     
+    // Auto-generate work order ID
+    const wo_id = generateWorkOrderId(ams_id);
+    
     const query = `
         INSERT INTO "tblAssetMaintSch" (
             ams_id,
             wfamsh_id,
+            wo_id,
             asset_id,
             maint_type_id,
             vendor_id,
@@ -460,12 +479,13 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             created_by,
             created_on,
             org_id
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, $11)
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12)
         RETURNING *
     `;
     
     const values = [
         ams_id,
+        wo_id,
         asset_id,
         maint_type_id,
         vendor_id,
@@ -500,5 +520,6 @@ module.exports = {
     updateMaintenanceSchedule,
     checkAssetTypeWorkflow,
     getNextAMSId,
+    generateWorkOrderId,
     insertDirectMaintenanceSchedule
 }; 
