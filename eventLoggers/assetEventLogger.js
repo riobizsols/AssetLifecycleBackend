@@ -219,6 +219,218 @@ async function logInsertingAssetProperties(options) {
     });
 }
 
+/**
+ * Log document upload API called (INFO)
+ */
+async function logDocumentUploadApiCalled(options) {
+    const { assetId, fileName, fileSize, mimeType, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'API_CALL',
+        module: 'AssetDocsController',
+        message: `INFO: Document upload API called for asset ${assetId}`,
+        logLevel: 'INFO',
+        requestData: { 
+            asset_id: assetId,
+            file_name: fileName,
+            file_size: fileSize,
+            mime_type: mimeType,
+            operation: 'uploadDocument'
+        },
+        responseData: { status: 'Processing file upload' },
+        duration: null,
+        userId
+    });
+}
+
+/**
+ * Log uploading file to MinIO (INFO)
+ */
+async function logUploadingToMinIO(options) {
+    const { assetId, fileName, objectName, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'FILE_UPLOAD',
+        module: 'AssetDocsController',
+        message: `INFO: Uploading file to MinIO storage`,
+        logLevel: 'INFO',
+        requestData: { 
+            asset_id: assetId,
+            file_name: fileName,
+            object_name: objectName,
+            storage: 'MinIO'
+        },
+        responseData: { status: 'Uploading to object storage' },
+        duration: null,
+        userId
+    });
+}
+
+/**
+ * Log file uploaded to MinIO successfully (INFO)
+ */
+async function logFileUploadedToMinIO(options) {
+    const { assetId, fileName, objectName, fileSize, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'FILE_UPLOAD',
+        module: 'AssetDocsController',
+        message: `INFO: File uploaded to MinIO successfully`,
+        logLevel: 'INFO',
+        requestData: { 
+            asset_id: assetId,
+            file_name: fileName,
+            file_size: fileSize
+        },
+        responseData: { 
+            uploaded: true,
+            object_name: objectName,
+            storage_bucket: 'assetlifecycle'
+        },
+        duration: null,
+        userId
+    });
+}
+
+/**
+ * Log inserting document metadata to database (INFO)
+ */
+async function logInsertingDocumentMetadata(options) {
+    const { documentId, assetId, docTypeName, docPath, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'DB_QUERY',
+        module: 'AssetDocsController',
+        message: `INFO: Inserting document metadata to database`,
+        logLevel: 'INFO',
+        requestData: { 
+            document_id: documentId,
+            asset_id: assetId,
+            doc_type_name: docTypeName,
+            doc_path: docPath,
+            query: 'INSERT INTO tblAssetDocs'
+        },
+        responseData: { status: 'Inserting document metadata' },
+        duration: null,
+        userId
+    });
+}
+
+/**
+ * Log document uploaded successfully (INFO)
+ */
+async function logDocumentUploaded(options) {
+    const { documentId, assetId, fileName, docTypeName, userId, duration } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'DOCUMENT_UPLOAD',
+        module: 'AssetDocsController',
+        message: `INFO: Document uploaded successfully - ${fileName}`,
+        logLevel: 'INFO',
+        requestData: { 
+            asset_id: assetId,
+            file_name: fileName,
+            doc_type_name: docTypeName
+        },
+        responseData: { 
+            success: true,
+            document_id: documentId,
+            uploadComplete: true
+        },
+        duration,
+        userId
+    });
+}
+
+/**
+ * Log document upload error (ERROR)
+ */
+async function logDocumentUploadError(options) {
+    const { assetId, fileName, error, userId, duration } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'DOCUMENT_UPLOAD',
+        module: 'AssetDocsController',
+        message: `ERROR: Document upload failed - ${error.message}`,
+        logLevel: 'ERROR',
+        requestData: { 
+            asset_id: assetId,
+            file_name: fileName
+        },
+        responseData: { 
+            error: error.message,
+            uploadFailed: true
+        },
+        duration,
+        userId
+    });
+}
+
+// ==================== GENERIC LOGGING HELPERS ====================
+
+/**
+ * Generic API call logger (INFO)
+ */
+async function logApiCall(options) {
+    const { operation, method, url, requestData, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'API_CALL',
+        module: 'AssetController',
+        message: `INFO: ${method} ${url} - ${operation}`,
+        logLevel: 'INFO',
+        requestData: { operation, method, url, ...requestData },
+        responseData: { status: 'processing' },
+        duration: null,
+        userId
+    });
+}
+
+/**
+ * Generic operation success logger (INFO)
+ */
+async function logOperationSuccess(options) {
+    const { operation, requestData, responseData, duration, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'ASSET_OPERATION',
+        module: 'AssetController',
+        message: `INFO: ${operation} completed successfully`,
+        logLevel: 'INFO',
+        requestData,
+        responseData: { success: true, ...responseData },
+        duration,
+        userId
+    });
+}
+
+/**
+ * Generic operation error logger (ERROR)
+ */
+async function logOperationError(options) {
+    const { operation, requestData, error, duration, userId } = options;
+    
+    await eventLogger.logEvent({
+        appId: 'ASSETS',
+        eventType: 'ASSET_OPERATION',
+        module: 'AssetController',
+        message: `ERROR: ${operation} failed - ${error.message}`,
+        logLevel: 'ERROR',
+        requestData,
+        responseData: { error: error.message, code: error.code },
+        duration,
+        userId
+    });
+}
+
 // ==================== INFO LEVEL EVENTS ====================
 
 /**
@@ -523,7 +735,11 @@ async function logDatabaseConnectionFailure(options) {
 }
 
 module.exports = {
-    // Detailed flow logging
+    // Generic helpers (use for any operation)
+    logApiCall,
+    logOperationSuccess,
+    logOperationError,
+    // Detailed flow logging - Asset Creation
     logAssetCreationApiCalled,
     logCheckingAssetType,
     logCheckingVendor,
@@ -533,6 +749,13 @@ module.exports = {
     logInsertingAssetToDatabase,
     logAssetInsertedToDatabase,
     logInsertingAssetProperties,
+    // Detailed flow logging - Document Upload
+    logDocumentUploadApiCalled,
+    logUploadingToMinIO,
+    logFileUploadedToMinIO,
+    logInsertingDocumentMetadata,
+    logDocumentUploaded,
+    logDocumentUploadError,
     // INFO
     logAssetCreated,
     logAssetsRetrieved,

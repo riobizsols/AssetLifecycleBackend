@@ -1,10 +1,35 @@
 const model = require('../models/assetWorkflowHistoryModel');
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 // Get asset workflow history with filtering
 const getAssetWorkflowHistory = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const APP_ID = 'ASSETWORKFLOWHISTORY';
+    
     try {
         const orgId = req.query.orgId || 'ORG001';
         const filters = { ...req.body, ...req.query };
+        
+        // Log API called
+        await logReportApiCall({
+            appId: APP_ID,
+            operation: 'Get Asset Workflow History Report',
+            method: req.method,
+            url: req.originalUrl,
+            requestData: { orgId, hasFilters: Object.keys(filters).length > 2 },
+            userId
+        });
         
         // Map frontend field names to backend field names
         if (filters.workOrderId) {
@@ -165,6 +190,39 @@ const getAssetWorkflowHistory = async (req, res) => {
             latest_action_by: record.latest_action_by
         }));
         
+        const recordCount = formattedData.length;
+        
+        // Log no data or success
+        if (recordCount === 0) {
+            await logNoDataFound({
+                appId: APP_ID,
+                reportType: 'Asset Workflow History',
+                filters,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportDataRetrieved({
+                appId: APP_ID,
+                reportType: 'Asset Workflow History',
+                recordCount,
+                filters,
+                duration: Date.now() - startTime,
+                userId
+            });
+            
+            // Warn if large result set
+            if (totalCount > 1000) {
+                await logLargeResultSet({
+                    appId: APP_ID,
+                    reportType: 'Asset Workflow History',
+                    recordCount: totalCount,
+                    threshold: 1000,
+                    userId
+                });
+            }
+        }
+        
         res.json({
             success: true,
             data: formattedData,
@@ -181,6 +239,38 @@ const getAssetWorkflowHistory = async (req, res) => {
         
     } catch (error) {
         console.error('Error in getAssetWorkflowHistory:', error);
+        
+        // Determine error level
+        const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+        
+        if (error.code === 'ECONNREFUSED') {
+            await logDatabaseConnectionFailure({
+                appId: APP_ID,
+                reportType: 'Asset Workflow History',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else if (isDbError) {
+            await logDatabaseQueryError({
+                appId: APP_ID,
+                reportType: 'Asset Workflow History',
+                query: 'getAssetWorkflowHistory',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportGenerationError({
+                appId: APP_ID,
+                reportType: 'Asset Workflow History',
+                error,
+                filters: req.query,
+                userId,
+                duration: Date.now() - startTime
+            });
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Failed to fetch asset workflow history',

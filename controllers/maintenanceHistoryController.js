@@ -1,7 +1,22 @@
 const model = require('../models/maintenanceHistoryModel');
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 // Get maintenance history with filtering
 const getMaintenanceHistory = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const APP_ID = 'MAINTENANCEHISTORY';
+    
     try {
         const orgId = req.query.orgId || 'ORG001';
         const {
@@ -19,6 +34,16 @@ const getMaintenanceHistory = async (req, res) => {
             page = 1,
             limit = 50
         } = req.query;
+
+        // Log API called
+        await logReportApiCall({
+            appId: APP_ID,
+            operation: 'Get Maintenance History Report',
+            method: req.method,
+            url: req.originalUrl,
+            requestData: { orgId, page, limit },
+            userId
+        });
 
         // Build filters object
         const filters = {};
@@ -58,6 +83,28 @@ const getMaintenanceHistory = async (req, res) => {
         filters.limit = limitNum;
         filters.offset = offset;
 
+        // Log filters applied
+        const appliedFilters = Object.keys(filters).filter(key => 
+            filters[key] !== null && !['limit', 'offset'].includes(key)
+        );
+        
+        if (appliedFilters.length > 0) {
+            await logReportFiltersApplied({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                filters: Object.fromEntries(appliedFilters.map(key => [key, filters[key]])),
+                userId
+            });
+        }
+
+        // Log data retrieval started
+        await logReportDataRetrieval({
+            appId: APP_ID,
+            reportType: 'Maintenance History',
+            filters,
+            userId
+        });
+
         // Get maintenance history and count
         const [historyResult, countResult] = await Promise.all([
             model.getMaintenanceHistory(filters, orgId),
@@ -66,6 +113,7 @@ const getMaintenanceHistory = async (req, res) => {
 
         const totalCount = parseInt(countResult.rows[0].total_count);
         const totalPages = Math.ceil(totalCount / limitNum);
+        const recordCount = historyResult.rows?.length || 0;
 
         // Format the response
         const formattedData = historyResult.rows.map(record => ({
@@ -113,6 +161,37 @@ const getMaintenanceHistory = async (req, res) => {
             vendor_address: record.vendor_address
         }));
 
+        // Log no data or success
+        if (recordCount === 0) {
+            await logNoDataFound({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                filters,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportDataRetrieved({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                recordCount,
+                filters,
+                duration: Date.now() - startTime,
+                userId
+            });
+            
+            // Warn if large result set
+            if (totalCount > 1000) {
+                await logLargeResultSet({
+                    appId: APP_ID,
+                    reportType: 'Maintenance History',
+                    recordCount: totalCount,
+                    threshold: 1000,
+                    userId
+                });
+            }
+        }
+
         res.json({
             success: true,
             message: 'Maintenance history retrieved successfully',
@@ -131,6 +210,38 @@ const getMaintenanceHistory = async (req, res) => {
 
     } catch (error) {
         console.error('Error in getMaintenanceHistory:', error);
+        
+        // Determine error level
+        const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+        
+        if (error.code === 'ECONNREFUSED') {
+            await logDatabaseConnectionFailure({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else if (isDbError) {
+            await logDatabaseQueryError({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                query: 'getMaintenanceHistory',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportGenerationError({
+                appId: APP_ID,
+                reportType: 'Maintenance History',
+                error,
+                filters: req.query,
+                userId,
+                duration: Date.now() - startTime
+            });
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Failed to retrieve maintenance history',

@@ -1,7 +1,22 @@
 const assetRegisterModel = require("../models/assetRegisterModel");
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 // Get asset register data with filters
 const getAssetRegister = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  const APP_ID = 'ASSETREPORT';
+  
   try {
     const {
       assetId,
@@ -21,6 +36,20 @@ const getAssetRegister = async (req, res) => {
       limit = 1000,
       offset = 0
     } = req.query;
+
+    // Step 1: Log API called
+    await logReportApiCall({
+      appId: APP_ID,
+      operation: 'Get Asset Register Report',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { 
+        hasFilters: Object.keys(req.query).length > 2,
+        limit, 
+        offset 
+      },
+      userId
+    });
 
     // Parse array parameters
     const filters = {
@@ -42,11 +71,66 @@ const getAssetRegister = async (req, res) => {
       offset: parseInt(offset)
     };
 
+    // Step 2: Log filters applied
+    const appliedFilters = Object.keys(filters).filter(key => 
+      filters[key] !== null && key !== 'limit' && key !== 'offset'
+    );
+    
+    if (appliedFilters.length > 0) {
+      await logReportFiltersApplied({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        filters: Object.fromEntries(appliedFilters.map(key => [key, filters[key]])),
+        userId
+      });
+    }
+
+    // Step 3: Log data retrieval started
+    await logReportDataRetrieval({
+      appId: APP_ID,
+      reportType: 'Asset Register',
+      filters,
+      userId
+    });
+
     // Get data and count
     const [data, count] = await Promise.all([
       assetRegisterModel.getAssetRegisterData(filters),
       assetRegisterModel.getAssetRegisterCount(filters)
     ]);
+
+    const recordCount = data.rows?.length || 0;
+
+    // Step 4: Log no data or success
+    if (recordCount === 0) {
+      await logNoDataFound({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        filters,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      await logReportDataRetrieved({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        recordCount,
+        filters,
+        duration: Date.now() - startTime,
+        userId
+      });
+      
+      // Step 5: Warn if large result set
+      if (parseInt(count) > 1000) {
+        await logLargeResultSet({
+          appId: APP_ID,
+          reportType: 'Asset Register',
+          recordCount: parseInt(count),
+          threshold: 1000,
+          userId
+        });
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -61,6 +145,41 @@ const getAssetRegister = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAssetRegister:", error);
+    
+    // Determine error level
+    const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    if (error.code === 'ECONNREFUSED') {
+      // CRITICAL: Database connection failure
+      await logDatabaseConnectionFailure({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else if (isDbError) {
+      // ERROR: Database query error
+      await logDatabaseQueryError({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        query: 'getAssetRegisterData',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      // ERROR: General report error
+      await logReportGenerationError({
+        appId: APP_ID,
+        reportType: 'Asset Register',
+        error,
+        filters: req.query,
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: "Error retrieving asset register data",

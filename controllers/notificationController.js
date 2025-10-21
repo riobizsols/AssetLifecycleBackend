@@ -70,13 +70,13 @@ const getUserNotifications = async (req, res) => {
     const formattedNotifications = notifications.map(notification => ({
       id: notification.wfamsh_id, // Use wfamsh_id as unique identifier
       wfamshId: notification.wfamsh_id,
-      userId: notification.current_action_user_id,
+      userId: notification.current_action_role_id, // ROLE-BASED: Use role ID instead of user ID
       status: 'AP', // Current action user always has AP status
       dueDate: notification.pl_sch_date,
       assetId: notification.asset_id,
       assetTypeName: notification.asset_type_name,
-      userName: notification.current_action_user_name, // Show current action user
-      userEmail: notification.current_action_user_email,
+      userName: notification.current_action_role_name || 'Unassigned', // ROLE-BASED: Show role name
+      userEmail: null, // Roles don't have emails
       cutoffDate: notification.cutoff_date,
       daysUntilDue: Math.floor(notification.days_until_due || 0),
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),

@@ -1,7 +1,22 @@
 const assetLifecycleModel = require("../models/assetLifecycleModel");
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 // Get asset lifecycle data with filters
 const getAssetLifecycle = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  const APP_ID = 'ASSETLIFECYCLEREPORT';
+  
   try {
     console.log('🔍 [AssetLifecycleController] Raw query parameters:', req.query);
     
@@ -20,6 +35,20 @@ const getAssetLifecycle = async (req, res) => {
       limit = 1000,
       offset = 0
     } = req.query;
+
+    // Step 1: Log API called
+    await logReportApiCall({
+      appId: APP_ID,
+      operation: 'Get Asset Lifecycle Report',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { 
+        hasFilters: Object.keys(req.query).length > 2,
+        limit, 
+        offset 
+      },
+      userId
+    });
 
     // Parse array parameters - handle both single values and arrays
     const parseArrayParam = (param) => {
@@ -46,11 +75,67 @@ const getAssetLifecycle = async (req, res) => {
     
     console.log('🔍 [AssetLifecycleController] Parsed filters:', JSON.stringify(filters, null, 2));
 
+    // Step 2: Log filters applied
+    const appliedFilters = Object.keys(filters).filter(key => 
+      filters[key] !== null && key !== 'limit' && key !== 'offset'
+    );
+    
+    if (appliedFilters.length > 0) {
+      await logReportFiltersApplied({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        filters: Object.fromEntries(appliedFilters.map(key => [key, filters[key]])),
+        userId
+      });
+    }
+
+    // Step 3: Log data retrieval started
+    await logReportDataRetrieval({
+      appId: APP_ID,
+      reportType: 'Asset Lifecycle',
+      filters,
+      userId
+    });
+
     // Get data and count
     const [data, count] = await Promise.all([
       assetLifecycleModel.getAssetLifecycleData(filters),
       assetLifecycleModel.getAssetLifecycleCount(filters)
     ]);
+
+    const recordCount = data.rows?.length || 0;
+
+    // Step 4: Log no data or success
+    if (recordCount === 0) {
+      await logNoDataFound({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        filters,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      // Step 5: Log success
+      await logReportDataRetrieved({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        recordCount,
+        filters,
+        duration: Date.now() - startTime,
+        userId
+      });
+      
+      // Step 6: Warn if large result set
+      if (recordCount > 1000) {
+        await logLargeResultSet({
+          appId: APP_ID,
+          reportType: 'Asset Lifecycle',
+          recordCount,
+          threshold: 1000,
+          userId
+        });
+      }
+    }
 
     res.status(200).json({
       success: true,
@@ -65,6 +150,41 @@ const getAssetLifecycle = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getAssetLifecycle:", error);
+    
+    // Determine error level
+    const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    if (error.code === 'ECONNREFUSED') {
+      // CRITICAL: Database connection failure
+      await logDatabaseConnectionFailure({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else if (isDbError) {
+      // ERROR: Database query error
+      await logDatabaseQueryError({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        query: 'getAssetLifecycleData',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      // ERROR: General report error
+      await logReportGenerationError({
+        appId: APP_ID,
+        reportType: 'Asset Lifecycle',
+        error,
+        filters: req.query,
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: "Error retrieving asset lifecycle data",

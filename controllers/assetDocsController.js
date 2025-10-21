@@ -5,6 +5,14 @@ const path = require('path');
 const { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus } = require('../models/assetDocsModel');
 const { generateCustomId } = require('../utils/idGenerator');
 const db = require('../config/db');
+const {
+    logDocumentUploadApiCalled,
+    logUploadingToMinIO,
+    logFileUploadedToMinIO,
+    logInsertingDocumentMetadata,
+    logDocumentUploaded,
+    logDocumentUploadError
+} = require('../eventLoggers/assetEventLogger');
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
@@ -12,10 +20,25 @@ const upload = multer({ storage });
 const uploadAssetDoc = [
   upload.single('file'),
   async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const body = req.body || {};
       const asset_id = body.asset_id || req.params.asset_id;
       const { dto_id, doc_type_name, org_id } = body;
+      
+      // Step 1: Log upload API called
+      if (req.file) {
+        await logDocumentUploadApiCalled({
+          assetId: asset_id,
+          fileName: req.file.originalname,
+          fileSize: req.file.size,
+          mimeType: req.file.mimetype,
+          userId
+        });
+      }
+      
       if (!req.file) return res.status(400).json({ message: 'file is required' });
       if (!asset_id || !org_id) return res.status(400).json({ message: 'asset_id and org_id are required' });
 
@@ -25,13 +48,40 @@ const uploadAssetDoc = [
       const hash = crypto.randomBytes(8).toString('hex');
       const objectName = `${org_id}/ASSET DOCUMENT/${asset_id}/${Date.now()}_${hash}${ext}`;
 
+      // Step 2: Log uploading to MinIO
+      await logUploadingToMinIO({
+        assetId: asset_id,
+        fileName: req.file.originalname,
+        objectName,
+        userId
+      });
+
       await minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
         'Content-Type': req.file.mimetype
+      });
+
+      // Step 3: Log file uploaded to MinIO
+      await logFileUploadedToMinIO({
+        assetId: asset_id,
+        fileName: req.file.originalname,
+        objectName,
+        fileSize: req.file.size,
+        userId
       });
 
       const doc_path = `${MINIO_BUCKET}/${objectName}`;
 
       const a_d_id = await generateCustomId('asset_doc', 3);
+      
+      // Step 4: Log inserting document metadata
+      await logInsertingDocumentMetadata({
+        documentId: a_d_id,
+        assetId: asset_id,
+        docTypeName: doc_type_name,
+        docPath: doc_path,
+        userId
+      });
+      
       const dbRes = await insertAssetDoc({
         a_d_id,
         asset_id,
@@ -43,9 +93,29 @@ const uploadAssetDoc = [
         org_id
       });
 
+      // Step 5: Log document uploaded successfully
+      await logDocumentUploaded({
+        documentId: a_d_id,
+        assetId: asset_id,
+        fileName: req.file.originalname,
+        docTypeName: doc_type_name,
+        userId,
+        duration: Date.now() - startTime
+      });
+
       return res.status(201).json(dbRes.rows[0]);
     } catch (err) {
       console.error('Upload failed', err);
+      
+      // Log document upload error
+      await logDocumentUploadError({
+        assetId: req.body.asset_id || req.params.asset_id,
+        fileName: req.file?.originalname || 'unknown',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(500).json({ message: 'Upload failed', error: err.message });
     }
   }

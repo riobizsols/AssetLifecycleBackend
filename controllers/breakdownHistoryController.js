@@ -1,10 +1,35 @@
 const model = require('../models/breakdownHistoryModel');
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 // Get breakdown history with filtering
 const getBreakdownHistory = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const APP_ID = 'BREAKDOWNHISTORY';
+    
     try {
         const orgId = req.query.orgId || 'ORG001';
         const filters = req.query || {};
+        
+        // Log API called
+        await logReportApiCall({
+            appId: APP_ID,
+            operation: 'Get Breakdown History Report',
+            method: req.method,
+            url: req.originalUrl,
+            requestData: { orgId, hasFilters: Object.keys(filters).length > 2 },
+            userId
+        });
         
         // Parse advancedConditions if it exists
         if (filters.advancedConditions) {
@@ -26,6 +51,28 @@ const getBreakdownHistory = async (req, res) => {
         
         console.log('Breakdown History Request:', { filters, orgId, page, limit });
         
+        // Log filters applied
+        const appliedFilters = Object.keys(filters).filter(key => 
+            filters[key] !== null && !['limit', 'offset', 'page', 'orgId'].includes(key)
+        );
+        
+        if (appliedFilters.length > 0) {
+            await logReportFiltersApplied({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                filters: Object.fromEntries(appliedFilters.map(key => [key, filters[key]])),
+                userId
+            });
+        }
+        
+        // Log data retrieval started
+        await logReportDataRetrieval({
+            appId: APP_ID,
+            reportType: 'Breakdown History',
+            filters,
+            userId
+        });
+        
         // Get breakdown history and count
         const [historyResult, countResult] = await Promise.all([
             model.getBreakdownHistory(filters, orgId),
@@ -34,6 +81,7 @@ const getBreakdownHistory = async (req, res) => {
         
         const totalCount = countResult.rows[0].total_count;
         const totalPages = Math.ceil(totalCount / limit);
+        const recordCount = historyResult.rows?.length || 0;
         
         // Format the response data
         const formattedData = historyResult.rows.map(record => ({
@@ -109,6 +157,37 @@ const getBreakdownHistory = async (req, res) => {
             group_name: record.group_name
         }));
         
+        // Log no data or success
+        if (recordCount === 0) {
+            await logNoDataFound({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                filters,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportDataRetrieved({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                recordCount,
+                filters,
+                duration: Date.now() - startTime,
+                userId
+            });
+            
+            // Warn if large result set
+            if (totalCount > 1000) {
+                await logLargeResultSet({
+                    appId: APP_ID,
+                    reportType: 'Breakdown History',
+                    recordCount: totalCount,
+                    threshold: 1000,
+                    userId
+                });
+            }
+        }
+        
         res.json({
             success: true,
             data: formattedData,
@@ -125,6 +204,38 @@ const getBreakdownHistory = async (req, res) => {
         
     } catch (error) {
         console.error('Error in getBreakdownHistory:', error);
+        
+        // Determine error level
+        const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+        
+        if (error.code === 'ECONNREFUSED') {
+            await logDatabaseConnectionFailure({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else if (isDbError) {
+            await logDatabaseQueryError({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                query: 'getBreakdownHistory',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            });
+        } else {
+            await logReportGenerationError({
+                appId: APP_ID,
+                reportType: 'Breakdown History',
+                error,
+                filters: req.query,
+                userId,
+                duration: Date.now() - startTime
+            });
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Failed to fetch breakdown history',

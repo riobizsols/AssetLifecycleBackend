@@ -1,5 +1,17 @@
 const AssetValuationModel = require('../models/assetValuationModel');
 const { exportToExcel, exportToCSV } = require('../utils/exportUtils');
+const {
+    logReportApiCall,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logReportFiltersApplied,
+    logNoDataFound,
+    logLargeResultSet,
+    logUnauthorizedReportAccess,
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
 
 class AssetValuationController {
     /**
@@ -8,9 +20,30 @@ class AssetValuationController {
      * @param {Object} res - Express response object
      */
     static async getAssetValuationData(req, res) {
+        const startTime = Date.now();
+        const userId = req.user?.user_id;
+        const APP_ID = 'ASSETVALUATION';
+        
         try {
+            // Log API called
+            await logReportApiCall({
+                appId: APP_ID,
+                operation: 'Get Asset Valuation Report',
+                method: req.method,
+                url: req.originalUrl,
+                requestData: req.query,
+                userId
+            });
+            
             // Validate required parameters
             if (!req.user?.org_id) {
+                await logUnauthorizedReportAccess({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    userId,
+                    duration: Date.now() - startTime
+                });
+                
                 return res.status(400).json({
                     success: false,
                     message: 'Organization ID is required'
@@ -82,8 +115,62 @@ class AssetValuationController {
             };
 
             // Debug logs removed for cleaner console
+            
+            // Log filters applied
+            const appliedFilters = Object.keys(filters).filter(key => 
+                filters[key] !== null && !['page', 'limit', 'sortBy', 'sortOrder'].includes(key)
+            );
+            
+            if (appliedFilters.length > 0) {
+                await logReportFiltersApplied({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    filters: Object.fromEntries(appliedFilters.map(key => [key, filters[key]])),
+                    userId
+                });
+            }
+
+            // Log data retrieval started
+            await logReportDataRetrieval({
+                appId: APP_ID,
+                reportType: 'Asset Valuation',
+                filters,
+                userId
+            });
 
             const result = await AssetValuationModel.getAssetValuationData(filters, orgId);
+            const recordCount = result.assets?.length || 0;
+
+            // Log no data or success
+            if (recordCount === 0) {
+                await logNoDataFound({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    filters,
+                    userId,
+                    duration: Date.now() - startTime
+                });
+            } else {
+                await logReportDataRetrieved({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    recordCount,
+                    filters,
+                    duration: Date.now() - startTime,
+                    userId
+                });
+                
+                // Warn if large result set
+                if (result.pagination?.total > 1000) {
+                    await logLargeResultSet({
+                        appId: APP_ID,
+                        reportType: 'Asset Valuation',
+                        recordCount: result.pagination.total,
+                        threshold: 1000,
+                        userId
+                    });
+                }
+            }
 
             res.status(200).json({
                 success: true,
@@ -96,6 +183,38 @@ class AssetValuationController {
 
         } catch (error) {
             console.error('Error in getAssetValuationData:', error);
+            
+            // Determine error level
+            const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+            
+            if (error.code === 'ECONNREFUSED') {
+                await logDatabaseConnectionFailure({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    error,
+                    userId,
+                    duration: Date.now() - startTime
+                });
+            } else if (isDbError) {
+                await logDatabaseQueryError({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    query: 'getAssetValuationData',
+                    error,
+                    userId,
+                    duration: Date.now() - startTime
+                });
+            } else {
+                await logReportGenerationError({
+                    appId: APP_ID,
+                    reportType: 'Asset Valuation',
+                    error,
+                    filters: req.query,
+                    userId,
+                    duration: Date.now() - startTime
+                });
+            }
+            
             res.status(500).json({
                 success: false,
                 message: 'Failed to retrieve asset valuation data',

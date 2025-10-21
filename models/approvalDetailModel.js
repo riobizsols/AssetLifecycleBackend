@@ -320,7 +320,17 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     console.log(`Inserted history record: ${wfamhisId} - User ${empIntId} approved workflow step`);
     
     // Find next user and update their status to AP
-    const nextUserStep = workflowDetails.find(w => w.sequence > currentUserStep.sequence);
+    // Get ALL workflow steps (not just current user's steps) to find the next approver
+    const allWorkflowStepsQuery = `
+      SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+      ORDER BY wfd.sequence ASC
+    `;
+    const allStepsResult = await pool.query(allWorkflowStepsQuery, [currentUserStep.wfamsh_id, orgId]);
+    const allWorkflowSteps = allStepsResult.rows;
+    
+    const nextUserStep = allWorkflowSteps.find(w => w.sequence > currentUserStep.sequence);
     if (nextUserStep) {
       // Update next user's status to AP (Approval Pending)
       await pool.query(
@@ -461,19 +471,14 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     
     console.log(`Inserted history record: ${wfamhisId} - User ${empIntId} rejected workflow step`);
     
-    // Find the previous approved user and update their status back to AP
+    // Find the previous approved step and update their status back to AP
+    // ROLE-BASED: Find the most recent approved step (UA status) with lower sequence
     const previousApprovedUserQuery = `
       SELECT wfd.wfamsd_id, wfd.user_id, wfd.sequence, wfd.job_role_id, wfd.dept_id, wfd.wfamsh_id
       FROM "tblWFAssetMaintSch_D" wfd
       WHERE wfd.wfamsh_id = $1 
         AND wfd.sequence < $2
         AND wfd.status = 'UA'
-        AND wfd.wfamsd_id = (
-          SELECT MAX(wfd2.wfamsd_id)
-          FROM "tblWFAssetMaintSch_D" wfd2
-          WHERE wfd2.user_id = wfd.user_id 
-            AND wfd2.wfamsh_id = wfd.wfamsh_id
-        )
       ORDER BY wfd.sequence DESC
       LIMIT 1
     `;
@@ -1468,6 +1473,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfd.notes,
         wfd.changed_by,
         wfd.changed_on,
+        wfd.job_role_id,
         wfh.pl_sch_date,
         wfh.asset_id,
         wfh.status as header_status,
@@ -1491,16 +1497,10 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        CASE 
-          WHEN u.full_name IS NOT NULL THEN u.full_name
-          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.full_name
-          ELSE 'Unknown User'
-        END as user_name,
-        CASE 
-          WHEN u.email IS NOT NULL THEN u.email
-          WHEN wfd.user_id LIKE 'EMP_INT_%' THEN u_emp.email
-          ELSE NULL
-        END as email,
+        jr.text as job_role_name,
+        -- ROLE-BASED: Always show role name (user_id is not used)
+        jr.text as user_name,
+        NULL as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
           CASE 
@@ -1524,21 +1524,13 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
       LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-      LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-      LEFT JOIN "tblUsers" u_emp ON wfd.user_id = u_emp.emp_int_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
       WHERE wfd.org_id = $1 
         AND wfd.wfamsh_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
-        AND wfd.user_id IS NOT NULL
-        AND wfd.wfamsd_id IN (
-          SELECT MAX(wfd2.wfamsd_id)
-          FROM "tblWFAssetMaintSch_D" wfd2
-          WHERE wfd2.user_id = wfd.user_id 
-            AND wfd2.wfamsh_id = wfd.wfamsh_id
-            AND wfd2.org_id = wfd.org_id
-        )
+        AND wfd.job_role_id IS NOT NULL
       ORDER BY wfd.sequence ASC
     `;
 
@@ -1582,36 +1574,47 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         });
         
         let stepStatus = 'pending';
-        let stepDescription = `Awaiting approval from ${detail.user_name}`;
+        let stepTitle = 'Awaiting';
+        let stepDescription = `Awaiting approval from any ${detail.job_role_name}`;
         
-        // Determine step status and color based on workflow progression
+        // ROLE-BASED: Determine step status based on workflow progression
         if (detail.detail_status === 'UA') {
-          // All approved users should show as 'approved' (blue)
           stepStatus = 'approved';
-          stepDescription = `Approved by ${detail.user_name}`;
+          stepTitle = 'Approved';
+          stepDescription = `Approved by ${detail.job_role_name}`;
         } else if (detail.detail_status === 'UR') {
           stepStatus = 'rejected';
-          stepDescription = `Rejected by ${detail.user_name}`;
+          stepTitle = 'Rejected';
+          stepDescription = `Rejected by ${detail.job_role_name}`;
         } else if (detail.detail_status === 'AP') {
           stepStatus = 'current';
-          stepDescription = `Action pending by ${detail.user_name}`;
+          stepTitle = 'In Progress';
+          stepDescription = `Action pending by any ${detail.job_role_name}`;
         } else if (detail.detail_status === 'IN') {
           stepStatus = 'pending';
-          stepDescription = `Awaiting approval from ${detail.user_name}`;
+          stepTitle = 'Awaiting';
+          stepDescription = `Waiting for approval from any ${detail.job_role_name}`;
         }
         
         workflowSteps.push({
-          id: `user_${stepNumber}`,
-          title: `Step ${stepNumber}`,
+          id: `role-${detail.job_role_id}-${index + 1}`,
+          title: stepTitle || `Step ${stepNumber}`,
           status: stepStatus,
           description: stepDescription,
           date: detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '',
           time: detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          // ROLE-BASED: user.id contains job_role_id (not emp_int_id)
+          // Frontend will check if current user has this role
           user: { 
-            id: detail.user_id, 
-            name: detail.user_name,
-            email: detail.email
-          }
+            id: detail.job_role_id, 
+            name: detail.job_role_name,
+            email: null // Roles don't have emails
+          },
+          role: { id: detail.job_role_id, name: detail.job_role_name }, // Keep for backward compatibility
+          notes: detail.notes || null,
+          changed_by: detail.changed_by,
+          changed_on: detail.changed_on,
+          sequence: detail.sequence
         });
       });
 

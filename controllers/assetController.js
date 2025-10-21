@@ -1,6 +1,11 @@
 const model = require("../models/assetModel");
 const db = require("../config/db");
 const {
+    // Generic helpers
+    logApiCall,
+    logOperationSuccess,
+    logOperationError,
+    // Detailed flow
     logAssetCreationApiCalled,
     logCheckingVendor,
     logVendorValidated,
@@ -9,14 +14,19 @@ const {
     logInsertingAssetToDatabase,
     logAssetInsertedToDatabase,
     logInsertingAssetProperties,
+    // Specific events
     logAssetCreated,
     logAssetsRetrieved,
+    logAssetUpdated,
+    logAssetDeleted,
     logUnauthorizedAccess,
     logMissingRequiredFields,
     logInvalidVendor,
     logDuplicateAssetId,
     logAssetCreationError,
     logAssetRetrievalError,
+    logAssetUpdateError,
+    logAssetDeletionError,
     logDatabaseConstraintViolation
 } = require("../eventLoggers/assetEventLogger");
 
@@ -347,37 +357,60 @@ const getAllAssets = async (req, res) => {
 
 
 const updateAsset = async (req, res) => {
+  const startTime = Date.now();
   const { asset_id } = req.params;
+  const userId = req.user?.user_id;
   
-  // Get user's branch information
-  const userModel = require("../models/userModel");
-  const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-  const userBranchId = userWithBranch?.branch_id;
-  
-  console.log("User branch ID for update:", userBranchId);
-  
-  const {
-    asset_type_id,
-    serial_number,
-    description,
-    branch_id = userBranchId, // Use user's branch if not provided
-    purchase_vendor_id,
-    service_vendor_id,
-    prod_serv_id,
-    maintsch_id,
-    purchased_cost,
-    purchased_on,
-    purchased_by,
-    expiry_date,
-    current_status,
-    warranty_period,
-    parent_asset_id,
-    group_id,
-    org_id,
-    properties
-  } = req.body;
-
   try {
+    // Get user's branch information (MOVED INSIDE TRY BLOCK)
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log("User branch ID for update:", userBranchId);
+    
+    const {
+      asset_type_id,
+      serial_number,
+      description,
+      branch_id = userBranchId, // Use user's branch if not provided
+      purchase_vendor_id,
+      service_vendor_id,
+      prod_serv_id,
+      maintsch_id,
+      purchased_cost,
+      purchased_on,
+      purchased_by,
+      expiry_date,
+      current_status,
+      warranty_period,
+      parent_asset_id,
+      group_id,
+      org_id,
+      properties
+    } = req.body;
+
+    // Log API called
+    await logApiCall({
+      operation: 'Update Asset',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: {
+        asset_id,
+        updates: {
+          asset_type_id,
+          serial_number,
+          branch_id,
+          purchase_vendor_id,
+          service_vendor_id,
+          purchased_cost,
+          current_status,
+          warranty_period
+        }
+      },
+      userId
+    });
+    
     // Get existing asset to retrieve org_id if not provided
     let finalOrgId = org_id || req.user?.org_id;
     if (!finalOrgId) {
@@ -412,9 +445,26 @@ const updateAsset = async (req, res) => {
       return res.status(404).json({ error: "Asset not found" });
     }
 
+    // Log success
+    await logAssetUpdated({
+      assetId: asset_id,
+      assetName: updatedAsset.text,
+      userId,
+      duration: Date.now() - startTime
+    });
+
     res.json(updatedAsset);
   } catch (err) {
     console.error("Error updating asset:", err);
+    
+    // Log error
+    await logAssetUpdateError({
+      assetId: asset_id,
+      error: err,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({ error: "Failed to update asset" });
   }
 };
@@ -732,8 +782,20 @@ const getAssetsWithFilters = async (req, res) => {
 
 // DELETE /api/assets/:id - Delete single asset
 const deleteAsset = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { asset_id } = req.params;
+
+    // Log API called
+    await logApiCall({
+      operation: 'Delete Asset',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { asset_id },
+      userId
+    });
 
     // Check if asset exists
     const existingAsset = await model.getAssetById(asset_id);
@@ -741,8 +803,19 @@ const deleteAsset = async (req, res) => {
       return res.status(404).json({ error: "Asset not found" });
     }
 
+    const assetName = existingAsset.rows[0]?.text;
+
     // Delete the asset
     const result = await model.deleteAsset(asset_id);
+    
+    // Log success
+    await logAssetDeleted({
+      assetId: asset_id,
+      assetName,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.json({
       message: "Asset deleted successfully",
       deletedAsset: result.rows[0]
@@ -784,6 +857,15 @@ const deleteAsset = async (req, res) => {
       const errorMessage = constraintMessages[specificTable] || 
         `This asset is referenced by other records in the system. Please remove all references first.`;
 
+      // LOG THE CONSTRAINT VIOLATION BEFORE RETURNING
+      await logDatabaseConstraintViolation({
+        assetName: req.params.asset_id,
+        assetTypeId: null,
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+
       return res.status(409).json({
         error: "Cannot delete asset",
         message: errorMessage,
@@ -799,6 +881,14 @@ const deleteAsset = async (req, res) => {
 
     // Handle other database errors
     if (err.code === '23502') {
+      // LOG BEFORE RETURNING
+      await logAssetDeletionError({
+        assetId: req.params.asset_id,
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         error: "Invalid asset data",
         message: "Required fields are missing for asset deletion.",
@@ -806,6 +896,14 @@ const deleteAsset = async (req, res) => {
       });
     }
 
+    // Log error for other cases
+    await logAssetDeletionError({
+      assetId: req.params.asset_id,
+      error: err,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     // Generic error fallback
     res.status(500).json({ 
       error: "Failed to delete asset",
@@ -816,15 +914,50 @@ const deleteAsset = async (req, res) => {
 };
 
 const deleteMultipleAssets = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { asset_ids } = req.body;
 
+    // Log API called
+    await logApiCall({
+      operation: 'Delete Multiple Assets',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { 
+        asset_ids,
+        count: asset_ids?.length || 0
+      },
+      userId
+    });
+
     if (!Array.isArray(asset_ids) || asset_ids.length === 0) {
+      await logMissingRequiredFields({
+        operation: 'deleteMultipleAssets',
+        missingFields: ['asset_ids (non-empty array)'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({ error: "asset_ids must be a non-empty array" });
     }
 
     // Delete the assets
     const result = await model.deleteMultipleAssets(asset_ids);
+    
+    // Log success
+    await logOperationSuccess({
+      operation: 'Delete Multiple Assets',
+      requestData: { asset_ids, count: asset_ids.length },
+      responseData: { 
+        deleted_count: result.rows.length,
+        deleted_successfully: true
+      },
+      duration: Date.now() - startTime,
+      userId
+    });
+    
     res.json({
       message: `${result.rows.length} asset(s) deleted successfully`,
       deletedAssets: result.rows
@@ -870,6 +1003,15 @@ const deleteMultipleAssets = async (req, res) => {
       const assetIdMatch = err.detail ? err.detail.match(/\((.*?)\)/) : null;
       const specificAssetId = assetIdMatch ? assetIdMatch[1] : null;
 
+      // LOG THE CONSTRAINT VIOLATION BEFORE RETURNING
+      await logDatabaseConstraintViolation({
+        assetName: req.body.asset_ids?.join(', ') || 'multiple assets',
+        assetTypeId: null,
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+
       return res.status(409).json({
         error: "Cannot delete assets",
         message: errorMessage,
@@ -885,12 +1027,28 @@ const deleteMultipleAssets = async (req, res) => {
 
     // Handle other database errors
     if (err.code === '23502') {
+      // LOG BEFORE RETURNING
+      await logAssetDeletionError({
+        assetId: req.body.asset_ids?.join(', ') || 'unknown',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         error: "Invalid asset data",
         message: "Required fields are missing for asset deletion.",
         code: err.code
       });
     }
+
+    // Log error for other cases
+    await logAssetDeletionError({
+      assetId: req.body.asset_ids?.join(', ') || 'unknown',
+      error: err,
+      userId,
+      duration: Date.now() - startTime
+    });
 
     // Generic error fallback
     res.status(500).json({ 
@@ -905,8 +1063,20 @@ const deleteMultipleAssets = async (req, res) => {
 
 // GET /api/assets/:id - Get asset by ID
 const getAssetById = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { id } = req.params;
+    
+    // Log API called
+    await logApiCall({
+      operation: 'Get Asset By ID',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { asset_id: id },
+      userId
+    });
     
     // Use getAssetWithDetails to get complete asset information
     const result = await model.getAssetWithDetails(id);
@@ -924,9 +1094,34 @@ const getAssetById = async (req, res) => {
     const asset = result.rows[0];
     asset.properties = properties;
     
+    // Log success
+    await logOperationSuccess({
+      operation: 'Get Asset By ID',
+      requestData: { asset_id: id },
+      responseData: {
+        found: true,
+        asset_name: asset.text,
+        asset_type_id: asset.asset_type_id,
+        current_status: asset.current_status,
+        property_count: Object.keys(properties).length
+      },
+      duration: Date.now() - startTime,
+      userId
+    });
+    
     res.status(200).json(asset);
   } catch (err) {
     console.error('Error fetching asset by ID:', err);
+    
+    // Log error
+    await logOperationError({
+      operation: 'Get Asset By ID',
+      requestData: { asset_id: req.params.id },
+      error: err,
+      duration: Date.now() - startTime,
+      userId
+    });
+    
     res.status(500).json({ error: 'Failed to fetch asset by ID' });
   }
 };

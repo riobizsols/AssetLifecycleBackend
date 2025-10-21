@@ -1,12 +1,61 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
+const {
+    // Generic helpers
+    logApiCall,
+    logOperationSuccess,
+    logOperationError,
+    // Detailed flow - Approve
+    logApproveMaintenanceApiCalled,
+    logValidatingApprovalRequest,
+    logProcessingApproval,
+    logMaintenanceApproved,
+    // Detailed flow - Reject
+    logRejectMaintenanceApiCalled,
+    logValidatingRejectionReason,
+    logProcessingRejection,
+    logMaintenanceRejected,
+    // INFO
+    logApprovalsRetrieved,
+    logApprovalDetailRetrieved,
+    logWorkflowHistoryRetrieved,
+    // WARNING
+    logMissingRequiredFields,
+    logApprovalNotFound,
+    logNoApprovalsForEmployee,
+    // ERROR
+    logApprovalOperationError,
+    logDataRetrievalError,
+    // CRITICAL
+    logDatabaseConnectionFailure,
+    logDatabaseConstraintViolation
+} = require('../eventLoggers/maintenanceApprovalEventLogger');
 
 // Get approval detail by asset ID
 const getApprovalDetail = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { assetId } = req.params; // can be asset_id or wfamsh_id
     const orgId = req.query.orgId || 'ORG001';
 
+    // Log API called
+    await logApiCall({
+      operation: 'Get Approval Detail',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { asset_id: assetId, org_id: orgId },
+      userId
+    });
+
     if (!assetId) {
+      await logMissingRequiredFields({
+        operation: 'Get Approval Detail',
+        missingFields: ['assetId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Asset ID is required'
@@ -16,6 +65,13 @@ const getApprovalDetail = async (req, res) => {
     const approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
 
     if (!approvalDetail) {
+      await logApprovalNotFound({
+        assetId,
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(404).json({
         success: false,
         message: 'No approval detail found for this asset'
@@ -60,6 +116,15 @@ const getApprovalDetail = async (req, res) => {
       vendorDetails: approvalDetail.vendorDetails || null // Include vendor details
     };
 
+    // Log success
+    await logApprovalDetailRetrieved({
+      assetId,
+      wfamsdId: formattedDetail.wfamsdId,
+      orgId,
+      userId,
+      duration: Date.now() - startTime
+    });
+
     res.json({
       success: true,
       message: 'Approval detail retrieved successfully',
@@ -69,6 +134,16 @@ const getApprovalDetail = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getApprovalDetail:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Approval Detail',
+      params: { asset_id: req.params.assetId, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve approval detail',
@@ -79,19 +154,66 @@ const getApprovalDetail = async (req, res) => {
 
 // Approve maintenance
 const approveMaintenanceAction = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { assetId } = req.params;
-      const { empIntId, note } = req.body;
+    const { empIntId, note } = req.body;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Step 1: Log API called with full request data
+    await logApproveMaintenanceApiCalled({
+      assetId,
+      empIntId,
+      note,
+      orgId,
+      method: req.method,
+      url: req.originalUrl,
+      userId
+    });
+
+    // Step 2: Validate required fields
     if (!assetId || !empIntId) {
+      await logMissingRequiredFields({
+        operation: 'Approve Maintenance',
+        missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Asset ID and Employee ID are required'
       });
     }
 
+    // Step 3: Log validation success
+    await logValidatingApprovalRequest({
+      assetId,
+      empIntId,
+      userId
+    });
+
+    // Step 4: Log processing approval
+    await logProcessingApproval({
+      assetId,
+      empIntId,
+      userId
+    });
+
+    // Step 5: Execute approval
     const result = await approveMaintenance(assetId, empIntId, note, orgId);
+
+    // Step 6: Log success
+    await logMaintenanceApproved({
+      assetId,
+      empIntId,
+      note,
+      resultMessage: result.message,
+      userId,
+      duration: Date.now() - startTime
+    });
 
     res.json({
       success: true,
@@ -101,6 +223,38 @@ const approveMaintenanceAction = async (req, res) => {
 
   } catch (error) {
     console.error('Error in approveMaintenanceAction:', error);
+    
+    // Determine if it's a critical error or just an error
+    const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    if (isDbError) {
+      if (error.code === 'ECONNREFUSED') {
+        await logDatabaseConnectionFailure({
+          operation: 'Approve Maintenance',
+          error,
+          userId,
+          duration: Date.now() - startTime
+        });
+      } else {
+        await logDatabaseConstraintViolation({
+          operation: 'Approve Maintenance',
+          error,
+          assetId: req.params.assetId,
+          userId,
+          duration: Date.now() - startTime
+        });
+      }
+    } else {
+      await logApprovalOperationError({
+        operation: 'Approve Maintenance',
+        assetId: req.params.assetId,
+        empIntId: req.body.empIntId,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to approve maintenance',
@@ -111,26 +265,76 @@ const approveMaintenanceAction = async (req, res) => {
 
 // Reject maintenance
 const rejectMaintenanceAction = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { assetId } = req.params;
     const { empIntId, reason } = req.body;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Step 1: Log API called with full request data
+    await logRejectMaintenanceApiCalled({
+      assetId,
+      empIntId,
+      reason,
+      orgId,
+      method: req.method,
+      url: req.originalUrl,
+      userId
+    });
+
+    // Step 2: Validate required fields
     if (!assetId || !empIntId) {
+      await logMissingRequiredFields({
+        operation: 'Reject Maintenance',
+        missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Asset ID and Employee ID are required'
       });
     }
 
-    if (!reason || reason.trim() === '') {
+    // Step 3: Validate rejection reason
+    const isReasonValid = reason && reason.trim() !== '';
+    await logValidatingRejectionReason({
+      assetId,
+      reason,
+      isValid: isReasonValid,
+      userId
+    });
+    
+    if (!isReasonValid) {
       return res.status(400).json({
         success: false,
         message: 'Rejection reason is required'
       });
     }
 
+    // Step 4: Log processing rejection
+    await logProcessingRejection({
+      assetId,
+      empIntId,
+      reason: reason.trim(),
+      userId
+    });
+
+    // Step 5: Execute rejection
     const result = await rejectMaintenance(assetId, empIntId, reason.trim(), orgId);
+
+    // Step 6: Log success
+    await logMaintenanceRejected({
+      assetId,
+      empIntId,
+      reason: reason.trim(),
+      resultMessage: result.message,
+      userId,
+      duration: Date.now() - startTime
+    });
 
     res.json({
       success: true,
@@ -140,6 +344,38 @@ const rejectMaintenanceAction = async (req, res) => {
 
   } catch (error) {
     console.error('Error in rejectMaintenanceAction:', error);
+    
+    // Determine if it's a critical error or just an error
+    const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    if (isDbError) {
+      if (error.code === 'ECONNREFUSED') {
+        await logDatabaseConnectionFailure({
+          operation: 'Reject Maintenance',
+          error,
+          userId,
+          duration: Date.now() - startTime
+        });
+      } else {
+        await logDatabaseConstraintViolation({
+          operation: 'Reject Maintenance',
+          error,
+          assetId: req.params.assetId,
+          userId,
+          duration: Date.now() - startTime
+        });
+      }
+    } else {
+      await logApprovalOperationError({
+        operation: 'Reject Maintenance',
+        assetId: req.params.assetId,
+        empIntId: req.body.empIntId,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Failed to reject maintenance',
@@ -150,11 +386,30 @@ const rejectMaintenanceAction = async (req, res) => {
 
 // Get workflow history
 const getWorkflowHistoryController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { assetId } = req.params;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Log API called
+    await logApiCall({
+      operation: 'Get Workflow History',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { asset_id: assetId, org_id: orgId },
+      userId
+    });
+
     if (!assetId) {
+      await logMissingRequiredFields({
+        operation: 'Get Workflow History',
+        missingFields: ['assetId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Asset ID is required'
@@ -178,6 +433,15 @@ const getWorkflowHistoryController = async (req, res) => {
       status: record.action
     }));
 
+    // Log success
+    await logWorkflowHistoryRetrieved({
+      assetId,
+      count: formattedHistory.length,
+      orgId,
+      userId,
+      duration: Date.now() - startTime
+    });
+
     res.json({
       success: true,
       message: 'Workflow history retrieved successfully',
@@ -187,6 +451,16 @@ const getWorkflowHistoryController = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getWorkflowHistory:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Workflow History',
+      params: { asset_id: req.params.assetId, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve workflow history',
@@ -197,17 +471,31 @@ const getWorkflowHistoryController = async (req, res) => {
 
 // Get maintenance approvals for the current user
 const getMaintenanceApprovalsController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || 'ORG001';
 
-    console.log('=== getMaintenanceApprovalsController ===');
-    console.log('empIntId:', empIntId);
-    console.log('orgId:', orgId);
-    console.log('req.user:', req.user);
+    // Log API called
+    await logApiCall({
+      operation: 'Get Maintenance Approvals',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { emp_int_id: empIntId, org_id: orgId },
+      userId
+    });
 
     if (!empIntId || empIntId === '') {
-      console.log('ERROR: Employee ID is missing or empty');
+      // WARNING: No employee ID
+      await logNoApprovalsForEmployee({
+        empIntId: 'NOT_PROVIDED',
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.json({
         success: true,
         message: 'No maintenance approvals found - Employee ID not available',
@@ -217,7 +505,6 @@ const getMaintenanceApprovalsController = async (req, res) => {
     }
 
     const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId);
-    console.log('Found maintenance approvals:', maintenanceApprovals.length);
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({
@@ -240,6 +527,15 @@ const getMaintenanceApprovalsController = async (req, res) => {
       maintenance_changed_on: record.maintenance_changed_on
     }));
 
+    // Log success
+    await logApprovalsRetrieved({
+      empIntId,
+      count: formattedData.length,
+      orgId,
+      userId,
+      duration: Date.now() - startTime
+    });
+
     res.json({
       success: true,
       message: 'Maintenance approvals retrieved successfully',
@@ -249,6 +545,16 @@ const getMaintenanceApprovalsController = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getMaintenanceApprovals:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Maintenance Approvals',
+      params: { emp_int_id: req.user?.emp_int_id, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve maintenance approvals',
@@ -293,11 +599,30 @@ const getActionType = (status) => {
 
 // Get all maintenance workflows for an asset (separated by wfamsh_id)
 const getAllMaintenanceWorkflows = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { assetId } = req.params;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Log API called
+    await logApiCall({
+      operation: 'Get All Maintenance Workflows',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { asset_id: assetId, org_id: orgId },
+      userId
+    });
+
     if (!assetId) {
+      await logMissingRequiredFields({
+        operation: 'Get All Maintenance Workflows',
+        missingFields: ['assetId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Asset ID is required'
@@ -307,11 +632,27 @@ const getAllMaintenanceWorkflows = async (req, res) => {
     const workflows = await getAllMaintenanceWorkflowsByAssetId(assetId, orgId);
 
     if (workflows.length === 0) {
+      await logApprovalNotFound({
+        assetId,
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(404).json({
         success: false,
         message: 'No maintenance workflows found for this asset'
       });
     }
+
+    // Log success
+    await logOperationSuccess({
+      operation: 'Get All Maintenance Workflows',
+      requestData: { asset_id: assetId, org_id: orgId },
+      responseData: { workflows_count: workflows.length },
+      duration: Date.now() - startTime,
+      userId
+    });
 
     res.json({
       success: true,
@@ -322,6 +663,16 @@ const getAllMaintenanceWorkflows = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getAllMaintenanceWorkflows:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get All Maintenance Workflows',
+      params: { asset_id: req.params.assetId, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve maintenance workflows',
@@ -332,11 +683,30 @@ const getAllMaintenanceWorkflows = async (req, res) => {
 
 // Get workflow history by wfamsh_id (specific workflow)
 const getWorkflowHistoryByWfamshIdController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { wfamshId } = req.params;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Log API called
+    await logApiCall({
+      operation: 'Get Workflow History By WfamshId',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { wfamsh_id: wfamshId, org_id: orgId },
+      userId
+    });
+
     if (!wfamshId) {
+      await logMissingRequiredFields({
+        operation: 'Get Workflow History By WfamshId',
+        missingFields: ['wfamshId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'Workflow ID (wfamsh_id) is required'
@@ -344,6 +714,15 @@ const getWorkflowHistoryByWfamshIdController = async (req, res) => {
     }
 
     const history = await getWorkflowHistoryByWfamshId(wfamshId, orgId);
+
+    // Log success
+    await logOperationSuccess({
+      operation: 'Get Workflow History By WfamshId',
+      requestData: { wfamsh_id: wfamshId, org_id: orgId },
+      responseData: { history_count: history.length },
+      duration: Date.now() - startTime,
+      userId
+    });
 
     res.json({
       success: true,
@@ -354,6 +733,16 @@ const getWorkflowHistoryByWfamshIdController = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getWorkflowHistoryByWfamshIdController:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Workflow History By WfamshId',
+      params: { wfamsh_id: req.params.wfamshId, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve workflow history',
@@ -364,11 +753,30 @@ const getWorkflowHistoryByWfamshIdController = async (req, res) => {
 
 // Get approval detail by wfamsh_id (specific workflow)
 const getApprovalDetailByWfamshIdController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
     const { wfamshId } = req.params;
     const orgId = req.query.orgId || 'ORG001';
 
+    // Log API called
+    await logApiCall({
+      operation: 'Get Approval Detail By WfamshId',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { wfamsh_id: wfamshId, org_id: orgId },
+      userId
+    });
+
     if (!wfamshId || wfamshId.trim() === '') {
+      await logMissingRequiredFields({
+        operation: 'Get Approval Detail By WfamshId',
+        missingFields: ['wfamshId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'WFAMSH ID is required'
@@ -377,6 +785,13 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
 
     // Validate that wfamshId is not empty and is a valid string
     if (typeof wfamshId !== 'string' || wfamshId.trim().length === 0) {
+      await logMissingRequiredFields({
+        operation: 'Get Approval Detail By WfamshId',
+        missingFields: ['valid_wfamshId'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(400).json({
         success: false,
         message: 'WFAMSH ID must be a valid string'
@@ -386,6 +801,13 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
     const approvalDetail = await getApprovalDetailByWfamshId(wfamshId, orgId);
 
     if (!approvalDetail) {
+      await logApprovalNotFound({
+        assetId: wfamshId,
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
       return res.status(404).json({
         success: false,
         message: 'No approval detail found for this workflow'
@@ -421,6 +843,15 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       workflowDetails: approvalDetail.workflowDetails
     };
 
+    // Log success
+    await logOperationSuccess({
+      operation: 'Get Approval Detail By WfamshId',
+      requestData: { wfamsh_id: wfamshId, org_id: orgId },
+      responseData: { wfamsd_id: formattedDetail.wfamsdId, asset_id: formattedDetail.assetId },
+      duration: Date.now() - startTime,
+      userId
+    });
+
     res.json({
       success: true,
       data: formattedDetail,
@@ -429,6 +860,16 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
 
   } catch (error) {
     console.error('Error in getApprovalDetailByWfamshId controller:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Approval Detail By WfamshId',
+      params: { wfamsh_id: req.params.wfamshId, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
     res.status(500).json({
       success: false,
       message: 'Internal server error',
