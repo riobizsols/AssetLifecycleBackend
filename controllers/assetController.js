@@ -324,20 +324,29 @@ const addAsset = async (req, res) => {
 };
 
 
-// GET /api/assets - Get all assets
+// GET /api/assets - Get all assets (filtered by user's org and branch)
 const getAllAssets = async (req, res) => {
   const startTime = Date.now();
   const userId = req.user?.user_id;
   
   try {
-    const assets = await model.getAllAssets();
+    // Get user's organization and branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Use user context filtering - filter by user's org and branch
+    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId);
     
-    // INFO: Assets retrieved successfully
+    // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
         operation: 'getAllAssets',
         count: assets.rows?.length || 0,
         userId,
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        userOrgId,
+        userBranchId
     });
     
     res.json(assets);
@@ -869,6 +878,9 @@ const searchAssets = async (req, res) => {
 
 // GET /api/assets - Get assets with query parameters for filtering
 const getAssetsWithFilters = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { 
             asset_type_id, 
@@ -879,29 +891,63 @@ const getAssetsWithFilters = async (req, res) => {
             search 
         } = req.query;
 
-        let result;
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(userId);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
 
-        // Apply filters based on query parameters
-        if (asset_type_id) {
-            result = await model.getAssetsByAssetType(asset_type_id);
-        } else if (branch_id) {
-            result = await model.getAssetsByBranch(branch_id);
-        } else if (vendor_id) {
-            result = await model.getAssetsByVendor(vendor_id);
-        } else if (status) {
-            result = await model.getAssetsByStatus(status);
-        } else if (org_id) {
-            result = await model.getAssetsByOrg(org_id);
-        } else if (search) {
-            result = await model.searchAssets(search);
-        } else {
-            // No filters, get all assets
-            result = await model.getAllAssets();
-        }
+        console.log('🔍 User context filtering:', {
+            userId,
+            userOrgId,
+            userBranchId,
+            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search }
+        });
+
+        // Always apply user context filtering first, then apply additional filters
+        const additionalFilters = {
+            asset_type_id,
+            status,
+            vendor_id,
+            search
+        };
+
+        // Remove null/undefined values
+        Object.keys(additionalFilters).forEach(key => {
+            if (additionalFilters[key] === null || additionalFilters[key] === undefined) {
+                delete additionalFilters[key];
+            }
+        });
+
+        const result = await model.getAssetsByUserContextWithFilters(
+            userOrgId, 
+            userBranchId, 
+            additionalFilters
+        );
+
+        // INFO: Assets retrieved successfully with user context filtering
+        await logAssetsRetrieved({
+            operation: 'getAssetsWithFilters',
+            count: result.rows?.length || 0,
+            userId,
+            duration: Date.now() - startTime,
+            userOrgId,
+            userBranchId,
+            additionalFilters
+        });
 
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching assets with filters:", err);
+        
+        // ERROR: Failed to fetch assets
+        await logAssetRetrievalError({
+            operation: 'getAssetsWithFilters',
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        });
+        
         res.status(500).json({ error: "Failed to fetch assets" });
     }
 };
@@ -1668,12 +1714,27 @@ const getPotentialParentAssets = async (req, res) => {
 
 // GET /api/assets/count - Get total count of assets
 const getAssetsCount = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
-    const count = await model.getAssetsCount();
+    // Get user's organization and branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Get count with user context filtering
+    const count = await model.getAssetsCount(userOrgId, userBranchId);
+    
     res.json({
       success: true,
-      count: count.rows[0].count,
-      message: "Total assets count retrieved successfully"
+      count: count,
+      message: "Total assets count retrieved successfully",
+      userContext: {
+        orgId: userOrgId,
+        branchId: userBranchId
+      }
     });
   } catch (err) {
     console.error("Error fetching assets count:", err);

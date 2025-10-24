@@ -949,13 +949,108 @@ const createAsset = async (assetData) => {
 };
 
 // Get total count of assets
-const getAssetsCount = async () => {
-  const query = `
+const getAssetsCount = async (orgId, branchId = null) => {
+  let query = `
     SELECT COUNT(*) as count
     FROM "tblAssets"
+    WHERE org_id = $1
   `;
   
-  return await db.query(query);
+  const params = [orgId];
+  
+  if (branchId) {
+    query += ` AND branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  const result = await db.query(query, params);
+  return result.rows[0].count;
+};
+
+// Get assets filtered by user's organization and branch
+const getAssetsByUserContext = async (orgId, branchId = null) => {
+  let query = `
+    SELECT 
+      a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+      a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, 
+      a.purchased_cost, a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, 
+      a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
+      a.created_by, a.created_on, a.changed_by, a.changed_on,
+      b.text as branch_name,
+      at.text as asset_type_name
+    FROM "tblAssets" a
+    LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE a.org_id = $1
+  `;
+  
+  const params = [orgId];
+  
+  if (branchId) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  query += ` ORDER BY a.created_on DESC`;
+  
+  return await db.query(query, params);
+};
+
+// Get assets with user context filtering and additional filters
+const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}) => {
+  let query = `
+    SELECT 
+      a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+      a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, 
+      a.purchased_cost, a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, 
+      a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
+      a.created_by, a.created_on, a.changed_by, a.changed_on,
+      b.text as branch_name,
+      at.text as asset_type_name
+    FROM "tblAssets" a
+    LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE a.org_id = $1
+  `;
+  
+  const params = [userOrgId];
+  let paramIndex = 2;
+  
+  // Always apply user branch filter if user has a branch
+  if (userBranchId) {
+    query += ` AND a.branch_id = $${paramIndex}`;
+    params.push(userBranchId);
+    paramIndex++;
+  }
+  
+  // Apply additional filters
+  if (additionalFilters.asset_type_id) {
+    query += ` AND a.asset_type_id = $${paramIndex}`;
+    params.push(additionalFilters.asset_type_id);
+    paramIndex++;
+  }
+  
+  if (additionalFilters.status) {
+    query += ` AND a.current_status = $${paramIndex}`;
+    params.push(additionalFilters.status);
+    paramIndex++;
+  }
+  
+  if (additionalFilters.vendor_id) {
+    query += ` AND (a.purchase_vendor_id = $${paramIndex} OR a.service_vendor_id = $${paramIndex})`;
+    params.push(additionalFilters.vendor_id);
+    paramIndex++;
+  }
+  
+  if (additionalFilters.search) {
+    query += ` AND (a.text ILIKE $${paramIndex} OR a.serial_number ILIKE $${paramIndex} OR a.description ILIKE $${paramIndex})`;
+    params.push(`%${additionalFilters.search}%`);
+    paramIndex++;
+  }
+  
+  query += ` ORDER BY a.created_on DESC`;
+  
+  return await db.query(query, params);
 };
 
 module.exports = {
@@ -988,6 +1083,8 @@ module.exports = {
   getAssetsExpiringWithin30Days,
   getAssetsExpiringWithin30DaysByType,
   getAssetsByExpiryDate,
+  getAssetsByUserContext,
+  getAssetsByUserContextWithFilters,
   
   getAssetsCount
 };

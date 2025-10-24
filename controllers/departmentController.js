@@ -13,7 +13,7 @@ const createDepartment = async (req, res) => {
         const parent_id = null;
         const changed_by = null;
 
-        let branch_code = null;
+        let branch_id = null;
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
         const deptIdResult = await db.query(
@@ -44,7 +44,7 @@ const createDepartment = async (req, res) => {
             int_status,
             text,
             parent_id,
-            branch_code,
+            branch_id,
             created_by,
             changed_by
         });
