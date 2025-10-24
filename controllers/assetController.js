@@ -1,5 +1,6 @@
 const model = require("../models/assetModel");
 const db = require("../config/db");
+const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 const {
     // Generic helpers
     logApiCall,
@@ -323,20 +324,29 @@ const addAsset = async (req, res) => {
 };
 
 
-// GET /api/assets - Get all assets
+// GET /api/assets - Get all assets (filtered by user's org and branch)
 const getAllAssets = async (req, res) => {
   const startTime = Date.now();
   const userId = req.user?.user_id;
   
   try {
-    const assets = await model.getAllAssets();
+    // Get user's organization and branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Use user context filtering - filter by user's org and branch
+    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId);
     
-    // INFO: Assets retrieved successfully
+    // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
         operation: 'getAllAssets',
         count: assets.rows?.length || 0,
         userId,
-        duration: Date.now() - startTime
+        duration: Date.now() - startTime,
+        userOrgId,
+        userBranchId
     });
     
     res.json(assets);
@@ -568,8 +578,30 @@ const getAssetsBySerialNumber = async (req, res) => {
 
 // GET /api/assets/expiring-within-30-days - Get assets expiring within 30 days
 const getAssetsExpiringWithin30Days = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const { context } = req.query; // SCRAPASSETS or ASSETS
+    
     try {
+        // Context-aware logging for scrap assets
+        if (context === 'SCRAPASSETS') {
+            scrapAssetsLogger.logGetNearingExpiryApiCalled({
+                requestData: { operation: 'get_assets_expiring_within_30_days' },
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+
+            scrapAssetsLogger.logQueryingNearingExpiryAssets({ userId }).catch(err => console.error('Logging error:', err));
+        }
+        
         const result = await model.getAssetsExpiringWithin30Days();
+        
+        if (context === 'SCRAPASSETS') {
+            scrapAssetsLogger.logNearingExpiryAssetsRetrieved({
+                count: result.rows.length,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
         
         res.status(200).json({
             message: `Found ${result.rows.length} assets expiring within 30 days`,
@@ -579,12 +611,23 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching assets expiring within 30 days:", err);
+        if (context === 'SCRAPASSETS') {
+            scrapAssetsLogger.logDataRetrievalError({
+                operation: 'get_assets_expiring_within_30_days',
+                error: err,
+                userId
+            }).catch(logErr => console.error('Logging error:', logErr));
+        }
         res.status(500).json({ error: "Failed to fetch assets expiring within 30 days" });
     }
 };
 
 // GET /api/assets/expiry/:filterType - Get assets by expiry date
 const getAssetsByExpiryDate = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const { context } = req.query; // SCRAPASSETS or ASSETS
+    
     try {
         const { filterType } = req.params;
         const { value, days } = req.query;
@@ -594,8 +637,27 @@ const getAssetsByExpiryDate = async (req, res) => {
         // Handle different filter types
         switch (filterType) {
             case 'expired':
+                // Context-aware logging for scrap assets
+                if (context === 'SCRAPASSETS') {
+                    scrapAssetsLogger.logGetExpiredAssetsApiCalled({
+                        requestData: { operation: 'get_expired_assets' },
+                        userId,
+                        duration: Date.now() - startTime
+                    }).catch(err => console.error('Logging error:', err));
+
+                    scrapAssetsLogger.logQueryingExpiredAssets({ userId }).catch(err => console.error('Logging error:', err));
+                }
+                
                 // Get expired assets
                 const expiredResult = await model.getAssetsByExpiryDate('expired');
+                
+                if (context === 'SCRAPASSETS') {
+                    scrapAssetsLogger.logExpiredAssetsRetrieved({
+                        count: expiredResult.rows.length,
+                        userId
+                    }).catch(err => console.error('Logging error:', err));
+                }
+                
                 res.status(200).json({
                     message: `Found ${expiredResult.rows.length} expired assets`,
                     filter_type: 'expired',
@@ -693,12 +755,85 @@ const getAssetsByExpiryDate = async (req, res) => {
 
 // GET /api/assets/type/:asset_type_id/inactive - Get inactive assets by asset type
 const getInactiveAssetsByAssetType = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { asset_type_id } = req.params;
+        const { context } = req.query; // DEPTASSIGNMENT or EMPASSIGNMENT
+        
+        // Determine which logger to use based on context
+        const deptAssignmentLogger = context === 'DEPTASSIGNMENT' ? require('../eventLoggers/deptAssignmentEventLogger') : null;
+        const empAssignmentLogger = context === 'EMPASSIGNMENT' ? require('../eventLoggers/empAssignmentEventLogger') : null;
+        
+        // STEP 1: Log asset type selected (non-blocking, context-aware)
+        if (deptAssignmentLogger) {
+            deptAssignmentLogger.logAssetTypeSelected({
+                assetTypeId: asset_type_id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        } else if (empAssignmentLogger) {
+            empAssignmentLogger.logAssetTypeSelected({
+                assetTypeId: asset_type_id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
+        
+        // STEP 2: Log API called (non-blocking, context-aware)
+        if (deptAssignmentLogger) {
+            deptAssignmentLogger.logApiCall({
+                operation: 'getInactiveAssetsByAssetType',
+                method: req.method,
+                url: req.originalUrl,
+                requestData: { asset_type_id },
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        } else if (empAssignmentLogger) {
+            empAssignmentLogger.logApiCall({
+                operation: 'getInactiveAssetsByAssetType',
+                method: req.method,
+                url: req.originalUrl,
+                requestData: { asset_type_id },
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
+        
+        // STEP 3: Log fetching assets for asset type (non-blocking, context-aware)
+        if (deptAssignmentLogger) {
+            deptAssignmentLogger.logAssetTypeFiltering({
+                deptId: req.query.dept_id || 'unknown',
+                assetTypeId: asset_type_id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        } else if (empAssignmentLogger) {
+            empAssignmentLogger.logAssetTypeFiltering({
+                employeeIntId: req.query.employee_int_id || 'unknown',
+                assetTypeId: asset_type_id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
+        
         const result = await model.getInactiveAssetsByAssetType(asset_type_id);
         
         const count = result.rows.length;
         const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";
+        
+        // STEP 4: Log assets viewed (non-blocking, context-aware)
+        if (deptAssignmentLogger) {
+            deptAssignmentLogger.logAvailableAssetsViewed({
+                deptId: req.query.dept_id || 'unknown',
+                assetCount: count,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        } else if (empAssignmentLogger) {
+            empAssignmentLogger.logAvailableAssetsViewed({
+                employeeIntId: req.query.employee_int_id || 'unknown',
+                assetCount: count,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
         
         res.status(200).json({
             message: message,
@@ -743,6 +878,9 @@ const searchAssets = async (req, res) => {
 
 // GET /api/assets - Get assets with query parameters for filtering
 const getAssetsWithFilters = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { 
             asset_type_id, 
@@ -753,29 +891,63 @@ const getAssetsWithFilters = async (req, res) => {
             search 
         } = req.query;
 
-        let result;
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(userId);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
 
-        // Apply filters based on query parameters
-        if (asset_type_id) {
-            result = await model.getAssetsByAssetType(asset_type_id);
-        } else if (branch_id) {
-            result = await model.getAssetsByBranch(branch_id);
-        } else if (vendor_id) {
-            result = await model.getAssetsByVendor(vendor_id);
-        } else if (status) {
-            result = await model.getAssetsByStatus(status);
-        } else if (org_id) {
-            result = await model.getAssetsByOrg(org_id);
-        } else if (search) {
-            result = await model.searchAssets(search);
-        } else {
-            // No filters, get all assets
-            result = await model.getAllAssets();
-        }
+        console.log('🔍 User context filtering:', {
+            userId,
+            userOrgId,
+            userBranchId,
+            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search }
+        });
+
+        // Always apply user context filtering first, then apply additional filters
+        const additionalFilters = {
+            asset_type_id,
+            status,
+            vendor_id,
+            search
+        };
+
+        // Remove null/undefined values
+        Object.keys(additionalFilters).forEach(key => {
+            if (additionalFilters[key] === null || additionalFilters[key] === undefined) {
+                delete additionalFilters[key];
+            }
+        });
+
+        const result = await model.getAssetsByUserContextWithFilters(
+            userOrgId, 
+            userBranchId, 
+            additionalFilters
+        );
+
+        // INFO: Assets retrieved successfully with user context filtering
+        await logAssetsRetrieved({
+            operation: 'getAssetsWithFilters',
+            count: result.rows?.length || 0,
+            userId,
+            duration: Date.now() - startTime,
+            userOrgId,
+            userBranchId,
+            additionalFilters
+        });
 
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching assets with filters:", err);
+        
+        // ERROR: Failed to fetch assets
+        await logAssetRetrievalError({
+            operation: 'getAssetsWithFilters',
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        });
+        
         res.status(500).json({ error: "Failed to fetch assets" });
     }
 };
@@ -1068,15 +1240,57 @@ const getAssetById = async (req, res) => {
   
   try {
     const { id } = req.params;
+    const { context } = req.query; // DEPTASSIGNMENT or EMPASSIGNMENT
     
-    // Log API called
-    await logApiCall({
+    // Determine which logger to use based on context
+    const deptAssignmentLogger = context === 'DEPTASSIGNMENT' ? require('../eventLoggers/deptAssignmentEventLogger') : null;
+    const empAssignmentLogger = context === 'EMPASSIGNMENT' ? require('../eventLoggers/empAssignmentEventLogger') : null;
+    const maintenanceApprovalLogger = context === 'MAINTENANCEAPPROVAL' ? require('../eventLoggers/maintenanceApprovalEventLogger') : null;
+    const serialNumberPrintLogger = context === 'SERIALNUMBERPRINT' ? require('../eventLoggers/serialNumberPrintEventLogger') : null;
+    
+    // Log API called (non-blocking, context-aware)
+    if (deptAssignmentLogger) {
+      deptAssignmentLogger.logApiCall({
+        operation: 'Get Asset Details',
+        method: req.method,
+        url: req.originalUrl,
+        requestData: { asset_id: id },
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (empAssignmentLogger) {
+      empAssignmentLogger.logApiCall({
+        operation: 'Get Asset Details',
+        method: req.method,
+        url: req.originalUrl,
+        requestData: { asset_id: id },
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (maintenanceApprovalLogger) {
+      maintenanceApprovalLogger.logApiCall({
+        operation: 'Get Asset Details',
+        method: req.method,
+        url: req.originalUrl,
+        requestData: { asset_id: id },
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (serialNumberPrintLogger) {
+      serialNumberPrintLogger.logApiCall({
+        operation: 'Get Asset Details',
+        method: req.method,
+        url: req.originalUrl,
+        requestData: { asset_id: id },
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      // Default to ASSETS logger (non-blocking)
+      logApiCall({
       operation: 'Get Asset By ID',
       method: req.method,
       url: req.originalUrl,
       requestData: { asset_id: id },
       userId
-    });
+      }).catch(err => console.error('Logging error:', err));
+    }
     
     // Use getAssetWithDetails to get complete asset information
     const result = await model.getAssetWithDetails(id);
@@ -1094,8 +1308,62 @@ const getAssetById = async (req, res) => {
     const asset = result.rows[0];
     asset.properties = properties;
     
-    // Log success
-    await logOperationSuccess({
+    // Log success (non-blocking, context-aware)
+    if (deptAssignmentLogger) {
+      deptAssignmentLogger.logOperationSuccess({
+        operation: 'Get Asset Details',
+        requestData: { asset_id: id },
+        responseData: {
+          found: true,
+          asset_name: asset.text,
+          asset_type_id: asset.asset_type_id,
+          current_status: asset.current_status
+        },
+        duration: Date.now() - startTime,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (empAssignmentLogger) {
+      empAssignmentLogger.logOperationSuccess({
+        operation: 'Get Asset Details',
+        requestData: { asset_id: id },
+        responseData: {
+          found: true,
+          asset_name: asset.text,
+          asset_type_id: asset.asset_type_id,
+          current_status: asset.current_status
+        },
+        duration: Date.now() - startTime,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (maintenanceApprovalLogger) {
+      maintenanceApprovalLogger.logOperationSuccess({
+        operation: 'Get Asset Details',
+        requestData: { asset_id: id },
+        responseData: {
+          found: true,
+          asset_name: asset.text,
+          asset_type_id: asset.asset_type_id,
+          current_status: asset.current_status
+        },
+        duration: Date.now() - startTime,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else if (serialNumberPrintLogger) {
+      serialNumberPrintLogger.logOperationSuccess({
+        operation: 'Get Asset Details',
+        requestData: { asset_id: id },
+        responseData: {
+          found: true,
+          asset_name: asset.text,
+          asset_type_id: asset.asset_type_id,
+          current_status: asset.current_status
+        },
+        duration: Date.now() - startTime,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      // Default to ASSETS logger (non-blocking)
+      logOperationSuccess({
       operation: 'Get Asset By ID',
       requestData: { asset_id: id },
       responseData: {
@@ -1107,7 +1375,8 @@ const getAssetById = async (req, res) => {
       },
       duration: Date.now() - startTime,
       userId
-    });
+      }).catch(err => console.error('Logging error:', err));
+    }
     
     res.status(200).json(asset);
   } catch (err) {
@@ -1445,12 +1714,27 @@ const getPotentialParentAssets = async (req, res) => {
 
 // GET /api/assets/count - Get total count of assets
 const getAssetsCount = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
   try {
-    const count = await model.getAssetsCount();
+    // Get user's organization and branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Get count with user context filtering
+    const count = await model.getAssetsCount(userOrgId, userBranchId);
+    
     res.json({
       success: true,
-      count: count.rows[0].count,
-      message: "Total assets count retrieved successfully"
+      count: count,
+      message: "Total assets count retrieved successfully",
+      userContext: {
+        orgId: userOrgId,
+        branchId: userBranchId
+      }
     });
   } catch (err) {
     console.error("Error fetching assets count:", err);

@@ -1,10 +1,20 @@
 const model = require("../models/scrapAssetsByTypeModel");
 const db = require("../config/db");
+const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 
 // GET /api/scrap-assets-by-type/:asset_type_id - Get scrap assets by asset type
 const getScrapAssetsByAssetType = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const { asset_type_id } = req.params;
+
     try {
-        const { asset_type_id } = req.params;
+        scrapAssetsLogger.logGetCategoryAssetsApiCalled({
+            category: asset_type_id,
+            requestData: { operation: 'get_scrap_assets_by_asset_type' },
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
 
         // Validate asset_type_id parameter
         if (!asset_type_id) {
@@ -13,6 +23,11 @@ const getScrapAssetsByAssetType = async (req, res) => {
                 error: "asset_type_id parameter is required"
             });
         }
+
+        scrapAssetsLogger.logQueryingCategoryAssets({
+            category: asset_type_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
         // Check if asset type exists
         const assetTypeCheck = await db.query(
@@ -30,6 +45,12 @@ const getScrapAssetsByAssetType = async (req, res) => {
 
         const result = await model.getScrapAssetsByAssetType(asset_type_id);
         
+        scrapAssetsLogger.logCategoryAssetsRetrieved({
+            category: asset_type_id,
+            count: result.rows.length,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
         res.status(200).json({
             success: true,
             message: `Found ${result.rows.length} scrap assets for asset type: ${assetTypeCheck.rows[0].text}`,
@@ -42,6 +63,12 @@ const getScrapAssetsByAssetType = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching scrap assets by asset type:", err);
+        scrapAssetsLogger.logDataRetrievalError({
+            operation: 'get_scrap_assets_by_asset_type',
+            error: err,
+            userId
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to fetch scrap assets by asset type",
@@ -52,8 +79,24 @@ const getScrapAssetsByAssetType = async (req, res) => {
 
 // GET /api/scrap-assets-by-type/asset-types/list - Get all asset types with scrap assets
 const getAssetTypesWithScrapAssets = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+
     try {
+        scrapAssetsLogger.logGetAllScrapAssetsApiCalled({
+            requestData: { operation: 'get_asset_types_with_scrap_assets' },
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+
+        scrapAssetsLogger.logQueryingScrapAssets({ userId }).catch(err => console.error('Logging error:', err));
+
         const result = await model.getAssetTypesWithScrapAssets();
+        
+        scrapAssetsLogger.logScrapAssetsRetrieved({
+            count: result.rows.length,
+            userId
+        }).catch(err => console.error('Logging error:', err));
         
         res.status(200).json({
             success: true,
@@ -63,6 +106,12 @@ const getAssetTypesWithScrapAssets = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching asset types with scrap assets:", err);
+        scrapAssetsLogger.logDataRetrievalError({
+            operation: 'get_asset_types_with_scrap_assets',
+            error: err,
+            userId
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to fetch asset types with scrap assets",

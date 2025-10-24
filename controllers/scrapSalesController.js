@@ -1,8 +1,14 @@
 const model = require("../models/scrapSalesModel");
 const db = require("../config/db");
 
+// Import scrap sales logger
+const scrapSalesLogger = require('../eventLoggers/scrapSalesEventLogger');
+
 // POST /api/scrap-sales - Create new scrap sale
 const createScrapSale = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const {
             text,
@@ -20,8 +26,29 @@ const createScrapSale = async (req, res) => {
         const org_id = req.user?.org_id;
         const created_by = req.user?.user_id;
 
+        // Log API called
+        scrapSalesLogger.logCreateScrapSaleApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            userId,
+            saleData: { buyer_name, total_sale_value, scrapAssets }
+        }).catch(err => console.error('Logging error:', err));
+
         // Validation
         if (!text || !total_sale_value || !buyer_name || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
+            const missingFields = [];
+            if (!text) missingFields.push('text');
+            if (!total_sale_value) missingFields.push('total_sale_value');
+            if (!buyer_name) missingFields.push('buyer_name');
+            if (!scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) missingFields.push('scrapAssets');
+            
+            scrapSalesLogger.logMissingRequiredFields({
+                operation: 'Create Scrap Sale',
+                missingFields,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+            
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields",
@@ -31,6 +58,12 @@ const createScrapSale = async (req, res) => {
 
         // Validate scrap assets
         const asdIds = scrapAssets.map(asset => asset.asd_id);
+        
+        scrapSalesLogger.logProcessingAssetValidation({
+            asdIds,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
         const validationResult = await model.validateScrapAssets(asdIds);
         
         if (validationResult.rows.length !== asdIds.length) {
@@ -44,6 +77,12 @@ const createScrapSale = async (req, res) => {
         // Check for already sold assets
         const alreadySold = validationResult.rows.filter(asset => asset.already_sold);
         if (alreadySold.length > 0) {
+            scrapSalesLogger.logAssetsAlreadySold({
+                alreadySoldAssets: alreadySold,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+            
             return res.status(400).json({
                 success: false,
                 error: "Assets already sold",
@@ -59,12 +98,27 @@ const createScrapSale = async (req, res) => {
         // Validate sale values
         const totalCalculatedValue = scrapAssets.reduce((sum, asset) => sum + (asset.sale_value || 0), 0);
         if (Math.abs(totalCalculatedValue - total_sale_value) > 0.01) {
+            scrapSalesLogger.logValueMismatch({
+                totalSaleValue: total_sale_value,
+                calculatedValue: totalCalculatedValue,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+            
             return res.status(400).json({
                 success: false,
                 error: "Value mismatch",
                 message: `Total sale value (${total_sale_value}) does not match sum of individual asset values (${totalCalculatedValue})`
             });
         }
+
+        // Log data preparation step
+        scrapSalesLogger.logDataPreparationStarted({
+            buyerName: buyer_name,
+            totalValue: total_sale_value,
+            assetCount: scrapAssets.length,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
         // Prepare sale data
         const saleData = {
@@ -87,11 +141,80 @@ const createScrapSale = async (req, res) => {
             }))
         };
 
-        // Debug: Log the sale data being passed
-        console.log('🔍 Sale data being passed to model:', JSON.stringify(saleData, null, 2));
+        // Log data preparation completed
+        scrapSalesLogger.logDataPreparationCompleted({
+            headerData: saleData.header,
+            assetDetails: saleData.scrapAssets,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log database transaction initiation
+        scrapSalesLogger.logDatabaseTransactionStarted({
+            operation: 'Create Scrap Sale',
+            tables: ['tblScrapSales_H', 'tblScrapSales_D'],
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log processing scrap sale creation
+        scrapSalesLogger.logProcessingScrapSaleCreation({
+            sshId: null, // Will be set after creation
+            buyerName: buyer_name,
+            totalValue: total_sale_value,
+            assetCount: scrapAssets.length,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
         // Create scrap sale
         const result = await model.createScrapSale(saleData);
+        
+        // Log database transaction completed
+        scrapSalesLogger.logDatabaseTransactionCompleted({
+            operation: 'Create Scrap Sale',
+            sshId: result.header.ssh_id,
+            tablesUpdated: ['tblScrapSales_H', 'tblScrapSales_D'],
+            recordsCreated: {
+                header: 1,
+                details: result.details.length
+            },
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log header table insertion details
+        scrapSalesLogger.logHeaderTableInserted({
+            sshId: result.header.ssh_id,
+            tableName: 'tblScrapSales_H',
+            headerData: result.header,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log details table insertion details
+        scrapSalesLogger.logDetailsTableInserted({
+            sshId: result.header.ssh_id,
+            tableName: 'tblScrapSales_D',
+            detailRecords: result.details,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log asset status updates
+        scrapSalesLogger.logAssetStatusUpdated({
+            sshId: result.header.ssh_id,
+            assetsUpdated: result.details.map(detail => ({
+                asd_id: detail.asd_id,
+                ssd_id: detail.ssd_id,
+                sale_value: detail.sale_value
+            })),
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
+        // Log success
+        scrapSalesLogger.logScrapSaleCreated({
+            sshId: result.header.ssh_id,
+            buyerName: buyer_name,
+            totalValue: total_sale_value,
+            assetCount: result.details.length,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
         
         res.status(201).json({
             success: true,
@@ -105,6 +228,15 @@ const createScrapSale = async (req, res) => {
         });
     } catch (err) {
         console.error("Error creating scrap sale:", err);
+        
+        // Log error
+        scrapSalesLogger.logScrapSaleCreationError({
+            error: err,
+            userId,
+            duration: Date.now() - startTime,
+            saleData: { buyer_name: req.body.buyer_name, total_sale_value: req.body.total_sale_value }
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to create scrap sale",
@@ -115,8 +247,32 @@ const createScrapSale = async (req, res) => {
 
 // GET /api/scrap-sales - Get all scrap sales
 const getAllScrapSales = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
+        // Log API called
+        scrapSalesLogger.logGetAllScrapSalesApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
         const result = await model.getAllScrapSales();
+        
+        // Log success
+        if (result.rows.length === 0) {
+            scrapSalesLogger.logNoScrapSalesFound({
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        } else {
+            scrapSalesLogger.logScrapSalesRetrieved({
+                count: result.rows.length,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
         
         res.status(200).json({
             success: true,
@@ -126,6 +282,14 @@ const getAllScrapSales = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching scrap sales:", err);
+        
+        // Log error
+        scrapSalesLogger.logScrapSalesRetrievalError({
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to fetch scrap sales",
@@ -136,17 +300,42 @@ const getAllScrapSales = async (req, res) => {
 
 // GET /api/scrap-sales/:id - Get scrap sale by ID
 const getScrapSaleById = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { id } = req.params;
+        
+        // Log API called
+        scrapSalesLogger.logGetScrapSaleByIdApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            sshId: id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
         const result = await model.getScrapSaleById(id);
         
         if (!result) {
+            scrapSalesLogger.logScrapSaleNotFound({
+                sshId: id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+            
             return res.status(404).json({
                 success: false,
                 error: "Scrap sale not found",
                 message: `Scrap sale with ID ${id} does not exist`
             });
         }
+        
+        // Log success
+        scrapSalesLogger.logScrapSaleDetailRetrieved({
+            sshId: id,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
         
         res.status(200).json({
             success: true,
@@ -155,6 +344,15 @@ const getScrapSaleById = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching scrap sale:", err);
+        
+        // Log error
+        scrapSalesLogger.logScrapSaleDetailRetrievalError({
+            sshId: req.params.id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to fetch scrap sale",
@@ -165,10 +363,28 @@ const getScrapSaleById = async (req, res) => {
 
 // POST /api/scrap-sales/validate-assets - Validate scrap assets before sale
 const validateScrapAssetsForSale = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { asdIds } = req.body;
 
+        // Log API called
+        scrapSalesLogger.logValidateScrapAssetsApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            userId,
+            asdIds
+        }).catch(err => console.error('Logging error:', err));
+
         if (!asdIds || !Array.isArray(asdIds) || asdIds.length === 0) {
+            scrapSalesLogger.logMissingRequiredFields({
+                operation: 'Validate Scrap Assets',
+                missingFields: ['asdIds'],
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+            
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields",
@@ -181,6 +397,15 @@ const validateScrapAssetsForSale = async (req, res) => {
         const validAssets = validationResult.rows.filter(asset => !asset.already_sold);
         const alreadySoldAssets = validationResult.rows.filter(asset => asset.already_sold);
         const invalidAssets = asdIds.filter(id => !validationResult.rows.find(asset => asset.asd_id === id));
+
+        // Log success
+        scrapSalesLogger.logAssetValidationCompleted({
+            validCount: validAssets.length,
+            alreadySoldCount: alreadySoldAssets.length,
+            invalidCount: invalidAssets.length,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
 
         res.status(200).json({
             success: true,
@@ -197,9 +422,128 @@ const validateScrapAssetsForSale = async (req, res) => {
         });
     } catch (err) {
         console.error("Error validating scrap assets:", err);
+        
+        // Log error
+        scrapSalesLogger.logAssetValidationError({
+            error: err,
+            userId,
+            duration: Date.now() - startTime,
+            asdIds: req.body.asdIds
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         res.status(500).json({ 
             success: false,
             error: "Failed to validate scrap assets",
+            message: err.message 
+        });
+    }
+};
+
+// DELETE /api/scrap-sales/:id - Delete scrap sale
+const deleteScrapSale = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
+    try {
+        const { id: ssh_id } = req.params;
+
+        // Log API called
+        scrapSalesLogger.logDeleteScrapSaleApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            userId,
+            sshId: ssh_id
+        }).catch(err => console.error('Logging error:', err));
+
+        // Validate SSH ID format
+        if (!ssh_id || !ssh_id.startsWith('SSH')) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid SSH ID format",
+                message: "SSH ID must start with 'SSH'"
+            });
+        }
+
+        // Check if scrap sale exists
+        const existingSale = await model.getScrapSaleById(ssh_id);
+        if (!existingSale) {
+            scrapSalesLogger.logScrapSaleNotFoundForDeletion({
+                sshId: ssh_id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+            
+            return res.status(404).json({
+                success: false,
+                error: "Scrap sale not found",
+                message: `Scrap sale with ID ${ssh_id} does not exist`
+            });
+        }
+
+        // Log deletion started
+        scrapSalesLogger.logScrapSaleDeletionStarted({
+            sshId: ssh_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Delete the scrap sale
+        const deleteResult = await model.deleteScrapSale(ssh_id);
+
+        // Log individual deletion steps
+        scrapSalesLogger.logDocumentsDeleted({
+            sshId: ssh_id,
+            documentsDeleted: 0, // We don't track document count in the model
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        scrapSalesLogger.logDetailsDeleted({
+            sshId: ssh_id,
+            detailsDeleted: deleteResult.detailsDeleted,
+            assetsAffected: deleteResult.assetsAffected,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        scrapSalesLogger.logHeaderDeleted({
+            sshId: ssh_id,
+            headerDeleted: deleteResult.headerDeleted,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // Log successful deletion
+        const totalRecordsDeleted = deleteResult.headerDeleted + deleteResult.detailsDeleted;
+        scrapSalesLogger.logScrapSaleDeleted({
+            sshId: ssh_id,
+            totalRecordsDeleted,
+            assetsAffected: deleteResult.assetsAffected,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+
+        res.json({
+            success: true,
+            message: "Scrap sale deleted successfully",
+            deleted: {
+                ssh_id: ssh_id,
+                header_records: deleteResult.headerDeleted,
+                detail_records: deleteResult.detailsDeleted,
+                total_records: totalRecordsDeleted,
+                assets_affected: deleteResult.assetsAffected
+            }
+        });
+
+    } catch (err) {
+        console.error("Error deleting scrap sale:", err);
+        
+        // Log error
+        scrapSalesLogger.logScrapSaleDeletionError({
+            sshId: req.params.id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
+        res.status(500).json({ 
+            success: false,
+            error: "Failed to delete scrap sale",
             message: err.message 
         });
     }
@@ -209,5 +553,6 @@ module.exports = {
     createScrapSale,
     getAllScrapSales,
     getScrapSaleById,
-    validateScrapAssetsForSale
+    validateScrapAssetsForSale,
+    deleteScrapSale
 };

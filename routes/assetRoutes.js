@@ -15,6 +15,7 @@ router.post("/add", controller.createAsset); // web route
 router.post("/delete", controller.deleteMultipleAssets);
 
 router.get("/all-assets", controller.getAllAssets);
+
 // GET /api/assets - Get all assets (with optional query filters)
 router.get("/", controller.getAssetsWithFilters);
 

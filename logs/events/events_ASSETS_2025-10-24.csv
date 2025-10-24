@@ -1,0 +1,20 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-10-24T05:56:09.962Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",227,USR001
+2025-10-24T05:56:38.364Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",227,USR001
+2025-10-24T05:57:47.997Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",177,USR001
+2025-10-24T05:57:57.881Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",183,USR001
+2025-10-24T05:58:51.403Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",164,USR001
+2025-10-24T06:00:40.846Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",191,USR001
+2025-10-24T06:00:53.523Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAllAssets""}","{""count"":19}",188,USR001
+2025-10-24T06:01:07.544Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",236,USR001
+2025-10-24T06:01:58.812Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",532,USR001
+2025-10-24T07:17:06.083Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",255,USR001
+2025-10-24T07:27:58.787Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":68}",343,USR001
+2025-10-24T07:28:37.526Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",238,USR001
+2025-10-24T07:51:50.348Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",208,USR001
+2025-10-24T07:54:05.090Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",168,USR001
+2025-10-24T08:08:33.473Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":37}",466,USR001
+2025-10-24T08:09:06.020Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":37}",304,USR001
+2025-10-24T08:10:16.428Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",251,USR001
+2025-10-24T08:10:47.411Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",324,USR001
+2025-10-24T08:35:12.921Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":19}",223,USR001

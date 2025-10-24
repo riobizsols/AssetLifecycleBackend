@@ -8,7 +8,7 @@ const {
     logUnauthorizedReportAccess,
     logLargeResultSet,
     logMissingParameters,
-    logInvalidFilters,
+    logInvalidFilters, 
     logReportGenerationError,
     logDatabaseQueryError,
     logDatabaseConnectionFailure

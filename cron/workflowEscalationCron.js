@@ -1,5 +1,6 @@
 const cron = require('node-cron');
 const { processWorkflowEscalations } = require('../models/workflowEscalationModel');
+const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 
 /**
  * ==================================================================================
@@ -56,16 +57,37 @@ const startWorkflowEscalationCron = () => {
     // Create and start the cron job
     // Runs every day at 9:00 AM IST
     escalationCronJob = cron.schedule('0 9 * * *', async () => {
+      const startTime = Date.now();
+      const executionTime = new Date().toISOString();
+      const userId = 'SYSTEM'; // Cron jobs run as system
+      
       console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
       console.log('║  WORKFLOW CUTOFF DATE ESCALATION - AUTOMATED PROCESS STARTED     ║');
       console.log('╚═══════════════════════════════════════════════════════════════════╝');
-      console.log('⏰ Execution Time:', new Date().toISOString());
+      console.log('⏰ Execution Time:', executionTime);
       console.log('📋 Task: Escalate overdue workflows to next approver');
       console.log('───────────────────────────────────────────────────────────────────\n');
 
       try {
+        maintenanceCronLogger.logWorkflowEscalationCronExecutionStarted({
+          executionTime,
+          userId
+        }).catch(err => console.error('Logging error:', err));
+
+        maintenanceCronLogger.logProcessingWorkflowEscalations({
+          orgId: 'ORG001',
+          userId
+        }).catch(err => console.error('Logging error:', err));
+
         // Process escalations for the default organization
         const results = await processWorkflowEscalations('ORG001');
+        
+        maintenanceCronLogger.logWorkflowEscalationCronCompleted({
+          orgId: 'ORG001',
+          results,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
         
         console.log('\n╔═══════════════════════════════════════════════════════════════════╗');
         console.log('║  WORKFLOW CUTOFF DATE ESCALATION - COMPLETED SUCCESSFULLY ✓      ║');
@@ -77,6 +99,12 @@ const startWorkflowEscalationCron = () => {
         console.log('   • Errors encountered:', results.errors);
         console.log('───────────────────────────────────────────────────────────────────\n');
       } catch (error) {
+        maintenanceCronLogger.logWorkflowEscalationCronError({
+          orgId: 'ORG001',
+          error,
+          userId
+        }).catch(logErr => console.error('Logging error:', logErr));
+        
         console.error('\n╔═══════════════════════════════════════════════════════════════════╗');
         console.error('║  WORKFLOW CUTOFF DATE ESCALATION - FAILED ✗                     ║');
         console.error('╚═══════════════════════════════════════════════════════════════════╝');
@@ -87,6 +115,12 @@ const startWorkflowEscalationCron = () => {
       scheduled: true,
       timezone: "Asia/Kolkata" // Adjust timezone as needed
     });
+
+    maintenanceCronLogger.logWorkflowEscalationCronStarted({
+      schedule: '0 9 * * *',
+      timezone: 'Asia/Kolkata',
+      userId: 'SYSTEM'
+    }).catch(err => console.error('Logging error:', err));
 
     console.log('✅ WORKFLOW CUTOFF DATE ESCALATION - Cron Job Started Successfully');
     console.log('   📅 Schedule: Every day at 9:00 AM (Asia/Kolkata timezone)');
@@ -106,6 +140,11 @@ const stopWorkflowEscalationCron = () => {
   try {
     if (escalationCronJob) {
       escalationCronJob.stop();
+      
+      maintenanceCronLogger.logWorkflowEscalationCronStopped({
+        userId: 'SYSTEM'
+      }).catch(err => console.error('Logging error:', err));
+      
       console.log('✅ Workflow Escalation Cron Job stopped successfully');
     } else {
       console.log('⚠️  No Workflow Escalation Cron Job is currently running');

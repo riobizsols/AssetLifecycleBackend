@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const {
     findUserByEmail,
     createUser,
-    setResetToken,
+    setResetToken, 
     findUserByResetToken,
     updatePassword,
     getUserWithBranch

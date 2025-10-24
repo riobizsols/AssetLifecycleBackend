@@ -5,7 +5,7 @@ const {
     logReportDataRetrieved,
     logReportFiltersApplied,
     logNoDataFound,
-    logLargeResultSet,
+    logLargeResultSet, 
     logReportGenerationError,
     logDatabaseQueryError,
     logDatabaseConnectionFailure

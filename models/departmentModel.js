@@ -59,7 +59,7 @@ const createDepartment = async (dept) => {
         int_status = 1,
         text,
         parent_id = null,
-        branch_code = null,
+        branch_id = null,
         created_by,
         changed_by = null
     } = dept;
@@ -67,7 +67,7 @@ const createDepartment = async (dept) => {
     const result = await db.query(
         `INSERT INTO "tblDepartments" (
       org_id, dept_id, int_status, text, parent_id,
-      branch_code, created_on, changed_on, created_by, changed_by
+      branch_id, created_on, changed_on, created_by, changed_by
     ) VALUES (
       $1, $2, $3, $4, $5,
       $6, CURRENT_DATE, CURRENT_DATE, $7, $8
@@ -78,7 +78,7 @@ const createDepartment = async (dept) => {
             int_status,
             text,
             parent_id,
-            branch_code,
+            branch_id,
             created_by,
             changed_by
         ]
