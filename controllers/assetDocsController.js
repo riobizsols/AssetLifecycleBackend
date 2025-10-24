@@ -5,7 +5,7 @@ const path = require('path');
 const { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus } = require('../models/assetDocsModel');
 const { generateCustomId } = require('../utils/idGenerator');
 const db = require('../config/db');
-const {
+const { 
     logDocumentUploadApiCalled,
     logUploadingToMinIO,
     logFileUploadedToMinIO,

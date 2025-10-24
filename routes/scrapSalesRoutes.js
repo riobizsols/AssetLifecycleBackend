@@ -15,7 +15,11 @@ router.use(protect);
 // POST /api/scrap-sales - Create new scrap sale (requires authentication)
 router.post("/", controller.createScrapSale);
 
+// DELETE /api/scrap-sales/:id - Delete scrap sale (requires authentication)
+router.delete("/:id", controller.deleteScrapSale);
+
 // Example of role-based authorization (uncomment if needed)
 // router.post("/", authorize(['admin', 'manager']), controller.createScrapSale);
+// router.delete("/:id", authorize(['admin', 'manager']), controller.deleteScrapSale);
 
 module.exports = router;

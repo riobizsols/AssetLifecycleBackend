@@ -277,6 +277,52 @@ const validateScrapAssets = async (asdIds) => {
     return await db.query(query, asdIds);
 };
 
+// Delete scrap sale (header, details, and documents)
+const deleteScrapSale = async (ssh_id) => {
+    const client = await db.connect();
+    
+    try {
+        await client.query('BEGIN');
+
+        // First, get the details to know which assets were sold
+        const detailsQuery = `
+            SELECT asd_id, ssd_id FROM "tblScrapSales_D" WHERE ssh_id = $1
+        `;
+        const detailsResult = await client.query(detailsQuery, [ssh_id]);
+        
+        // Delete documents first (foreign key constraint)
+        const deleteDocsQuery = `
+            DELETE FROM "tblScrapSalesDocs" WHERE ssh_id = $1
+        `;
+        await client.query(deleteDocsQuery, [ssh_id]);
+        
+        // Delete details
+        const deleteDetailsQuery = `
+            DELETE FROM "tblScrapSales_D" WHERE ssh_id = $1
+        `;
+        const detailsDeleteResult = await client.query(deleteDetailsQuery, [ssh_id]);
+        
+        // Delete header
+        const deleteHeaderQuery = `
+            DELETE FROM "tblScrapSales_H" WHERE ssh_id = $1
+        `;
+        const headerDeleteResult = await client.query(deleteHeaderQuery, [ssh_id]);
+        
+        await client.query('COMMIT');
+
+        return {
+            headerDeleted: headerDeleteResult.rowCount,
+            detailsDeleted: detailsDeleteResult.rowCount,
+            assetsAffected: detailsResult.rows.map(row => row.asd_id)
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     createScrapSale,
     createScrapSalesHeader,
@@ -285,5 +331,6 @@ module.exports = {
     getScrapSaleById,
     validateScrapAssets,
     generateSshId,
-    generateSsdId
+    generateSsdId,
+    deleteScrapSale
 };

@@ -30,6 +30,9 @@ const {
     logDatabaseConstraintViolation
 } = require('../eventLoggers/maintenanceApprovalEventLogger');
 
+// Import supervisor approval logger
+const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
+
 // Get approval detail by asset ID
 const getApprovalDetail = async (req, res) => {
   const startTime = Date.now();
@@ -38,23 +41,42 @@ const getApprovalDetail = async (req, res) => {
   try {
     const { assetId } = req.params; // can be asset_id or wfamsh_id
     const orgId = req.query.orgId || 'ORG001';
+    const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
-    // Log API called
-    await logApiCall({
-      operation: 'Get Approval Detail',
-      method: req.method,
-      url: req.originalUrl,
-      requestData: { asset_id: assetId, org_id: orgId },
-      userId
-    });
+    // Log API called (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalDetailApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        wfamshId: assetId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logApiCall({
+        operation: 'Get Approval Detail',
+        method: req.method,
+        url: req.originalUrl,
+        requestData: { asset_id: assetId, org_id: orgId },
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     if (!assetId) {
-      await logMissingRequiredFields({
-        operation: 'Get Approval Detail',
-        missingFields: ['assetId'],
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logMissingRequiredFields({
+          operation: 'Get Supervisor Approval Detail',
+          missingFields: ['assetId'],
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logMissingRequiredFields({
+          operation: 'Get Approval Detail',
+          missingFields: ['assetId'],
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
       
       return res.status(400).json({
         success: false,
@@ -65,12 +87,20 @@ const getApprovalDetail = async (req, res) => {
     const approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
 
     if (!approvalDetail) {
-      await logApprovalNotFound({
-        assetId,
-        orgId,
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logApprovalNotFound({
+          wfamshId: assetId,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logApprovalNotFound({
+          assetId,
+          orgId,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
       
       return res.status(404).json({
         success: false,
@@ -116,14 +146,22 @@ const getApprovalDetail = async (req, res) => {
       vendorDetails: approvalDetail.vendorDetails || null // Include vendor details
     };
 
-    // Log success
-    await logApprovalDetailRetrieved({
-      assetId,
-      wfamsdId: formattedDetail.wfamsdId,
-      orgId,
-      userId,
-      duration: Date.now() - startTime
-    });
+    // Log success (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalDetailRetrieved({
+        wfamshId: assetId,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logApprovalDetailRetrieved({
+        assetId,
+        wfamsdId: formattedDetail.wfamsdId,
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     res.json({
       success: true,
@@ -135,14 +173,25 @@ const getApprovalDetail = async (req, res) => {
   } catch (error) {
     console.error('Error in getApprovalDetail:', error);
     
-    // Log error
-    await logDataRetrievalError({
-      operation: 'Get Approval Detail',
-      params: { asset_id: req.params.assetId, org_id: req.query.orgId },
-      error,
-      userId,
-      duration: Date.now() - startTime
-    });
+    const { context } = req.query;
+    
+    // Log error (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logDataRetrievalError({
+        operation: 'Get Supervisor Approval Detail',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logDataRetrievalError({
+        operation: 'Get Approval Detail',
+        params: { asset_id: req.params.assetId, org_id: req.query.orgId },
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    }
     
     res.status(500).json({
       success: false,
@@ -161,26 +210,47 @@ const approveMaintenanceAction = async (req, res) => {
     const { assetId } = req.params;
     const { empIntId, note } = req.body;
     const orgId = req.query.orgId || 'ORG001';
+    const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
-    // Step 1: Log API called with full request data
-    await logApproveMaintenanceApiCalled({
-      assetId,
-      empIntId,
-      note,
-      orgId,
-      method: req.method,
-      url: req.originalUrl,
-      userId
-    });
+    // Step 1: Log API called with full request data (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalActionApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        wfamshId: assetId,
+        action: 'approve',
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logApproveMaintenanceApiCalled({
+        assetId,
+        empIntId,
+        note,
+        orgId,
+        method: req.method,
+        url: req.originalUrl,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     // Step 2: Validate required fields
     if (!assetId || !empIntId) {
-      await logMissingRequiredFields({
-        operation: 'Approve Maintenance',
-        missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logMissingRequiredFields({
+          operation: 'Supervisor Approve Maintenance',
+          missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logMissingRequiredFields({
+          operation: 'Approve Maintenance',
+          missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
       
       return res.status(400).json({
         success: false,
@@ -189,31 +259,57 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 3: Log validation success
-    await logValidatingApprovalRequest({
-      assetId,
-      empIntId,
-      userId
-    });
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logValidationSuccess({
+        operation: 'Supervisor Approve Maintenance',
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logValidatingApprovalRequest({
+        assetId,
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     // Step 4: Log processing approval
-    await logProcessingApproval({
-      assetId,
-      empIntId,
-      userId
-    });
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logProcessingSupervisorApproval({
+        wfamshId: assetId,
+        action: 'approve',
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logProcessingApproval({
+        assetId,
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     // Step 5: Execute approval
     const result = await approveMaintenance(assetId, empIntId, note, orgId);
 
-    // Step 6: Log success
-    await logMaintenanceApproved({
-      assetId,
-      empIntId,
-      note,
-      resultMessage: result.message,
-      userId,
-      duration: Date.now() - startTime
-    });
+    // Step 6: Log success (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalCompleted({
+        wfamshId: assetId,
+        action: 'approve',
+        empIntId,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logMaintenanceApproved({
+        assetId,
+        empIntId,
+        note,
+        resultMessage: result.message,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     res.json({
       success: true,
@@ -224,35 +320,67 @@ const approveMaintenanceAction = async (req, res) => {
   } catch (error) {
     console.error('Error in approveMaintenanceAction:', error);
     
+    const { context } = req.query;
+    
     // Determine if it's a critical error or just an error
     const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
     
     if (isDbError) {
       if (error.code === 'ECONNREFUSED') {
-        await logDatabaseConnectionFailure({
-          operation: 'Approve Maintenance',
-          error,
-          userId,
-          duration: Date.now() - startTime
-        });
+        if (context === 'SUPERVISORAPPROVAL') {
+          supervisorApprovalLogger.logDatabaseConnectionFailure({
+            operation: 'Supervisor Approve Maintenance',
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        } else {
+          logDatabaseConnectionFailure({
+            operation: 'Approve Maintenance',
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        }
       } else {
-        await logDatabaseConstraintViolation({
-          operation: 'Approve Maintenance',
-          error,
-          assetId: req.params.assetId,
-          userId,
-          duration: Date.now() - startTime
-        });
+        if (context === 'SUPERVISORAPPROVAL') {
+          supervisorApprovalLogger.logDatabaseConstraintViolation({
+            operation: 'Supervisor Approve Maintenance',
+            wfamshId: req.params.assetId,
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        } else {
+          logDatabaseConstraintViolation({
+            operation: 'Approve Maintenance',
+            error,
+            assetId: req.params.assetId,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        }
       }
     } else {
-      await logApprovalOperationError({
-        operation: 'Approve Maintenance',
-        assetId: req.params.assetId,
-        empIntId: req.body.empIntId,
-        error,
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logSupervisorApprovalOperationError({
+          operation: 'Supervisor Approve Maintenance',
+          wfamshId: req.params.assetId,
+          empIntId: req.body.empIntId,
+          error,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logApprovalOperationError({
+          operation: 'Approve Maintenance',
+          assetId: req.params.assetId,
+          empIntId: req.body.empIntId,
+          error,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
     }
     
     res.status(500).json({
@@ -272,26 +400,47 @@ const rejectMaintenanceAction = async (req, res) => {
     const { assetId } = req.params;
     const { empIntId, reason } = req.body;
     const orgId = req.query.orgId || 'ORG001';
+    const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
-    // Step 1: Log API called with full request data
-    await logRejectMaintenanceApiCalled({
-      assetId,
-      empIntId,
-      reason,
-      orgId,
-      method: req.method,
-      url: req.originalUrl,
-      userId
-    });
+    // Step 1: Log API called with full request data (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalActionApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        wfamshId: assetId,
+        action: 'reject',
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logRejectMaintenanceApiCalled({
+        assetId,
+        empIntId,
+        reason,
+        orgId,
+        method: req.method,
+        url: req.originalUrl,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     // Step 2: Validate required fields
     if (!assetId || !empIntId) {
-      await logMissingRequiredFields({
-        operation: 'Reject Maintenance',
-        missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logMissingRequiredFields({
+          operation: 'Supervisor Reject Maintenance',
+          missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logMissingRequiredFields({
+          operation: 'Reject Maintenance',
+          missingFields: [!assetId && 'assetId', !empIntId && 'empIntId'].filter(Boolean),
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
       
       return res.status(400).json({
         success: false,
@@ -301,12 +450,19 @@ const rejectMaintenanceAction = async (req, res) => {
 
     // Step 3: Validate rejection reason
     const isReasonValid = reason && reason.trim() !== '';
-    await logValidatingRejectionReason({
-      assetId,
-      reason,
-      isValid: isReasonValid,
-      userId
-    });
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logValidationSuccess({
+        operation: 'Supervisor Reject Maintenance',
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logValidatingRejectionReason({
+        assetId,
+        reason,
+        isValid: isReasonValid,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
     
     if (!isReasonValid) {
       return res.status(400).json({
@@ -316,25 +472,44 @@ const rejectMaintenanceAction = async (req, res) => {
     }
 
     // Step 4: Log processing rejection
-    await logProcessingRejection({
-      assetId,
-      empIntId,
-      reason: reason.trim(),
-      userId
-    });
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logProcessingSupervisorApproval({
+        wfamshId: assetId,
+        action: 'reject',
+        empIntId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logProcessingRejection({
+        assetId,
+        empIntId,
+        reason: reason.trim(),
+        userId
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     // Step 5: Execute rejection
     const result = await rejectMaintenance(assetId, empIntId, reason.trim(), orgId);
 
-    // Step 6: Log success
-    await logMaintenanceRejected({
-      assetId,
-      empIntId,
-      reason: reason.trim(),
-      resultMessage: result.message,
-      userId,
-      duration: Date.now() - startTime
-    });
+    // Step 6: Log success (context-aware)
+    if (context === 'SUPERVISORAPPROVAL') {
+      supervisorApprovalLogger.logSupervisorApprovalCompleted({
+        wfamshId: assetId,
+        action: 'reject',
+        empIntId,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    } else {
+      logMaintenanceRejected({
+        assetId,
+        empIntId,
+        reason: reason.trim(),
+        resultMessage: result.message,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+    }
 
     res.json({
       success: true,
@@ -345,35 +520,67 @@ const rejectMaintenanceAction = async (req, res) => {
   } catch (error) {
     console.error('Error in rejectMaintenanceAction:', error);
     
+    const { context } = req.query;
+    
     // Determine if it's a critical error or just an error
     const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
     
     if (isDbError) {
       if (error.code === 'ECONNREFUSED') {
-        await logDatabaseConnectionFailure({
-          operation: 'Reject Maintenance',
-          error,
-          userId,
-          duration: Date.now() - startTime
-        });
+        if (context === 'SUPERVISORAPPROVAL') {
+          supervisorApprovalLogger.logDatabaseConnectionFailure({
+            operation: 'Supervisor Reject Maintenance',
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        } else {
+          logDatabaseConnectionFailure({
+            operation: 'Reject Maintenance',
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        }
       } else {
-        await logDatabaseConstraintViolation({
-          operation: 'Reject Maintenance',
-          error,
-          assetId: req.params.assetId,
-          userId,
-          duration: Date.now() - startTime
-        });
+        if (context === 'SUPERVISORAPPROVAL') {
+          supervisorApprovalLogger.logDatabaseConstraintViolation({
+            operation: 'Supervisor Reject Maintenance',
+            wfamshId: req.params.assetId,
+            error,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        } else {
+          logDatabaseConstraintViolation({
+            operation: 'Reject Maintenance',
+            error,
+            assetId: req.params.assetId,
+            userId,
+            duration: Date.now() - startTime
+          }).catch(err => console.error('Logging error:', err));
+        }
       }
     } else {
-      await logApprovalOperationError({
-        operation: 'Reject Maintenance',
-        assetId: req.params.assetId,
-        empIntId: req.body.empIntId,
-        error,
-        userId,
-        duration: Date.now() - startTime
-      });
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logSupervisorApprovalOperationError({
+          operation: 'Supervisor Reject Maintenance',
+          wfamshId: req.params.assetId,
+          empIntId: req.body.empIntId,
+          error,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logApprovalOperationError({
+          operation: 'Reject Maintenance',
+          assetId: req.params.assetId,
+          empIntId: req.body.empIntId,
+          error,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
     }
     
     res.status(500).json({

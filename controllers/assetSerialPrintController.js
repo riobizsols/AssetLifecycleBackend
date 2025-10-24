@@ -1,8 +1,12 @@
 const AssetSerialPrintModel = require('../models/assetSerialPrintModel');
+const serialPrintLogger = require('../eventLoggers/serialNumberPrintEventLogger');
 
 class AssetSerialPrintController {
   // Add serial number to print queue
   static async addToPrintQueue(req, res) {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const orgId = req.user.org_id;
       const createdBy = req.user.user_id;
@@ -13,13 +17,21 @@ class AssetSerialPrintController {
         reason = null
       } = req.body;
 
-      console.log(`Adding serial number to print queue for org: ${orgId}`);
-      console.log('Serial number:', serial_no);
-      console.log('Status:', status);
-      console.log('Reason:', reason);
+      // STEP 1: Log add to queue initiated (non-blocking)
+      serialPrintLogger.logAddToPrintQueueInitiated({
+        serialNumber: serial_no,
+        userId
+      }).catch(err => console.error('Logging error:', err));
 
-      // Validate required fields
+      // STEP 2: Validate required fields
       if (!serial_no) {
+        serialPrintLogger.logMissingParameters({
+          operation: 'addToPrintQueue',
+          missingParams: ['serial_no'],
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         return res.status(400).json({
           success: false,
           message: 'Serial number is required'
@@ -35,10 +47,22 @@ class AssetSerialPrintController {
         org_id: orgId
       };
 
+      // STEP 3: Log inserting to database (non-blocking)
+      serialPrintLogger.logInsertingToPrintQueue({
+        serialNumber: serial_no,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+
       // Add to print queue
       const result = await AssetSerialPrintModel.addToPrintQueue(serialData);
 
-      console.log(`Successfully added serial number to print queue: ${result.psnq_id}`);
+      // STEP 4: Log added successfully (non-blocking)
+      serialPrintLogger.logAddedToPrintQueue({
+        psnqId: result.psnq_id,
+        serialNumber: serial_no,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
 
       res.status(201).json({
         success: true,
@@ -51,12 +75,25 @@ class AssetSerialPrintController {
       
       // Handle specific database errors
       if (error.code === '23505') {
+        serialPrintLogger.logDuplicateSerialNumber({
+          serialNumber: req.body?.serial_no,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         return res.status(409).json({
           success: false,
           message: 'Serial number already exists in print queue',
           error: error.message
         });
       }
+
+      serialPrintLogger.logAddToQueueError({
+        serialNumber: req.body?.serial_no,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
 
       res.status(500).json({
         success: false,
@@ -68,14 +105,29 @@ class AssetSerialPrintController {
 
   // Get all serial numbers in print queue
   static async getAllPrintQueue(req, res) {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const orgId = req.user.org_id;
 
-      console.log(`Fetching all print queue items for org: ${orgId}`);
+      // STEP 1: Log API called (non-blocking)
+      serialPrintLogger.logPrintQueueFetchApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        status: 'all',
+        userId
+      }).catch(err => console.error('Logging error:', err));
+
+      // STEP 2: Log querying database (non-blocking)
+      serialPrintLogger.logQueryingPrintQueue({
+        status: 'all',
+        userId
+      }).catch(err => console.error('Logging error:', err));
 
       const printQueue = await AssetSerialPrintModel.getAllPrintQueue(orgId);
 
-      console.log(`Found ${printQueue.length} items in print queue`);
+      const count = printQueue.length;
 
       // Format response with asset and asset type details
       const formattedData = printQueue.map(item => ({
@@ -104,6 +156,14 @@ class AssetSerialPrintController {
         }
       }));
 
+      // STEP 3: Log print queue retrieved (non-blocking)
+      serialPrintLogger.logPrintQueueRetrieved({
+        count,
+        status: 'all',
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+
       res.json({
         success: true,
         data: formattedData,
@@ -112,6 +172,14 @@ class AssetSerialPrintController {
 
     } catch (error) {
       console.error('Error in getAllPrintQueue:', error);
+      
+      serialPrintLogger.logPrintQueueFetchError({
+        status: 'all',
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+      
       res.status(500).json({
         success: false,
         message: 'Failed to fetch print queue',
@@ -122,15 +190,39 @@ class AssetSerialPrintController {
 
   // Get print queue by status
   static async getPrintQueueByStatus(req, res) {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const orgId = req.user.org_id;
       const { status } = req.params;
 
-      console.log(`Fetching print queue items with status: ${status} for org: ${orgId}`);
+      // STEP 1: Log API called (non-blocking)
+      serialPrintLogger.logPrintQueueFetchApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        status,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+
+      // STEP 2: Log querying database (non-blocking)
+      serialPrintLogger.logQueryingPrintQueue({
+        status,
+        userId
+      }).catch(err => console.error('Logging error:', err));
 
       const printQueue = await AssetSerialPrintModel.getPrintQueueByStatus(orgId, status);
 
-      console.log(`Found ${printQueue.length} items with status: ${status}`);
+      const count = printQueue.length;
+
+      // Log if queue is empty (WARNING)
+      if (count === 0) {
+        serialPrintLogger.logEmptyPrintQueue({
+          status,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+      }
 
       // Format response with asset and asset type details
       const formattedData = printQueue.map(item => ({
@@ -159,6 +251,14 @@ class AssetSerialPrintController {
         }
       }));
 
+      // STEP 3: Log print queue retrieved (non-blocking)
+      serialPrintLogger.logPrintQueueRetrieved({
+        count,
+        status,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+
       res.json({
         success: true,
         data: formattedData,
@@ -168,6 +268,14 @@ class AssetSerialPrintController {
 
     } catch (error) {
       console.error('Error in getPrintQueueByStatus:', error);
+      
+      serialPrintLogger.logPrintQueueFetchError({
+        status: req.params?.status,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+      
       res.status(500).json({
         success: false,
         message: 'Failed to fetch print queue by status',
@@ -178,32 +286,69 @@ class AssetSerialPrintController {
 
   // Update print status
   static async updatePrintStatus(req, res) {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const orgId = req.user.org_id;
       const { psnqId } = req.params;
       const { status } = req.body;
 
-      console.log(`Updating print status for psnq_id: ${psnqId}, status: ${status}`);
+      // STEP 1: Log status update API called (non-blocking)
+      serialPrintLogger.logStatusUpdateApiCalled({
+        method: req.method,
+        url: req.originalUrl,
+        psnqId,
+        newStatus: status,
+        userId
+      }).catch(err => console.error('Logging error:', err));
 
-      // Validate required fields
+      // STEP 2: Validate required fields
       if (!status) {
+        serialPrintLogger.logMissingParameters({
+          operation: 'updatePrintStatus',
+          missingParams: ['status'],
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         return res.status(400).json({
           success: false,
           message: 'Status is required'
         });
       }
 
+      // STEP 3: Log updating status in database (non-blocking)
+      serialPrintLogger.logUpdatingStatusInDatabase({
+        psnqId,
+        newStatus: status,
+        userId
+      }).catch(err => console.error('Logging error:', err));
+
       // Update status
       const result = await AssetSerialPrintModel.updatePrintStatus(psnqId, status, orgId);
 
       if (!result) {
+        serialPrintLogger.logPrintQueueItemNotFound({
+          psnqId,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         return res.status(404).json({
           success: false,
           message: 'Print queue item not found'
         });
       }
 
-      console.log(`Successfully updated print status for: ${psnqId}`);
+      // STEP 4: Log status updated successfully (non-blocking)
+      serialPrintLogger.logStatusUpdated({
+        psnqId,
+        serialNumber: result.serial_no || 'unknown',
+        newStatus: status,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
 
       res.json({
         success: true,
@@ -213,6 +358,15 @@ class AssetSerialPrintController {
 
     } catch (error) {
       console.error('Error in updatePrintStatus:', error);
+      
+      serialPrintLogger.logStatusUpdateError({
+        psnqId: req.params?.psnqId,
+        newStatus: req.body?.status,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+      
       res.status(500).json({
         success: false,
         message: 'Failed to update print status',
@@ -223,23 +377,41 @@ class AssetSerialPrintController {
 
   // Delete from print queue
   static async deleteFromPrintQueue(req, res) {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
       const orgId = req.user.org_id;
       const { psnqId } = req.params;
 
-      console.log(`Deleting print queue item: ${psnqId}`);
+      // STEP 1: Log delete initiated (non-blocking)
+      serialPrintLogger.logDeleteFromQueueInitiated({
+        psnqId,
+        userId
+      }).catch(err => console.error('Logging error:', err));
 
       // Delete from print queue
       const result = await AssetSerialPrintModel.deleteFromPrintQueue(psnqId, orgId);
 
       if (!result) {
+        serialPrintLogger.logPrintQueueItemNotFound({
+          psnqId,
+          userId,
+          duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         return res.status(404).json({
           success: false,
           message: 'Print queue item not found'
         });
       }
 
-      console.log(`Successfully deleted print queue item: ${psnqId}`);
+      // STEP 2: Log deleted successfully (non-blocking)
+      serialPrintLogger.logDeletedFromQueue({
+        psnqId,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
 
       res.json({
         success: true,
@@ -249,6 +421,14 @@ class AssetSerialPrintController {
 
     } catch (error) {
       console.error('Error in deleteFromPrintQueue:', error);
+      
+      serialPrintLogger.logDeleteError({
+        psnqId: req.params?.psnqId,
+        error,
+        userId,
+        duration: Date.now() - startTime
+      }).catch(err => console.error('Logging error:', err));
+      
       res.status(500).json({
         success: false,
         message: 'Failed to delete print queue item',

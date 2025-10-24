@@ -1,7 +1,12 @@
 const model = require("../models/assetAssignmentModel");
+const deptAssignmentLogger = require("../eventLoggers/deptAssignmentEventLogger");
+const empAssignmentLogger = require("../eventLoggers/empAssignmentEventLogger");
 
 // POST /api/asset-assignments - Add new asset assignment
 const addAssetAssignment = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const {
             asset_assign_id,
@@ -16,39 +21,112 @@ const addAssetAssignment = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        // Validate basic required fields
+        // STEP 1: Log API called (non-blocking)
+        deptAssignmentLogger.logAssignmentApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            assetId: asset_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId,
+            requestBody: req.body
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Validate basic required fields (non-blocking)
+        deptAssignmentLogger.logValidatingParameters({
+            assetId: asset_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         if (!asset_assign_id || !dept_id || !asset_id || !org_id || latest_assignment_flag === undefined) {
+            deptAssignmentLogger.logMissingParameters({
+                operation: 'addAssetAssignment',
+                missingParams: ['asset_assign_id', 'dept_id', 'asset_id', 'org_id', 'latest_assignment_flag'],
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(400).json({ 
                 error: "asset_assign_id, dept_id, asset_id, org_id, and latest_assignment_flag are required fields" 
             });
         }
 
-        // Check asset type assignment_type to determine if employee_int_id is required
+        // STEP 3: Check asset type assignment_type (non-blocking)
+        deptAssignmentLogger.logCheckingAssetTypeAssignment({
+            assetId: asset_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const assetModel = require("../models/assetModel");
         const assetTypeResult = await assetModel.getAssetTypeAssignmentType(asset_id);
         
         if (assetTypeResult.rows.length === 0) {
+            deptAssignmentLogger.logInvalidAssetForDept({
+                assetId: asset_id,
+                reason: 'Asset not found or asset type not configured',
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(404).json({ 
                 error: "Asset not found or asset type not configured" 
             });
         }
 
         const assignmentType = assetTypeResult.rows[0].assignment_type;
+
+        // STEP 4: Log asset type validated (non-blocking)
+        deptAssignmentLogger.logAssetTypeValidated({
+            assetId: asset_id,
+            assignmentType: assignmentType,
+            userId
+        }).catch(err => console.error('Logging error:', err));
         
         // Validate employee_int_id based on assignment_type
         if (assignmentType === "User" && !employee_int_id) {
+            deptAssignmentLogger.logInvalidAssetForDept({
+                assetId: asset_id,
+                reason: 'Asset type requires User assignment but employee_int_id not provided',
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(400).json({ 
                 error: "employee_int_id is required when assignment_type is 'User'" 
             });
         }
 
-        // Check if asset assignment already exists
+        // STEP 5: Check for existing assignment (non-blocking)
+        deptAssignmentLogger.logCheckingExistingAssignment({
+            assetId: asset_id,
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const existingAssignment = await model.checkAssetAssignmentExists(asset_assign_id);
         if (existingAssignment.rows.length > 0) {
+            deptAssignmentLogger.logDuplicateAssignment({
+                assetId: asset_id,
+                deptId: dept_id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(409).json({ 
                 error: "Asset assignment with this asset_assign_id already exists" 
             });
         }
+
+        // STEP 6: No existing assignment - can proceed (non-blocking)
+        deptAssignmentLogger.logNoExistingAssignment({
+            assetId: asset_id,
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 7: Log assignment ID (non-blocking)
+        deptAssignmentLogger.logAssignmentIdGenerated({
+            assignmentId: asset_assign_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
         // Prepare assignment data
         const assignmentData = {
@@ -62,8 +140,33 @@ const addAssetAssignment = async (req, res) => {
             latest_assignment_flag
         };
 
-        // Insert new asset assignment
+        // STEP 8: Insert to database (non-blocking)
+        deptAssignmentLogger.logInsertingAssignmentToDatabase({
+            assignmentId: asset_assign_id,
+            assetId: asset_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.insertAssetAssignment(assignmentData);
+
+        // STEP 9: Assignment inserted successfully (non-blocking)
+        deptAssignmentLogger.logAssignmentInsertedToDatabase({
+            assignmentId: asset_assign_id,
+            assetId: asset_id,
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 10: Log success (non-blocking)
+        deptAssignmentLogger.logDeptAssignmentSuccess({
+            assetId: asset_id,
+            deptId: dept_id,
+            assignmentId: asset_assign_id,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
 
         res.status(201).json({
             message: "Asset assignment added successfully",
@@ -73,12 +176,22 @@ const addAssetAssignment = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding asset assignment:", err);
+        deptAssignmentLogger.logAssignmentError({
+            assetId: req.body?.asset_id,
+            deptId: req.body?.dept_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Internal server error", err });
     }
 };
 
 // POST /api/asset-assignments/employee - Add new asset assignment for employee only (no assignment_type check)
 const addEmployeeAssetAssignment = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const {
             asset_assign_id,
@@ -93,35 +206,71 @@ const addEmployeeAssetAssignment = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        // Validate required fields
+        // STEP 1: Log API called (non-blocking)
+        empAssignmentLogger.logAssignmentApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId,
+            requestBody: req.body
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Validate required fields (non-blocking)
+        empAssignmentLogger.logValidatingParameters({
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         if (!asset_assign_id || !dept_id || !asset_id || !org_id || !employee_int_id || latest_assignment_flag === undefined) {
+            empAssignmentLogger.logMissingParameters({
+                operation: 'addEmployeeAssetAssignment',
+                missingParams: ['asset_assign_id', 'dept_id', 'asset_id', 'org_id', 'employee_int_id', 'latest_assignment_flag'],
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(400).json({ 
                 error: "asset_assign_id, dept_id, asset_id, org_id, employee_int_id, and latest_assignment_flag are required fields" 
             });
         }
 
-        // Check asset type assignment_type to ensure it is not Department
-        // const assetModel = require("../models/assetModel");
-        // const assetTypeResult = await assetModel.getAssetTypeAssignmentType(asset_id);
-        // if (assetTypeResult.rows.length === 0) {
-        //     return res.status(404).json({ 
-        //         error: "Asset not found or asset type not configured" 
-        //     });
-        // }
-        // const assignmentType = assetTypeResult.rows[0].assignment_type;
-        // if (assignmentType === "Department") {
-        //     return res.status(400).json({ 
-        //         error: "This asset type is for department assignment only" 
-        //     });
-        // }
+        // STEP 3: Check for existing assignment (non-blocking)
+        empAssignmentLogger.logCheckingExistingAssignment({
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
-        // Check if asset assignment already exists
         const existingAssignment = await model.checkAssetAssignmentExists(asset_assign_id);
         if (existingAssignment.rows.length > 0) {
+            empAssignmentLogger.logDuplicateAssignment({
+                assetId: asset_id,
+                employeeIntId: employee_int_id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(409).json({ 
                 error: "Asset assignment with this asset_assign_id already exists" 
             });
         }
+
+        // STEP 4: No existing assignment - can proceed (non-blocking)
+        empAssignmentLogger.logNoExistingAssignment({
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 5: Log assignment ID (non-blocking)
+        empAssignmentLogger.logAssignmentIdGenerated({
+            assignmentId: asset_assign_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
 
         // Prepare assignment data
         const assignmentData = {
@@ -135,8 +284,34 @@ const addEmployeeAssetAssignment = async (req, res) => {
             latest_assignment_flag
         };
 
-        // Insert new asset assignment
+        // STEP 6: Insert to database (non-blocking)
+        empAssignmentLogger.logInsertingAssignmentToDatabase({
+            assignmentId: asset_assign_id,
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            deptId: dept_id,
+            orgId: org_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.insertAssetAssignment(assignmentData);
+
+        // STEP 7: Assignment inserted successfully (non-blocking)
+        empAssignmentLogger.logAssignmentInsertedToDatabase({
+            assignmentId: asset_assign_id,
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 8: Log success (non-blocking)
+        empAssignmentLogger.logEmpAssignmentSuccess({
+            assetId: asset_id,
+            employeeIntId: employee_int_id,
+            assignmentId: asset_assign_id,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
 
         res.status(201).json({
             message: "Employee asset assignment added successfully",
@@ -145,6 +320,13 @@ const addEmployeeAssetAssignment = async (req, res) => {
 
     } catch (err) {
         console.error("Error adding employee asset assignment:", err);
+        empAssignmentLogger.logAssignmentError({
+            assetId: req.body?.asset_id,
+            employeeIntId: req.body?.employee_int_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Internal server error", err });
     }
 };
@@ -194,34 +376,118 @@ const getAssetAssignmentWithDetails = async (req, res) => {
     }
 };
 
-// GET /api/asset-assignments/dept/:dept_id - Get asset assignments by department
+// GET /api/asset-assignments/dept/:dept_id - Get asset assignments by department (HISTORY)
 const getAssetAssignmentsByDept = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { dept_id } = req.params;
+
+        // STEP 1: Log history API called (non-blocking)
+        deptAssignmentLogger.logApiCall({
+            operation: 'getDepartmentAssignmentHistory',
+            method: req.method,
+            url: req.originalUrl,
+            requestData: { dept_id },
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Log querying history from database (non-blocking)
+        deptAssignmentLogger.logQueryingDeptAssignments({
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.getAssetAssignmentsByDept(dept_id);
+
+        // STEP 3: Log history retrieved (non-blocking)
+        deptAssignmentLogger.logAssignmentHistoryViewed({
+            deptId: dept_id,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset assignments by department:", err);
+        deptAssignmentLogger.logAssignmentRetrievalError({
+            deptId: req.params?.dept_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Failed to fetch asset assignments by department" });
     }
 };
 
-// GET /api/asset-assignments/employee/:employee_id - Get asset assignments by employee
+// GET /api/asset-assignments/employee/:employee_id - Get asset assignments by employee (HISTORY)
 const getAssetAssignmentsByEmployee = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { employee_id } = req.params;
+
+        // STEP 1: Log history API called (non-blocking)
+        empAssignmentLogger.logApiCall({
+            operation: 'getEmployeeAssignmentHistory',
+            method: req.method,
+            url: req.originalUrl,
+            requestData: { employee_id },
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Log querying history from database (non-blocking)
+        empAssignmentLogger.logQueryingEmpAssignments({
+            employeeId: employee_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.getAssetAssignmentsByEmployee(employee_id);
+
+        // STEP 3: Log history retrieved (non-blocking)
+        empAssignmentLogger.logAssignmentHistoryViewed({
+            employeeIntId: employee_id,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset assignments by employee:", err);
+        empAssignmentLogger.logAssignmentRetrievalError({
+            employeeId: req.params?.employee_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Failed to fetch asset assignments by employee" });
     }
 };
 
 // GET /api/asset-assignments/employee/:employee_id/active - Get active asset assignments by employee
 const getActiveAssetAssignmentsByEmployee = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { employee_id } = req.params;
+
+        // STEP 1: Log API called (non-blocking)
+        empAssignmentLogger.logEmpSelectionApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            employeeId: employee_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Log querying database (non-blocking)
+        empAssignmentLogger.logQueryingEmpAssignments({
+            employeeId: employee_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.getActiveAssetAssignmentsByEmployeeWithDetails(employee_id);
         
         const count = result.assignments.length;
@@ -229,6 +495,11 @@ const getActiveAssetAssignmentsByEmployee = async (req, res) => {
         
         // Check if employee exists
         if (!result.employee) {
+            empAssignmentLogger.logInvalidEmployee({
+                employeeId: employee_id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(404).json({ 
                 error: "Employee not found",
                 message: "Employee not found",
@@ -238,6 +509,21 @@ const getActiveAssetAssignmentsByEmployee = async (req, res) => {
                 department: null
             });
         }
+
+        // STEP 3: Log processing data (non-blocking)
+        empAssignmentLogger.logProcessingEmpAssignmentData({
+            employeeId: employee_id,
+            count: count,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 4: Log successful retrieval (non-blocking)
+        empAssignmentLogger.logEmpAssignmentsRetrieved({
+            employeeId: employee_id,
+            count: count,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
         
         res.status(200).json({
             message: message,
@@ -256,6 +542,12 @@ const getActiveAssetAssignmentsByEmployee = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching active asset assignments by employee:", err);
+        empAssignmentLogger.logAssignmentRetrievalError({
+            employeeId: req.params?.employee_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Failed to fetch active asset assignments by employee" });
     }
 };
@@ -298,6 +590,9 @@ const getAssetAssignmentsByOrg = async (req, res) => {
 
 // PUT /api/asset-assignments/:id - Update asset assignment
 const updateAssetAssignment = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { id } = req.params;
         const {
@@ -315,7 +610,46 @@ const updateAssetAssignment = async (req, res) => {
         // Check if asset assignment exists
         const existingAssignment = await model.getAssetAssignmentById(id);
         if (existingAssignment.rows.length === 0) {
+            // Log to both since we don't know which type it is (non-blocking)
+            if (employee_int_id) {
+                empAssignmentLogger.logInvalidAssetForEmployee({
+                    assetId: asset_id,
+                    reason: 'Assignment not found',
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(logErr => console.error('Logging error:', logErr));
+            } else {
+                deptAssignmentLogger.logInvalidAssetForDept({
+                    assetId: asset_id,
+                    reason: 'Assignment not found',
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(logErr => console.error('Logging error:', logErr));
+            }
             return res.status(404).json({ error: "Asset assignment not found" });
+        }
+
+        // Determine if this is unassignment (action='C') or update
+        const isUnassignment = action === 'C';
+        const isEmployeeAssignment = employee_int_id || existingAssignment.rows[0].employee_int_id;
+
+        // Log unassignment initiated (non-blocking)
+        if (isUnassignment) {
+            if (isEmployeeAssignment) {
+                empAssignmentLogger.logEmpUnassignmentInitiated({
+                    assetId: asset_id || existingAssignment.rows[0].asset_id,
+                    employeeIntId: employee_int_id || existingAssignment.rows[0].employee_int_id,
+                    assignmentId: id,
+                    userId
+                }).catch(logErr => console.error('Logging error:', logErr));
+            } else {
+                deptAssignmentLogger.logDeptUnassignmentInitiated({
+                    assetId: asset_id || existingAssignment.rows[0].asset_id,
+                    deptId: dept_id || existingAssignment.rows[0].dept_id,
+                    assignmentId: id,
+                    userId
+                }).catch(logErr => console.error('Logging error:', logErr));
+            }
         }
 
         // Prepare update data
@@ -332,6 +666,27 @@ const updateAssetAssignment = async (req, res) => {
         // Update asset assignment
         const result = await model.updateAssetAssignment(id, updateData);
 
+        // Log success (non-blocking)
+        if (isUnassignment) {
+            if (isEmployeeAssignment) {
+                empAssignmentLogger.logEmpUnassignmentSuccess({
+                    assetId: asset_id || existingAssignment.rows[0].asset_id,
+                    employeeIntId: employee_int_id || existingAssignment.rows[0].employee_int_id,
+                    assignmentId: id,
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(logErr => console.error('Logging error:', logErr));
+            } else {
+                deptAssignmentLogger.logDeptUnassignmentSuccess({
+                    assetId: asset_id || existingAssignment.rows[0].asset_id,
+                    deptId: dept_id || existingAssignment.rows[0].dept_id,
+                    assignmentId: id,
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(logErr => console.error('Logging error:', logErr));
+            }
+        }
+
         res.status(200).json({
             message: "Asset assignment updated successfully",
             assignment: result.rows[0]
@@ -339,6 +694,26 @@ const updateAssetAssignment = async (req, res) => {
 
     } catch (err) {
         console.error("Error updating asset assignment:", err);
+        
+        // Log error (non-blocking)
+        if (req.body?.employee_int_id) {
+            empAssignmentLogger.logUnassignmentError({
+                assetId: req.body?.asset_id,
+                employeeIntId: req.body?.employee_int_id,
+                error: err,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(logErr => console.error('Logging error:', logErr));
+        } else {
+            deptAssignmentLogger.logUnassignmentError({
+                assetId: req.body?.asset_id,
+                deptId: req.body?.dept_id,
+                error: err,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(logErr => console.error('Logging error:', logErr));
+        }
+        
         res.status(500).json({ error: "Internal server error", err });
     }
 };
@@ -440,12 +815,35 @@ const deleteMultipleAssetAssignments = async (req, res) => {
 
 // GET /api/asset-assignments/department/:dept_id/assignments - Get department-wise asset assignments
 const getDepartmentWiseAssetAssignments = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { dept_id } = req.params;
+
+        // STEP 1: Log API called (non-blocking)
+        deptAssignmentLogger.logDeptSelectionApiCalled({
+            method: req.method,
+            url: req.originalUrl,
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 2: Log querying database (non-blocking)
+        deptAssignmentLogger.logQueryingDeptAssignments({
+            deptId: dept_id,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
         const result = await model.getDepartmentWiseAssetAssignments(dept_id);
         
         // Check if department exists
         if (!result.department) {
+            deptAssignmentLogger.logInvalidDepartment({
+                deptId: dept_id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
             return res.status(404).json({ 
                 error: "Department not found",
                 message: "Department not found",
@@ -463,6 +861,21 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             ? `Department has ${assetCount} assigned assets and ${employeeCount} employees`
             : `Department has no assigned assets and ${employeeCount} employees`;
         
+        // STEP 3: Log processing data (non-blocking)
+        deptAssignmentLogger.logProcessingAssignmentData({
+            deptId: dept_id,
+            count: assetCount,
+            userId
+        }).catch(err => console.error('Logging error:', err));
+
+        // STEP 4: Log successful retrieval (non-blocking)
+        deptAssignmentLogger.logDeptAssignmentsRetrieved({
+            deptId: dept_id,
+            count: assetCount,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(err => console.error('Logging error:', err));
+        
         res.status(200).json({
             message: message,
             department: {
@@ -477,6 +890,12 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
         });
     } catch (err) {
         console.error("Error fetching department-wise asset assignments:", err);
+        deptAssignmentLogger.logAssignmentRetrievalError({
+            deptId: req.params?.dept_id,
+            error: err,
+            userId,
+            duration: Date.now() - startTime
+        }).catch(logErr => console.error('Logging error:', logErr));
         res.status(500).json({ error: "Failed to fetch department-wise asset assignments" });
     }
 };

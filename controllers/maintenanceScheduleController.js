@@ -1,5 +1,8 @@
 const model = require("../models/maintenanceScheduleModel");
 
+// Import supervisor approval logger
+const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
+
 // Main function to generate maintenance schedules
 const generateMaintenanceSchedules = async (req, res) => {
     try {
@@ -543,8 +546,21 @@ const getMaintenanceFrequencyForAssetType = async (req, res) => {
 
 // Get all maintenance schedules from tblAssetMaintSch
 const getAllMaintenanceSchedules = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const orgId = req.query.orgId || 'ORG001';
+        const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
+        
+        // Log API called (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logSupervisorApprovalListApiCalled({
+                method: req.method,
+                url: req.originalUrl,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
         
         const result = await model.getAllMaintenanceSchedules(orgId);
         
@@ -571,6 +587,16 @@ const getAllMaintenanceSchedules = async (req, res) => {
             };
         });
 
+        // Log success (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logSupervisorApprovalsRetrieved({
+                count: formattedData.length,
+                empIntId: userId, // Using userId as empIntId for now
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
+
         res.json({
             success: true,
             message: 'Maintenance schedules retrieved successfully',
@@ -581,6 +607,19 @@ const getAllMaintenanceSchedules = async (req, res) => {
 
     } catch (error) {
         console.error('Error in getAllMaintenanceSchedules:', error);
+        
+        const { context } = req.query;
+        
+        // Log error (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logDataRetrievalError({
+                operation: 'Get Supervisor Approval List',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Failed to retrieve maintenance schedules',
@@ -591,11 +630,34 @@ const getAllMaintenanceSchedules = async (req, res) => {
 
 // Get maintenance schedule details by ID from tblAssetMaintSch
 const getMaintenanceScheduleById = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { id } = req.params;
         const orgId = req.query.orgId;
+        const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
+        
+        // Log API called (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logSupervisorApprovalDetailApiCalled({
+                method: req.method,
+                url: req.originalUrl,
+                wfamshId: id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
         
         if (!id) {
+            if (context === 'SUPERVISORAPPROVAL') {
+                supervisorApprovalLogger.logMissingRequiredFields({
+                    operation: 'Get Supervisor Approval Detail',
+                    missingFields: ['id'],
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+            }
+            
             return res.status(400).json({
                 success: false,
                 message: 'Maintenance schedule ID is required'
@@ -605,6 +667,14 @@ const getMaintenanceScheduleById = async (req, res) => {
         const result = await model.getMaintenanceScheduleById(id, orgId);
         
         if (result.rows.length === 0) {
+            if (context === 'SUPERVISORAPPROVAL') {
+                supervisorApprovalLogger.logApprovalNotFound({
+                    wfamshId: id,
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+            }
+            
             return res.status(404).json({
                 success: false,
                 message: 'Maintenance schedule not found'
@@ -616,6 +686,15 @@ const getMaintenanceScheduleById = async (req, res) => {
         // Format the data for frontend - include all columns from tblAssetMaintSch
         const formattedData = { ...record };
 
+        // Log success (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logSupervisorApprovalDetailRetrieved({
+                wfamshId: id,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
+
         res.json({
             success: true,
             message: 'Maintenance schedule details retrieved successfully',
@@ -625,6 +704,19 @@ const getMaintenanceScheduleById = async (req, res) => {
 
     } catch (error) {
         console.error('Error in getMaintenanceScheduleById:', error);
+        
+        const { context } = req.query;
+        
+        // Log error (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logDataRetrievalError({
+                operation: 'Get Supervisor Approval Detail',
+                error,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
+        
         res.status(500).json({
             success: false,
             message: 'Failed to retrieve maintenance schedule details',
@@ -635,29 +727,90 @@ const getMaintenanceScheduleById = async (req, res) => {
 
 // Update maintenance schedule in tblAssetMaintSch
 const updateMaintenanceSchedule = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
     try {
         const { id } = req.params;
         const orgId = req.query.orgId;
         const updateData = req.body;
+        const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
         const changedOn = new Date(); // Set changed_on to current timestamp
 
+        // Log API called (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logMaintenanceUpdateApiCalled({
+                method: req.method,
+                url: req.originalUrl,
+                wfamshId: id,
+                updateData,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }
+
         if (!id) {
+            if (context === 'SUPERVISORAPPROVAL') {
+                supervisorApprovalLogger.logMissingRequiredFields({
+                    operation: 'Update Supervisor Maintenance',
+                    missingFields: ['id'],
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+            }
             return res.status(400).json({ success: false, message: 'Maintenance schedule ID is required' });
         }
         if (!updateData.status) {
+            if (context === 'SUPERVISORAPPROVAL') {
+                supervisorApprovalLogger.logMissingRequiredFields({
+                    operation: 'Update Supervisor Maintenance',
+                    missingFields: ['status'],
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+            }
             return res.status(400).json({ success: false, message: 'Status is required' });
         }
 
         const result = await model.updateMaintenanceSchedule(id, { ...updateData, changed_by: changedBy, changed_on: changedOn }, orgId);
 
         if (result.rows.length === 0) {
+            if (context === 'SUPERVISORAPPROVAL') {
+                supervisorApprovalLogger.logApprovalNotFound({
+                    wfamshId: id,
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+            }
             return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
+        }
+
+        // Log success (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logMaintenanceUpdated({
+                wfamshId: id,
+                updateFields: Object.keys(updateData),
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
         }
 
         res.status(200).json({ success: true, message: 'Maintenance schedule updated successfully', data: result.rows[0] });
     } catch (error) {
         console.error('Error in updateMaintenanceSchedule:', error);
+        
+        const { context } = req.query;
+        
+        // Log error (context-aware)
+        if (context === 'SUPERVISORAPPROVAL') {
+            supervisorApprovalLogger.logMaintenanceUpdateError({
+                wfamshId: req.params.id,
+                updateData: req.body,
+                error,
+                userId,
+                duration: Date.now() - startTime
+            }).catch(err => console.error('Logging error:', err));
+        }
         res.status(500).json({ success: false, message: 'Failed to update maintenance schedule', error: error.message });
     }
 };

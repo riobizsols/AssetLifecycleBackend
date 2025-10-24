@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const axios = require('axios');
 const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
+const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 
 class CronService {
     constructor() {
@@ -11,7 +12,14 @@ class CronService {
 
     // Initialize all cron jobs
     initCronJobs() {
+        const userId = 'SYSTEM';
+        
         console.log('Initializing cron jobs...');
+        
+        maintenanceCronLogger.logCronJobInitialization({
+            jobs: ['maintenance_schedule_generation', 'workflow_escalation'],
+            userId
+        }).catch(err => console.error('Logging error:', err));
         
         // Schedule maintenance schedule generation every 24 hours at 12 AM
         this.scheduleMaintenanceGeneration();
@@ -37,12 +45,33 @@ class CronService {
     scheduleMaintenanceGeneration() {
         // Run every day at 12:00 AM (midnight)
         cron.schedule('0 0 * * *', async () => {
-            console.log('🕐 [CRON] Starting scheduled maintenance schedule generation at:', new Date().toISOString());
+            const startTime = Date.now();
+            const executionTime = new Date().toISOString();
+            const userId = 'SYSTEM'; // Cron jobs run as system
+            
+            console.log('🕐 [CRON] Starting scheduled maintenance schedule generation at:', executionTime);
             
             try {
+                maintenanceCronLogger.logMaintenanceScheduleCronExecutionStarted({
+                    executionTime,
+                    userId
+                }).catch(err => console.error('Logging error:', err));
+
                 await this.generateMaintenanceSchedules();
+                
+                maintenanceCronLogger.logMaintenanceScheduleCronCompleted({
+                    results: { status: 'success' },
+                    userId,
+                    duration: Date.now() - startTime
+                }).catch(err => console.error('Logging error:', err));
+                
                 console.log('✅ [CRON] Maintenance schedule generation completed successfully');
             } catch (error) {
+                maintenanceCronLogger.logMaintenanceScheduleCronError({
+                    error,
+                    userId
+                }).catch(logErr => console.error('Logging error:', logErr));
+                
                 console.error('❌ [CRON] Error in maintenance schedule generation:', error.message);
             }
         }, {
@@ -50,13 +79,26 @@ class CronService {
             timezone: "Asia/Kolkata" // IST timezone
         });
 
+        maintenanceCronLogger.logMaintenanceScheduleCronStarted({
+            schedule: '0 0 * * *',
+            timezone: 'Asia/Kolkata',
+            userId: 'SYSTEM'
+        }).catch(err => console.error('Logging error:', err));
+
         console.log('📅 [CRON] Maintenance schedule generation scheduled for every day at 12:00 AM (IST)');
     }
 
     // Call the maintenance schedule generation API
     async generateMaintenanceSchedules() {
+        const userId = 'SYSTEM';
+        
         try {
             const url = `${this.baseURL}/api/maintenance-schedules/generate-cron`;
+            
+            maintenanceCronLogger.logCallingMaintenanceScheduleAPI({
+                url,
+                userId
+            }).catch(err => console.error('Logging error:', err));
             
             const requestConfig = {
                 method: 'POST',
@@ -72,6 +114,12 @@ class CronService {
 
             const response = await axios(requestConfig);
             
+            maintenanceCronLogger.logMaintenanceScheduleAPIResponse({
+                status: response.status,
+                data: response.data,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+            
             console.log('📊 [CRON] Maintenance generation response:', {
                 status: response.status,
                 data: response.data
@@ -79,6 +127,13 @@ class CronService {
 
             return response.data;
         } catch (error) {
+            maintenanceCronLogger.logMaintenanceScheduleAPIError({
+                error,
+                status: error.response?.status,
+                data: error.response?.data,
+                userId
+            }).catch(logErr => console.error('Logging error:', logErr));
+            
             console.error('❌ [CRON] API call failed:', {
                 message: error.message,
                 status: error.response?.status,
@@ -90,6 +145,13 @@ class CronService {
 
     // Manual trigger for testing
     async triggerMaintenanceGeneration() {
+        const userId = 'SYSTEM';
+        
+        maintenanceCronLogger.logManualTriggerMaintenanceGeneration({
+            triggeredBy: 'Manual Trigger',
+            userId
+        }).catch(err => console.error('Logging error:', err));
+        
         console.log('🔧 [CRON] Manually triggering maintenance schedule generation...');
         return await this.generateMaintenanceSchedules();
     }
