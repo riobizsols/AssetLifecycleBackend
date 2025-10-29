@@ -3,7 +3,8 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 const getBranches = async (req, res) => {
     try {
-        const branches = await branchModel.getAllBranches();
+        const org_id = req.user.org_id;
+        const branches = await branchModel.getAllBranches(org_id);
         res.json(branches);
     } catch (error) {
         console.error("Error fetching branches:", error);

@@ -817,6 +817,8 @@ const deleteMultipleAssetAssignments = async (req, res) => {
 const getDepartmentWiseAssetAssignments = async (req, res) => {
     const startTime = Date.now();
     const userId = req.user?.user_id;
+    const org_id = req.user?.org_id;
+    const branch_id = req.user?.branch_id;
     
     try {
         const { dept_id } = req.params;
@@ -835,7 +837,7 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getDepartmentWiseAssetAssignments(dept_id);
+        const result = await model.getDepartmentWiseAssetAssignments(dept_id, org_id, branch_id);
         
         // Check if department exists
         if (!result.department) {
@@ -881,7 +883,9 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             department: {
                 dept_id: result.department.dept_id,
                 department_name: result.department.department_name,
-                employee_count: employeeCount
+                employee_count: employeeCount,
+                org_id: result.department.org_id,
+                branch_id: result.department.branch_id
             },
             assetCount: assetCount,
             employeeCount: employeeCount,

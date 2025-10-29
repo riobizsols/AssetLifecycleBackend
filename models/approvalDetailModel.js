@@ -833,11 +833,12 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   }
 };
 
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode) => {
    try {
-     console.log('=== getMaintenanceApprovals model (ROLE-BASED) ===');
+     console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
      console.log('orgId:', orgId);
+     console.log('userBranchCode:', userBranchCode);
      
      // Handle empty string or null empIntId
      if (!empIntId || empIntId === '') {
@@ -867,7 +868,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
      
      console.log('User roles:', userRoleIds);
      
-     // ROLE-BASED: Query workflows where user's roles match workflow steps
+     // ROLE-BASED: Query workflows where user's roles match workflow steps AND maintenance belongs to user's org/branch_code
      const query = `
        SELECT DISTINCT
          wfh.wfamsh_id,
@@ -877,6 +878,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
          wfh.status as header_status,
          wfh.created_on as maintenance_created_on,
          wfh.changed_on as maintenance_changed_on,
+         wfh.branch_code,
          a.asset_type_id,
          at.text as asset_type_name,
          a.serial_number,
@@ -898,13 +900,15 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001') => {
        LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
        LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
        WHERE wfd.org_id = $1 
-         AND wfd.job_role_id = ANY($2::varchar[])
+         AND a.org_id = $1
+         AND wfh.branch_code = $2
+         AND wfd.job_role_id = ANY($3::varchar[])
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
 
-     const result = await pool.query(query, [orgId, userRoleIds]);
+     const result = await pool.query(query, [orgId, userBranchCode, userRoleIds]);
      console.log('Query executed successfully, found rows:', result.rows.length);
      console.log('Sample row (if any):', result.rows[0] || 'No rows found');
      return result.rows;

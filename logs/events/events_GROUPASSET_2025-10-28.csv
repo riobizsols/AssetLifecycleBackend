@@ -1,0 +1,19 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-10-28T09:00:56.014Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,N/A,USR001
+2025-10-28T09:00:56.026Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T09:00:56.109Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 4 asset groups","{""count"":4}",N/A,N/A,USR001
+2025-10-28T09:01:25.165Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,N/A,USR001
+2025-10-28T09:01:25.181Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T09:01:25.285Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 4 asset groups","{""count"":4}",N/A,N/A,USR001
+2025-10-28T11:51:43.153Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,N/A,USR001
+2025-10-28T11:51:43.477Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T11:51:43.673Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 4 asset groups","{""count"":4}",N/A,N/A,USR001
+2025-10-28T11:59:30.479Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T11:59:30.481Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,209,USR001
+2025-10-28T11:59:30.574Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 1 asset groups","{""count"":1}",N/A,N/A,USR001
+2025-10-28T11:59:48.817Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,244,USR001
+2025-10-28T11:59:48.836Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T11:59:48.935Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 4 asset groups","{""count"":4}",N/A,N/A,USR001
+2025-10-28T12:42:46.820Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
+2025-10-28T12:42:46.841Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,185,USR001
+2025-10-28T12:42:47.351Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 4 asset groups","{""count"":4}",N/A,N/A,USR001

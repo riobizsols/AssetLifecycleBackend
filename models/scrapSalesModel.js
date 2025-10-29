@@ -36,6 +36,7 @@ const generateSsdId = async () => {
 const createScrapSalesHeader = async (client, headerData) => {
     const {
         org_id,
+        branch_code,
         text,
         total_sale_value,
         buyer_name,
@@ -54,6 +55,7 @@ const createScrapSalesHeader = async (client, headerData) => {
         INSERT INTO "tblScrapSales_H" (
             ssh_id,
             org_id,
+            branch_code,
             text,
             total_sale_value,
             buyer_name,
@@ -67,7 +69,7 @@ const createScrapSalesHeader = async (client, headerData) => {
             collection_date,
             invoice_no,
             po_no
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $8, CURRENT_DATE, $9, $10, $11, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_DATE, $9, CURRENT_DATE, $10, $11, $12, $13)
         RETURNING *
     `;
 
@@ -75,6 +77,7 @@ const createScrapSalesHeader = async (client, headerData) => {
     const values = [
         ssh_id,
         org_id,
+        branch_code,
         text,
         total_sale_value,
         buyer_name,
@@ -89,8 +92,8 @@ const createScrapSalesHeader = async (client, headerData) => {
 
     // Handle total_sale_value - check if column is ARRAY or NUMERIC
     const sanitizedValues = values.map((value, index) => {
-        // total_sale_value is at index 3 (4th parameter)
-        if (index === 3 && typeof value === 'number') {
+        // total_sale_value is at index 4 (5th parameter) - ssh_id, org_id, branch_code, text, total_sale_value
+        if (index === 4 && typeof value === 'number') {
             // For now, convert to array to handle ARRAY column type
             // This can be removed once the table structure is fixed
             console.log(`🔧 Converting total_sale_value to array: ${value} -> [${value}]`);
@@ -186,11 +189,16 @@ const createScrapSale = async (saleData) => {
 };
 
 // Get all scrap sales
-const getAllScrapSales = async () => {
+const getAllScrapSales = async (org_id, userBranchCode) => {
+    console.log('=== Scrap Sales Model Listing Debug ===');
+    console.log('org_id:', org_id);
+    console.log('userBranchCode:', userBranchCode);
+    
     const query = `
         SELECT 
             ssh.ssh_id,
             ssh.org_id,
+            ssh.branch_code,
             ssh.text,
             ssh.total_sale_value,
             ssh.buyer_name,
@@ -205,14 +213,17 @@ const getAllScrapSales = async () => {
             COUNT(ssd.ssd_id) as total_assets
         FROM "tblScrapSales_H" ssh
         LEFT JOIN "tblScrapSales_D" ssd ON ssh.ssh_id = ssd.ssh_id
-        GROUP BY ssh.ssh_id, ssh.org_id, ssh.text, ssh.total_sale_value, 
+        WHERE ssh.org_id = $1 AND ssh.branch_code = $2
+        GROUP BY ssh.ssh_id, ssh.org_id, ssh.branch_code, ssh.text, ssh.total_sale_value, 
                  ssh.buyer_name, ssh.buyer_company, ssh.buyer_phone, 
                  ssh.created_by, ssh.created_on, ssh.sale_date, 
                  ssh.collection_date, ssh.invoice_no, ssh.po_no
         ORDER BY ssh.created_on DESC
     `;
     
-    return await db.query(query);
+    const result = await db.query(query, [org_id, userBranchCode]);
+    console.log('Query executed successfully, found scrap sales:', result.rows.length);
+    return result;
 };
 
 // Get scrap sale by ID with details

@@ -1,8 +1,12 @@
 const db = require('../config/db');
 
 // ✅ Fetch all departments
-const getAllDepartments = async () => {
-    const result = await db.query('SELECT * FROM "tblDepartments"');
+const getAllDepartments = async (org_id, branch_id) => {
+    // Fetch departments that match the branch_id exactly (excluding null values)
+    const result = await db.query(
+        'SELECT * FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2', 
+        [org_id, branch_id]
+    );
     return result.rows;
 };
 

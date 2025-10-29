@@ -264,6 +264,8 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
                     dbField = 'a.current_status';
                 } else if (field === 'branch') {
                     dbField = 'b.branch_name';
+                } else if (field === 'branchId') {
+                    dbField = 'a.branch_id';
                 } else if (field === 'reportedByEmail') {
                     dbField = 'u.email';
                 } else if (field === 'vendorEmail') {

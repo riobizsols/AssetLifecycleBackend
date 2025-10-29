@@ -13,6 +13,7 @@ const getAssetRegisterData = async (filters = {}) => {
     invoiceNumber,
     category,
     location,
+    branch_id,
     purchaseDateRange,
     commissionedDateRange,
     currentStatus,
@@ -81,6 +82,12 @@ const getAssetRegisterData = async (filters = {}) => {
     queryParams.push(location);
   }
 
+  if (branch_id) {
+    paramCount++;
+    whereConditions.push(`a.branch_id = $${paramCount}`);
+    queryParams.push(branch_id);
+  }
+
   if (purchaseDateRange && purchaseDateRange.length === 2) {
     paramCount++;
     whereConditions.push(`a.purchased_on >= $${paramCount}`);
@@ -139,6 +146,7 @@ const getAssetRegisterData = async (filters = {}) => {
           'invoiceNumber': "'N/A'",
           'category': 'at.text',
           'location': 'b.text',
+          'branchId': 'a.branch_id',
           'purchaseDateRange': 'a.purchased_on',
           'commissionedDateRange': 'a.purchased_on',
           'currentStatus': 'a.current_status',
@@ -285,6 +293,7 @@ const getAssetRegisterCount = async (filters = {}) => {
     invoiceNumber,
     category,
     location,
+    branch_id,
     purchaseDateRange,
     commissionedDateRange,
     currentStatus,
@@ -351,6 +360,12 @@ const getAssetRegisterCount = async (filters = {}) => {
     queryParams.push(location);
   }
 
+  if (branch_id) {
+    paramCount++;
+    whereConditions.push(`a.branch_id = $${paramCount}`);
+    queryParams.push(branch_id);
+  }
+
   if (purchaseDateRange && purchaseDateRange.length === 2) {
     paramCount++;
     whereConditions.push(`a.purchased_on >= $${paramCount}`);
@@ -408,6 +423,7 @@ const getAssetRegisterCount = async (filters = {}) => {
           'invoiceNumber': "'N/A'",
           'category': 'at.text',
           'location': 'b.text',
+          'branchId': 'a.branch_id',
           'purchaseDateRange': 'a.purchased_on',
           'commissionedDateRange': 'a.purchased_on',
           'currentStatus': 'a.current_status',

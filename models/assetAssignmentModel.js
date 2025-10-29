@@ -298,21 +298,21 @@ const deleteMultipleAssetAssignments = async (asset_assign_ids) => {
   return await db.query(query, [asset_assign_ids]);
 };
 
-const getDepartmentWiseAssetAssignments = async (dept_id) => {
-  // Get department details and employee count
+const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id) => {
+  // Get department details and employee count with org_id and branch_id filter
   const deptQuery = `
         SELECT 
-            d.dept_id, d.text as department_name,
+            d.dept_id, d.text as department_name, d.org_id, d.branch_id,
             COUNT(DISTINCT e.employee_id) as employee_count
         FROM "tblDepartments" d
         LEFT JOIN "tblEmployees" e ON d.dept_id = e.dept_id
-        WHERE d.dept_id = $1
-        GROUP BY d.dept_id, d.text
+        WHERE d.dept_id = $1 AND d.org_id = $2 AND d.branch_id = $3
+        GROUP BY d.dept_id, d.text, d.org_id, d.branch_id
     `;
 
-  const deptResult = await db.query(deptQuery, [dept_id]);
+  const deptResult = await db.query(deptQuery, [dept_id, org_id, branch_id]);
 
-  // Get assigned assets for department (only assets with assignment_type = 'Department')
+  // Get assigned assets for department with org_id and branch_id filters
   const assignedAssetsQuery = `
         SELECT DISTINCT
             a.asset_id, a.text as asset_name, a.serial_number, a.description,
@@ -323,25 +323,26 @@ const getDepartmentWiseAssetAssignments = async (dept_id) => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
         WHERE aa.dept_id = $1 
-        AND at.assignment_type = 'department'
+        AND a.org_id = $2
+        AND a.branch_id = $3
         AND aa.action = 'A' 
         AND aa.latest_assignment_flag = true
         ORDER BY a.text
     `;
 
-  const assignedAssetsResult = await db.query(assignedAssetsQuery, [dept_id]);
+  const assignedAssetsResult = await db.query(assignedAssetsQuery, [dept_id, org_id, branch_id]);
 
-  // Get employees for the department
+  // Get employees for the department (filtered by org_id)
   const employeesQuery = `
         SELECT 
             e.employee_id, e.emp_int_id, e.name as employee_name, 
             e.email_id as email, e.phone_number as phone, e.employee_type as designation
         FROM "tblEmployees" e
-        WHERE e.dept_id = $1
+        WHERE e.dept_id = $1 AND e.org_id = $2
         ORDER BY e.name
     `;
 
-  const employeesResult = await db.query(employeesQuery, [dept_id]);
+  const employeesResult = await db.query(employeesQuery, [dept_id, org_id]);
 
   return {
     department: deptResult.rows[0] || null,

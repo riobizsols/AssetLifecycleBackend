@@ -1,6 +1,6 @@
 const pool = require('../config/db');
 
-const getMaintenanceNotifications = async (orgId = 'ORG001') => {
+const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
   // ROLE-BASED WORKFLOW: Fetch all users with the required job role
   const query = `
     SELECT 
@@ -38,6 +38,8 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
     LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
     LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
     WHERE wfd.org_id = $1 
+      AND a.org_id = $1
+      AND a.branch_id = $2
       AND wfd.status IN ('IN', 'IP', 'AP')
       AND wfh.status IN ('IN', 'IP')
       AND wfd.job_role_id IS NOT NULL
@@ -45,17 +47,17 @@ const getMaintenanceNotifications = async (orgId = 'ORG001') => {
     ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
   try {
-    const result = await pool.query(query, [orgId]);
+    const result = await pool.query(query, [orgId, branchId]);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId]);
+    console.error('Query Parameters:', [orgId, branchId]);
     throw error;
   }
 };
 
-const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => {
+const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
   const query = `
     SELECT DISTINCT
@@ -112,6 +114,8 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
     ) current_action_role ON wfh.wfamsh_id = current_action_role.wfamsh_id
     -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
+      AND a.org_id = $1
+      AND a.branch_id = $2
       AND wfh.status IN ('IN', 'IP', 'CO')
       AND EXISTS (
         SELECT 1 
@@ -119,24 +123,24 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001') => 
         INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
-          AND u.emp_int_id = $2
+          AND u.emp_int_id = $3
           AND u.int_status = 1
           AND wfd.status IN ('IN', 'IP', 'AP', 'UA', 'UR')
       )
     ORDER BY wfh.pl_sch_date ASC
   `;
   try {
-    const result = await pool.query(query, [orgId, empIntId]);
+    const result = await pool.query(query, [orgId, branchId, empIntId]);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId, empIntId]);
+    console.error('Query Parameters:', [orgId, branchId, empIntId]);
     throw error;
   }
 };
 
-const getNotificationStats = async (orgId = 'ORG001') => {
+const getNotificationStats = async (orgId = 'ORG001', branchId) => {
   const query = `
     SELECT 
       COUNT(*) as total_notifications,
@@ -148,17 +152,19 @@ const getNotificationStats = async (orgId = 'ORG001') => {
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     WHERE wfd.org_id = $1 
+      AND a.org_id = $1
+      AND a.branch_id = $2
       AND wfd.status IN ('IN', 'IP')
       AND wfh.status IN ('IN', 'IP')
       AND wfd.user_id IS NOT NULL
   `;
   try {
-    const result = await pool.query(query, [orgId]);
+    const result = await pool.query(query, [orgId, branchId]);
     return result.rows[0];
   } catch (error) {
     console.error('Error in getNotificationStats:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId]);
+    console.error('Query Parameters:', [orgId, branchId]);
     throw error;
   }
 };

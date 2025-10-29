@@ -48,6 +48,13 @@ const getMaintenanceHistory = async (req, res) => {
         // Build filters object
         const filters = {};
         
+        // Add user's branch_id as default filter
+        const userBranchId = req.user?.branch_id;
+        if (userBranchId) {
+            filters.branch_id = userBranchId;
+            console.log('🔍 [MaintenanceHistoryController] Added user branch_id filter:', userBranchId);
+        }
+        
         if (asset_id) filters.asset_id = asset_id;
         if (vendor_id) filters.vendor_id = vendor_id;
         if (wo_id) filters.wo_id = wo_id;

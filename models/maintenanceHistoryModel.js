@@ -52,6 +52,13 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
     const queryParams = [orgId];
     let paramIndex = 2;
     
+    // Apply branch_id filter first
+    if (filters.branch_id) {
+        query += ` AND a.branch_id = $${paramIndex}`;
+        queryParams.push(filters.branch_id);
+        paramIndex++;
+    }
+    
     // Apply filters
     if (filters.asset_id) {
         query += ` AND ams.asset_id = $${paramIndex}`;
@@ -233,6 +240,8 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
                     dbField = 'v.contact_person_number';
                 } else if (field === 'vendorAddress') {
                     dbField = 'CONCAT(v.address_line1, \', \', v.city, \', \', v.state, \' \', v.pincode)';
+                } else if (field === 'branchId') {
+                    dbField = 'a.branch_id';
                 } else {
                     // Unknown field - skip this condition to prevent errors
                     console.log('⚠️ [MaintenanceHistoryModel] Unknown field in advanced condition:', field, '- skipping condition');
@@ -368,6 +377,13 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
     
     const queryParams = [orgId];
     let paramIndex = 2;
+    
+    // Apply branch_id filter first
+    if (filters.branch_id) {
+        query += ` AND a.branch_id = $${paramIndex}`;
+        queryParams.push(filters.branch_id);
+        paramIndex++;
+    }
     
     // Apply the same filters as the main query
     if (filters.asset_id) {
@@ -548,6 +564,8 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
                     dbField = 'v.contact_person_number';
                 } else if (field === 'vendorAddress') {
                     dbField = 'CONCAT(v.address_line1, \', \', v.city, \', \', v.state, \' \', v.pincode)';
+                } else if (field === 'branchId') {
+                    dbField = 'a.branch_id';
                 } else {
                     // Unknown field - skip this condition to prevent errors
                     console.log('⚠️ [MaintenanceHistoryModel] Unknown field in advanced condition:', field, '- skipping condition');

@@ -5,9 +5,34 @@ const { generateCustomId } = require("../utils/idGenerator");
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
-    const vendors = await vendorsModel.getAllVendors();
+    const org_id = req.user.org_id;
+    
+    // Get user's branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log('=== Vendor Listing Debug ===');
+    console.log('User org_id:', org_id);
+    console.log('User branch_id:', userBranchId);
+    
+    // Get branch_code from tblBranches
+    let userBranchCode = null;
+    if (userBranchId) {
+      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+      const branchResult = await db.query(branchQuery, [userBranchId]);
+      if (branchResult.rows.length > 0) {
+        userBranchCode = branchResult.rows[0].branch_code;
+        console.log('User branch_code:', userBranchCode);
+      } else {
+        console.log('Branch not found for branch_id:', userBranchId);
+      }
+    }
+    
+    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode);
     res.json(vendors);
   } catch (error) {
+    console.error("Get all vendors error:", error);
     res.status(500).json({ error: "Failed to fetch vendors" });
   }
 };
@@ -60,6 +85,29 @@ exports.createVendor = async (req, res) => {
     } = req.body;
 
     const org_id = req.user.org_id;
+    
+    // Get user's branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log('=== Vendor Creation Debug ===');
+    console.log('User org_id:', org_id);
+    console.log('User branch_id:', userBranchId);
+    
+    // Get branch_code from tblBranches
+    let branch_code = null;
+    if (userBranchId) {
+      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+      const branchResult = await db.query(branchQuery, [userBranchId]);
+      if (branchResult.rows.length > 0) {
+        branch_code = branchResult.rows[0].branch_code;
+        console.log('Branch code found:', branch_code);
+      } else {
+        console.log('Branch not found for branch_id:', userBranchId);
+      }
+    }
+    
     const changed_on = new Date();
     const created_on = new Date();
     const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
@@ -67,6 +115,7 @@ exports.createVendor = async (req, res) => {
     const vendorData = {
       vendor_id, // use generated
       org_id,
+      branch_code,
       vendor_name,
       int_status,
       company_name,

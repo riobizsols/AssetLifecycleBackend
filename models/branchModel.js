@@ -1,7 +1,7 @@
 const db = require("../config/db");
 
-const getAllBranches = async () => {
-  const result = await db.query('SELECT * FROM "tblBranches"');
+const getAllBranches = async (org_id) => {
+  const result = await db.query('SELECT * FROM "tblBranches" WHERE org_id = $1', [org_id]);
   return result.rows;
 };
 

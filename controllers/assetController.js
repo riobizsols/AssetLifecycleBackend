@@ -505,7 +505,17 @@ const getAssetsByAssetType = async (req, res) => {
 // GET /api/assets/printers - Get printer assets using organization settings
 const getPrinterAssets = async (req, res) => {
     try {
-        const result = await model.getPrinterAssets();
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log('=== Printer Assets Controller Debug ===');
+        console.log('User org_id:', userOrgId);
+        console.log('User branch_id:', userBranchId);
+        
+        const result = await model.getPrinterAssets(userOrgId, userBranchId);
         res.status(200).json({
             success: true,
             message: "Printer assets retrieved successfully",
@@ -583,6 +593,16 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
     const { context } = req.query; // SCRAPASSETS or ASSETS
     
     try {
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(userId);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
+
+        if (!userOrgId) {
+            return res.status(400).json({ error: "User organization not found" });
+        }
+
         // Context-aware logging for scrap assets
         if (context === 'SCRAPASSETS') {
             scrapAssetsLogger.logGetNearingExpiryApiCalled({
@@ -594,7 +614,7 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
             scrapAssetsLogger.logQueryingNearingExpiryAssets({ userId }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAssetsExpiringWithin30Days();
+        const result = await model.getAssetsExpiringWithin30Days(userOrgId, userBranchId);
         
         if (context === 'SCRAPASSETS') {
             scrapAssetsLogger.logNearingExpiryAssetsRetrieved({
@@ -629,6 +649,16 @@ const getAssetsByExpiryDate = async (req, res) => {
     const { context } = req.query; // SCRAPASSETS or ASSETS
     
     try {
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(userId);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
+
+        if (!userOrgId) {
+            return res.status(400).json({ error: "User organization not found" });
+        }
+
         const { filterType } = req.params;
         const { value, days } = req.query;
         
@@ -649,7 +679,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                 }
                 
                 // Get expired assets
-                const expiredResult = await model.getAssetsByExpiryDate('expired');
+                const expiredResult = await model.getAssetsByExpiryDate('expired', null, userOrgId, userBranchId);
                 
                 if (context === 'SCRAPASSETS') {
                     scrapAssetsLogger.logExpiredAssetsRetrieved({
@@ -674,7 +704,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Days parameter must be a positive number" 
                     });
                 }
-                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber);
+                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber, userOrgId, userBranchId);
                 res.status(200).json({
                     message: `Found ${expiringSoonResult.rows.length} assets expiring within ${daysNumber} days`,
                     filter_type: 'expiring_soon',
@@ -691,7 +721,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date parameter is required for 'expiring_on' filter" 
                     });
                 }
-                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value);
+                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value, userOrgId, userBranchId);
                 res.status(200).json({
                     message: `Found ${expiringOnResult.rows.length} assets expiring on ${value}`,
                     filter_type: 'expiring_on',
@@ -708,7 +738,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date range parameter is required for 'expiring_between' filter (format: startDate,endDate)" 
                     });
                 }
-                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value);
+                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value, userOrgId, userBranchId);
                 const [startDate, endDate] = value.split(',');
                 res.status(200).json({
                     message: `Found ${expiringBetweenResult.rows.length} assets expiring between ${startDate} and ${endDate}`,
@@ -722,7 +752,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'no_expiry':
                 // Get assets with no expiry date
-                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry');
+                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry', null, userOrgId, userBranchId);
                 res.status(200).json({
                     message: `Found ${noExpiryResult.rows.length} assets with no expiry date`,
                     filter_type: 'no_expiry',
@@ -733,7 +763,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'all':
                 // Get all assets with expiry date info
-                const allResult = await model.getAssetsByExpiryDate('all');
+                const allResult = await model.getAssetsByExpiryDate('all', null, userOrgId, userBranchId);
                 res.status(200).json({
                     message: `Found ${allResult.rows.length} assets with expiry date information`,
                     filter_type: 'all',
@@ -813,7 +843,18 @@ const getInactiveAssetsByAssetType = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getInactiveAssetsByAssetType(asset_type_id);
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log('=== Inactive Assets Controller Debug ===');
+        console.log('asset_type_id:', asset_type_id);
+        console.log('User org_id:', userOrgId);
+        console.log('User branch_id:', userBranchId);
+        
+        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId);
         
         const count = result.rows.length;
         const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";
@@ -1594,6 +1635,9 @@ if (useful_life_years && useful_life_years > 0) {
         console.log('  Depreciation Method:', depreciationType);
         console.log('  Useful Life Years:', useful_life_years);
         console.log('  Calculated Depreciation Rate:', calculatedDepreciationRate);
+        console.log('  Branch ID from request:', branch_id);
+        console.log('  User Branch ID:', userBranchId);
+        console.log('  Final Branch ID:', branch_id || userBranchId || null);
         
         // Prepare asset data (now includes prod_serv_id and depreciation fields)
         const assetData = {
@@ -1602,7 +1646,7 @@ if (useful_life_years && useful_life_years > 0) {
             text,
             serial_number,
             description,
-            branch_id: branch_id || null,
+            branch_id: branch_id || userBranchId || null,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
             prod_serv_id: prod_serv_id || null, // Use value from frontend
@@ -1681,8 +1725,22 @@ if (useful_life_years && useful_life_years > 0) {
 
 // GET /api/assets/expiring-30-days-by-type - Get assets expiring within 30 days grouped by asset type
 const getAssetsExpiringWithin30DaysByType = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    const { context } = req.query; // SCRAPASSETS or ASSETS
+    
     try {
-        const result = await model.getAssetsExpiringWithin30DaysByType();
+        // Get user's organization and branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(userId);
+        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+        const userBranchId = userWithBranch?.branch_id;
+
+        if (!userOrgId) {
+            return res.status(400).json({ error: "User organization not found" });
+        }
+
+        const result = await model.getAssetsExpiringWithin30DaysByType(userOrgId, userBranchId);
         
         // Calculate total count
         const totalCount = result.rows.reduce((sum, type) => sum + parseInt(type.asset_count), 0);

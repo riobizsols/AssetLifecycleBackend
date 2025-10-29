@@ -154,7 +154,17 @@ const commitBulkUploadEmployees = async (req, res) => {
 
     const created_by = req.user.user_id;
     const org_id = req.user.org_id;
-    const results = await model.bulkUpsertEmployees(csvData, created_by, org_id);
+    
+    // Get user's branch information
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log('=== Employee Bulk Upload Debug ===');
+    console.log('User org_id:', org_id);
+    console.log('User branch_id:', userBranchId);
+    
+    const results = await model.bulkUpsertEmployees(csvData, created_by, org_id, userBranchId);
     
     res.json({
       success: true,

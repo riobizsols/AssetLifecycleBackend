@@ -7,7 +7,9 @@ const { generateCustomId } = require("../utils/idGenerator");
 // GET /departments
 const fetchDepartments = async (req, res) => {
     try {
-        const data = await DeptAdminModel.getAllDepartments();
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;
+        const data = await DeptAdminModel.getAllDepartments(org_id, branch_id);
         res.json(data);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch departments' });
@@ -18,7 +20,15 @@ const fetchDepartments = async (req, res) => {
 const fetchDeptIdByName = async (req, res) => {
     try {
         const { name } = req.params;
-        const dept = await DeptAdminModel.getDepartmentIdByName(name);
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;
+        
+        console.log('=== Department ID by Name Debug ===');
+        console.log('deptName:', name);
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', branch_id);
+        
+        const dept = await DeptAdminModel.getDepartmentIdByName(name, org_id, branch_id);
         if (!dept) return res.status(404).json({ error: 'Department not found' });
         res.json(dept);
     } catch (err) {
@@ -30,7 +40,15 @@ const fetchDeptIdByName = async (req, res) => {
 const fetchAdminsForDept = async (req, res) => {
     try {
         const { dept_id } = req.params;
-        const admins = await DeptAdminModel.getAdminsByDeptId(dept_id);
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;
+        
+        console.log('=== Department Admins Debug ===');
+        console.log('dept_id:', dept_id);
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', branch_id);
+        
+        const admins = await DeptAdminModel.getAdminsByDeptId(dept_id, org_id, branch_id);
         res.json(admins);
     } catch (err) {
         console.error("Error fetching admins:", err); // log it
@@ -43,7 +61,15 @@ const fetchAdminsForDept = async (req, res) => {
 const fetchUsersForDept = async (req, res) => {
     try {
         const { dept_id } = req.params;
-        const users = await DeptAdminModel.getUsersByDeptId(dept_id);
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;
+        
+        console.log('=== Department Users Debug ===');
+        console.log('dept_id:', dept_id);
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', branch_id);
+        
+        const users = await DeptAdminModel.getUsersByDeptId(dept_id, org_id, branch_id);
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch users' });
@@ -65,6 +91,15 @@ const createDeptAdmin = async (req, res) => {
 
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
+        
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log('=== Department Admin Creation Debug ===');
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', userBranchId);
 
         // Check if user already exists as admin for this department
         const existingAdmin = await db.query(
@@ -79,16 +114,16 @@ const createDeptAdmin = async (req, res) => {
             });
         }
 
-        // Check if department exists
+        // Check if department exists and belongs to user's branch
         const deptCheck = await db.query(
-            `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
-            [dept_id]
+            `SELECT text FROM "tblDepartments" WHERE dept_id = $1 AND org_id = $2 AND branch_id = $3`,
+            [dept_id, org_id, userBranchId]
         );
 
         if (deptCheck.rows.length === 0) {
             return res.status(404).json({ 
                 error: "Department not found",
-                message: "The specified department does not exist" 
+                message: "The specified department does not exist in your branch" 
             });
         }
 
@@ -108,12 +143,12 @@ const createDeptAdmin = async (req, res) => {
         // Generate the next dept_admin_id using idGenerator
         const newDeptAdminId = await generateCustomId("dept_admin", 2);
 
-        // Insert into tblDeptAdmins
+        // Insert into tblDeptAdmins with branch_id
         const insertResult = await db.query(
-            `INSERT INTO "tblDeptAdmins" (dept_admin_id, org_id, dept_id, user_id, created_by, created_on)
-         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE)
+            `INSERT INTO "tblDeptAdmins" (dept_admin_id, org_id, branch_id, dept_id, user_id, created_by, created_on)
+         VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
          RETURNING *`,
-            [newDeptAdminId, org_id, dept_id, user_id, created_by]
+            [newDeptAdminId, org_id, userBranchId, dept_id, user_id, created_by]
         );
 
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"
@@ -150,7 +185,7 @@ const createDeptAdmin = async (req, res) => {
             message: "An internal server error occurred" 
         });
     }
-  };
+};
 
 // DELETE /dept-admins
 const deleteDeptAdmin = async (req, res) => {
@@ -201,13 +236,26 @@ const deleteDeptAdmin = async (req, res) => {
 
 const fetchAllAdmins = async (req, res) => {
     try {
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;
+        
+        console.log('=== All Department Admins Debug ===');
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', branch_id);
+        
         const result = await db.query(
             `SELECT d.dept_id, d.text AS dept_name, da.user_id, u.full_name
-         FROM "tblDeptAdmins" da
-         JOIN "tblUsers" u ON da.user_id = u.user_id
-         JOIN "tblDepartments" d ON da.dept_id = d.dept_id
-         ORDER BY d.text, u.full_name`
+             FROM "tblDeptAdmins" da
+             JOIN "tblUsers" u ON da.user_id = u.user_id
+             JOIN "tblDepartments" d ON da.dept_id = d.dept_id
+             WHERE da.org_id = $1 
+               AND (da.branch_id = $2 OR da.branch_id IS NULL)
+               AND d.org_id = $1
+             ORDER BY d.text, u.full_name`,
+            [org_id, branch_id]
         );
+        
+        
         res.json(result.rows);
     } catch (err) {
         console.error("Failed to fetch all admins:", err);

@@ -15,6 +15,7 @@ const getAssetLifecycleData = async (filters = {}) => {
     buyer,
     saleDateRange,
     saleAmount,
+    branch_id,
     advancedConditions,
     limit = 1000,
     offset = 0
@@ -23,6 +24,13 @@ const getAssetLifecycleData = async (filters = {}) => {
   let whereConditions = [];
   let queryParams = [];
   let paramCount = 0;
+
+  // Add branch_id filter first
+  if (branch_id) {
+    paramCount++;
+    whereConditions.push(`a.branch_id = $${paramCount}`);
+    queryParams.push(branch_id);
+  }
 
   // Build dynamic WHERE conditions
   if (purchaseDateRange && purchaseDateRange.length === 2 && 
@@ -145,6 +153,7 @@ const getAssetLifecycleData = async (filters = {}) => {
           'assetName': 'asset_name',
           'category': 'category',
           'location': 'location',
+          'branchId': 'branch_id',
           'department': 'department',
           'vendor': 'vendor',
           'purchaseDateRange': 'purchase_date',
@@ -385,7 +394,7 @@ const getAssetLifecycleData = async (filters = {}) => {
       po_no,
       collection_date
     FROM asset_lifecycle
-    ${whereClause.replace(/a\.asset_id/g, 'asset_id').replace(/a\.text/g, 'asset_name').replace(/at\.text/g, 'category').replace(/b\.text/g, 'location').replace(/d\.text/g, 'department').replace(/v\.vendor_name/g, 'vendor').replace(/vs\.vendor_name/g, 'vendor').replace(/a\.purchased_on/g, 'purchase_date').replace(/a\.current_status/g, 'current_status').replace(/asd\.scrapped_date/g, 'scrap_date').replace(/asd\.location/g, 'scrap_location').replace(/asd\.scrapped_by/g, 'scrapped_by').replace(/ssh\.buyer_name/g, 'buyer').replace(/ssh\.sale_date/g, 'sale_date').replace(/ssh\.total_sale_value/g, 'sale_amount')}
+    ${whereClause.replace(/a\.asset_id/g, 'asset_id').replace(/a\.text/g, 'asset_name').replace(/at\.text/g, 'category').replace(/b\.text/g, 'location').replace(/d\.text/g, 'department').replace(/v\.vendor_name/g, 'vendor').replace(/vs\.vendor_name/g, 'vendor').replace(/a\.purchased_on/g, 'purchase_date').replace(/a\.current_status/g, 'current_status').replace(/asd\.scrapped_date/g, 'scrap_date').replace(/asd\.location/g, 'scrap_location').replace(/asd\.scrapped_by/g, 'scrapped_by').replace(/ssh\.buyer_name/g, 'buyer').replace(/ssh\.sale_date/g, 'sale_date').replace(/ssh\.total_sale_value/g, 'sale_amount').replace(/a\.branch_id/g, 'branch_id')}
     ORDER BY created_on DESC
     LIMIT $${paramCount - 1} OFFSET $${paramCount}
   `;
@@ -416,12 +425,20 @@ const getAssetLifecycleCount = async (filters = {}) => {
     buyer,
     saleDateRange,
     saleAmount,
+    branch_id,
     advancedConditions
   } = filters;
 
   let whereConditions = [];
   let queryParams = [];
   let paramCount = 0;
+
+  // Add branch_id filter first
+  if (branch_id) {
+    paramCount++;
+    whereConditions.push(`a.branch_id = $${paramCount}`);
+    queryParams.push(branch_id);
+  }
 
   // Build dynamic WHERE conditions (same as above)
   if (purchaseDateRange && purchaseDateRange.length === 2 && 
@@ -543,6 +560,7 @@ const getAssetLifecycleCount = async (filters = {}) => {
           'assetName': 'asset_name',
           'category': 'category',
           'location': 'location',
+          'branchId': 'branch_id',
           'department': 'department',
           'vendor': 'vendor',
           'purchaseDateRange': 'purchase_date',
@@ -700,7 +718,8 @@ const getAssetLifecycleCount = async (filters = {}) => {
           WHEN ssh.total_sale_value IS NULL THEN 0
           WHEN array_length(ssh.total_sale_value, 1) IS NULL THEN 0
           ELSE CAST(ssh.total_sale_value[1] AS DECIMAL)
-        END as sale_amount
+        END as sale_amount,
+        a.branch_id
       FROM "tblAssets" a
       LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
       LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
@@ -715,7 +734,7 @@ const getAssetLifecycleCount = async (filters = {}) => {
     )
     SELECT COUNT(*) as total
     FROM asset_lifecycle
-    ${whereClause}
+    ${whereClause.replace(/a\.asset_id/g, 'asset_id').replace(/a\.text/g, 'asset_name').replace(/at\.text/g, 'category').replace(/b\.text/g, 'location').replace(/d\.text/g, 'department').replace(/v\.vendor_name/g, 'vendor').replace(/vs\.vendor_name/g, 'vendor').replace(/a\.purchased_on/g, 'purchase_date').replace(/a\.current_status/g, 'current_status').replace(/asd\.scrapped_date/g, 'scrap_date').replace(/asd\.location/g, 'scrap_location').replace(/asd\.scrapped_by/g, 'scrapped_by').replace(/ssh\.buyer_name/g, 'buyer').replace(/ssh\.sale_date/g, 'sale_date').replace(/ssh\.total_sale_value/g, 'sale_amount').replace(/a\.branch_id/g, 'branch_id')}
   `;
 
   try {

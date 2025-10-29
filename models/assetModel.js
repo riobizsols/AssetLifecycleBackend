@@ -71,7 +71,11 @@ const getAssetsByAssetType = async (asset_type_id) => {
   return await db.query(query, [asset_type_id]);
 };
 
-const getPrinterAssets = async () => {
+const getPrinterAssets = async (orgId, branchId) => {
+  console.log('=== Printer Assets Model Debug ===');
+  console.log('orgId:', orgId);
+  console.log('branchId:', branchId);
+  
   const query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
@@ -86,13 +90,18 @@ const getPrinterAssets = async () => {
                 SELECT value 
                 FROM "tblOrgSettings" 
                 WHERE key = 'printer_asset_type'
+                AND org_id = $1
             )
         )
+        AND a.org_id = $1
+        AND a.branch_id = $2
         AND a.current_status != 'SCRAPPED'
         ORDER BY a.created_on DESC
     `;
 
-  return await db.query(query);
+  const result = await db.query(query, [orgId, branchId]);
+  console.log('Query executed successfully, found printer assets:', result.rows.length);
+  return result;
 };
 
 const getAssetsByBranch = async (branch_id) => {
@@ -172,7 +181,12 @@ const getAssetsByOrg = async (org_id) => {
   return await db.query(query, [org_id]);
 };
 
-const getInactiveAssetsByAssetType = async (asset_type_id) => {
+const getInactiveAssetsByAssetType = async (asset_type_id, orgId, branchId) => {
+  console.log('=== Inactive Assets Model Debug ===');
+  console.log('asset_type_id:', asset_type_id);
+  console.log('orgId:', orgId);
+  console.log('branchId:', branchId);
+  
   const query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
@@ -181,6 +195,8 @@ const getInactiveAssetsByAssetType = async (asset_type_id) => {
             a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
         FROM "tblAssets" a
         WHERE a.asset_type_id = $1
+        AND a.org_id = $2
+        AND a.branch_id = $3
         AND a.asset_id NOT IN (
             SELECT DISTINCT aa.asset_id 
             FROM "tblAssetAssignments" aa
@@ -189,7 +205,9 @@ const getInactiveAssetsByAssetType = async (asset_type_id) => {
         ORDER BY a.created_on DESC
     `;
 
-  return await db.query(query, [asset_type_id]);
+  const result = await db.query(query, [asset_type_id, orgId, branchId]);
+  console.log('Query executed successfully, found inactive assets:', result.rows.length);
+  return result;
 };
 
 const searchAssets = async (searchTerm) => {
@@ -627,32 +645,45 @@ const getPotentialParentAssets = async (asset_type_id) => {
   return await db.query(query, [parentAssetTypeId]);
 };
 
-// Get assets expiring within 30 days
-const getAssetsExpiringWithin30Days = async () => {
-  const query = `
+// Get assets expiring within 30 days (filtered by user context)
+const getAssetsExpiringWithin30Days = async (orgId, branchId = null) => {
+  let query = `
     SELECT 
-      asset_id, asset_type_id, text, serial_number, description,
-      branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-      purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-      parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+      a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+      a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+      a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+      a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+      b.text as branch_name,
+      at.text as asset_type_name,
       CASE 
-        WHEN expiry_date IS NOT NULL THEN 
-          expiry_date - CURRENT_DATE
+        WHEN a.expiry_date IS NOT NULL THEN 
+          a.expiry_date - CURRENT_DATE
         ELSE NULL
       END as days_until_expiry
-    FROM "tblAssets"
-    WHERE expiry_date IS NOT NULL
-    AND expiry_date >= CURRENT_DATE
-    AND expiry_date <= CURRENT_DATE + INTERVAL '30 days'
-    ORDER BY expiry_date ASC
+    FROM "tblAssets" a
+    LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    WHERE a.expiry_date IS NOT NULL
+    AND a.expiry_date >= CURRENT_DATE
+    AND a.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
+    AND a.org_id = $1
   `;
+  
+  const params = [orgId];
+  
+  if (branchId) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  query += ` ORDER BY a.expiry_date ASC`;
 
-  return await db.query(query);
+  return await db.query(query, params);
 };
 
-// Get assets expiring within 30 days grouped by asset type
-const getAssetsExpiringWithin30DaysByType = async () => {
-  const query = `
+// Get assets expiring within 30 days grouped by asset type (filtered by user context)
+const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null) => {
+  let query = `
     SELECT 
       at.text as asset_type_name,
       at.asset_type_id,
@@ -665,6 +696,7 @@ const getAssetsExpiringWithin30DaysByType = async () => {
           'description', a.description,
           'expiry_date', a.expiry_date,
           'current_status', a.current_status,
+          'branch_name', b.text,
           'days_until_expiry', CASE 
             WHEN a.expiry_date IS NOT NULL THEN 
               a.expiry_date - CURRENT_DATE
@@ -678,17 +710,29 @@ const getAssetsExpiringWithin30DaysByType = async () => {
       AND a.expiry_date >= CURRENT_DATE
       AND a.expiry_date <= CURRENT_DATE + INTERVAL '30 days'
       AND a.current_status != 'SCRAPPED'
+      AND a.org_id = $1
+    LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     WHERE at.asset_type_id IS NOT NULL
+  `;
+  
+  const params = [orgId];
+  
+  if (branchId) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  query += `
     GROUP BY at.asset_type_id, at.text
     HAVING COUNT(a.asset_id) > 0
     ORDER BY at.text ASC
   `;
 
-  return await db.query(query);
+  return await db.query(query, params);
 };
 
-// Get assets by expiry date with different filter types
-const getAssetsByExpiryDate = async (filterType, value = null) => {
+// Get assets by expiry date with different filter types (filtered by user context)
+const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId = null) => {
   let query = '';
   let params = [];
 
@@ -696,95 +740,143 @@ const getAssetsByExpiryDate = async (filterType, value = null) => {
     case 'expired':
       query = `
         SELECT 
-          asset_id, asset_type_id, text, serial_number, description,
-          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name,
           CASE 
-            WHEN expiry_date IS NOT NULL THEN 
-              CURRENT_DATE - expiry_date
+            WHEN a.expiry_date IS NOT NULL THEN 
+              CURRENT_DATE - a.expiry_date
             ELSE NULL
           END as days_expired
-        FROM "tblAssets"
-        WHERE expiry_date IS NOT NULL
-        AND expiry_date < CURRENT_DATE
-        AND current_status != 'SCRAPPED'
-        ORDER BY expiry_date DESC
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date IS NOT NULL
+        AND a.expiry_date < CURRENT_DATE
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $1
       `;
+      params = [orgId];
+      if (branchId) {
+        query += ` AND a.branch_id = $2`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.expiry_date DESC`;
       break;
 
     case 'expiring_soon':
       const days = parseInt(value) || 30;
       query = `
         SELECT 
-          asset_id, asset_type_id, text, serial_number, description,
-          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name,
           CASE 
-            WHEN expiry_date IS NOT NULL THEN 
-              expiry_date - CURRENT_DATE
+            WHEN a.expiry_date IS NOT NULL THEN 
+              a.expiry_date - CURRENT_DATE
             ELSE NULL
           END as days_until_expiry
-        FROM "tblAssets"
-        WHERE expiry_date IS NOT NULL
-        AND expiry_date >= CURRENT_DATE
-        AND expiry_date <= CURRENT_DATE + INTERVAL '${days} days'
-        AND current_status != 'SCRAPPED'
-        ORDER BY expiry_date ASC
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date IS NOT NULL
+        AND a.expiry_date >= CURRENT_DATE
+        AND a.expiry_date <= CURRENT_DATE + INTERVAL '${days} days'
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $1
       `;
+      params = [orgId];
+      if (branchId) {
+        query += ` AND a.branch_id = $2`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.expiry_date ASC`;
       break;
 
     case 'expiring_on':
       query = `
         SELECT 
-          asset_id, asset_type_id, text, serial_number, description,
-          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        FROM "tblAssets"
-        WHERE expiry_date = $1
-        AND current_status != 'SCRAPPED'
-        ORDER BY text
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date = $1
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $2
       `;
-      params = [value];
+      params = [value, orgId];
+      if (branchId) {
+        query += ` AND a.branch_id = $3`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.text`;
       break;
 
     case 'expiring_between':
       const [startDate, endDate] = value.split(',');
       query = `
         SELECT 
-          asset_id, asset_type_id, text, serial_number, description,
-          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on,
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name,
           CASE 
-            WHEN expiry_date IS NOT NULL THEN 
-              expiry_date - CURRENT_DATE
+            WHEN a.expiry_date IS NOT NULL THEN 
+              a.expiry_date - CURRENT_DATE
             ELSE NULL
           END as days_until_expiry
-        FROM "tblAssets"
-        WHERE expiry_date IS NOT NULL
-        AND expiry_date >= $1
-        AND expiry_date <= $2
-        AND current_status != 'SCRAPPED'
-        ORDER BY expiry_date ASC
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date IS NOT NULL
+        AND a.expiry_date >= $1
+        AND a.expiry_date <= $2
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $3
       `;
-      params = [startDate, endDate];
+      params = [startDate, endDate, orgId];
+      if (branchId) {
+        query += ` AND a.branch_id = $4`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.expiry_date ASC`;
       break;
 
     case 'no_expiry':
       query = `
         SELECT 
-          asset_id, asset_type_id, text, serial_number, description,
-          branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-          purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-          parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        FROM "tblAssets"
-        WHERE expiry_date IS NULL
-        AND current_status != 'SCRAPPED'
-        ORDER BY text
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date IS NULL
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $1
       `;
+      params = [orgId];
+      if (branchId) {
+        query += ` AND a.branch_id = $2`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.text`;
       break;
 
     default:
