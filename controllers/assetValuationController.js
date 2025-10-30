@@ -96,8 +96,15 @@ class AssetValuationController {
                 }
             }
 
+            // Add user's branch_id as default filter
+            const userBranchId = req.user?.branch_id;
+            if (userBranchId) {
+                console.log('🔍 [AssetValuationController] Added user branch_id filter:', userBranchId);
+            }
+
             // Parse array parameters
             const filters = {
+                branch_id: userBranchId || null,
                 assetStatus: assetStatus || null,
                 includeScrapAssets: includeScrapAssets === 'true' || includeScrapAssets === true,
                 currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,

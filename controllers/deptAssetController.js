@@ -90,29 +90,34 @@ const addDeptAsset = async (req, res) => {
 const getAllAssetTypes = async (req, res) => {
     try {
         const { assignment_type } = req.query;
+        const org_id = req.user?.org_id;
+        const branch_id = req.user?.branch_id;
         
         let query = `SELECT 
-                asset_type_id, 
-                text,
-                assignment_type,
-                group_required,
-                COALESCE(is_child, false) as is_child,
-                parent_asset_type_id
-             FROM "tblAssetTypes" 
-             WHERE int_status = 1`;
+                at.asset_type_id, 
+                at.text,
+                at.assignment_type,
+                at.group_required,
+                COALESCE(at.is_child, false) as is_child,
+                at.parent_asset_type_id,
+                $1 as org_id,
+                $2 as branch_id
+             FROM "tblAssetTypes" at
+             INNER JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
+             WHERE at.int_status = 1 AND a.org_id = $1 AND a.branch_id = $2`;
         
-        const params = [];
+        const params = [org_id, branch_id];
         
         // If assignment_type is provided, filter by it
         if (assignment_type) {
-            query += ` AND assignment_type = $1`;
+            query += ` AND at.assignment_type = $3`;
             params.push(assignment_type);
             console.log(`Fetching asset types with assignment_type = '${assignment_type}'...`);
         } else {
             console.log('Fetching all active asset types...');
         }
         
-        query += ` ORDER BY text`;
+        query += ` GROUP BY at.asset_type_id, at.text, at.assignment_type, at.group_required, at.is_child, at.parent_asset_type_id ORDER BY at.text`;
         
         const result = await db.query(query, params);
         console.log(`Found ${result.rows.length} asset types:`, result.rows);

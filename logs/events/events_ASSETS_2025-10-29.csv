@@ -88,3 +88,6 @@ Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duratio
 2025-10-29T12:48:03.868Z,INFO,ASSET_UPDATE,AssetController,"INFO: Asset updated successfully - Dell XPS 13","{""asset_id"":""ASS002"",""asset_name"":""Dell XPS 13""}","{""success"":true}",284,USR002
 2025-10-29T13:25:52.712Z,INFO,API_CALL,AssetController,"INFO: PUT /api/assets/ASS002 - Update Asset","{""operation"":""Update Asset"",""method"":""PUT"",""url"":""/api/assets/ASS002"",""asset_id"":""ASS002"",""updates"":{""branch_id"":""BR001"",""purchase_vendor_id"":""V002""}}","{""status"":""processing""}",N/A,USR002
 2025-10-29T13:25:52.930Z,INFO,ASSET_UPDATE,AssetController,"INFO: Asset updated successfully - Dell XPS 13","{""asset_id"":""ASS002"",""asset_name"":""Dell XPS 13""}","{""success"":true}",270,USR002
+2025-10-29T05:30:53.618Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":27}",218,USR001
+2025-10-29T05:31:48.081Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":27}",189,USR001
+2025-10-29T05:39:15.090Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":27}",198,USR001

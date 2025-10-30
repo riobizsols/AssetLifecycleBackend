@@ -550,8 +550,13 @@ const getAllMaintenanceSchedules = async (req, res) => {
     const userId = req.user?.user_id;
     
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+        const branchId = req.user?.branch_id;
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
+        
+        console.log('=== Maintenance Schedule Controller Debug ===');
+        console.log('org_id from req.user:', orgId);
+        console.log('branch_id from req.user:', branchId);
         
         // Log API called (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -562,7 +567,7 @@ const getAllMaintenanceSchedules = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAllMaintenanceSchedules(orgId);
+        const result = await model.getAllMaintenanceSchedules(orgId, branchId);
         
         // Format the data for frontend - include all columns from tblAssetMaintSch plus joined data
         const formattedData = result.rows.map(record => {
@@ -635,8 +640,14 @@ const getMaintenanceScheduleById = async (req, res) => {
     
     try {
         const { id } = req.params;
-        const orgId = req.query.orgId;
+        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+        const branchId = req.user?.branch_id;
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
+        
+        console.log('=== Maintenance Schedule Detail Controller Debug ===');
+        console.log('org_id from req.user:', orgId);
+        console.log('branch_id from req.user:', branchId);
+        console.log('ams_id:', id);
         
         // Log API called (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -664,7 +675,7 @@ const getMaintenanceScheduleById = async (req, res) => {
             });
         }
         
-        const result = await model.getMaintenanceScheduleById(id, orgId);
+        const result = await model.getMaintenanceScheduleById(id, orgId, branchId);
         
         if (result.rows.length === 0) {
             if (context === 'SUPERVISORAPPROVAL') {

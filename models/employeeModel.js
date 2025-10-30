@@ -126,7 +126,7 @@ const validateAndFormatDate = (dateString) => {
 };
 
 // Bulk upsert employees (insert or update)
-const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
+const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) => {
   const client = await db.connect();
   
   try {
@@ -136,6 +136,10 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
     let updated = 0;
     let errors = 0;
     const errorDetails = [];
+    
+    console.log('=== Employee Model Bulk Upload Debug ===');
+    console.log('org_id:', org_id);
+    console.log('userBranchId:', userBranchId);
     
     for (const row of csvData) {
       try {
@@ -180,7 +184,8 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
               language_code = $14,
               int_status = $15,
               org_id = $16,
-              changed_by = $17,
+              branch_id = $17,
+              changed_by = $18,
               changed_on = NOW()::timestamp(3)
             WHERE employee_id = $1
           `, [
@@ -200,6 +205,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
             row.language_code,
             1, // int_status is always 1 by default
             org_id,
+            userBranchId,
             created_by
           ]);
           updated++;
@@ -210,10 +216,10 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
               emp_int_id, employee_id, name, first_name, last_name, middle_name,
               full_name, email_id, dept_id, phone_number, employee_type,
               joining_date, releiving_date, language_code, int_status, org_id,
-              created_by, created_on, changed_by, changed_on
+              branch_id, created_by, created_on, changed_by, changed_on
             ) VALUES (
               $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
-              $17, NOW()::timestamp(3), $17, NOW()::timestamp(3)
+              $17, $18, NOW()::timestamp(3), $18, NOW()::timestamp(3)
             )
           `, [
             finalEmpIntId,
@@ -232,6 +238,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id) => {
             row.language_code,
             1, // int_status is always 1 by default
             org_id,
+            userBranchId,
             created_by
           ]);
           inserted++;

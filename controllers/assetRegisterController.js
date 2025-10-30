@@ -85,6 +85,13 @@ const getAssetRegister = async (req, res) => {
       });
     }
 
+    // Add user's branch_id as default filter
+    const userBranchId = req.user?.branch_id;
+    if (userBranchId) {
+      filters.branch_id = userBranchId;
+      console.log('🔍 [AssetRegisterController] Added user branch_id filter:', userBranchId);
+    }
+
     // Step 3: Log data retrieval started
     await logReportDataRetrieval({
       appId: APP_ID,

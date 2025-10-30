@@ -1,8 +1,19 @@
 const db = require("../config/db");
 
 // Get all vendors
-const getAllVendors = async () => {
-  const result = await db.query('SELECT * FROM "tblVendors"');
+const getAllVendors = async (org_id, userBranchCode) => {
+  console.log('=== Vendor Model Listing Debug ===');
+  console.log('org_id:', org_id);
+  console.log('userBranchCode:', userBranchCode);
+  
+  const query = `
+    SELECT * FROM "tblVendors" 
+    WHERE org_id = $1 AND branch_code = $2
+    ORDER BY created_on DESC
+  `;
+  
+  const result = await db.query(query, [org_id, userBranchCode]);
+  console.log('Query executed successfully, found vendors:', result.rows.length);
   return result.rows;
 };
 
@@ -14,10 +25,16 @@ const getVendorById = async (vendorId) => {
 
 
 const createVendor = async (vendor) => {
+  console.log('=== Vendor Model Creation Debug ===');
+  console.log('vendor_id:', vendor.vendor_id);
+  console.log('org_id:', vendor.org_id);
+  console.log('branch_code:', vendor.branch_code);
+  
   const query = `
     INSERT INTO "tblVendors" (
       vendor_id,
       org_id,
+      branch_code,
       vendor_name,
       int_status,
       company_name,
@@ -38,13 +55,14 @@ const createVendor = async (vendor) => {
       changed_on
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
     ) RETURNING *;
   `;
 
   const values = [
     vendor.vendor_id,
     vendor.org_id,
+    vendor.branch_code,
     vendor.vendor_name,
     vendor.int_status,
     vendor.company_name,
@@ -66,6 +84,7 @@ const createVendor = async (vendor) => {
   ];
 
   const { rows } = await db.query(query, values);
+  console.log('Vendor created successfully with branch_code:', vendor.branch_code);
   return rows[0];
 };
 

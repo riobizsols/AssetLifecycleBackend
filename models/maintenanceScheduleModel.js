@@ -325,7 +325,11 @@ const isMaintenanceDue = (lastMaintenanceDate, frequency, uom) => {
 };
 
 // Get all maintenance schedules from tblAssetMaintSch
-const getAllMaintenanceSchedules = async (orgId = 'ORG001') => {
+const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
+    console.log('=== Maintenance Schedule Model Debug ===');
+    console.log('orgId:', orgId);
+    console.log('branchId:', branchId);
+    
     const query = `
         SELECT 
             ams.*,
@@ -346,15 +350,17 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001') => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
-        WHERE ams.org_id = $1
+        WHERE ams.org_id = $1 AND a.org_id = $1 AND a.branch_id = $2
         ORDER BY ams.created_on DESC
     `;
     
-    return await db.query(query, [orgId]);
+    const result = await db.query(query, [orgId, branchId]);
+    console.log('Query executed successfully, found rows:', result.rows.length);
+    return result;
 };
 
 // Get maintenance schedule details by ID from tblAssetMaintSch
-const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001') => {
+const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => {
     const query = `
         SELECT 
             ams.*,
@@ -363,10 +369,10 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001') => {
         FROM "tblAssetMaintSch" ams
         LEFT JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-        WHERE ams.ams_id = $1 AND ams.org_id = $2
+        WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2 AND a.branch_id = $3
     `;
     
-    return await db.query(query, [amsId, orgId]);
+    return await db.query(query, [amsId, orgId, branchId]);
 };
 
 // Update maintenance schedule in tblAssetMaintSch

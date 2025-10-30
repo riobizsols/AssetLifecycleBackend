@@ -87,6 +87,13 @@ const getAssetWorkflowHistory = async (filters = {}, orgId = 'ORG001') => {
     const queryParams = [orgId];
     let paramIndex = 2;
     
+    // Apply branch_id filter first
+    if (filters.branch_id) {
+        query += ` AND a.branch_id = $${paramIndex}`;
+        queryParams.push(filters.branch_id);
+        paramIndex++;
+    }
+    
     // Apply filters
     if (filters.asset_id) {
         query += ` AND wfh.asset_id = $${paramIndex}`;
@@ -200,6 +207,10 @@ const getAssetWorkflowHistory = async (filters = {}, orgId = 'ORG001') => {
                     case 'department':
                         fieldName = 'd.text';
                         tableAlias = 'd';
+                        break;
+                    case 'branchId':
+                        fieldName = 'a.branch_id';
+                        tableAlias = 'a';
                         break;
                     case 'serialNumber':
                         fieldName = 'a.serial_number';
@@ -378,6 +389,13 @@ const getAssetWorkflowHistoryCount = async (filters = {}, orgId = 'ORG001') => {
     const queryParams = [orgId];
     let paramIndex = 2;
     
+    // Apply branch_id filter first
+    if (filters.branch_id) {
+        query += ` AND a.branch_id = $${paramIndex}`;
+        queryParams.push(filters.branch_id);
+        paramIndex++;
+    }
+    
     // Apply the same filters as the main query
     if (filters.asset_id) {
         query += ` AND wfh.asset_id = $${paramIndex}`;
@@ -489,6 +507,10 @@ const getAssetWorkflowHistoryCount = async (filters = {}, orgId = 'ORG001') => {
                     case 'department':
                         fieldName = 'd.text';
                         tableAlias = 'd';
+                        break;
+                    case 'branchId':
+                        fieldName = 'a.branch_id';
+                        tableAlias = 'a';
                         break;
                     case 'serialNumber':
                         fieldName = 'a.serial_number';

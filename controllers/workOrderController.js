@@ -5,10 +5,18 @@ const getAllWorkOrders = async (req, res) => {
     try {
         console.log('Fetching all work orders with status "IN" and maintained_by "Vendor"...');
         
-        // Get organization ID from request or use default
+        // Get organization ID and branch ID from request or use default
         const orgId = req.query.org_id || req.user?.org_id || 'ORG001';
+        const userBranchId = req.query.branch_id || req.user?.branch_id || 'BR001';
         
-        const result = await model.getAllWorkOrders(orgId);
+        console.log('=== CONTROLLER DEBUG ===');
+        console.log('req.user:', req.user);
+        console.log('req.user.branch_id:', req.user?.branch_id);
+        console.log('req.user.branch_code:', req.user?.branch_code);
+        console.log('Final userBranchId:', userBranchId);
+        console.log('=== END CONTROLLER DEBUG ===');
+        
+        const result = await model.getAllWorkOrders(orgId, userBranchId);
         
         if (result.rows.length === 0) {
             return res.status(200).json({
@@ -119,10 +127,11 @@ const getWorkOrderById = async (req, res) => {
         
         console.log(`Fetching work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);
         
-        // Get organization ID from request or use default
+        // Get organization ID and branch ID from request or use default
         const orgId = req.query.org_id || req.user?.org_id || 'ORG001';
+        const userBranchId = req.query.branch_id || req.user?.branch_id || 'BR001';
         
-        const result = await model.getWorkOrderById(id, orgId);
+        const result = await model.getWorkOrderById(id, orgId, userBranchId);
         
         if (result.rows.length === 0) {
             return res.status(404).json({

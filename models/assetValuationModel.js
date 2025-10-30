@@ -18,6 +18,7 @@ class AssetValuationModel {
             }
 
             const {
+                branch_id,
                 assetStatus,
                 includeScrapAssets,
                 currentValueMin,
@@ -76,6 +77,13 @@ class AssetValuationModel {
 
             const queryParams = [orgId];
             let paramIndex = 2;
+
+            // Apply branch_id filter first
+            if (branch_id) {
+                baseQuery += ` AND a.branch_id = $${paramIndex}`;
+                queryParams.push(branch_id);
+                paramIndex++;
+            }
 
             // Apply filters
             if (assetStatus && assetStatus !== 'All' && assetStatus !== null) {
@@ -156,7 +164,8 @@ class AssetValuationModel {
                         'accumulatedDepreciation': 'CAST(a.accumulated_depreciation AS NUMERIC)',
                         'netBookValue': 'CAST(a.current_book_value AS NUMERIC)',
                         'depreciationMethod': 'at.depreciation_type',
-                        'usefulLife': 'a.useful_life_years'
+                        'usefulLife': 'a.useful_life_years',
+                        'branchId': 'a.branch_id'
                     };
 
                     const dbField = fieldMapping[field];
@@ -258,6 +267,13 @@ class AssetValuationModel {
             const countParams = [orgId];
             let countParamIndex = 2;
 
+            // Apply branch_id filter first
+            if (branch_id) {
+                countQuery += ` AND a.branch_id = $${countParamIndex}`;
+                countParams.push(branch_id);
+                countParamIndex++;
+            }
+
             // Apply same filters for count
             if (!includeScrapAssets) {
                 countQuery += ` AND a.current_status != 'SCRAPPED'`;
@@ -330,7 +346,8 @@ class AssetValuationModel {
                         'accumulatedDepreciation': 'CAST(a.accumulated_depreciation AS NUMERIC)',
                         'netBookValue': 'CAST(a.current_book_value AS NUMERIC)',
                         'depreciationMethod': 'at.depreciation_type',
-                        'usefulLife': 'a.useful_life_years'
+                        'usefulLife': 'a.useful_life_years',
+                        'branchId': 'a.branch_id'
                     };
 
                     const dbField = fieldMapping[field];

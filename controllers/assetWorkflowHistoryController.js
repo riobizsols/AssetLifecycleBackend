@@ -21,6 +21,13 @@ const getAssetWorkflowHistory = async (req, res) => {
         const orgId = req.query.orgId || 'ORG001';
         const filters = { ...req.body, ...req.query };
         
+        // Add user's branch_id as default filter
+        const userBranchId = req.user?.branch_id;
+        if (userBranchId) {
+            filters.branch_id = userBranchId;
+            console.log('🔍 [AssetWorkflowHistoryController] Added user branch_id filter:', userBranchId);
+        }
+        
         // Log API called
         await logReportApiCall({
             appId: APP_ID,

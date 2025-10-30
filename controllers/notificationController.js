@@ -7,8 +7,9 @@ const {
 // Get all maintenance notifications for an organization
 const getAllNotifications = async (req, res) => {
   try {
-    const orgId = req.query.orgId;
-    const notifications = await getMaintenanceNotifications(orgId);
+    const orgId = req.query.orgId || req.user?.org_id;
+    const branchId = req.user?.branch_id;
+    const notifications = await getMaintenanceNotifications(orgId, branchId);
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
@@ -51,7 +52,8 @@ const getAllNotifications = async (req, res) => {
 const getUserNotifications = async (req, res) => {
   try {
     const { userId } = req.params; // This is now emp_int_id
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    const branchId = req.user?.branch_id;
     
     if (!userId) {
       return res.status(400).json({
@@ -60,9 +62,9 @@ const getUserNotifications = async (req, res) => {
       });
     }
 
-    console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}`);
+    console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
     
-    const notifications = await getMaintenanceNotificationsByUser(userId, orgId);
+    const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId);
     
     console.log(`Found ${notifications.length} notifications for user ${userId}`);
     
@@ -114,8 +116,9 @@ const getUserNotifications = async (req, res) => {
 // Get notification statistics
 const getNotificationStatistics = async (req, res) => {
   try {
-    const orgId = req.query.orgId;
-    const stats = await getNotificationStats(orgId);
+    const orgId = req.query.orgId || req.user?.org_id;
+    const branchId = req.user?.branch_id;
+    const stats = await getNotificationStats(orgId, branchId);
     
     res.json({
       success: true,
@@ -141,10 +144,11 @@ const getNotificationStatistics = async (req, res) => {
 // Get notifications with filters
 const getFilteredNotifications = async (req, res) => {
   try {
-    const orgId = req.query.orgId;
+    const orgId = req.query.orgId || req.user?.org_id;
+    const branchId = req.user?.branch_id;
     const { status, urgency, assetType } = req.query;
     
-    let notifications = await getMaintenanceNotifications(orgId);
+    let notifications = await getMaintenanceNotifications(orgId, branchId);
     
     // Apply filters
     if (status) {

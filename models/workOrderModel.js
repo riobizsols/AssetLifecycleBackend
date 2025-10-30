@@ -1,7 +1,7 @@
 const db = require('../config/db');
 
 // Get all work orders from tblAssetMaintSch with detailed information
-const getAllWorkOrders = async (orgId = 'ORG001') => {
+const getAllWorkOrders = async (orgId, userBranchId) => {
     const query = `
         SELECT 
             ams.*,
@@ -122,15 +122,21 @@ const getAllWorkOrders = async (orgId = 'ORG001') => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
-        WHERE ams.org_id = $1 AND ams.status = 'IN' AND ams.maintained_by = 'Vendor'
+        INNER JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        WHERE ams.org_id = $1 
+          AND a.org_id = $1 
+          AND b.org_id = $1 
+          AND b.branch_id = $2 
+          AND ams.status = 'IN' 
+          AND ams.maintained_by = 'Vendor'
         ORDER BY ams.created_on DESC
-`;
+    `;
     
-    return await db.query(query, [orgId]);
+    return await db.query(query, [orgId, userBranchId]);
 };
 
 // Get work order by ID with detailed information
-const getWorkOrderById = async (amsId, orgId = 'ORG001') => {
+const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001') => {
     const query = `
         SELECT 
             ams.*,
@@ -251,10 +257,17 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001') => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
-        WHERE ams.ams_id = $1 AND ams.org_id = $2 AND ams.status = 'IN' AND ams.maintained_by = 'Vendor'
+        INNER JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        WHERE ams.ams_id = $1 
+          AND ams.org_id = $2 
+          AND a.org_id = $2 
+          AND b.org_id = $2 
+          AND b.branch_id = $3 
+          AND ams.status = 'IN' 
+          AND ams.maintained_by = 'Vendor'
     `;
     
-    return await db.query(query, [amsId, orgId]);
+    return await db.query(query, [amsId, orgId, userBranchId]);
 };
 
 module.exports = {

@@ -48,7 +48,7 @@ const createAssetGroupDetail = async (assetgroup_d_id, assetgroup_h_id, asset_id
 };
 
 // Create asset group with multiple assets (transaction)
-const createAssetGroup = async (org_id, text, asset_ids, created_by) => {
+const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by) => {
     const client = await db.connect();
     
     try {
@@ -57,13 +57,13 @@ const createAssetGroup = async (org_id, text, asset_ids, created_by) => {
         // Generate asset group header ID
         let assetgroup_h_id = await generateAssetGroupHeaderId();
         
-        // Insert header
+        // Insert header with branch_code
         const headerResult = await client.query(`
             INSERT INTO "tblAssetGroup_H" (
-                assetgroup_h_id, org_id, text, created_by, created_on, changed_by, changed_on
-            ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $4, CURRENT_TIMESTAMP)
+                assetgroup_h_id, org_id, branch_code, text, created_by, created_on, changed_by, changed_on
+            ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP)
             RETURNING *
-        `, [assetgroup_h_id, org_id, text, created_by]);
+        `, [assetgroup_h_id, org_id, branch_code, text, created_by]);
         
         // Generate sequential detail IDs
         const detailIds = await generateSequentialDetailIds(asset_ids.length);
@@ -100,11 +100,16 @@ const createAssetGroup = async (org_id, text, asset_ids, created_by) => {
 };
 
 // Get all asset groups
-const getAllAssetGroups = async () => {
+const getAllAssetGroups = async (org_id, userBranchCode) => {
+    console.log('=== Asset Group Model Listing Debug ===');
+    console.log('org_id:', org_id);
+    console.log('userBranchCode:', userBranchCode);
+    
     const query = `
         SELECT 
             h.assetgroup_h_id,
             h.org_id,
+            h.branch_code,
             h.text,
             h.created_by,
             h.created_on,
@@ -113,11 +118,14 @@ const getAllAssetGroups = async () => {
             COUNT(d.asset_id) as asset_count
         FROM "tblAssetGroup_H" h
         LEFT JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
-        GROUP BY h.assetgroup_h_id, h.org_id, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
+        WHERE h.org_id = $1 AND h.branch_code = $2
+        GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
         ORDER BY h.created_on DESC
     `;
     
-    return await db.query(query);
+    const result = await db.query(query, [org_id, userBranchCode]);
+    console.log('Query executed successfully, found asset groups:', result.rows.length);
+    return result;
 };
 
 // Get asset group by ID with details

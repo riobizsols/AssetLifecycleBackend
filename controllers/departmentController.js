@@ -9,11 +9,21 @@ const createDepartment = async (req, res) => {
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+
+        console.log('=== Department Creation Debug ===');
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', userBranchId);
+
         const int_status = 1;
         const parent_id = null;
         const changed_by = null;
 
-        let branch_id = null;
+        // Use user's branch_id instead of null
+        const branch_id = userBranchId;
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
         const deptIdResult = await db.query(
@@ -54,7 +64,7 @@ const createDepartment = async (req, res) => {
         console.error("Error creating department:", err);
         res.status(500).json({ error: 'Failed to create department' });
     }
-  };
+};
 
 const getNextDepartmentId = async (req, res) => {
     try {
@@ -165,13 +175,11 @@ const updateDepartment = async (req, res) => {
 module.exports = {
     createDepartment,
     getAllDepartments: async (req, res) => {
-        try {
-            const departments = await DepartmentModel.getAllDepartments();
-            res.status(200).json(departments);
-        } catch (err) {
-            console.error("Error fetching departments:", err);
-            res.status(500).json({ error: 'Failed to fetch departments' });
-        }
+        const org_id = req.user.org_id;
+        const branch_id = req.user.branch_id;   
+
+        const departments = await DepartmentModel.getAllDepartments(org_id, branch_id);
+        res.status(200).json(departments);
     },
     deleteDepartment,
     updateDepartment,

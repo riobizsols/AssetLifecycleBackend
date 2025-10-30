@@ -75,6 +75,13 @@ const getAssetLifecycle = async (req, res) => {
     
     console.log('🔍 [AssetLifecycleController] Parsed filters:', JSON.stringify(filters, null, 2));
 
+    // Add user's branch_id as default filter
+    const userBranchId = req.user?.branch_id;
+    if (userBranchId) {
+      filters.branch_id = userBranchId;
+      console.log('🔍 [AssetLifecycleController] Added user branch_id filter:', userBranchId);
+    }
+
     // Step 2: Log filters applied
     const appliedFilters = Object.keys(filters).filter(key => 
       filters[key] !== null && key !== 'limit' && key !== 'offset'

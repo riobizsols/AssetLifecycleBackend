@@ -21,6 +21,13 @@ const getBreakdownHistory = async (req, res) => {
         const orgId = req.query.orgId || 'ORG001';
         const filters = req.query || {};
         
+        // Add user's branch_id as default filter
+        const userBranchId = req.user?.branch_id;
+        if (userBranchId) {
+            filters.branch_id = userBranchId;
+            console.log('🔍 [BreakdownHistoryController] Added user branch_id filter:', userBranchId);
+        }
+        
         // Log API called
         await logReportApiCall({
             appId: APP_ID,

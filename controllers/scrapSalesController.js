@@ -25,6 +25,28 @@ const createScrapSale = async (req, res) => {
 
         const org_id = req.user?.org_id;
         const created_by = req.user?.user_id;
+        
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log('=== Scrap Sales Creation Debug ===');
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', userBranchId);
+        
+        // Get branch_code from tblBranches
+        let userBranchCode = null;
+        if (userBranchId) {
+            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+            const branchResult = await db.query(branchQuery, [userBranchId]);
+            if (branchResult.rows.length > 0) {
+                userBranchCode = branchResult.rows[0].branch_code;
+                console.log('User branch_code:', userBranchCode);
+            } else {
+                console.log('Branch not found for branch_id:', userBranchId);
+            }
+        }
 
         // Log API called
         scrapSalesLogger.logCreateScrapSaleApiCalled({
@@ -124,6 +146,7 @@ const createScrapSale = async (req, res) => {
         const saleData = {
             header: {
                 org_id,
+                branch_code: userBranchCode,
                 text,
                 total_sale_value,
                 buyer_name,
@@ -251,6 +274,30 @@ const getAllScrapSales = async (req, res) => {
     const userId = req.user?.user_id;
     
     try {
+        const org_id = req.user.org_id;
+        
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+        
+        console.log('=== Scrap Sales Listing Debug ===');
+        console.log('User org_id:', org_id);
+        console.log('User branch_id:', userBranchId);
+        
+        // Get branch_code from tblBranches
+        let userBranchCode = null;
+        if (userBranchId) {
+            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+            const branchResult = await db.query(branchQuery, [userBranchId]);
+            if (branchResult.rows.length > 0) {
+                userBranchCode = branchResult.rows[0].branch_code;
+                console.log('User branch_code:', userBranchCode);
+            } else {
+                console.log('Branch not found for branch_id:', userBranchId);
+            }
+        }
+        
         // Log API called
         scrapSalesLogger.logGetAllScrapSalesApiCalled({
             method: req.method,
@@ -258,7 +305,7 @@ const getAllScrapSales = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
         
-        const result = await model.getAllScrapSales();
+        const result = await model.getAllScrapSales(org_id, userBranchCode);
         
         // Log success
         if (result.rows.length === 0) {
