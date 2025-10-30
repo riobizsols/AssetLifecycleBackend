@@ -152,8 +152,9 @@ const createBreakdownReport = async (breakdownData) => {
 
     // Helper: fetch asset_type_id and basic info
     const assetQuery = `
-      SELECT a.asset_id, a.asset_type_id, a.service_vendor_id, a.org_id
+      SELECT a.asset_id, a.asset_type_id, a.service_vendor_id, a.org_id, a.branch_id, b.branch_code
       FROM "tblAssets" a
+      LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
       WHERE a.asset_id = $1
     `;
     const assetRes = await client.query(assetQuery, [asset_id]);
@@ -216,6 +217,7 @@ const createBreakdownReport = async (breakdownData) => {
           status: 'IP',
           created_by: reported_by,
           org_id,
+          branch_code: assetRow ? assetRow.branch_code : null,
           isBreakdown: true
         });
         // Create first detail step as AP (Approval Pending), others IN (Inactive)
@@ -250,10 +252,11 @@ const createBreakdownReport = async (breakdownData) => {
         const updateRes = await client.query(
           `UPDATE "tblAssetMaintSch"
            SET act_maint_st_date = $1,
+               branch_code = COALESCE($2, branch_code),
                changed_on = CURRENT_TIMESTAMP
-           WHERE ams_id = $2
+           WHERE ams_id = $3
            RETURNING *`,
-          [nowISODateOnly, existingSchedule.ams_id]
+          [nowISODateOnly, assetRow ? assetRow.branch_code : null, existingSchedule.ams_id]
         );
         maintenanceResult = updateRes.rows[0];
       } else {
@@ -300,6 +303,7 @@ const createBreakdownReport = async (breakdownData) => {
           status: 'IP',
           created_by: reported_by,
           org_id,
+          branch_code: assetRow ? assetRow.branch_code : null,
           isBreakdown: true
         });
         const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
@@ -372,6 +376,7 @@ const createBreakdownReport = async (breakdownData) => {
           status: 'IP',
           created_by: reported_by,
           org_id,
+          branch_code: assetRow ? assetRow.branch_code : null,
           isBreakdown: true
         });
         

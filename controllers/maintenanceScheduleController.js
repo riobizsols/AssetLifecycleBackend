@@ -136,7 +136,8 @@ const generateMaintenanceSchedules = async (req, res) => {
                         act_sch_date: null,
                         status: 'IN',
                         created_by: 'system',
-                        org_id: asset.org_id
+                        org_id: asset.org_id,
+                        branch_code: asset.branch_code
                     };
                     
                     const headerResult = await model.insertWorkflowMaintenanceScheduleHeader(scheduleHeaderData);
@@ -370,7 +371,8 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                             act_sch_date: null,
                             status: 'IN',
                             created_by: 'system',
-                            org_id: asset.org_id
+                            org_id: asset.org_id,
+                            branch_code: asset.branch_code
                         };
                         
                         const headerResult = await model.insertWorkflowMaintenanceScheduleHeader(scheduleHeaderData);
@@ -743,7 +745,7 @@ const updateMaintenanceSchedule = async (req, res) => {
     
     try {
         const { id } = req.params;
-        const orgId = req.query.orgId;
+            const orgId = req.query.orgId || req.user?.org_id;
         const updateData = req.body;
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
