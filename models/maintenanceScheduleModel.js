@@ -267,7 +267,28 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData) => {
         org_id
     ];
     
-    return await db.query(query, values);
+    const result = await db.query(query, values);
+    
+    // Send push notification for new workflow detail
+    try {
+        const workflowNotificationService = require('../services/workflowNotificationService');
+        
+        // Check if this is a breakdown-related workflow
+        const isBreakdown = notes && (notes.includes('BF01-Breakdown') || notes.includes('BF03-Breakdown') || notes.includes('breakdown'));
+        
+        if (isBreakdown) {
+            await workflowNotificationService.notifyBreakdownWorkflowDetail(detailData, notes);
+        } else {
+            await workflowNotificationService.notifyNewWorkflowDetail(detailData);
+        }
+        
+        console.log(`Push notification triggered for workflow detail ${wfamsd_id}`);
+    } catch (notificationError) {
+        // Log error but don't fail the main operation
+        console.error('Error sending push notification for workflow detail:', notificationError);
+    }
+    
+    return result;
 };
 
 // 12. Calculate planned schedule date based on frequency and UOM

@@ -61,7 +61,7 @@ class NotificationIntegrationService {
                     data: {
                         assetId: assetData.assetId,
                         assetName: assetData.assetName,
-                        changes: changes,
+                        changes: JSON.stringify(changes),
                         type: 'asset_updated'
                     },
                     notificationType: 'asset_updated'
@@ -74,10 +74,16 @@ class NotificationIntegrationService {
                     notificationSent: fcmResult.success,
                     duration
                 });
+                
+                return fcmResult;
+            } else {
+                console.log('No assigned user found for asset update notification');
+                return { success: false, reason: 'No assigned user' };
             }
             
         } catch (error) {
             console.error('Error sending asset updated notification:', error);
+            return { success: false, error: error.message };
         }
     }
 

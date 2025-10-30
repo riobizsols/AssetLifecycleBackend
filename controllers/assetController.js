@@ -463,6 +463,49 @@ const updateAsset = async (req, res) => {
       duration: Date.now() - startTime
     });
 
+    // Send notification to assigned user (if any)
+    try {
+      const notificationService = require('../services/notificationIntegrationService');
+      
+      // Get asset assignment information
+      const assignmentModel = require('../models/assetAssignmentModel');
+      const assignmentInfo = await assignmentModel.getLatestAssetAssignment(asset_id);
+      
+      if (assignmentInfo && assignmentInfo.rows.length > 0) {
+        const assignment = assignmentInfo.rows[0];
+        const assignedUserId = assignment.employee_user_id;
+        
+        if (assignedUserId) {
+          // Prepare asset data for notification
+          const assetData = {
+            assetId: asset_id,
+            assetName: updatedAsset.text,
+            assignedTo: assignedUserId
+          };
+          
+          // Determine what changed for notification context
+          const changes = {
+            updatedBy: userId,
+            updatedAt: new Date().toISOString(),
+            fields: Object.keys(req.body).filter(key => req.body[key] !== undefined)
+          };
+          
+          // Send notification asynchronously (non-blocking)
+          setImmediate(async () => {
+            try {
+              await notificationService.notifyAssetUpdated(assetData, assignedUserId, changes);
+              console.log(`📱 Asset update notification sent to user ${assignedUserId} for asset ${asset_id}`);
+            } catch (notificationError) {
+              console.error('❌ Failed to send asset update notification:', notificationError);
+            }
+          });
+        }
+      }
+    } catch (notificationError) {
+      console.error('❌ Error in asset update notification flow:', notificationError);
+      // Don't fail the request if notification fails
+    }
+
     res.json(updatedAsset);
   } catch (err) {
     console.error("Error updating asset:", err);

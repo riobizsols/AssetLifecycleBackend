@@ -1,6 +1,7 @@
 const admin = require('firebase-admin');
 const db = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
+require('dotenv').config();
 
 class FCMService {
     constructor() {
@@ -194,34 +195,64 @@ class FCMService {
 
             // Try to send notification via Firebase, but catch errors and simulate if needed
             try {
-                // Send notification via Firebase
-                const message = {
-                    notification: {
-                        title,
-                        body
-                    },
-                    data: {
-                        ...data,
-                        notificationType,
-                        timestamp: new Date().toISOString()
-                    },
-                    tokens: deviceTokens
-                };
+                // Send notification via Firebase - Use individual send() calls instead of sendMulticast()
+                // to avoid the 404 error on the /batch endpoint which doesn't exist in FCM HTTP v1 API
+                let successCount = 0;
+                let failureCount = 0;
+                const responses = [];
 
-                const response = await admin.messaging().sendMulticast(message);
+                for (const token of deviceTokens) {
+                    try {
+                        const message = {
+                            notification: {
+                                title,
+                                body
+                            },
+                            data: {
+                                ...data,
+                                notificationType,
+                                timestamp: new Date().toISOString()
+                            },
+                            token: token
+                        };
+
+                        const response = await admin.messaging().send(message);
+                        successCount++;
+                        responses.push({ success: true, messageId: response });
+                    } catch (singleError) {
+                        failureCount++;
+                        responses.push({ success: false, error: singleError.message });
+                        
+                        // Remove invalid tokens from database
+                        const tokenRecord = tokens.find(t => t.device_token === token);
+                        if (tokenRecord && (
+                            singleError.code === 'messaging/invalid-registration-token' || 
+                            singleError.code === 'messaging/registration-token-not-registered'
+                        )) {
+                            console.log(`Removing invalid token: ${token.substring(0, 20)}...`);
+                            await db.query(
+                                'UPDATE "tblFCMTokens" SET is_active = false WHERE token_id = $1',
+                                [tokenRecord.token_id]
+                            );
+                        }
+                    }
+                }
+
+                // Create response object similar to sendMulticast response
+                const response = {
+                    successCount,
+                    failureCount,
+                    responses,
+                    totalTokens: deviceTokens.length
+                };
 
                 // Log notification history
                 await this.logNotificationHistory(userId, tokens, notificationType, title, body, data, response);
 
-                // Handle failed tokens
-                if (response.failureCount > 0) {
-                    await this.handleFailedTokens(tokens, response.responses);
-                }
-
                 return {
                     success: true,
-                    successCount: response.successCount,
-                    failureCount: response.failureCount,
+                    successCount,
+                    failureCount,
                     totalTokens: deviceTokens.length
                 };
 
@@ -316,9 +347,10 @@ class FCMService {
      */
     async logNotificationHistory(userId, tokens, notificationType, title, body, data, fcmResponse) {
         try {
-            const notificationId = 'NOT' + uuidv4().substring(0, 15).toUpperCase();
-
             for (const token of tokens) {
+                // Generate unique notification ID for each token
+                const notificationId = 'NOT' + uuidv4().substring(0, 15).toUpperCase();
+                
                 const insertQuery = `
                     INSERT INTO "tblNotificationHistory" (
                         notification_id, user_id, token_id, notification_type,
