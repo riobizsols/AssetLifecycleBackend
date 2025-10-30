@@ -943,6 +943,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           wfh.maint_type_id,
           a.service_vendor_id as vendor_id,
           wfh.at_main_freq_id,
+          a.branch_id,
+          b.branch_code,
           -- detect breakdown from detail notes
           EXISTS (
             SELECT 1 
@@ -968,6 +970,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
       `;
      
@@ -1087,14 +1090,16 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        const updateQuery = `
          UPDATE "tblAssetMaintSch"
          SET wo_id = $1,
+             branch_code = COALESCE($2, branch_code),
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
-         WHERE ams_id = $2 AND org_id = $3
+         WHERE ams_id = $3 AND org_id = $4
          RETURNING ams_id, wo_id
        `;
        
        const updateParams = [
          workOrderId,
+         workflowData.branch_code,
          existingAmsId,
          orgId
        ];
@@ -1123,9 +1128,10 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
              vendor_id = $3,
              at_main_freq_id = $4,
              maintained_by = $5,
+             branch_code = COALESCE($6, branch_code),
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
-         WHERE ams_id = $6 AND org_id = $7
+         WHERE ams_id = $7 AND org_id = $8
          RETURNING ams_id, wo_id
        `;
        
@@ -1135,6 +1141,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          workflowData.vendor_id,
          workflowData.at_main_freq_id,
          workflowData.maintained_by,
+         workflowData.branch_code,
          existingAmsId,
          orgId
        ];
@@ -1188,8 +1195,9 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           act_maint_st_date,
           created_by,
           created_on,
-          org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13)
+          org_id,
+          branch_code
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
       `;
       
       const insertParams = [
@@ -1205,7 +1213,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         'IN', // Initial status
         workflowData.act_maint_st_date,
         'system', // created_by
-        orgId
+        orgId,
+        workflowData.branch_code
       ];
      
      console.log('Insert query params:', insertParams);

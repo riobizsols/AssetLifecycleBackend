@@ -21,8 +21,11 @@ const getAssetsByAssetType = async (asset_type_id) => {
             a.purchased_on,
             a.service_vendor_id,
             a.org_id,
-            a.text as asset_name
+            a.text as asset_name,
+            a.branch_id,
+            b.branch_code
         FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         WHERE a.asset_type_id = $1
         ORDER BY a.asset_id
     `;
@@ -177,6 +180,7 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
         status,
         created_by,
         org_id,
+        branch_code,
         isBreakdown = false
     } = scheduleData;
     
@@ -195,8 +199,9 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
             created_on,
             changed_by,
             changed_on,
-            org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11)
+            org_id,
+            branch_code
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12)
         RETURNING *
     `;
     
@@ -214,7 +219,8 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
         act_sch_date,
         status,
         created_by,
-        org_id
+        org_id,
+        branch_code
     ];
     
     return await db.query(query, values);
@@ -355,7 +361,7 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => 
 };
 
 // Update maintenance schedule in tblAssetMaintSch
-const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') => {
+const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     const {
         notes,
         status,
@@ -364,6 +370,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
         technician_name,
         technician_email,
         technician_phno,
+        cost,
         changed_by,
         changed_on
     } = updateData;
@@ -382,9 +389,10 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
             technician_name = COALESCE($7, technician_name),
             technician_email = COALESCE($8, technician_email),
             technician_phno = COALESCE($9, technician_phno),
-            changed_by = $10,
-            changed_on = $11
-        WHERE ams_id = $1 AND org_id = $12
+            cost = COALESCE($10, cost),
+            changed_by = $11,
+            changed_on = $12
+        WHERE ams_id = $1 AND org_id = $13
         RETURNING *
     `;
 
@@ -398,6 +406,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId = 'ORG001') =>
         technician_name,
         technician_email,
         technician_phno,
+        cost,
         changed_by,
         changed_on,
         orgId
@@ -463,11 +472,27 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
         status,
         act_maint_st_date,
         created_by,
-        org_id
+        org_id,
+        branch_code
     } = scheduleData;
     
     // Auto-generate work order ID
     const wo_id = generateWorkOrderId(ams_id);
+    
+    // If branch_code not provided, fetch it from asset
+    let finalBranchCode = branch_code;
+    if (!finalBranchCode && asset_id) {
+        const branchQuery = `
+            SELECT b.branch_code
+            FROM "tblAssets" a
+            LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+            WHERE a.asset_id = $1
+        `;
+        const branchResult = await db.query(branchQuery, [asset_id]);
+        if (branchResult.rows.length > 0) {
+            finalBranchCode = branchResult.rows[0].branch_code;
+        }
+    }
     
     const query = `
         INSERT INTO "tblAssetMaintSch" (
@@ -484,8 +509,9 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             act_maint_st_date,
             created_by,
             created_on,
-            org_id
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12)
+            org_id,
+            branch_code
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12, $13)
         RETURNING *
     `;
     
@@ -501,7 +527,8 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
         status,
         act_maint_st_date,
         created_by,
-        org_id
+        org_id,
+        finalBranchCode
     ];
     
     return await db.query(query, values);
