@@ -66,6 +66,26 @@ const getAssetAssignmentsByAsset = async (asset_id) => {
   return await db.query(query, [asset_id]);
 };
 
+const getLatestAssetAssignment = async (asset_id) => {
+  const query = `
+        SELECT 
+            aa.asset_assign_id, aa.dept_id, aa.asset_id, aa.org_id, aa.employee_int_id,
+            aa.action, aa.action_on, aa.action_by, aa.latest_assignment_flag,
+            e.employee_id, e.name as employee_name,
+            u.user_id as employee_user_id, u.full_name as user_name, u.email
+        FROM "tblAssetAssignments" aa
+        LEFT JOIN "tblEmployees" e ON aa.employee_int_id = e.emp_int_id
+        LEFT JOIN "tblUsers" u ON e.emp_int_id = u.emp_int_id
+        WHERE aa.asset_id = $1 
+          AND aa.action = 'A' 
+          AND aa.latest_assignment_flag = true
+        ORDER BY aa.action_on DESC
+        LIMIT 1
+    `;
+
+  return await db.query(query, [asset_id]);
+};
+
 const getAssetAssignmentsByStatus = async (action) => {
   const query = `
         SELECT 
@@ -357,6 +377,7 @@ module.exports = {
   getAssetAssignmentsByDept,
   getAssetAssignmentsByEmployee,
   getAssetAssignmentsByAsset,
+  getLatestAssetAssignment,
   getAssetAssignmentsByStatus,
   getAssetAssignmentsByOrg,
   getActiveAssetAssignmentsByEmployee,
