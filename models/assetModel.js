@@ -236,6 +236,9 @@ const getAssetWithDetails = async (asset_id) => {
             a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
             a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
             a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+            -- newly added fields
+            a.cost_center_code, a.location, a.insurance_policy_no, a.insurer,
+            a.insured_value, a.insurance_start_date, a.insurance_end_date, a.comprehensive_insurance,
             at.text as asset_type_name,
             at.is_child,
             at.parent_asset_type_id,
@@ -379,7 +382,16 @@ const updateAsset = async (asset_id, {
   parent_asset_id,
   group_id,
   org_id,
-  properties
+  properties,
+  // new fields
+  cost_center_code,
+  location,
+  insurance_policy_no,
+  insurer,
+  insured_value,
+  insurance_start_date,
+  insurance_end_date,
+  comprehensive_insurance
 }) => {
   const client = await db.connect();
   try {
@@ -406,6 +418,14 @@ const updateAsset = async (asset_id, {
         parent_asset_id = $15,
         group_id = $16,
         org_id = COALESCE($17, org_id),
+        cost_center_code = COALESCE($19, cost_center_code),
+        location = COALESCE($20, location),
+        insurance_policy_no = COALESCE($21, insurance_policy_no),
+        insurer = COALESCE($22, insurer),
+        insured_value = COALESCE($23, insured_value),
+        insurance_start_date = COALESCE($24, insurance_start_date),
+        insurance_end_date = COALESCE($25, insurance_end_date),
+        comprehensive_insurance = COALESCE($26, comprehensive_insurance),
         changed_on = CURRENT_TIMESTAMP
       WHERE asset_id = $18
       RETURNING *
@@ -429,7 +449,15 @@ const updateAsset = async (asset_id, {
       parent_asset_id,
       group_id,
       org_id,
-      asset_id
+      asset_id,
+      cost_center_code,
+      location,
+      insurance_policy_no,
+      insurer,
+      insured_value,
+      insurance_start_date,
+      insurance_end_date,
+      comprehensive_insurance
     ];
 
     const result = await client.query(query, values);
@@ -988,11 +1016,19 @@ const createAsset = async (assetData) => {
         accumulated_depreciation,
         last_depreciation_calc_date,
         depreciation_start_date,
+        cost_center_code,
+        location,
+        insurance_policy_no,
+        insurer,
+        insured_value,
+        insurance_start_date,
+        insurance_end_date,
+        comprehensive_insurance,
         created_on,
         changed_on
       )
       VALUES (
-        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
       )
       RETURNING *
     `;
@@ -1025,7 +1061,15 @@ const createAsset = async (assetData) => {
       current_book_value,
       accumulated_depreciation,
       last_depreciation_calc_date,
-      depreciation_start_date
+      depreciation_start_date,
+      assetData.cost_center_code || null,
+      assetData.location || null,
+      assetData.insurance_policy_no || null,
+      assetData.insurer || null,
+      assetData.insured_value || null,
+      assetData.insurance_start_date || null,
+      assetData.insurance_end_date || null,
+      assetData.comprehensive_insurance || null
     ];
 
     const result = await client.query(query, values);

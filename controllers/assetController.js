@@ -397,7 +397,16 @@ const updateAsset = async (req, res) => {
       parent_asset_id,
       group_id,
       org_id,
-      properties
+      properties,
+      // New fields for update
+      cost_center_code,
+      location,
+      insurance_policy_no,
+      insurer,
+      insured_value,
+      insurance_start_date,
+      insurance_end_date,
+      comprehensive_insurance
     } = req.body;
 
     // Log API called
@@ -448,7 +457,15 @@ const updateAsset = async (req, res) => {
       parent_asset_id,
       group_id,
       org_id: finalOrgId,
-      properties
+      properties,
+      cost_center_code,
+      location,
+      insurance_policy_no,
+      insurer,
+      insured_value,
+      insurance_start_date,
+      insurance_end_date,
+      comprehensive_insurance
     });
 
     if (!updatedAsset) {
@@ -1475,7 +1492,16 @@ const createAsset = async (req, res) => {
             current_book_value,
             accumulated_depreciation,
             last_depreciation_calc_date,
-            depreciation_start_date
+            depreciation_start_date,
+            // Additional fields
+            cost_center, // maps to cost_center_code
+            location,
+            insurance_policy_number, // maps to insurance_policy_no
+            insurer,
+            insured_value,
+            insurance_start_date,
+            insurance_end_date,
+            comprehensive_insurance
         } = req.body;
 
         if (!req.user || !req.user.user_id) {
@@ -1668,7 +1694,16 @@ if (useful_life_years && useful_life_years > 0) {
             current_book_value: parseFloat(current_book_value) || parseFloat(purchased_cost) || 0,
             accumulated_depreciation: parseFloat(accumulated_depreciation) || 0,
             last_depreciation_calc_date: last_depreciation_calc_date || null,
-            depreciation_start_date: depreciation_start_date || purchased_on
+            depreciation_start_date: depreciation_start_date || purchased_on,
+            // Additional fields mapping to DB
+            cost_center_code: cost_center || null,
+            location: location || null,
+            insurance_policy_no: insurance_policy_number || null,
+            insurer: insurer || null,
+            insured_value: insured_value ? parseFloat(insured_value) : null,
+            insurance_start_date: insurance_start_date || null,
+            insurance_end_date: insurance_end_date || null,
+            comprehensive_insurance: comprehensive_insurance || null
         };
 
         // Start a transaction to ensure atomicity
