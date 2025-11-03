@@ -200,8 +200,13 @@ class FCMService {
                 let successCount = 0;
                 let failureCount = 0;
                 const responses = [];
+                // Track token success mapping: token_id -> success status
+                const tokenSuccessMap = new Map();
 
-                for (const token of deviceTokens) {
+                for (let i = 0; i < deviceTokens.length; i++) {
+                    const token = deviceTokens[i];
+                    const tokenRecord = tokens.find(t => t.device_token === token);
+                    
                     try {
                         const message = {
                             notification: {
@@ -219,12 +224,21 @@ class FCMService {
                         const response = await admin.messaging().send(message);
                         successCount++;
                         responses.push({ success: true, messageId: response });
+                        
+                        // Mark this token as successful
+                        if (tokenRecord) {
+                            tokenSuccessMap.set(tokenRecord.token_id, true);
+                        }
                     } catch (singleError) {
                         failureCount++;
                         responses.push({ success: false, error: singleError.message });
                         
+                        // Mark this token as failed
+                        if (tokenRecord) {
+                            tokenSuccessMap.set(tokenRecord.token_id, false);
+                        }
+                        
                         // Remove invalid tokens from database
-                        const tokenRecord = tokens.find(t => t.device_token === token);
                         if (tokenRecord && (
                             singleError.code === 'messaging/invalid-registration-token' || 
                             singleError.code === 'messaging/registration-token-not-registered'
@@ -243,7 +257,8 @@ class FCMService {
                     successCount,
                     failureCount,
                     responses,
-                    totalTokens: deviceTokens.length
+                    totalTokens: deviceTokens.length,
+                    tokenSuccessMap: Object.fromEntries(tokenSuccessMap)
                 };
 
                 // Log notification history
@@ -259,11 +274,18 @@ class FCMService {
             } catch (firebaseError) {
                 console.log('📱 Firebase error, simulating notification:', firebaseError.message);
                 
+                // Create token success map for all tokens (all successful in simulation)
+                const simulatedTokenSuccessMap = {};
+                tokens.forEach(token => {
+                    simulatedTokenSuccessMap[token.token_id] = true;
+                });
+                
                 // Log notification history for simulated notifications
                 await this.logNotificationHistory(userId, tokens, notificationType, title, body, data, {
-                    successCount: 1,
+                    successCount: tokens.length,
                     failureCount: 0,
-                    responses: [{ success: true }]
+                    responses: tokens.map(() => ({ success: true })),
+                    tokenSuccessMap: simulatedTokenSuccessMap
                 });
 
                 return {
@@ -343,22 +365,72 @@ class FCMService {
     }
 
     /**
+     * Get current timestamp in Indian Standard Time (IST - UTC+5:30)
+     * @returns {string} Timestamp in IST format (YYYY-MM-DD HH:mm:ss)
+     */
+    getISTTimestamp() {
+        const now = new Date();
+        
+        // Convert to IST using Asia/Kolkata timezone
+        const formatter = new Intl.DateTimeFormat('en-IN', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false
+        });
+        
+        const parts = formatter.formatToParts(now);
+        
+        // Extract parts from formatter
+        const year = parts.find(p => p.type === 'year').value;
+        const month = parts.find(p => p.type === 'month').value;
+        const day = parts.find(p => p.type === 'day').value;
+        const hour = parts.find(p => p.type === 'hour').value;
+        const minute = parts.find(p => p.type === 'minute').value;
+        const second = parts.find(p => p.type === 'second').value;
+        
+        return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+    }
+
+    /**
      * Log notification history
      */
     async logNotificationHistory(userId, tokens, notificationType, title, body, data, fcmResponse) {
         try {
+            // Get current timestamp in IST (Indian Standard Time)
+            const sentTimestamp = this.getISTTimestamp();
+            
+            // Get token success map if available, otherwise use overall success count
+            const tokenSuccessMap = fcmResponse.tokenSuccessMap || {};
+            
             for (const token of tokens) {
                 // Generate unique notification ID for each token
                 const notificationId = 'NOT' + uuidv4().substring(0, 15).toUpperCase();
                 
+                // Determine if this specific token was successful
+                // Check tokenSuccessMap first, then fall back to overall success if map not available
+                const isSuccessful = tokenSuccessMap[token.token_id] === true || 
+                                    (tokenSuccessMap[token.token_id] === undefined && fcmResponse.successCount > 0);
+                
+                const status = isSuccessful ? 'sent' : 'failed';
+                
+                // Set delivered_on for ALL notifications with status 'sent'
+                // For sent status, we consider it delivered when FCM accepts it
+                // We use the same timestamp as sent_on since FCM accepts it immediately
+                // IMPORTANT: Always set delivered_on when status is 'sent' to ensure all notifications track delivery
+                const deliveredTimestamp = status === 'sent' ? sentTimestamp : null;
+                
                 const insertQuery = `
                     INSERT INTO "tblNotificationHistory" (
                         notification_id, user_id, token_id, notification_type,
-                        title, body, data, status, fcm_response, sent_on
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+                        title, body, data, status, fcm_response, sent_on, delivered_on
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamp, $11::timestamp)
                 `;
 
-                const status = fcmResponse.successCount > 0 ? 'sent' : 'failed';
                 await db.query(insertQuery, [
                     notificationId,
                     userId,
@@ -368,7 +440,9 @@ class FCMService {
                     body,
                     JSON.stringify(data),
                     status,
-                    JSON.stringify(fcmResponse)
+                    JSON.stringify(fcmResponse),
+                    sentTimestamp,
+                    deliveredTimestamp
                 ]);
             }
         } catch (error) {
@@ -448,6 +522,80 @@ class FCMService {
             return result.rows;
         } catch (error) {
             console.error('Error getting notification preferences:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get notification history for a user
+     * Supports filters: notificationType, status, startDate, endDate, limit, offset
+     */
+    async getUserNotificationHistory(userId, filters = {}) {
+        try {
+            const {
+                notificationType,
+                status,
+                startDate,
+                endDate,
+                limit = 20,
+                offset = 0
+            } = filters;
+
+            let paramIndex = 2;
+            const params = [userId];
+            let where = 'WHERE nh.user_id = $1';
+
+            if (notificationType) {
+                where += ` AND nh.notification_type = $${paramIndex++}`;
+                params.push(notificationType);
+            }
+
+            if (status) {
+                where += ` AND nh.status = $${paramIndex++}`;
+                params.push(status);
+            }
+
+            if (startDate) {
+                where += ` AND nh.sent_on >= $${paramIndex++}`;
+                params.push(startDate);
+            }
+
+            if (endDate) {
+                where += ` AND nh.sent_on <= $${paramIndex++}`;
+                params.push(endDate);
+            }
+
+            const query = `
+                SELECT 
+                    nh.notification_id,
+                    nh.user_id,
+                    nh.token_id,
+                    nh.notification_type,
+                    nh.title,
+                    nh.body,
+                    nh.data,
+                    nh.status,
+                    nh.fcm_response,
+                    nh.sent_on,
+                    nh.delivered_on,
+                    nh.clicked_on,
+                    t.platform,
+                    t.device_type,
+                    t.app_version
+                FROM "tblNotificationHistory" nh
+                LEFT JOIN "tblFCMTokens" t ON nh.token_id = t.token_id
+                ${where}
+                ORDER BY nh.sent_on DESC
+                LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+            `;
+
+            params.push(Number(limit));
+            params.push(Number(offset));
+
+            const result = await db.query(query, params);
+            return result.rows;
+        } catch (error) {
+            console.error('Error getting user notification history:', error);
             throw error;
         }
     }
