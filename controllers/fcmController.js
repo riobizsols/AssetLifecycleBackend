@@ -344,6 +344,85 @@ class FCMController {
     }
 
     /**
+     * Get FCM notification history for the current user
+     */
+    async getNotificationHistory(req, res) {
+        const startTime = Date.now();
+        const userId = req.user?.user_id;
+
+        try {
+            if (!userId) {
+                return res.status(401).json({ 
+                    success: false, 
+                    message: 'User authentication required' 
+                });
+            }
+
+            const {
+                notificationType,
+                status,
+                startDate,
+                endDate,
+                limit,
+                offset
+            } = req.query;
+
+            const history = await fcmService.getUserNotificationHistory(userId, {
+                notificationType,
+                status,
+                startDate,
+                endDate,
+                limit: limit ? Number(limit) : undefined,
+                offset: offset ? Number(offset) : undefined
+            });
+
+            const duration = Date.now() - startTime;
+
+            res.json({
+                success: true,
+                message: 'Notification history retrieved successfully',
+                data: {
+                    userId: userId,
+                    history: history.map(item => ({
+                        notificationId: item.notification_id,
+                        notificationType: item.notification_type,
+                        title: item.title,
+                        body: item.body,
+                        data: item.data,
+                        status: item.status,
+                        sentOn: item.sent_on,
+                        deliveredOn: item.delivered_on,
+                        clickedOn: item.clicked_on,
+                        tokenId: item.token_id,
+                        device: {
+                            platform: item.platform,
+                            deviceType: item.device_type,
+                            appVersion: item.app_version
+                        }
+                    }))
+                }
+            });
+
+        } catch (error) {
+            const duration = Date.now() - startTime;
+            await logFcmOperationError({
+                operation: 'Get Notification History',
+                error,
+                requestData: { userId, query: req.query },
+                duration,
+                userId
+            });
+
+            console.error('Error getting notification history:', error);
+            res.status(500).json({
+                success: false,
+                message: 'Failed to get notification history',
+                error: error.message
+            });
+        }
+    }
+
+    /**
      * Send test notification to current user
      */
     async sendTestNotification(req, res) {

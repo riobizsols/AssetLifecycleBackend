@@ -42,6 +42,13 @@ router.put('/preferences', fcmController.updateNotificationPreferences);
 router.get('/preferences', fcmController.getNotificationPreferences);
 
 /**
+ * @route GET /api/fcm/history
+ * @desc Get FCM notification history for current user
+ * @access Private
+ */
+router.get('/history', fcmController.getNotificationHistory);
+
+/**
  * @route POST /api/fcm/test-notification
  * @desc Send test notification to current user
  * @access Private

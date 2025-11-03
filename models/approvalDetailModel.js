@@ -1,6 +1,8 @@
 const pool = require('../config/db');
 const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
+const workflowNotificationService = require('../services/workflowNotificationService');
+const fcmService = require('../services/fcmService');
 
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
@@ -356,6 +358,20 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       );
       
       console.log(`Inserted history record: ${nextWfamhisId} for next user ${nextUserStep.user_id} status change`);
+
+      // Send mobile notification to next approver role when they become AP
+      try {
+        await workflowNotificationService.notifyNewWorkflowDetail({
+          wfamsd_id: nextUserStep.wfamsd_id,
+          wfamsh_id: nextUserStep.wfamsh_id,
+          job_role_id: nextUserStep.job_role_id,
+          status: 'AP',
+          sequence: nextUserStep.sequence,
+          org_id: orgId
+        });
+      } catch (notifyErr) {
+        console.error('Failed to send notification to next approver:', notifyErr);
+      }
     } else {
       // No next user - check if all users have approved
       const allUsersApprovedQuery = `
@@ -928,6 +944,184 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
    }
  };
 
+  // Helper function to notify maintenance supervisors after record creation
+  const notifyMaintenanceSupervisors = async (amsId, assetId, wfamshId, orgId) => {
+    try {
+      console.log('=== notifyMaintenanceSupervisors called ===');
+      console.log('amsId:', amsId, 'assetId:', assetId, 'wfamshId:', wfamshId, 'orgId:', orgId);
+      
+      // Step 1: Get m_supervisor_role from tblOrgSettings
+      const orgSettingsQuery = `
+        SELECT value 
+        FROM "tblOrgSettings" 
+        WHERE key = 'm_supervisor_role' 
+        AND org_id = $1
+      `;
+      const orgSettingsResult = await pool.query(orgSettingsQuery, [orgId]);
+      
+      if (orgSettingsResult.rows.length === 0) {
+        console.log('No m_supervisor_role setting found in tblOrgSettings');
+        return { success: false, reason: 'No supervisor role setting found' };
+      }
+      
+      const supervisorRoleId = orgSettingsResult.rows[0].value;
+      console.log('Found supervisor role ID:', supervisorRoleId);
+      
+      // Step 2: Get asset name for notification context
+      const assetQuery = `
+        SELECT text as asset_name 
+        FROM "tblAssets" 
+        WHERE asset_id = $1 AND org_id = $2
+      `;
+      const assetResult = await pool.query(assetQuery, [assetId, orgId]);
+      const assetName = assetResult.rows.length > 0 ? assetResult.rows[0].asset_name : 'Asset';
+      
+      // Step 3: Find all users with the supervisor job role
+      const usersQuery = `
+        SELECT DISTINCT u.user_id, u.full_name, u.email, u.emp_int_id
+        FROM "tblUserJobRoles" ujr
+        INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+        WHERE ujr.job_role_id = $1
+        AND u.int_status = 1
+      `;
+      const usersResult = await pool.query(usersQuery, [supervisorRoleId]);
+      
+      console.log(`Query for supervisor role ${supervisorRoleId} returned ${usersResult.rows.length} users`);
+      if (usersResult.rows.length > 0) {
+        console.log('Users found:');
+        usersResult.rows.forEach((user, index) => {
+          console.log(`  ${index + 1}. ${user.full_name} (user_id: ${user.user_id}, emp_int_id: ${user.emp_int_id})`);
+        });
+      }
+      
+      if (usersResult.rows.length === 0) {
+        console.log(`No users found with job role ${supervisorRoleId}`);
+        // Debug: Check if the role exists and if USR015 has any roles
+        const debugQuery = `
+          SELECT 
+            jr.job_role_id, jr.text as role_name,
+            COUNT(ujr.user_id) as user_count
+          FROM "tblJobRoles" jr
+          LEFT JOIN "tblUserJobRoles" ujr ON jr.job_role_id = ujr.job_role_id
+            AND (ujr.int_status IS NULL OR ujr.int_status = 1)
+          WHERE jr.job_role_id = $1
+          GROUP BY jr.job_role_id, jr.text
+        `;
+        const debugResult = await pool.query(debugQuery, [supervisorRoleId]);
+        console.log('Debug - Role info:', debugResult.rows[0] || 'Role not found');
+        
+        // Also check if USR015 exists and their roles
+        const userCheckQuery = `
+          SELECT 
+            u.user_id, u.emp_int_id, u.full_name, u.int_status as user_status,
+            ujr.job_role_id, jr.text as role_name, ujr.int_status as role_status
+          FROM "tblUsers" u
+          LEFT JOIN "tblUserJobRoles" ujr ON u.user_id = ujr.user_id
+          LEFT JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
+          WHERE u.user_id = 'USR015' OR u.emp_int_id = 'USR015'
+        `;
+        const userCheckResult = await pool.query(userCheckQuery);
+        console.log('Debug - USR015 info:', userCheckResult.rows);
+        
+        return { success: false, reason: 'No supervisors found' };
+      }
+      
+      console.log(`Found ${usersResult.rows.length} maintenance supervisors to notify`);
+      
+      // Step 4: Check notification preferences before sending
+      // Initialize preferences for 'workflow_completed' if they don't exist
+      for (const user of usersResult.rows) {
+        try {
+          const preferenceCheckQuery = `
+            SELECT preference_id, push_enabled 
+            FROM "tblNotificationPreferences"
+            WHERE user_id = $1 AND notification_type = $2
+          `;
+          const preferenceCheck = await pool.query(preferenceCheckQuery, [user.user_id, 'workflow_completed']);
+          
+          if (preferenceCheck.rows.length === 0) {
+            // Create default preference for workflow_completed
+            const preferenceId = 'PREF' + Math.random().toString(36).substr(2, 15).toUpperCase();
+            const insertPreferenceQuery = `
+              INSERT INTO "tblNotificationPreferences" (
+                preference_id, user_id, notification_type, 
+                is_enabled, email_enabled, push_enabled
+              ) VALUES ($1, $2, $3, true, true, true)
+            `;
+            await pool.query(insertPreferenceQuery, [preferenceId, user.user_id, 'workflow_completed']);
+            console.log(`Initialized workflow_completed preference for user ${user.user_id} (${user.full_name})`);
+          } else {
+            const pushEnabled = preferenceCheck.rows[0].push_enabled;
+            console.log(`User ${user.user_id} (${user.full_name}) has workflow_completed preference: push_enabled=${pushEnabled}`);
+            if (!pushEnabled) {
+              console.log(`⚠️  Push notifications disabled for user ${user.user_id}. Skipping notification.`);
+            }
+          }
+        } catch (prefError) {
+          console.error(`Error checking/initializing preference for user ${user.user_id}:`, prefError);
+          // Continue even if preference check fails
+        }
+      }
+      
+      // Step 5: Send notifications to each supervisor
+      let successCount = 0;
+      let failureCount = 0;
+      
+      for (const user of usersResult.rows) {
+        try {
+          console.log(`Attempting to send notification to ${user.full_name} (${user.user_id}, emp_int_id: ${user.emp_int_id})`);
+          
+          // Check if user has device tokens
+          const deviceTokens = await fcmService.getUserDeviceTokens(user.user_id);
+          if (deviceTokens.length === 0) {
+            console.log(`⚠️  User ${user.user_id} has no registered device tokens. Notification will be skipped.`);
+            failureCount++;
+            continue;
+          }
+          console.log(`User ${user.user_id} has ${deviceTokens.length} device token(s)`);
+          
+          const notificationResult = await fcmService.sendNotificationToUser({
+            userId: user.user_id,
+            title: 'Maintenance Workflow Completed',
+            body: `Maintenance workflow completed. Asset "${assetName}" is ready. You can check now.`,
+            data: {
+              ams_id: amsId || '',
+              asset_id: assetId || '',
+              asset_name: assetName,
+              wfamsh_id: wfamshId || '',
+              notification_type: 'workflow_completed'
+            },
+            notificationType: 'workflow_completed'
+          });
+          
+          if (notificationResult.success) {
+            successCount++;
+            console.log(`✅ Notification sent successfully to ${user.full_name} (${user.user_id})`);
+          } else {
+            failureCount++;
+            console.log(`❌ Failed to send notification to ${user.full_name} (${user.user_id}): ${notificationResult.reason || 'Unknown error'}`);
+          }
+        } catch (error) {
+          failureCount++;
+          console.error(`❌ Error sending notification to ${user.full_name} (${user.user_id}):`, error.message);
+        }
+      }
+      
+      console.log(`Notification summary: ${successCount} successful, ${failureCount} failed`);
+      return {
+        success: successCount > 0,
+        totalUsers: usersResult.rows.length,
+        successCount,
+        failureCount
+      };
+      
+    } catch (error) {
+      console.error('Error in notifyMaintenanceSupervisors:', error);
+      // Don't throw error - notification failure shouldn't break record creation
+      return { success: false, error: error.message };
+    }
+  };
+
    // Create maintenance record in tblAssetMaintSch when workflow is completed
   const createMaintenanceRecord = async (wfamshId, orgId = 'ORG001') => {
     try {
@@ -1141,13 +1335,26 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        console.log('BF03 update query params:', updateParams);
        const updateResult = await pool.query(updateQuery, updateParams);
        
-       if (updateResult.rows.length === 0) {
-         console.error('Failed to update existing schedule for BF03.');
-       } else {
-         console.log('BF03: wo_id updated successfully:', existingAmsId, updateResult.rows[0].wo_id);
-       }
-       
-       return existingAmsId;
+      if (updateResult.rows.length === 0) {
+        console.error('Failed to update existing schedule for BF03.');
+      } else {
+        console.log('BF03: wo_id updated successfully:', existingAmsId, updateResult.rows[0].wo_id);
+      }
+      
+      // Notify maintenance supervisors after BF03 update
+      console.log('=== About to notify maintenance supervisors (BF03) ===');
+      try {
+        const notificationResult = await notifyMaintenanceSupervisors(existingAmsId, workflowData.asset_id, wfamshId, orgId);
+        console.log('Notification result (BF03):', JSON.stringify(notificationResult, null, 2));
+        if (!notificationResult.success) {
+          console.error('⚠️  Notification failed (BF03):', notificationResult.reason || notificationResult.error);
+        }
+      } catch (notifyErr) {
+        console.error('❌ CRITICAL: Failed to send notification to supervisors after BF03 update:', notifyErr);
+        console.error('Error stack:', notifyErr.stack);
+      }
+      
+      return existingAmsId;
      }
      
      // If BF01 with existing schedule, update it instead of creating new one
@@ -1192,6 +1399,27 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          console.log('Maintenance schedule updated successfully. wo_id:', updateResult.rows[0].wo_id, '(should be null for software assets)');
          return existingAmsId;
        }
+      if (updateResult.rows.length === 0) {
+        console.error('Failed to update existing schedule. Creating new one instead.');
+        // Fall through to create new record
+      } else {
+        console.log('Maintenance schedule updated successfully. wo_id remains unchanged:', existingAmsId, updateResult.rows[0].wo_id);
+        
+        // Notify maintenance supervisors after BF01 update
+        console.log('=== About to notify maintenance supervisors (BF01) ===');
+        try {
+          const notificationResult = await notifyMaintenanceSupervisors(existingAmsId, workflowData.asset_id, wfamshId, orgId);
+          console.log('Notification result (BF01):', JSON.stringify(notificationResult, null, 2));
+          if (!notificationResult.success) {
+            console.error('⚠️  Notification failed (BF01):', notificationResult.reason || notificationResult.error);
+          }
+        } catch (notifyErr) {
+          console.error('❌ CRITICAL: Failed to send notification to supervisors after BF01 update:', notifyErr);
+          console.error('Error stack:', notifyErr.stack);
+        }
+        
+        return existingAmsId;
+      }
      }
      
      // Create new maintenance record (default behavior or if update failed)
@@ -1261,6 +1489,20 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      await pool.query(insertQuery, insertParams);
      
      console.log('Maintenance record created successfully with ams_id:', amsId);
+     
+     // Notify maintenance supervisors after new record creation
+     console.log('=== About to notify maintenance supervisors ===');
+     try {
+       const notificationResult = await notifyMaintenanceSupervisors(amsId, workflowData.asset_id, wfamshId, orgId);
+       console.log('Notification result:', JSON.stringify(notificationResult, null, 2));
+       if (!notificationResult.success) {
+         console.error('⚠️  Notification failed:', notificationResult.reason || notificationResult.error);
+       }
+     } catch (notifyErr) {
+       console.error('❌ CRITICAL: Failed to send notification to supervisors after record creation:', notifyErr);
+       console.error('Error stack:', notifyErr.stack);
+     }
+     
      return amsId;
    } catch (error) {
      console.error('Error in createMaintenanceRecord:', error);
