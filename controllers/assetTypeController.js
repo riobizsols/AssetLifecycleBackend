@@ -264,7 +264,8 @@ const updateAssetType = async (req, res) => {
             is_child,
             parent_asset_type_id,
             maint_type_id,
-            maint_lead_type
+            maint_lead_type,
+            depreciation_type
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -306,20 +307,29 @@ const updateAssetType = async (req, res) => {
         const updateData = {
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
-            maint_required: maint_required || existingAsset.rows[0].maint_required,
-            assignment_type: assignment_type || existingAsset.rows[0].assignment_type,
+            maint_required: maint_required !== undefined ? maint_required : existingAsset.rows[0].maint_required,
+            assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
-            text: text || existingAsset.rows[0].text,
+            text: text !== undefined && text !== null ? text : existingAsset.rows[0].text,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
-            parent_asset_type_id: parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id,
-            maint_type_id: maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id,
-            maint_lead_type: maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type
+            parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),
+            maint_type_id: maint_required === 0 || maint_required === false ? null : (maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id),
+            maint_lead_type: maint_required === 0 || maint_required === false ? null : (maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type),
+            depreciation_type: depreciation_type !== undefined ? depreciation_type : existingAsset.rows[0].depreciation_type
         };
 
+        console.log('Updating asset type:', id, 'with updateData:', updateData);
         const result = await model.updateAssetType(id, updateData, changed_by);
+        console.log('Update result rows:', result?.rows?.length, result?.rows?.[0]);
+        
+        if (!result || !result.rows || result.rows.length === 0) {
+            console.error('Update query returned no rows');
+            return res.status(500).json({ error: "Update query returned no rows" });
+        }
 
         res.status(200).json({
+            success: true,
             message: "Asset type updated successfully",
             asset_type: result.rows[0]
         });

@@ -40,8 +40,18 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     WHERE wfd.org_id = $1 
       AND a.org_id = $1
       AND a.branch_id = $2
+      -- Only show pending statuses (IN, IP, AP) - exclude approved (UA) and rejected (UR)
       AND wfd.status IN ('IN', 'IP', 'AP')
+      -- Exclude completed (CO) and cancelled (CA) workflows
       AND wfh.status IN ('IN', 'IP')
+      -- Only include if there are still pending approvals for this workflow
+      AND EXISTS (
+        SELECT 1 
+        FROM "tblWFAssetMaintSch_D" wfd2
+        WHERE wfd2.wfamsh_id = wfh.wfamsh_id
+          AND wfd2.org_id = $1
+          AND wfd2.status IN ('IN', 'IP', 'AP')
+      )
       AND wfd.job_role_id IS NOT NULL
       AND u.int_status = 1
     ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
@@ -116,7 +126,17 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     WHERE wfh.org_id = $1 
       AND a.org_id = $1
       AND a.branch_id = $2
-      AND wfh.status IN ('IN', 'IP', 'CO')
+      -- Exclude completed (CO) and cancelled (CA) workflows
+      AND wfh.status IN ('IN', 'IP')
+      -- Only show if there are pending approvals (status IN, IP, or AP)
+      AND EXISTS (
+        SELECT 1 
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = wfh.wfamsh_id
+          AND wfd.org_id = $1
+          AND wfd.status IN ('IN', 'IP', 'AP')
+      )
+      -- Check if the requesting employee has a role involved in this workflow with pending status
       AND EXISTS (
         SELECT 1 
         FROM "tblWFAssetMaintSch_D" wfd
@@ -125,7 +145,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
           AND u.emp_int_id = $3
           AND u.int_status = 1
-          AND wfd.status IN ('IN', 'IP', 'AP', 'UA', 'UR')
+          AND wfd.status IN ('IN', 'IP', 'AP')
       )
     ORDER BY wfh.pl_sch_date ASC
   `;

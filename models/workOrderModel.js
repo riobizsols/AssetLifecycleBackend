@@ -37,18 +37,66 @@ const getAllWorkOrders = async (orgId, userBranchId) => {
                     EXTRACT(DAY FROM (CURRENT_DATE - ams.act_maint_st_date))
                 ELSE 0
             END as days_overdue,
-            -- Get checklist items for this asset type
+            -- Get checklist items for this asset type (adjusted for BF02/BF01 breakdowns)
             (
-                SELECT json_agg(
-                    json_build_object(
+                WITH regular_checklist AS (
+                    SELECT json_build_object(
                         'checklist_id', cl.at_main_checklist_id,
                         'text', cl.text,
                         'at_main_freq_id', cl.at_main_freq_id
-                    )
+                    ) as item
+                    FROM "tblATMaintCheckList" cl
+                    WHERE cl.asset_type_id = a.asset_type_id 
+                    AND cl.org_id = ams.org_id
+                ),
+                breakdown_info AS (
+                    SELECT brd.abr_id, brd.atbrrc_id, brd.description as breakdown_description, 
+                           brc.text as breakdown_reason, brd.decision_code
+                    FROM "tblAssetBRDet" brd
+                    LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+                    WHERE brd.asset_id = ams.asset_id
+                      AND brd.org_id = ams.org_id
+                      AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                      AND (
+                        (ams.wo_id IS NOT NULL AND ams.wo_id ILIKE '%' || brd.abr_id || '%')
+                        OR
+                        (ams.wfamsh_id IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+                            WHERE wfd.wfamsh_id = ams.wfamsh_id
+                              AND wfd.org_id = ams.org_id
+                              AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+                        ))
+                        OR
+                        (ams.maint_type_id = 'MT004')
+                      )
+                    ORDER BY brd.created_on DESC
+                    LIMIT 1
+                ),
+                breakdown_checklist AS (
+                    SELECT json_build_object(
+                        'checklist_id', 'BREAKDOWN-' || bd.abr_id,
+                        'text', bd.breakdown_reason,
+                        'at_main_freq_id', NULL,
+                        'is_breakdown', true,
+                        'breakdown_description', bd.breakdown_description
+                    ) as item
+                    FROM breakdown_info bd
                 )
-                FROM "tblATMaintCheckList" cl
-                WHERE cl.asset_type_id = a.asset_type_id 
-                AND cl.org_id = ams.org_id
+                SELECT CASE 
+                    WHEN EXISTS (SELECT 1 FROM breakdown_info WHERE decision_code = 'BF02') THEN
+                        -- BF02: Only breakdown reason
+                        (SELECT json_agg(item) FROM breakdown_checklist)
+                    WHEN EXISTS (SELECT 1 FROM breakdown_info WHERE decision_code = 'BF01') THEN
+                        -- BF01: Regular checklist + breakdown reason
+                        (SELECT json_agg(item) FROM (
+                            SELECT item FROM regular_checklist
+                            UNION ALL
+                            SELECT item FROM breakdown_checklist
+                        ) combined)
+                    ELSE
+                        -- No breakdown or BF03: Regular checklist only
+                        (SELECT json_agg(item) FROM regular_checklist)
+                END
             ) as checklist_items,
             -- Last five activity records for this asset
             (
@@ -128,7 +176,23 @@ const getAllWorkOrders = async (orgId, userBranchId) => {
           AND b.org_id = $1 
           AND b.branch_id = $2 
           AND ams.status = 'IN' 
-          AND ams.maintained_by = 'Vendor'
+          AND ams.wo_id IS NOT NULL
+          AND (
+            -- Include vendor-maintained work orders
+            ams.maintained_by = 'Vendor'
+            OR
+            -- Include breakdown maintenance (MT004) even if not vendor-maintained
+            ams.maint_type_id = 'MT004'
+            OR
+            -- Include breakdown work orders identified by notes or breakdown table (for backward compatibility)
+            (ams.notes ILIKE '%Breakdown%' AND EXISTS (
+              SELECT 1 FROM "tblAssetBRDet" brd
+              WHERE brd.asset_id = ams.asset_id
+                AND brd.org_id = ams.org_id
+                AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
+            ))
+          )
         ORDER BY ams.created_on DESC
     `;
     
@@ -145,6 +209,7 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
             a.description as asset_description,
             a.purchased_on,
             a.service_vendor_id,
+            a.location,
             at.text as asset_type_name,
             at.maint_required,
             at.assignment_type,
@@ -172,18 +237,66 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
                     EXTRACT(DAY FROM (CURRENT_DATE - ams.act_maint_st_date))
                 ELSE 0
             END as days_overdue,
-            -- Get checklist items for this asset type
+            -- Get checklist items for this asset type (adjusted for BF02/BF01 breakdowns)
             (
-                SELECT json_agg(
-                    json_build_object(
+                WITH regular_checklist AS (
+                    SELECT json_build_object(
                         'checklist_id', cl.at_main_checklist_id,
                         'text', cl.text,
                         'at_main_freq_id', cl.at_main_freq_id
-                    )
+                    ) as item
+                    FROM "tblATMaintCheckList" cl
+                    WHERE cl.asset_type_id = a.asset_type_id 
+                    AND cl.org_id = ams.org_id
+                ),
+                breakdown_info AS (
+                    SELECT brd.abr_id, brd.atbrrc_id, brd.description as breakdown_description, 
+                           brc.text as breakdown_reason, brd.decision_code
+                    FROM "tblAssetBRDet" brd
+                    LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+                    WHERE brd.asset_id = ams.asset_id
+                      AND brd.org_id = ams.org_id
+                      AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                      AND (
+                        (ams.wo_id IS NOT NULL AND ams.wo_id ILIKE '%' || brd.abr_id || '%')
+                        OR
+                        (ams.wfamsh_id IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+                            WHERE wfd.wfamsh_id = ams.wfamsh_id
+                              AND wfd.org_id = ams.org_id
+                              AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+                        ))
+                        OR
+                        (ams.maint_type_id = 'MT004')
+                      )
+                    ORDER BY brd.created_on DESC
+                    LIMIT 1
+                ),
+                breakdown_checklist AS (
+                    SELECT json_build_object(
+                        'checklist_id', 'BREAKDOWN-' || bd.abr_id,
+                        'text', bd.breakdown_reason,
+                        'at_main_freq_id', NULL,
+                        'is_breakdown', true,
+                        'breakdown_description', bd.breakdown_description
+                    ) as item
+                    FROM breakdown_info bd
                 )
-                FROM "tblATMaintCheckList" cl
-                WHERE cl.asset_type_id = a.asset_type_id 
-                AND cl.org_id = ams.org_id
+                SELECT CASE 
+                    WHEN EXISTS (SELECT 1 FROM breakdown_info WHERE decision_code = 'BF02') THEN
+                        -- BF02: Only breakdown reason
+                        (SELECT json_agg(item) FROM breakdown_checklist)
+                    WHEN EXISTS (SELECT 1 FROM breakdown_info WHERE decision_code = 'BF01') THEN
+                        -- BF01: Regular checklist + breakdown reason
+                        (SELECT json_agg(item) FROM (
+                            SELECT item FROM regular_checklist
+                            UNION ALL
+                            SELECT item FROM breakdown_checklist
+                        ) combined)
+                    ELSE
+                        -- No breakdown or BF03: Regular checklist only
+                        (SELECT json_agg(item) FROM regular_checklist)
+                END
             ) as checklist_items,
             -- Last five activity records for this asset
             (
@@ -264,7 +377,23 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
           AND b.org_id = $2 
           AND b.branch_id = $3 
           AND ams.status = 'IN' 
-          AND ams.maintained_by = 'Vendor'
+          AND ams.wo_id IS NOT NULL
+          AND (
+            -- Include vendor-maintained work orders
+            ams.maintained_by = 'Vendor'
+            OR
+            -- Include breakdown maintenance (MT004) even if not vendor-maintained
+            ams.maint_type_id = 'MT004'
+            OR
+            -- Include breakdown work orders identified by notes or breakdown table (for backward compatibility)
+            (ams.notes ILIKE '%Breakdown%' AND EXISTS (
+              SELECT 1 FROM "tblAssetBRDet" brd
+              WHERE brd.asset_id = ams.asset_id
+                AND brd.org_id = ams.org_id
+                AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+                AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
+            ))
+          )
     `;
     
     return await db.query(query, [amsId, orgId, userBranchId]);

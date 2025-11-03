@@ -142,6 +142,9 @@ const getWorkOrderById = async (req, res) => {
         
         const workOrder = result.rows[0];
         
+        console.log('Raw workOrder from DB:', workOrder.location);
+        console.log('Raw workOrder asset_id:', workOrder.asset_id);
+        
         // Format the response data with separated asset and vendor details
         const formattedData = {
             // Work Order Details
@@ -177,7 +180,8 @@ const getWorkOrderById = async (req, res) => {
                 serial_number: workOrder.serial_number,
                 description: workOrder.asset_description,
                 purchased_on: workOrder.purchased_on,
-                service_vendor_id: workOrder.service_vendor_id
+                service_vendor_id: workOrder.service_vendor_id,
+                location: workOrder.location
             },
             
             // Asset Type Details
@@ -210,6 +214,7 @@ const getWorkOrderById = async (req, res) => {
         };
         
         console.log(`Successfully fetched work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);
+        console.log('Formatted asset location:', formattedData.asset.location);
         
         return res.status(200).json({
             success: true,

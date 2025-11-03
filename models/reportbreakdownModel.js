@@ -5,10 +5,13 @@ const msModel = require('./maintenanceScheduleModel');
 // Get all reports from reports-view
 const getAllReports = async (orgId) => {
   const query = `
-    SELECT *
-    FROM "tblAssetBRDet"
-    WHERE org_id = $1
-    ORDER BY reported_by DESC
+    SELECT 
+      brd.*,
+      a.asset_type_id
+    FROM "tblAssetBRDet" brd
+    LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
+    WHERE brd.org_id = $1
+    ORDER BY brd.reported_by DESC
   `;
   const result = await pool.query(query, [orgId]);
   return result.rows;
@@ -16,17 +19,27 @@ const getAllReports = async (orgId) => {
 
 // Reason Codes
 const getBreakdownReasonCodes = async (orgId, assetTypeId = null) => {
-  let query = `
-    SELECT atbrrc_id, asset_type_id, text, instatus, org_id
-    FROM "tblATBRReasonCodes"
-    WHERE instatus = '1' AND org_id = $1
-  `;
+  let query = '';
   const params = [orgId];
+  
   if (assetTypeId) {
-    query += ' AND asset_type_id = $2';
+    // If assetTypeId is provided, filter by it and ensure unique atbrrc_id
+    query = `
+      SELECT DISTINCT ON (atbrrc_id) atbrrc_id, asset_type_id, text, instatus, org_id
+      FROM "tblATBRReasonCodes"
+      WHERE instatus = '1' AND org_id = $1 AND asset_type_id = $2
+      ORDER BY atbrrc_id, text ASC
+    `;
     params.push(assetTypeId);
+  } else {
+    // If no assetTypeId, just get distinct codes (shouldn't happen in normal flow)
+    query = `
+      SELECT DISTINCT ON (atbrrc_id) atbrrc_id, asset_type_id, text, instatus, org_id
+      FROM "tblATBRReasonCodes"
+      WHERE instatus = '1' AND org_id = $1
+      ORDER BY atbrrc_id, text ASC
+    `;
   }
-  query += ' ORDER BY text ASC';
   
   console.log('Reason codes query:', query);
   console.log('Reason codes params:', params);
@@ -262,13 +275,15 @@ const createBreakdownReport = async (breakdownData) => {
       } else {
         // No workflow and no existing schedule: create direct schedule in AMS
         const ams_id = await msModel.getNextAMSId();
+        // Determine maintained_by based on service_vendor_id (similar to BF02 logic)
+        const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
         const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
           ams_id,
           asset_id,
-          maint_type_id: null,
+          maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
           vendor_id: assetRow ? assetRow.service_vendor_id : null,
           at_main_freq_id: null,
-          maintained_by: null,
+          maintained_by: maintainedBy,
           notes: `Breakdown Maintenance - ${abr_id}`,
           status: 'IN',
           act_maint_st_date: nowISODateOnly,
@@ -328,13 +343,15 @@ const createBreakdownReport = async (breakdownData) => {
       } else {
         // Create a new AMS line, do not touch existing
         const ams_id = await msModel.getNextAMSId();
+        // Determine maintained_by based on service_vendor_id (similar to workflow logic)
+        const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
         const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
           ams_id,
           asset_id,
-          maint_type_id: null,
+          maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
           vendor_id: assetRow ? assetRow.service_vendor_id : null,
           at_main_freq_id: null,
-          maintained_by: null,
+          maintained_by: maintainedBy,
           notes: `Breakdown Maintenance - ${abr_id}`,
           status: 'IN',
           act_maint_st_date: nowISODateOnly,
