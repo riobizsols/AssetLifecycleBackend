@@ -889,7 +889,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        SELECT DISTINCT
          wfh.wfamsh_id,
          wfh.asset_id,
-         wfh.pl_sch_date,
+         wfh.pl_sch_date as scheduled_date,
          wfh.act_sch_date,
          wfh.status as header_status,
          wfh.created_on as maintenance_created_on,
@@ -900,9 +900,11 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          a.serial_number,
          a.description as asset_description,
          v.vendor_name,
+         v.vendor_name as vendor,
          d.text as department_name,
          jr.text as job_role_name,
          mt.text as maintenance_type_name,
+         mt.text as maintenance_type,
          -- Calculate days until due
          EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
          -- Calculate days until cutoff
@@ -914,7 +916,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
        LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
        LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-       LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+       LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
        WHERE wfd.org_id = $1 
          AND a.org_id = $1
          AND wfh.branch_code = $2

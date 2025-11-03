@@ -744,7 +744,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
       asset_type_name: record.asset_type_name,
       serial_number: record.serial_number,
       asset_description: record.asset_description,
-      scheduled_date: record.pl_sch_date,
+      scheduled_date: record.scheduled_date,
       actual_date: record.act_sch_date,
       vendor: record.vendor_name || '-',
       department: record.department_name || '-',
