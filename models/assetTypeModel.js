@@ -163,11 +163,11 @@ const getAssetTypesByMaintRequired = async () => {
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_type_id, maint_lead_type, depreciation_type
         FROM "tblAssetTypes"
-        WHERE maint_required = true
-        AND int_status = 1
+        WHERE int_status = 1
         ORDER BY text
     `;
     
+    // maint_required = true AND
     return await db.query(query);
 };
 

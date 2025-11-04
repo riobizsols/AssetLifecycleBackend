@@ -121,6 +121,7 @@ const getApprovalDetail = async (req, res) => {
       
       // Maintenance info
       maintenanceType: approvalDetail.maint_type_name || 'Regular Maintenance',
+      maint_type_id: approvalDetail.maint_type_id || null,
       dueDate: approvalDetail.pl_sch_date,
       cutoffDate: approvalDetail.cutoff_date,
       
@@ -1058,11 +1059,14 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       wfamsdId: approvalDetail.wfamsdId,
       wfamshId: approvalDetail.wfamshId,
       assetId: approvalDetail.assetId,
+      assetName: approvalDetail.assetName,
+      assetSerialNumber: approvalDetail.assetSerialNumber,
       assetTypeId: approvalDetail.assetTypeId,
       assetTypeName: approvalDetail.assetTypeName,
       vendorId: approvalDetail.vendorId,
       vendorName: approvalDetail.vendorName,
       maintenanceType: approvalDetail.maintenanceType,
+      maint_type_id: approvalDetail.maint_type_id || null,
       dueDate: approvalDetail.dueDate,
       cutoffDate: approvalDetail.cutoffDate,
       actionBy: approvalDetail.actionBy,

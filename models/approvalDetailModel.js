@@ -1319,29 +1319,61 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        }
      }
      
-     // Generate work order ID
-     let workOrderId = null;
-     if (breakdownId) {
-       // Format: WO-{WFAMSH_ID}-{ABR_ID}-{BREAKDOWN_REASON} for breakdown workflows
-       workOrderId = `WO-${wfamshId}-${breakdownId}`;
-       if (breakdownReasonCode) {
-         // Add breakdown reason to work order ID for reference
-         workOrderId = `${workOrderId}-${breakdownReasonCode.substring(0, 20).replace(/\s/g, '_')}`;
-       }
-       console.log('Generated work order ID for breakdown:', workOrderId);
-     } else {
-       // Format: WO-{WFAMSH_ID} for regular workflows
-       workOrderId = `WO-${wfamshId}`;
-       console.log('Generated work order ID for regular workflow:', workOrderId);
-     }
+     // Check if this is a software asset (Subscription Renewal - MT001) BEFORE deciding maintenance type
+     // Get software asset type ID from orgSettings
+     const softwareAssetTypeQuery = `
+       SELECT value 
+       FROM "tblOrgSettings" 
+       WHERE key = 'software_at_id' 
+       AND org_id = $1
+       LIMIT 1
+     `;
+     const softwareAssetTypeResult = await pool.query(softwareAssetTypeQuery, [orgId]);
+     const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
+     
+     // Check original maintenance type from workflow header (before breakdown override)
+     const originalMaintTypeId = workflowData.maint_type_id || 'MT002';
+     
+     // Check if this asset is software type or if original maintenance type is MT001 (Subscription Renewal)
+     const isSoftwareAsset = (softwareAssetTypeId && workflowData.asset_type_id === softwareAssetTypeId) || originalMaintTypeId === 'MT001';
+     console.log('=== Software Asset Detection ===');
+     console.log('Is Software Asset:', isSoftwareAsset);
+     console.log('Software Asset Type ID from orgSettings:', softwareAssetTypeId);
+     console.log('Current Asset Type ID:', workflowData.asset_type_id);
+     console.log('Original Maintenance Type from Workflow:', originalMaintTypeId);
      
      // Decide maintenance type
      // If any detail note contains 'breakdown', force MT004; otherwise use header value or default to MT002
      const isBreakdown = !!workflowData.has_breakdown_note;
-     const maintTypeId = isBreakdown ? 'MT004' : (workflowData.maint_type_id || 'MT002');
+     const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
      
-     // If BF03 with existing schedule, update only wo_id
+     // Generate work order ID
+     // Skip work order generation for software assets (Subscription Renewal - MT001)
+     let workOrderId = null;
+     if (!isSoftwareAsset) {
+       if (breakdownId) {
+         // Format: WO-{WFAMSH_ID}-{ABR_ID}-{BREAKDOWN_REASON} for breakdown workflows
+         workOrderId = `WO-${wfamshId}-${breakdownId}`;
+         if (breakdownReasonCode) {
+           // Add breakdown reason to work order ID for reference
+           workOrderId = `${workOrderId}-${breakdownReasonCode.substring(0, 20).replace(/\s/g, '_')}`;
+         }
+         console.log('Generated work order ID for breakdown:', workOrderId);
+       } else {
+         // Format: WO-{WFAMSH_ID} for regular workflows
+         workOrderId = `WO-${wfamshId}`;
+         console.log('Generated work order ID for regular workflow:', workOrderId);
+       }
+     } else {
+       console.log('Skipping work order generation for software asset (Subscription Renewal)');
+     }
+     
+     // If BF03 with existing schedule, update only wo_id (skip for software assets)
      if (isBF03Postpone && existingAmsId) {
+       if (isSoftwareAsset) {
+         console.log('BF03 detected for software asset - Skipping wo_id update');
+         return existingAmsId;
+       }
        console.log('BF03 detected - Updating wo_id only for existing maintenance schedule:', existingAmsId);
        
        const updateQuery = `
@@ -1387,8 +1419,10 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      }
      
      // If BF01 with existing schedule, update it instead of creating new one
+     // For software assets, don't touch wo_id (keep it null or existing value)
      if (existingAmsId && !isBF03Postpone) {
        console.log('BF01 detected - Updating existing maintenance schedule:', existingAmsId);
+       console.log('Is Software Asset (will not update wo_id):', isSoftwareAsset);
        
        const updateQuery = `
          UPDATE "tblAssetMaintSch"
@@ -1416,9 +1450,16 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          orgId
        ];
        
-       console.log('Update query params:', updateParams);
+       console.log('BF01 update query params:', updateParams);
        const updateResult = await pool.query(updateQuery, updateParams);
        
+       if (updateResult.rows.length === 0) {
+         console.error('Failed to update existing schedule. Creating new one instead.');
+         // Fall through to create new record
+       } else {
+         console.log('Maintenance schedule updated successfully. wo_id:', updateResult.rows[0].wo_id, '(should be null for software assets)');
+         return existingAmsId;
+       }
       if (updateResult.rows.length === 0) {
         console.error('Failed to update existing schedule. Creating new one instead.');
         // Fall through to create new record
@@ -1487,7 +1528,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
       const insertParams = [
         amsId,
         workflowData.wfamsh_id,
-        workOrderId, // Work order ID with breakdown information
+        isSoftwareAsset ? null : workOrderId, // Work order ID - null for software assets
         workflowData.asset_id,
         maintTypeId,
         workflowData.vendor_id,
@@ -1502,6 +1543,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
       ];
      
      console.log('Insert query params:', insertParams);
+     console.log('Is Software Asset (will insert null wo_id):', isSoftwareAsset);
+     console.log('Work Order ID to insert:', isSoftwareAsset ? null : workOrderId);
      console.log('About to execute insert query...');
      
      await pool.query(insertQuery, insertParams);
@@ -1787,6 +1830,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfd.job_role_id,
         wfh.pl_sch_date,
         wfh.asset_id,
+        a.text as asset_name,
+        a.serial_number,
         wfh.status as header_status,
         wfh.created_on as maintenance_created_on,
         a.asset_type_id,
@@ -1856,8 +1901,67 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       // Get the first record for basic details
       const firstRecord = approvalDetails[0];
       
-      // Fetch checklist items for this asset
-      const checklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
+      // Check for breakdown information linked to this workflow
+      const breakdownQuery = `
+        SELECT brd.abr_id, brd.atbrrc_id, brd.description as breakdown_description, brc.text as breakdown_reason, brd.decision_code
+        FROM "tblAssetBRDet" brd
+        LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+        WHERE brd.asset_id = $1
+          AND brd.org_id = $2
+          AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+          AND (
+            -- Match by workflow notes containing abr_id
+            EXISTS (
+              SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+              WHERE wfd.wfamsh_id = $3
+                AND wfd.org_id = $2
+                AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+            )
+            OR
+            -- For breakdown maintenance (MT004), get most recent breakdown
+            (EXISTS (
+              SELECT 1 FROM "tblWFAssetMaintSch_H" wfh
+              WHERE wfh.wfamsh_id = $3
+                AND wfh.org_id = $2
+                AND wfh.maint_type_id = 'MT004'
+            ))
+          )
+        ORDER BY brd.created_on DESC
+        LIMIT 1
+      `;
+      
+      const breakdownResult = await pool.query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
+      const breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
+      
+      // Fetch regular checklist items for this asset
+      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
+      
+      // Build final checklist based on decision code
+      let checklistItems = [];
+      
+      if (breakdownInfo) {
+        const breakdownChecklistItem = {
+          checklist_id: `BREAKDOWN-${breakdownInfo.abr_id}`,
+          text: breakdownInfo.breakdown_reason || breakdownInfo.atbrrc_id || 'Breakdown Reason',
+          at_main_freq_id: null,
+          is_breakdown: true,
+          breakdown_description: breakdownInfo.breakdown_description || null
+        };
+        
+        if (breakdownInfo.decision_code === 'BF02') {
+          // BF02: Only show breakdown reason as checklist
+          checklistItems = [breakdownChecklistItem];
+        } else if (breakdownInfo.decision_code === 'BF01') {
+          // BF01: Show regular checklist + breakdown reason
+          checklistItems = [...regularChecklistItems, breakdownChecklistItem];
+        } else {
+          // BF03 or other: Show regular checklist only
+          checklistItems = regularChecklistItems;
+        }
+      } else {
+        // No breakdown info: Show regular checklist
+        checklistItems = regularChecklistItems;
+      }
 
       // Build workflow steps for this specific wfamsh_id
       const workflowSteps = [];
@@ -1934,11 +2038,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfamsdId: firstRecord.wfamsd_id,
         wfamshId: firstRecord.wfamsh_id,
         assetId: firstRecord.asset_id,
+        assetName: firstRecord.asset_name,
+        assetSerialNumber: firstRecord.serial_number,
         assetTypeId: firstRecord.asset_type_id,
         assetTypeName: firstRecord.asset_type_name,
         vendorId: firstRecord.vendor_id,
         vendorName: firstRecord.vendor_name,
         maintenanceType: firstRecord.maint_type_name,
+        maint_type_id: firstRecord.maint_type_id,
         dueDate: firstRecord.pl_sch_date,
         cutoffDate: firstRecord.cutoff_date,
         actionBy: firstRecord.user_name,
