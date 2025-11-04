@@ -193,6 +193,90 @@ class WorkflowNotificationService {
     }
 
     /**
+     * Send notification when a rejection causes workflow to revert to previous approver
+     * This is used when a second-level user rejects and the first-level user needs to re-approve
+     * @param {Object} detailData - The workflow detail data
+     * @param {string} detailData.wfamsd_id - Workflow detail ID (previous approver)
+     * @param {string} detailData.wfamsh_id - Workflow header ID
+     * @param {string} detailData.job_role_id - Job role ID (previous approver role)
+     * @param {string} detailData.status - Status (should be 'AP')
+     * @param {string} detailData.sequence - Sequence number
+     * @param {string} detailData.org_id - Organization ID
+     * @param {string} detailData.asset_name - Asset name
+     * @param {string} detailData.asset_id - Asset ID
+     * @param {string} detailData.rejection_reason - Reason for rejection
+     * @param {string} detailData.rejected_by_role - Role name of user who rejected
+     */
+    async notifyRejectionReverted(detailData) {
+        try {
+            const { 
+                wfamsd_id, 
+                wfamsh_id, 
+                job_role_id, 
+                status, 
+                sequence, 
+                org_id,
+                asset_name,
+                asset_id,
+                rejection_reason,
+                rejected_by_role
+            } = detailData;
+
+            // Only send notifications for approval pending status (reverted back)
+            if (status !== 'AP') {
+                console.log(`Skipping rejection reversion notification for wfamsd_id ${wfamsd_id} - status is ${status}, not AP`);
+                return { success: true, reason: 'Status not AP' };
+            }
+
+            // Get job role information
+            const jobRoleInfo = await this.getJobRoleInfo(job_role_id);
+            if (!jobRoleInfo) {
+                console.log(`No job role info found for job_role_id ${job_role_id}`);
+                return { success: false, reason: 'Job role info not found' };
+            }
+
+            // Prepare notification data with rejection/reversion context
+            const notificationData = {
+                jobRoleId: job_role_id,
+                title: 'Maintenance Request Rejected - Re-approval Required',
+                body: `The maintenance request for asset "${asset_name}" was rejected by ${rejected_by_role}. Your previous approval has been reverted. Please review and re-approve. ${rejection_reason ? `Reason: ${rejection_reason}` : ''}`,
+                data: {
+                    wfamsd_id: wfamsd_id || '',
+                    wfamsh_id: wfamsh_id || '',
+                    asset_id: asset_id || '',
+                    asset_name: asset_name || '',
+                    job_role: jobRoleInfo?.text || '',
+                    sequence: sequence ? sequence.toString() : '',
+                    rejection_reason: rejection_reason || '',
+                    rejected_by_role: rejected_by_role || '',
+                    is_reversion: 'true',
+                    notification_type: 'workflow_rejection_reverted'
+                },
+                notificationType: 'workflow_rejection_reverted'
+            };
+
+            // Send notification to all users with this job role
+            const result = await fcmService.sendNotificationToRole(notificationData);
+
+            console.log(`Rejection reversion notification sent for wfamsd_id ${wfamsd_id}:`, {
+                jobRoleId: job_role_id,
+                jobRoleName: jobRoleInfo.text,
+                assetName: asset_name,
+                rejectedByRole: rejected_by_role,
+                totalUsers: result.totalUsers,
+                successCount: result.successCount,
+                failureCount: result.failureCount
+            });
+
+            return result;
+
+        } catch (error) {
+            console.error('Error sending rejection reversion notification:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Initialize default notification preferences for workflow notifications
      * @param {string} userId - User ID
      */
@@ -200,7 +284,8 @@ class WorkflowNotificationService {
         try {
             const notificationTypes = [
                 'workflow_approval',
-                'breakdown_approval'
+                'breakdown_approval',
+                'workflow_rejection_reverted'
             ];
 
             for (const notificationType of notificationTypes) {

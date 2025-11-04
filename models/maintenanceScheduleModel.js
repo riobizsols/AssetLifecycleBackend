@@ -23,6 +23,7 @@ const getAssetsByAssetType = async (asset_type_id) => {
             a.org_id,
             a.text as asset_name,
             a.branch_id,
+            a.group_id,
             b.branch_code
         FROM "tblAssets" a
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
@@ -31,6 +32,112 @@ const getAssetsByAssetType = async (asset_type_id) => {
     `;
     
     return await db.query(query, [asset_type_id]);
+};
+
+// 2a. Get assets in a group by group_id
+const getAssetsByGroupId = async (group_id) => {
+    const query = `
+        SELECT 
+            a.asset_id,
+            a.asset_type_id,
+            a.purchased_on,
+            a.service_vendor_id,
+            a.org_id,
+            a.text as asset_name,
+            a.branch_id,
+            a.group_id,
+            b.branch_code
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        WHERE a.group_id = $1
+        ORDER BY a.purchased_on ASC
+    `;
+    
+    return await db.query(query, [group_id]);
+};
+
+// 2b. Get all unique groups for an asset type
+const getGroupsByAssetType = async (asset_type_id) => {
+    const query = `
+        SELECT DISTINCT
+            a.group_id,
+            COUNT(a.asset_id) as asset_count
+        FROM "tblAssets" a
+        WHERE a.asset_type_id = $1
+          AND a.group_id IS NOT NULL
+        GROUP BY a.group_id
+        HAVING COUNT(a.asset_id) > 0
+    `;
+    
+    return await db.query(query, [asset_type_id]);
+};
+
+// 2c. Check existing workflow maintenance schedules for a group
+const checkExistingWorkflowMaintenanceSchedulesForGroup = async (group_id) => {
+    const query = `
+        SELECT 
+            wfamsh_id,
+            group_id,
+            status,
+            act_sch_date,
+            pl_sch_date
+        FROM "tblWFAssetMaintSch_H"
+        WHERE group_id = $1
+        ORDER BY created_on DESC
+    `;
+    
+    return await db.query(query, [group_id]);
+};
+
+// 2d. Check existing maintenance schedules for assets in a group
+const checkExistingMaintenanceSchedulesForGroup = async (group_id) => {
+    const query = `
+        SELECT 
+            ams.ams_id,
+            ams.asset_id,
+            ams.status,
+            ams.act_maint_st_date
+        FROM "tblAssetMaintSch" ams
+        INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        WHERE a.group_id = $1
+        ORDER BY ams.created_on DESC
+    `;
+    
+    return await db.query(query, [group_id]);
+};
+
+// 2e. Get earliest purchase date for a group
+const getEarliestPurchaseDateForGroup = async (group_id) => {
+    const query = `
+        SELECT MIN(purchased_on) as earliest_purchase_date
+        FROM "tblAssets"
+        WHERE group_id = $1
+    `;
+    
+    const result = await db.query(query, [group_id]);
+    return result.rows[0]?.earliest_purchase_date;
+};
+
+// 2f. Get latest maintenance date for a group (from both workflow and direct schedules)
+const getLatestMaintenanceDateForGroup = async (group_id) => {
+    const query = `
+        SELECT 
+            MAX(COALESCE(workflow_dates.max_date, direct_dates.max_date)) as latest_maintenance_date
+        FROM (
+            SELECT MAX(act_sch_date) as max_date
+            FROM "tblWFAssetMaintSch_H"
+            WHERE group_id = $1 AND status IN ('CO', 'CA')
+        ) workflow_dates,
+        (
+            SELECT MAX(ams.act_maint_st_date) as max_date
+            FROM "tblAssetMaintSch" ams
+            INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+            WHERE a.group_id = $1 AND ams.status IN ('CO', 'CA')
+        ) direct_dates
+    `;
+    
+    const result = await db.query(query, [group_id]);
+    return result.rows[0]?.latest_maintenance_date;
 };
 
 // 3. Get maintenance frequency for asset type
@@ -558,9 +665,15 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
 module.exports = {
     getAssetTypesRequiringMaintenance,
     getAssetsByAssetType,
+    getAssetsByGroupId,
+    getGroupsByAssetType,
     getMaintenanceFrequency,
     checkExistingMaintenanceSchedules,
     checkExistingWorkflowMaintenanceSchedules,
+    checkExistingWorkflowMaintenanceSchedulesForGroup,
+    checkExistingMaintenanceSchedulesForGroup,
+    getEarliestPurchaseDateForGroup,
+    getLatestMaintenanceDateForGroup,
     getWorkflowAssetSequences,
     getWorkflowJobRoles,
     getNextWFAMSHId,
