@@ -121,6 +121,21 @@ const addScrapAsset = async (scrapData) => {
     
     await client.query(updateQuery, [scrapped_by, asset_id]);
     
+    // 3. Unassign asset from department or employee if currently assigned
+    // Update all active assignments (action='A' and latest_assignment_flag=true) to unassign them
+    const unassignQuery = `
+      UPDATE "tblAssetAssignments" 
+      SET action = 'C',
+          latest_assignment_flag = false,
+          action_on = CURRENT_TIMESTAMP,
+          action_by = $1
+      WHERE asset_id = $2 
+        AND action = 'A' 
+        AND latest_assignment_flag = true
+    `;
+    
+    await client.query(unassignQuery, [scrapped_by, asset_id]);
+    
     // Commit the transaction
     await client.query('COMMIT');
     

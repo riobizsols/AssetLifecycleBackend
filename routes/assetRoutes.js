@@ -22,6 +22,24 @@ router.get("/", controller.getAssetsWithFilters);
 // GET /api/assets/count - Get total count of assets
 router.get("/count", controller.getAssetsCount);
 
+// GET /api/assets/assigned - Get count of assigned assets
+router.get("/assigned", controller.getAssignedAssetsCount);
+
+// GET /api/assets/under-maintenance - Get count of assets under maintenance
+router.get("/under-maintenance", controller.getUnderMaintenanceAssetsCount);
+
+// GET /api/assets/decommissioned - Get count of decommissioned assets
+router.get("/decommissioned", controller.getDecommissionedAssetsCount);
+
+// GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
+router.get("/dashboard-summary", controller.getDashboardSummary);
+
+// GET /api/assets/department-distribution - Get department-wise asset distribution
+router.get("/department-distribution", controller.getDepartmentWiseAssetDistribution);
+
+// GET /api/assets/top-5-asset-types - Get top 5 asset types by count
+router.get("/top-5-asset-types", controller.getTop5AssetTypes);
+
 // GET /api/assets/potential-parents/:asset_type_id - Get potential parent assets
 router.get("/potential-parents/:asset_type_id", controller.getPotentialParentAssets);
 

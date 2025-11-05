@@ -1882,6 +1882,482 @@ const getAssetsCount = async (req, res) => {
   }
 };
 
+// GET /api/assets/assigned - Get count of assigned assets
+const getAssignedAssetsCount = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Debug: Check total assignments with different conditions
+    const debugQuery = `
+      SELECT 
+        COUNT(DISTINCT CASE WHEN aa.action = 'A' AND aa.latest_assignment_flag = true THEN a.asset_id END) as assigned_with_flag,
+        COUNT(DISTINCT CASE WHEN aa.action = 'A' THEN a.asset_id END) as assigned_all,
+        COUNT(DISTINCT a.asset_id) as total_assets_with_assignments,
+        COUNT(*) as total_assignment_records
+      FROM "tblAssets" a
+      INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+      WHERE a.org_id = $1
+      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+    `;
+    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    
+    const debugResult = await db.query(debugQuery, debugParams);
+    console.log('🔍 [Assigned Assets Debug]', {
+      userOrgId,
+      userBranchId,
+      debugCounts: debugResult.rows[0]
+    });
+
+    let query = `
+      SELECT COUNT(DISTINCT a.asset_id) as count
+      FROM "tblAssets" a
+      INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+      WHERE aa.action = 'A' 
+      AND aa.latest_assignment_flag = true
+      AND a.org_id = $1
+    `;
+    const params = [userOrgId];
+
+    if (userBranchId) {
+      query += ` AND a.branch_id = $2`;
+      params.push(userBranchId);
+    }
+
+    const result = await db.query(query, params);
+    const count = parseInt(result.rows[0].count) || 0;
+
+    res.json({
+      success: true,
+      count: count,
+      message: "Assigned assets count retrieved successfully",
+      debug: process.env.NODE_ENV === 'development' ? {
+        userOrgId,
+        userBranchId,
+        debugCounts: debugResult.rows[0]
+      } : undefined
+    });
+  } catch (err) {
+    console.error("Error fetching assigned assets count:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch assigned assets count",
+      message: err.message 
+    });
+  }
+};
+
+// GET /api/assets/under-maintenance - Get count of assets under maintenance
+const getUnderMaintenanceAssetsCount = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Debug: Check different ways assets can be under maintenance
+    const debugQuery = `
+      SELECT 
+        COUNT(DISTINCT CASE WHEN a.current_status = 'Under Maintenance' THEN a.asset_id END) as status_under_maintenance,
+        COUNT(DISTINCT CASE WHEN ams.status = 'IN' THEN a.asset_id END) as has_active_maintenance_schedule,
+        COUNT(DISTINCT CASE WHEN wfh.status IN ('IN', 'IP') THEN a.asset_id END) as has_active_workflow_maintenance,
+        COUNT(DISTINCT CASE WHEN (ams.status = 'IN' OR wfh.status IN ('IN', 'IP') OR a.current_status = 'Under Maintenance') THEN a.asset_id END) as total_under_maintenance,
+        COUNT(DISTINCT a.asset_id) as total_assets
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetMaintSch" ams ON a.asset_id = ams.asset_id AND ams.status = 'IN' AND ams.org_id = $1
+      LEFT JOIN "tblWFAssetMaintSch_H" wfh ON a.asset_id = wfh.asset_id AND wfh.status IN ('IN', 'IP') AND wfh.org_id = $1
+      WHERE a.org_id = $1
+      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+    `;
+    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    
+    const debugResult = await db.query(debugQuery, debugParams);
+    console.log('🔍 [Under Maintenance Assets Debug]', {
+      userOrgId,
+      userBranchId,
+      debugCounts: debugResult.rows[0]
+    });
+
+    // Count assets that have active maintenance schedules (status = 'IN' in tblAssetMaintSch)
+    // OR active workflow maintenance (status IN ('IN', 'IP') in tblWFAssetMaintSch_H)
+    // OR current_status = 'Under Maintenance' (for backward compatibility)
+    let query = `
+      SELECT COUNT(DISTINCT a.asset_id) as count
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetMaintSch" ams ON a.asset_id = ams.asset_id 
+        AND ams.status = 'IN' 
+        AND ams.org_id = $1
+      LEFT JOIN "tblWFAssetMaintSch_H" wfh ON a.asset_id = wfh.asset_id 
+        AND wfh.status IN ('IN', 'IP') 
+        AND wfh.org_id = $1
+      WHERE a.org_id = $1
+        AND (ams.asset_id IS NOT NULL 
+             OR wfh.asset_id IS NOT NULL 
+             OR a.current_status = 'Under Maintenance')
+    `;
+    const params = [userOrgId];
+
+    if (userBranchId) {
+      query += ` AND a.branch_id = $2`;
+      params.push(userBranchId);
+    }
+
+    const result = await db.query(query, params);
+    const count = parseInt(result.rows[0].count) || 0;
+
+    res.json({
+      success: true,
+      count: count,
+      message: "Under maintenance assets count retrieved successfully",
+      debug: process.env.NODE_ENV === 'development' ? {
+        userOrgId,
+        userBranchId,
+        debugCounts: debugResult.rows[0]
+      } : undefined
+    });
+  } catch (err) {
+    console.error("Error fetching under maintenance assets count:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch under maintenance assets count",
+      message: err.message 
+    });
+  }
+};
+
+// GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
+const getDashboardSummary = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Comprehensive query to get all metrics and overlaps
+    const summaryQuery = `
+      WITH asset_status AS (
+        SELECT DISTINCT a.asset_id,
+          -- Check if assigned
+          CASE WHEN aa.asset_id IS NOT NULL AND aa.action = 'A' AND aa.latest_assignment_flag = true 
+               THEN 1 ELSE 0 END as is_assigned,
+          -- Check if under maintenance
+          CASE WHEN (ams.asset_id IS NOT NULL 
+                    OR wfh.asset_id IS NOT NULL 
+                    OR a.current_status = 'Under Maintenance')
+               THEN 1 ELSE 0 END as is_under_maintenance,
+          -- Check if decommissioned
+          CASE WHEN (a.current_status = 'Decommissioned' 
+                    OR a.current_status = 'SCRAPPED' 
+                    OR asd.asd_id IS NOT NULL)
+               THEN 1 ELSE 0 END as is_decommissioned
+        FROM "tblAssets" a
+        LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id 
+          AND aa.action = 'A' 
+          AND aa.latest_assignment_flag = true
+        LEFT JOIN "tblAssetMaintSch" ams ON a.asset_id = ams.asset_id 
+          AND ams.status = 'IN' 
+          AND ams.org_id = $1
+        LEFT JOIN "tblWFAssetMaintSch_H" wfh ON a.asset_id = wfh.asset_id 
+          AND wfh.status IN ('IN', 'IP') 
+          AND wfh.org_id = $1
+        LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
+        WHERE a.org_id = $1
+          ${userBranchId ? 'AND a.branch_id = $2' : ''}
+      )
+      SELECT 
+        COUNT(*) as total_assets,
+        SUM(is_assigned) as assigned_count,
+        SUM(is_under_maintenance) as under_maintenance_count,
+        SUM(is_decommissioned) as decommissioned_count,
+        SUM(CASE WHEN is_assigned = 1 AND is_under_maintenance = 1 THEN 1 ELSE 0 END) as assigned_and_maintenance,
+        SUM(CASE WHEN is_assigned = 1 AND is_decommissioned = 1 THEN 1 ELSE 0 END) as assigned_and_decommissioned,
+        SUM(CASE WHEN is_under_maintenance = 1 AND is_decommissioned = 1 THEN 1 ELSE 0 END) as maintenance_and_decommissioned,
+        SUM(CASE WHEN is_assigned = 1 AND is_under_maintenance = 1 AND is_decommissioned = 1 THEN 1 ELSE 0 END) as all_three,
+        SUM(CASE WHEN is_assigned = 0 AND is_under_maintenance = 0 AND is_decommissioned = 0 THEN 1 ELSE 0 END) as none
+      FROM asset_status
+    `;
+    const params = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    
+    const result = await db.query(summaryQuery, params);
+    const summary = result.rows[0];
+
+    res.json({
+      success: true,
+      summary: {
+        total_assets: parseInt(summary.total_assets) || 0,
+        assigned: parseInt(summary.assigned_count) || 0,
+        under_maintenance: parseInt(summary.under_maintenance_count) || 0,
+        decommissioned: parseInt(summary.decommissioned_count) || 0,
+        overlaps: {
+          assigned_and_maintenance: parseInt(summary.assigned_and_maintenance) || 0,
+          assigned_and_decommissioned: parseInt(summary.assigned_and_decommissioned) || 0,
+          maintenance_and_decommissioned: parseInt(summary.maintenance_and_decommissioned) || 0,
+          all_three: parseInt(summary.all_three) || 0
+        },
+        none: parseInt(summary.none) || 0
+      },
+      message: "Dashboard summary retrieved successfully",
+      userContext: {
+        orgId: userOrgId,
+        branchId: userBranchId
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching dashboard summary:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch dashboard summary",
+      message: err.message 
+    });
+  }
+};
+
+// GET /api/assets/decommissioned - Get count of decommissioned assets
+const getDecommissionedAssetsCount = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Debug: Check breakdown of decommissioned/scrapped assets
+    const debugQuery = `
+      SELECT 
+        COUNT(DISTINCT CASE WHEN a.current_status = 'Decommissioned' THEN a.asset_id END) as decommissioned_status,
+        COUNT(DISTINCT CASE WHEN a.current_status = 'SCRAPPED' THEN a.asset_id END) as scrapped_status,
+        COUNT(DISTINCT CASE WHEN asd.asd_id IS NOT NULL THEN a.asset_id END) as has_scrap_record,
+        COUNT(DISTINCT CASE WHEN a.current_status = 'Decommissioned' OR a.current_status = 'SCRAPPED' OR asd.asd_id IS NOT NULL THEN a.asset_id END) as total_decommissioned,
+        COUNT(DISTINCT a.asset_id) as total_assets
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
+      WHERE a.org_id = $1
+      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+    `;
+    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    
+    const debugResult = await db.query(debugQuery, debugParams);
+    console.log('🔍 [Decommissioned Assets Debug]', {
+      userOrgId,
+      userBranchId,
+      debugCounts: debugResult.rows[0]
+    });
+
+    let query = `
+      SELECT COUNT(DISTINCT a.asset_id) as count
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
+      WHERE (a.current_status = 'Decommissioned' OR a.current_status = 'SCRAPPED' OR asd.asd_id IS NOT NULL)
+      AND a.org_id = $1
+    `;
+    const params = [userOrgId];
+
+    if (userBranchId) {
+      query += ` AND a.branch_id = $2`;
+      params.push(userBranchId);
+    }
+
+    const result = await db.query(query, params);
+    const count = parseInt(result.rows[0].count) || 0;
+
+    res.json({
+      success: true,
+      count: count,
+      message: "Decommissioned assets count retrieved successfully",
+      debug: process.env.NODE_ENV === 'development' ? {
+        userOrgId,
+        userBranchId,
+        debugCounts: debugResult.rows[0]
+      } : undefined
+    });
+  } catch (err) {
+    console.error("Error fetching decommissioned assets count:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch decommissioned assets count",
+      message: err.message 
+    });
+  }
+};
+
+// GET /api/assets/department-distribution - Get department-wise asset distribution
+const getDepartmentWiseAssetDistribution = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Query to get asset count by department
+    // Start from departments to show all departments, even those with 0 assets
+    // Only count assets that are currently assigned (action = 'A' and latest_assignment_flag = true)
+    // Filter departments by user's org_id and branch_id to only show relevant departments
+    const params = [userOrgId];
+    let paramIndex = 2;
+    
+    // Build query with proper parameter indexing - start from departments
+    let query = `
+      SELECT 
+        COALESCE(d.text, 'Unknown') as department_name,
+        COUNT(DISTINCT CASE WHEN a.asset_id IS NOT NULL THEN a.asset_id END) as asset_count
+      FROM "tblDepartments" d
+      LEFT JOIN "tblAssetAssignments" aa ON d.dept_id = aa.dept_id
+        AND aa.action = 'A' 
+        AND aa.latest_assignment_flag = true
+      LEFT JOIN "tblAssets" a ON aa.asset_id = a.asset_id
+        AND a.org_id = $1
+    `;
+    
+    if (userBranchId) {
+      params.push(userBranchId);
+      query += ` AND a.branch_id = $${paramIndex}`;
+    }
+    
+    query += `
+      WHERE d.org_id = $1
+        AND d.int_status = 1
+    `;
+    
+    if (userBranchId) {
+      query += ` AND d.branch_id = $${paramIndex}`;
+    }
+    
+    query += `
+      GROUP BY d.dept_id, d.text
+      ORDER BY asset_count DESC, d.text ASC
+    `;
+    
+    // Also get unassigned assets count (assets not assigned to any department)
+    let unassignedQuery = `
+      SELECT COUNT(DISTINCT a.asset_id) as unassigned_count
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id 
+        AND aa.action = 'A' 
+        AND aa.latest_assignment_flag = true
+      WHERE a.org_id = $1
+        AND (aa.asset_id IS NULL OR aa.dept_id IS NULL)
+    `;
+    
+    if (userBranchId) {
+      unassignedQuery += ` AND a.branch_id = $${paramIndex}`;
+    }
+
+    const result = await db.query(query, params);
+    const unassignedResult = await db.query(unassignedQuery, params);
+    
+    const departments = result.rows.map(row => ({
+      name: row.department_name,
+      value: parseInt(row.asset_count) || 0
+    }));
+    
+    // Add unassigned assets if there are any
+    const unassignedCount = parseInt(unassignedResult.rows[0]?.unassigned_count || 0);
+    if (unassignedCount > 0) {
+      departments.push({
+        name: 'Unassigned',
+        value: unassignedCount
+      });
+    }
+
+    res.json({
+      success: true,
+      data: departments,
+      message: "Department-wise asset distribution retrieved successfully",
+      userContext: {
+        orgId: userOrgId,
+        branchId: userBranchId
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching department-wise asset distribution:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch department-wise asset distribution",
+      message: err.message 
+    });
+  }
+};
+
+// GET /api/assets/top-5-asset-types - Get top 5 asset types by count
+const getTop5AssetTypes = async (req, res) => {
+  try {
+    const db = require("../config/db");
+    const userModel = require("../models/userModel");
+    const userId = req.user?.user_id;
+    const userWithBranch = await userModel.getUserWithBranch(userId);
+    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
+    const userBranchId = userWithBranch?.branch_id;
+
+    // Query to get top 5 asset types by count
+    // Filter by user's org_id and branch_id
+    const params = [userOrgId];
+    let paramIndex = 2;
+    
+    let query = `
+      SELECT 
+        at.asset_type_id,
+        at.text as asset_type_name,
+        COUNT(DISTINCT a.asset_id) as asset_count
+      FROM "tblAssetTypes" at
+      LEFT JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
+        AND a.org_id = $1
+    `;
+    
+    if (userBranchId) {
+      params.push(userBranchId);
+      query += ` AND a.branch_id = $${paramIndex}`;
+      paramIndex++;
+    }
+    
+    query += `
+      WHERE at.org_id = $1
+        AND at.int_status = 1
+    `;
+    
+    query += `
+      GROUP BY at.asset_type_id, at.text
+      ORDER BY asset_count DESC, at.text ASC
+      LIMIT 5
+    `;
+
+    const result = await db.query(query, params);
+    
+    const assetTypes = result.rows.map(row => ({
+      asset_type_id: row.asset_type_id,
+      name: row.asset_type_name,
+      count: parseInt(row.asset_count) || 0
+    }));
+
+    res.json({
+      success: true,
+      data: assetTypes,
+      message: "Top 5 asset types retrieved successfully",
+      userContext: {
+        orgId: userOrgId,
+        branchId: userBranchId
+      }
+    });
+  } catch (err) {
+    console.error("Error fetching top 5 asset types:", err);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch top 5 asset types",
+      message: err.message 
+    });
+  }
+};
+
 module.exports = {
   getAllAssets,
   addAsset,
@@ -1904,5 +2380,11 @@ module.exports = {
   getAssetsWithFilters,
   deleteAsset,
   deleteMultipleAssets,
-  getAssetsCount
+  getAssetsCount,
+  getAssignedAssetsCount,
+  getUnderMaintenanceAssetsCount,
+  getDecommissionedAssetsCount,
+  getDashboardSummary,
+  getDepartmentWiseAssetDistribution,
+  getTop5AssetTypes
 };
