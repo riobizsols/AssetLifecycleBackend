@@ -3,6 +3,179 @@ const model = require("../models/maintenanceScheduleModel");
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
 
+// Helper function to process group maintenance
+const processGroupMaintenance = async (group_id, assetType, frequencies, testDate) => {
+    console.log(`\n=== Processing Group Maintenance for Group: ${group_id} ===`);
+    
+    // Get all assets in the group
+    const groupAssetsResult = await model.getAssetsByGroupId(group_id);
+    const groupAssets = groupAssetsResult.rows;
+    
+    if (groupAssets.length === 0) {
+        console.log(`No assets found in group ${group_id}`);
+        return { schedulesCreated: 0, skipped: true };
+    }
+    
+    console.log(`Found ${groupAssets.length} assets in group ${group_id}`);
+    
+    // Get representative asset info (first asset for org_id, branch_code, etc.)
+    const representativeAsset = groupAssets[0];
+    
+    // Check for in-progress group maintenance
+    const existingGroupWorkflowSchedules = await model.checkExistingWorkflowMaintenanceSchedulesForGroup(group_id);
+    const inProgressGroupSchedules = existingGroupWorkflowSchedules.rows.filter(s => s.status === 'IN' || s.status === 'IP');
+    
+    if (inProgressGroupSchedules.length > 0) {
+        console.log(`Group ${group_id} has in-progress maintenance schedules, skipping`);
+        return { schedulesCreated: 0, skipped: true };
+    }
+    
+    // Determine date to consider for maintenance
+    let dateToConsider = null;
+    
+    // Check if this is first maintenance (no completed schedules)
+    const completedGroupSchedules = existingGroupWorkflowSchedules.rows.filter(s => s.status === 'CO' || s.status === 'CA');
+    const completedDirectSchedules = await model.checkExistingMaintenanceSchedulesForGroup(group_id);
+    const completedDirectGroupSchedules = completedDirectSchedules.rows.filter(s => s.status === 'CO' || s.status === 'CA');
+    
+    if (completedGroupSchedules.length === 0 && completedDirectGroupSchedules.length === 0) {
+        // First maintenance: use earliest purchase date
+        const earliestPurchaseDate = await model.getEarliestPurchaseDateForGroup(group_id);
+        if (earliestPurchaseDate) {
+            dateToConsider = new Date(earliestPurchaseDate);
+            console.log(`First maintenance for group ${group_id}: Using earliest purchase date: ${dateToConsider}`);
+        } else {
+            console.log(`No purchase date found for group ${group_id}, skipping`);
+            return { schedulesCreated: 0, skipped: true };
+        }
+    } else {
+        // Subsequent maintenance: use latest maintenance date
+        const latestMaintenanceDate = await model.getLatestMaintenanceDateForGroup(group_id);
+        
+        // Also check workflow schedules
+        let latestWorkflowDate = null;
+        if (completedGroupSchedules.length > 0) {
+            latestWorkflowDate = new Date(Math.max(...completedGroupSchedules.map(s => new Date(s.act_sch_date || s.pl_sch_date))));
+        }
+        
+        // Use the latest of all dates
+        const datesToCompare = [];
+        if (latestMaintenanceDate) datesToCompare.push(new Date(latestMaintenanceDate));
+        if (latestWorkflowDate) datesToCompare.push(latestWorkflowDate);
+        
+        // Also check earliest purchase date as fallback
+        const earliestPurchaseDate = await model.getEarliestPurchaseDateForGroup(group_id);
+        if (earliestPurchaseDate) datesToCompare.push(new Date(earliestPurchaseDate));
+        
+        if (datesToCompare.length > 0) {
+            dateToConsider = new Date(Math.max(...datesToCompare.map(d => d.getTime())));
+            console.log(`Subsequent maintenance for group ${group_id}: Using latest maintenance date: ${dateToConsider}`);
+        } else {
+            const earliestPurchaseDate = await model.getEarliestPurchaseDateForGroup(group_id);
+            if (earliestPurchaseDate) {
+                dateToConsider = new Date(earliestPurchaseDate);
+                console.log(`No previous maintenance found, using earliest purchase date: ${dateToConsider}`);
+            } else {
+                console.log(`No date found for group ${group_id}, skipping`);
+                return { schedulesCreated: 0, skipped: true };
+            }
+        }
+    }
+    
+    let schedulesCreated = 0;
+    
+    // Process each frequency for the group
+    for (const frequency of frequencies) {
+        console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for group ${group_id}`);
+        
+        // Calculate planned schedule date: dateToConsider + frequency
+        const plannedScheduleDate = model.calculatePlannedScheduleDate(dateToConsider, frequency.frequency, frequency.uom);
+        console.log(`Group ${group_id} - Date to consider: ${dateToConsider}`);
+        console.log(`Group ${group_id} - Planned schedule date: ${plannedScheduleDate}`);
+        
+        // Check if maintenance is due (schedule 10 days before planned date)
+        const tenDaysBeforePlanned = new Date(plannedScheduleDate);
+        tenDaysBeforePlanned.setDate(tenDaysBeforePlanned.getDate() - 10);
+        
+        const isDue = testDate >= tenDaysBeforePlanned;
+        
+        if (!isDue) {
+            console.log(`Maintenance not due for group ${group_id} with frequency ${frequency.frequency} ${frequency.uom}`);
+            continue;
+        }
+        
+        console.log(`Maintenance is due for group ${group_id}, creating schedule...`);
+        
+        // Create workflow maintenance schedule header for the GROUP
+        const wfamshId = await model.getNextWFAMSHId();
+        
+        // Use first asset's ID as representative (or could be null for pure group maintenance)
+        const scheduleHeaderData = {
+            wfamsh_id: wfamshId,
+            at_main_freq_id: frequency.at_main_freq_id,
+            maint_type_id: frequency.maint_type_id,
+            asset_id: groupAssets[0].asset_id, // Representative asset
+            group_id: group_id, // Set group_id instead of null
+            vendor_id: representativeAsset.service_vendor_id,
+            pl_sch_date: plannedScheduleDate,
+            act_sch_date: null,
+            status: 'IN',
+            created_by: 'system',
+            org_id: representativeAsset.org_id,
+            branch_code: representativeAsset.branch_code
+        };
+        
+        const headerResult = await model.insertWorkflowMaintenanceScheduleHeader(scheduleHeaderData);
+        console.log(`Created workflow maintenance schedule header for GROUP ${group_id}: ${wfamshId}`);
+        
+        // Create workflow maintenance schedule details
+        const workflowSequences = await model.getWorkflowAssetSequences(assetType.asset_type_id);
+        
+        if (workflowSequences.rows.length === 0) {
+            console.log(`No workflow sequences found for asset type ${assetType.asset_type_id}`);
+            continue;
+        }
+        
+        let totalDetailsCreated = 0;
+        
+        for (const sequence of workflowSequences.rows) {
+            const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
+            
+            if (workflowJobRoles.rows.length === 0) {
+                continue;
+            }
+            
+            for (const jobRole of workflowJobRoles.rows) {
+                const wfamsdId = await model.getNextWFAMSDId();
+                
+                const seqNo = parseInt(sequence.seqs_no);
+                const status = seqNo === 10 ? 'AP' : 'IN';
+                
+                const scheduleDetailData = {
+                    wfamsd_id: wfamsdId,
+                    wfamsh_id: wfamshId,
+                    job_role_id: jobRole.job_role_id,
+                    user_id: jobRole.emp_int_id,
+                    dept_id: jobRole.dept_id,
+                    sequence: sequence.seqs_no,
+                    status: status,
+                    notes: `Group maintenance for ${groupAssets.length} assets`,
+                    created_by: 'system',
+                    org_id: representativeAsset.org_id
+                };
+                
+                await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
+                totalDetailsCreated++;
+            }
+        }
+        
+        console.log(`Total details created for group ${group_id} header ${wfamshId}: ${totalDetailsCreated}`);
+        schedulesCreated++;
+    }
+    
+    return { schedulesCreated, skipped: false, assetIds: groupAssets.map(a => a.asset_id) };
+};
+
 // Main function to generate maintenance schedules
 const generateMaintenanceSchedules = async (req, res) => {
     try {
@@ -28,21 +201,15 @@ const generateMaintenanceSchedules = async (req, res) => {
         let totalSchedulesCreated = 0;
         let processedAssets = 0;
         let skippedAssets = 0;
+        let groupSchedulesCreated = 0;
+        let processedGroups = 0;
+        
+        // Track assets that are in groups to skip them in individual processing
+        const assetsInGroups = new Set();
         
         // Process each asset type
         for (const assetType of assetTypes) {
             console.log(`Processing asset type: ${assetType.asset_type_id} - ${assetType.text}`);
-            
-            // Step 2a: Get assets for this asset type
-            const assetsResult = await model.getAssetsByAssetType(assetType.asset_type_id);
-            const assets = assetsResult.rows;
-            
-            console.log(`Found ${assets.length} assets for asset type ${assetType.asset_type_id}`);
-            
-            if (assets.length === 0) {
-                console.log(`No assets found for asset type ${assetType.asset_type_id}`);
-                continue;
-            }
             
             // Step 2b: Get maintenance frequency for this asset type
             const frequencyResult = await model.getMaintenanceFrequency(assetType.asset_type_id);
@@ -53,8 +220,55 @@ const generateMaintenanceSchedules = async (req, res) => {
                 continue;
             }
             
-            // Process each asset
+            // Step 2a: Get groups for this asset type FIRST
+            const groupsResult = await model.getGroupsByAssetType(assetType.asset_type_id);
+            const groups = groupsResult.rows;
+            
+            console.log(`Found ${groups.length} groups for asset type ${assetType.asset_type_id}`);
+            
+            // Process groups first
+            for (const group of groups) {
+                if (!group.group_id) continue;
+                
+                processedGroups++;
+                console.log(`\nProcessing group ${group.group_id} with ${group.asset_count} assets`);
+                
+                const groupResult = await processGroupMaintenance(
+                    group.group_id,
+                    assetType,
+                    frequencies,
+                    testDate
+                );
+                
+                if (!groupResult.skipped) {
+                    groupSchedulesCreated += groupResult.schedulesCreated;
+                    totalSchedulesCreated += groupResult.schedulesCreated;
+                    
+                    // Track assets in this group to skip them later
+                    if (groupResult.assetIds) {
+                        groupResult.assetIds.forEach(assetId => assetsInGroups.add(assetId));
+                    }
+                }
+            }
+            
+            // Step 2c: Get assets for this asset type (for individual processing)
+            const assetsResult = await model.getAssetsByAssetType(assetType.asset_type_id);
+            const assets = assetsResult.rows;
+            
+            console.log(`Found ${assets.length} total assets for asset type ${assetType.asset_type_id}`);
+            
+            if (assets.length === 0) {
+                console.log(`No assets found for asset type ${assetType.asset_type_id}`);
+                continue;
+            }
+            
+            // Process each asset (skip those in groups)
             for (const asset of assets) {
+                // Skip assets that are in groups (already processed)
+                if (assetsInGroups.has(asset.asset_id) || asset.group_id) {
+                    console.log(`Skipping asset ${asset.asset_id} - already processed as part of a group`);
+                    continue;
+                }
                 console.log(`Processing asset: ${asset.asset_id} - ${asset.asset_name}`);
                 processedAssets++;
                 
@@ -202,13 +416,17 @@ const generateMaintenanceSchedules = async (req, res) => {
         }
         
         console.log(`Maintenance schedule generation completed.`);
+        console.log(`Groups processed: ${processedGroups}`);
+        console.log(`Group schedules created: ${groupSchedulesCreated}`);
         console.log(`Total assets processed: ${processedAssets}`);
         console.log(`Assets skipped: ${skippedAssets}`);
-        console.log(`Schedules created: ${totalSchedulesCreated}`);
+        console.log(`Total schedules created: ${totalSchedulesCreated}`);
         
         res.status(200).json({
             message: "Maintenance schedules generated successfully",
             asset_types_processed: assetTypes.length,
+            groups_processed: processedGroups,
+            group_schedules_created: groupSchedulesCreated,
             assets_processed: processedAssets,
             assets_skipped: skippedAssets,
             schedules_created: totalSchedulesCreated,

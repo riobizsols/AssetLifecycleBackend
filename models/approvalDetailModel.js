@@ -527,6 +527,67 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       );
       
       console.log(`Inserted history record: ${prevWfamhisId} for previous user ${previousApprovedUser.user_id} status revert`);
+      
+      // Notify previous approver about rejection and reversion
+      try {
+        // Get workflow header information for context
+        const workflowInfoQuery = `
+          SELECT 
+            wfh.wfamsh_id,
+            wfh.asset_id,
+            a.text as asset_name,
+            wfh.pl_sch_date
+          FROM "tblWFAssetMaintSch_H" wfh
+          INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+          WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+        `;
+        const workflowInfoResult = await pool.query(workflowInfoQuery, [currentUserStep.wfamsh_id, orgId]);
+        const workflowInfo = workflowInfoResult.rows[0];
+        
+        // Get job role information for previous approver
+        const jobRoleQuery = `
+          SELECT job_role_id, text as job_role_name
+          FROM "tblJobRoles"
+          WHERE job_role_id = $1
+        `;
+        const jobRoleResult = await pool.query(jobRoleQuery, [previousApprovedUser.job_role_id]);
+        const jobRoleInfo = jobRoleResult.rows[0];
+        
+        if (workflowInfo && jobRoleInfo) {
+          // Get the rejecting user's role name for context
+          const rejectingUserRoleQuery = `
+            SELECT text as job_role_name
+            FROM "tblJobRoles"
+            WHERE job_role_id = $1
+          `;
+          const rejectingUserRoleResult = await pool.query(rejectingUserRoleQuery, [currentUserStep.job_role_id]);
+          const rejectingRoleName = rejectingUserRoleResult.rows[0]?.job_role_name || 'next approver';
+          
+          // Send notification with rejection/reversion content
+          const notificationResult = await workflowNotificationService.notifyRejectionReverted({
+            wfamsd_id: previousApprovedUser.wfamsd_id,
+            wfamsh_id: previousApprovedUser.wfamsh_id,
+            job_role_id: previousApprovedUser.job_role_id,
+            status: 'AP',
+            sequence: previousApprovedUser.sequence,
+            org_id: orgId,
+            asset_name: workflowInfo.asset_name,
+            asset_id: workflowInfo.asset_id,
+            rejection_reason: reason,
+            rejected_by_role: rejectingRoleName
+          });
+          
+          console.log(`Rejection reversion notification sent to previous approver role ${previousApprovedUser.job_role_id}:`, {
+            success: notificationResult.success,
+            totalUsers: notificationResult.totalUsers,
+            successCount: notificationResult.successCount,
+            failureCount: notificationResult.failureCount
+          });
+        }
+      } catch (notifyErr) {
+        console.error('Failed to send rejection reversion notification:', notifyErr);
+        // Don't throw error - notification failure shouldn't break rejection process
+      }
     }
     
     // Check if all users have rejected

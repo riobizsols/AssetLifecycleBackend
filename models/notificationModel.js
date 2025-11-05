@@ -11,10 +11,13 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
       wfd.status as detail_status,
       wfh.pl_sch_date,
       wfh.asset_id,
+      wfh.group_id,
       wfh.status as header_status,
       a.asset_type_id,
       at.maint_lead_type,
       at.text as asset_type_name,
+      ag.text as group_name,
+      (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
       COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       mt.text as maint_type_name,
       jr.text as job_role_name,
@@ -32,6 +35,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
     -- Join with all users who have this job role
@@ -74,8 +78,11 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
       wfh.wfamsh_id,
       wfh.pl_sch_date,
       wfh.asset_id,
+      wfh.group_id,
       wfh.status as header_status,
       a.asset_type_id,
+      ag.text as group_name,
+      (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
       CASE 
         WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
         ELSE at.maint_lead_type::text
@@ -105,6 +112,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     FROM "tblWFAssetMaintSch_H" wfh
     INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     -- Get current action role (workflow step with AP status)
     LEFT JOIN (
