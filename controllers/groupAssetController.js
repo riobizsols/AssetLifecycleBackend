@@ -11,13 +11,53 @@ const getAvailableAssetsByAssetType = async (req, res) => {
             });
         }
 
-        const result = await model.getAvailableAssetsByAssetType(asset_type_id);
+        // Get user's org_id and branch_id from the authenticated request
+        const org_id = req.user?.org_id || null;
+        const branch_id = req.user?.branch_id || null;
+
+        console.log(`[getAvailableAssetsByAssetType] Fetching assets for asset_type_id: ${asset_type_id}, org_id: ${org_id}, branch_id: ${branch_id}`);
+        
+        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id, branch_id);
+        
+        // Verify that all returned assets match the requested asset type
+        const mismatchedAssets = result.rows.filter(asset => asset.asset_type_id !== asset_type_id);
+        if (mismatchedAssets.length > 0) {
+            console.error(`[getAvailableAssetsByAssetType] ERROR: Found ${mismatchedAssets.length} assets with mismatched asset_type_id!`);
+            console.error(`[getAvailableAssetsByAssetType] Requested: ${asset_type_id}, Mismatched assets:`, mismatchedAssets.map(a => ({ asset_id: a.asset_id, asset_type_id: a.asset_type_id })));
+        }
+        
+        // Filter out any mismatched assets as a safety measure
+        const filteredAssets = result.rows.filter(asset => asset.asset_type_id === asset_type_id);
+        
+        // Also verify org_id and branch_id match (additional safety check)
+        const orgMismatched = filteredAssets.filter(asset => org_id && asset.org_id !== org_id);
+        const branchMismatched = filteredAssets.filter(asset => branch_id && asset.branch_id !== branch_id);
+        
+        if (orgMismatched.length > 0) {
+            console.error(`[getAvailableAssetsByAssetType] ERROR: Found ${orgMismatched.length} assets with mismatched org_id!`);
+        }
+        if (branchMismatched.length > 0) {
+            console.error(`[getAvailableAssetsByAssetType] ERROR: Found ${branchMismatched.length} assets with mismatched branch_id!`);
+        }
+        
+        // Final filter for org_id and branch_id
+        const finalFilteredAssets = filteredAssets.filter(asset => {
+            const orgMatch = !org_id || asset.org_id === org_id;
+            const branchMatch = !branch_id || asset.branch_id === branch_id;
+            return orgMatch && branchMatch;
+        });
+        
+        if (finalFilteredAssets.length !== filteredAssets.length) {
+            console.warn(`[getAvailableAssetsByAssetType] Filtered out ${filteredAssets.length - finalFilteredAssets.length} assets due to org/branch mismatch`);
+        }
         
         res.status(200).json({
-            message: `Found ${result.rows.length} available assets for asset type ${asset_type_id}`,
+            message: `Found ${finalFilteredAssets.length} available assets for asset type ${asset_type_id}`,
             asset_type_id: asset_type_id,
-            count: result.rows.length,
-            assets: result.rows
+            org_id: org_id,
+            branch_id: branch_id,
+            count: finalFilteredAssets.length,
+            assets: finalFilteredAssets
         });
 
     } catch (err) {

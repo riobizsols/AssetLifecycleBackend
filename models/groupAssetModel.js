@@ -1,8 +1,9 @@
 const db = require('../config/db');
 
 // Get available assets by asset type (excluding those already in asset groups)
-const getAvailableAssetsByAssetType = async (asset_type_id) => {
-    const query = `
+// Filters by org_id and branch_id if provided
+const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null, branch_id = null) => {
+    let query = `
         SELECT 
             a.asset_id, 
             a.asset_type_id, 
@@ -44,10 +45,28 @@ const getAvailableAssetsByAssetType = async (asset_type_id) => {
             FROM "tblAssetGroup_D" agd 
             WHERE agd.asset_id = a.asset_id
         )
-        ORDER BY a.text ASC
     `;
 
-    return await db.query(query, [asset_type_id]);
+    const params = [asset_type_id];
+    let paramIndex = 2;
+
+    // Filter by organization ID if provided
+    if (org_id) {
+        query += ` AND a.org_id = $${paramIndex}`;
+        params.push(org_id);
+        paramIndex++;
+    }
+
+    // Filter by branch ID if provided
+    if (branch_id) {
+        query += ` AND a.branch_id = $${paramIndex}`;
+        params.push(branch_id);
+        paramIndex++;
+    }
+
+    query += ` ORDER BY a.text ASC`;
+
+    return await db.query(query, params);
 };
 
 // Get all available assets (not in any group) for all asset types

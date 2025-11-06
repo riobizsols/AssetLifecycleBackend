@@ -106,6 +106,58 @@ function getBackupFilename() {
 }
 
 /**
+ * Find pg_dump executable path (Windows support)
+ */
+async function findPgDump() {
+  const isWindows = process.platform === 'win32';
+  const pgDumpName = isWindows ? 'pg_dump.exe' : 'pg_dump';
+  
+  // First, try to find pg_dump in PATH
+  try {
+    const result = await execAsync(isWindows ? `where ${pgDumpName}` : `which ${pgDumpName}`);
+    const pgDumpPath = result.stdout.trim().split('\n')[0];
+    if (pgDumpPath) {
+      log(`Found pg_dump in PATH: ${pgDumpPath}`);
+      return pgDumpPath;
+    }
+  } catch (error) {
+    // Not in PATH, will search common locations
+  }
+  
+  // Not in PATH, search common installation locations
+  if (isWindows) {
+    const commonPaths = [
+      'C:\\Program Files\\PostgreSQL\\18\\bin\\pg_dump.exe',
+      'C:\\Program Files\\PostgreSQL\\17\\bin\\pg_dump.exe',
+      'C:\\Program Files\\PostgreSQL\\16\\bin\\pg_dump.exe',
+      'C:\\Program Files\\PostgreSQL\\15\\bin\\pg_dump.exe',
+      'C:\\Program Files\\PostgreSQL\\14\\bin\\pg_dump.exe',
+      'C:\\Program Files (x86)\\PostgreSQL\\18\\bin\\pg_dump.exe',
+      'C:\\Program Files (x86)\\PostgreSQL\\17\\bin\\pg_dump.exe',
+      'C:\\Program Files (x86)\\PostgreSQL\\16\\bin\\pg_dump.exe',
+      'C:\\Program Files (x86)\\PostgreSQL\\15\\bin\\pg_dump.exe',
+      'C:\\Program Files (x86)\\PostgreSQL\\14\\bin\\pg_dump.exe',
+    ];
+    
+    for (const pgDumpPath of commonPaths) {
+      try {
+        await fs.access(pgDumpPath);
+        log(`Found pg_dump at: ${pgDumpPath}`);
+        return pgDumpPath;
+      } catch (error) {
+        // Continue searching
+      }
+    }
+  }
+  
+  // If not found, throw error with helpful message
+  throw new Error(
+    `pg_dump not found. Please ensure PostgreSQL client tools are installed. ` +
+    `${isWindows ? 'Common locations: C:\\Program Files\\PostgreSQL\\<version>\\bin\\' : 'Install via: sudo apt-get install postgresql-client'}`
+  );
+}
+
+/**
  * Ensure directory exists
  */
 async function ensureDirectory(dirPath) {
@@ -158,12 +210,15 @@ async function createBackup() {
     await ensureDirectory(config.backupDir);
     await ensureDirectory(config.logDir);
     
+    // Find pg_dump executable
+    const pgDumpPath = await findPgDump();
+    
     // Build pg_dump command
-    let dumpCommand = `pg_dump -h ${config.dbConfig.host} -p ${config.dbConfig.port} -U ${config.dbConfig.user} -d ${config.dbConfig.database} -F c -f "${sqlFile}"`;
+    let dumpCommand = `"${pgDumpPath}" -h ${config.dbConfig.host} -p ${config.dbConfig.port} -U ${config.dbConfig.user} -d ${config.dbConfig.database} -F c -f "${sqlFile}"`;
     
     // Add compression flag if not using custom format
     if (!config.compression) {
-      dumpCommand = `pg_dump -h ${config.dbConfig.host} -p ${config.dbConfig.port} -U ${config.dbConfig.user} -d ${config.dbConfig.database} -F p -f "${sqlFile}"`;
+      dumpCommand = `"${pgDumpPath}" -h ${config.dbConfig.host} -p ${config.dbConfig.port} -U ${config.dbConfig.user} -d ${config.dbConfig.database} -F p -f "${sqlFile}"`;
     }
     
     log(`Executing: ${dumpCommand.replace(config.dbConfig.password, '***')}`);
