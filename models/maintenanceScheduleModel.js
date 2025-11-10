@@ -3,12 +3,23 @@ const db = require('../config/db');
 // 1. Get asset types that require maintenance
 const getAssetTypesRequiringMaintenance = async () => {
     const query = `
-        SELECT asset_type_id, text, maint_required
+        SELECT asset_type_id, text, maint_required, org_id
         FROM "tblAssetTypes"
         WHERE maint_required = true AND int_status = 1
         ORDER BY asset_type_id
     `;
     
+    return await db.query(query);
+};
+
+// 1a. Fetch usage-based maintenance configuration from org settings
+const getUsageBasedMaintenanceSettings = async () => {
+    const query = `
+        SELECT org_id, key, value
+        FROM "tblOrgSettings"
+        WHERE key IN ('at_id_usage_based', 'at_ub_lead_time')
+    `;
+
     return await db.query(query);
 };
 
@@ -437,6 +448,23 @@ const isMaintenanceDue = (lastMaintenanceDate, frequency, uom) => {
     return today >= nextMaintenanceDate;
 };
 
+// 14. Get cumulative asset usage since a specific date
+const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
+    const query = `
+        SELECT COALESCE(SUM(usage_counter), 0) AS total_usage
+        FROM "tblAssetUsageReg"
+        WHERE asset_id = $1
+          AND created_on >= $2
+    `;
+
+    const result = await db.query(query, [asset_id, sinceDate]);
+    const totalUsage = result.rows[0]?.total_usage;
+
+    return totalUsage !== undefined && totalUsage !== null
+        ? Number(totalUsage)
+        : 0;
+};
+
 // Get all maintenance schedules from tblAssetMaintSch
 const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
     console.log('=== Maintenance Schedule Model Debug ===');
@@ -478,14 +506,62 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => 
         SELECT 
             ams.*,
             COALESCE(a.asset_type_id, 'N/A') as asset_type_id,
-            COALESCE(at.text, 'Unknown Asset Type') as asset_type_name
+            COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+            -- Get group_id from workflow header if this is a group maintenance
+            wfh.group_id,
+            -- Get group name if this is a group maintenance
+            ag.text as group_name,
+            -- Get group asset count
+            (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count
         FROM "tblAssetMaintSch" ams
         LEFT JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblWFAssetMaintSch_H" wfh ON ams.wfamsh_id = wfh.wfamsh_id AND wfh.org_id = ams.org_id
+        LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2 AND a.branch_id = $3
     `;
     
-    return await db.query(query, [amsId, orgId, branchId]);
+    const result = await db.query(query, [amsId, orgId, branchId]);
+    
+    // If this is a group maintenance, fetch all assets in the group
+    if (result.rows.length > 0) {
+        const record = result.rows[0];
+        const groupId = record.group_id;
+        
+        // Check if this is a group maintenance by checking group_id from workflow header
+        if (groupId) {
+            console.log(`Detected group maintenance for maintenance schedule ${amsId}, group_id: ${groupId}`);
+            
+            // Fetch all assets in the group
+            const groupAssetsQuery = `
+                SELECT 
+                    a.asset_id,
+                    a.text as asset_name,
+                    a.serial_number,
+                    a.description,
+                    a.service_vendor_id,
+                    a.branch_id,
+                    b.branch_code
+                FROM "tblAssets" a
+                LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+                WHERE a.group_id = $1 AND a.org_id = $2
+                ORDER BY a.text ASC
+            `;
+            
+            const groupAssetsResult = await db.query(groupAssetsQuery, [groupId, orgId]);
+            record.group_assets = groupAssetsResult.rows;
+            record.is_group_maintenance = true;
+            record.group_asset_count = groupAssetsResult.rows.length;
+            
+            console.log(`Found ${record.group_asset_count} assets in group ${groupId}`);
+        } else {
+            record.group_assets = [];
+            record.is_group_maintenance = false;
+            record.group_asset_count = 0;
+        }
+    }
+    
+    return result;
 };
 
 // Update maintenance schedule in tblAssetMaintSch
@@ -664,6 +740,7 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
 
 module.exports = {
     getAssetTypesRequiringMaintenance,
+    getUsageBasedMaintenanceSettings,
     getAssetsByAssetType,
     getAssetsByGroupId,
     getGroupsByAssetType,
@@ -682,6 +759,7 @@ module.exports = {
     insertWorkflowMaintenanceScheduleDetail,
     calculatePlannedScheduleDate,
     isMaintenanceDue,
+    getAssetUsageSinceDate,
     getAllMaintenanceSchedules,
     getMaintenanceScheduleById,
     updateMaintenanceSchedule,

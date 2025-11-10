@@ -28,7 +28,12 @@ const getAllNotifications = async (req, res) => {
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
       isUrgent: notification.days_until_cutoff <= 0,
       isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance' // Use actual maintenance type name from database
+      maintenanceType: notification.maint_type_name || 'Regular Maintenance', // Use actual maintenance type name from database
+      // Group asset maintenance information
+      groupId: notification.group_id || null,
+      groupName: notification.group_name || null,
+      groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,
+      isGroupMaintenance: !!notification.group_id
     }));
 
     res.json({
@@ -84,7 +89,12 @@ const getUserNotifications = async (req, res) => {
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
       isUrgent: notification.days_until_cutoff <= 2, // Show urgent when 2 days or less until cutoff
       isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance' // Use actual maintenance type name from database
+      maintenanceType: notification.maint_type_name || 'Regular Maintenance', // Use actual maintenance type name from database
+      // Group asset maintenance information
+      groupId: notification.group_id || null,
+      groupName: notification.group_name || null,
+      groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,
+      isGroupMaintenance: !!notification.group_id
     }));
 
     res.json({
@@ -182,7 +192,12 @@ const getFilteredNotifications = async (req, res) => {
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
       isUrgent: notification.days_until_cutoff <= 0,
       isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance'
+      maintenanceType: notification.maint_type_name || 'Regular Maintenance',
+      // Group asset maintenance information
+      groupId: notification.group_id || null,
+      groupName: notification.group_name || null,
+      groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,
+      isGroupMaintenance: !!notification.group_id
     }));
 
     res.json({

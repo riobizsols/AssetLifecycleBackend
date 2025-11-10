@@ -1082,7 +1082,13 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       checklist: approvalDetail.checklist,
       vendorDetails: approvalDetail.vendorDetails,
       workflowSteps: approvalDetail.workflowSteps,
-      workflowDetails: approvalDetail.workflowDetails
+      workflowDetails: approvalDetail.workflowDetails,
+      // Group asset maintenance information
+      groupId: approvalDetail.groupId || null,
+      groupName: approvalDetail.groupName || null,
+      groupAssetCount: approvalDetail.groupAssetCount || null,
+      isGroupMaintenance: approvalDetail.isGroupMaintenance || false,
+      groupAssets: approvalDetail.groupAssets || [] // All assets in the group
     };
 
     // Log success

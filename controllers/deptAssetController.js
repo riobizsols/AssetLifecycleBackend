@@ -92,35 +92,58 @@ const getAllAssetTypes = async (req, res) => {
         const { assignment_type } = req.query;
         const org_id = req.user?.org_id;
         const branch_id = req.user?.branch_id;
-        
-        let query = `SELECT 
-                at.asset_type_id, 
+
+        if (!org_id) {
+            return res.status(400).json({ error: "Organization context missing" });
+        }
+
+        let query = `
+            SELECT DISTINCT
+                at.asset_type_id,
                 at.text,
                 at.assignment_type,
                 at.group_required,
-                COALESCE(at.is_child, false) as is_child,
+                COALESCE(at.is_child, false) AS is_child,
                 at.parent_asset_type_id,
-                $1 as org_id,
-                $2 as branch_id
-             FROM "tblAssetTypes" at
-             INNER JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
-             WHERE at.int_status = 1 AND a.org_id = $1 AND a.branch_id = $2`;
-        
-        const params = [org_id, branch_id];
-        
-        // If assignment_type is provided, filter by it
-        if (assignment_type) {
-            query += ` AND at.assignment_type = $3`;
-            params.push(assignment_type);
-            console.log(`Fetching asset types with assignment_type = '${assignment_type}'...`);
+                at.maint_required,
+                at.maint_type_id,
+                at.maint_lead_type
+            FROM "tblAssetTypes" at
+            LEFT JOIN "tblDeptAssetTypes" dat
+                ON dat.asset_type_id = at.asset_type_id
+                AND dat.int_status = 1
+            LEFT JOIN "tblDepartments" d
+                ON d.dept_id = dat.dept_id
+                AND d.org_id = at.org_id
+            WHERE at.int_status = 1
+              AND at.org_id = $1
+        `;
+
+        const params = [org_id];
+
+        if (branch_id) {
+            params.push(branch_id);
+            query += `
+              AND (
+                    d.branch_id IS NULL
+                 OR d.branch_id = $${params.length}
+              )
+            `;
+            console.log(`Filtering asset types for org ${org_id} and branch ${branch_id}`);
         } else {
-            console.log('Fetching all active asset types...');
+            console.log(`Filtering asset types for org ${org_id} with no branch restriction`);
         }
-        
-        query += ` GROUP BY at.asset_type_id, at.text, at.assignment_type, at.group_required, at.is_child, at.parent_asset_type_id ORDER BY at.text`;
-        
+
+        if (assignment_type) {
+            params.push(assignment_type);
+            query += ` AND at.assignment_type = $${params.length}`;
+            console.log(`Applying assignment_type filter: ${assignment_type}`);
+        }
+
+        query += ` ORDER BY at.text`;
+
         const result = await db.query(query, params);
-        console.log(`Found ${result.rows.length} asset types:`, result.rows);
+        console.log(`Found ${result.rows.length} asset types for org ${org_id}${branch_id ? ` and branch ${branch_id}` : ''}`);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);

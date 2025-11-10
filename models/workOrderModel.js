@@ -364,13 +364,19 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
                   )
                 ORDER BY brd.created_on DESC
                 LIMIT 1
-            ) as breakdown_info
+            ) as breakdown_info,
+            -- Get group_id from workflow header if this is a group maintenance
+            wfh.group_id,
+            -- Get group name if this is a group maintenance
+            ag.text as group_name
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         INNER JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblWFAssetMaintSch_H" wfh ON ams.wfamsh_id = wfh.wfamsh_id AND wfh.org_id = ams.org_id
+        LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
         WHERE ams.ams_id = $1 
           AND ams.org_id = $2 
           AND a.org_id = $2 
@@ -393,10 +399,55 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
                 AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
                 AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
             ))
+            OR
+            -- Include group maintenance work orders (detected by group_id from workflow header)
+            (wfh.group_id IS NOT NULL)
           )
     `;
     
-    return await db.query(query, [amsId, orgId, userBranchId]);
+    const result = await db.query(query, [amsId, orgId, userBranchId]);
+    
+    // If this is a group maintenance, fetch all assets in the group
+    if (result.rows.length > 0) {
+        const workOrder = result.rows[0];
+        const groupId = workOrder.group_id;
+        
+        // Check if this is a group maintenance by checking group_id from workflow header
+        if (groupId) {
+            console.log(`Detected group maintenance for work order ${amsId}, group_id: ${groupId}`);
+            
+            // Fetch all assets in the group
+            const groupAssetsQuery = `
+                SELECT 
+                    a.asset_id,
+                    a.text as asset_name,
+                    a.serial_number,
+                    a.description,
+                    a.service_vendor_id,
+                    a.branch_id,
+                    b.branch_code,
+                    a.location,
+                    a.current_status
+                FROM "tblAssets" a
+                LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+                WHERE a.group_id = $1 AND a.org_id = $2
+                ORDER BY a.text ASC
+            `;
+            
+            const groupAssetsResult = await db.query(groupAssetsQuery, [groupId, orgId]);
+            workOrder.group_assets = groupAssetsResult.rows;
+            workOrder.is_group_maintenance = true;
+            workOrder.group_asset_count = groupAssetsResult.rows.length;
+            
+            console.log(`Found ${workOrder.group_asset_count} assets in group ${groupId}`);
+        } else {
+            workOrder.group_assets = [];
+            workOrder.is_group_maintenance = false;
+            workOrder.group_asset_count = 0;
+        }
+    }
+    
+    return result;
 };
 
 module.exports = {

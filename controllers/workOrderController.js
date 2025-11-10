@@ -210,11 +210,23 @@ const getWorkOrderById = async (req, res) => {
             },
             
             // Breakdown Details (if applicable)
-            breakdown_info: workOrder.breakdown_info || null
+            breakdown_info: workOrder.breakdown_info || null,
+            
+            // Group maintenance information
+            is_group_maintenance: workOrder.is_group_maintenance || false,
+            group_id: workOrder.group_id || null,
+            group_name: workOrder.group_name || null,
+            group_asset_count: workOrder.group_asset_count || 0,
+            group_assets: workOrder.group_assets || []
         };
         
         console.log(`Successfully fetched work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);
         console.log('Formatted asset location:', formattedData.asset.location);
+        console.log('Group maintenance info:', {
+            is_group_maintenance: formattedData.is_group_maintenance,
+            group_asset_count: formattedData.group_asset_count,
+            group_assets_length: formattedData.group_assets?.length
+        });
         
         return res.status(200).json({
             success: true,

@@ -3,6 +3,7 @@ const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const fcmService = require('../services/fcmService');
+const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
@@ -1195,6 +1196,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         SELECT 
           wfh.wfamsh_id,
           wfh.asset_id,
+          wfh.group_id,
           wfh.pl_sch_date as act_maint_st_date,
           a.asset_type_id,
           wfh.maint_type_id,
@@ -1245,6 +1247,145 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      console.log('Maintained by will be set to:', workflowData.maintained_by);
      console.log('Service vendor ID:', workflowData.vendor_id);
      console.log('BF01 notes:', workflowData.bf01_notes);
+     console.log('Group ID:', workflowData.group_id);
+     
+     // Check if this is a group maintenance
+     if (workflowData.group_id) {
+       console.log(`=== GROUP MAINTENANCE DETECTED ===`);
+       console.log(`Group ID: ${workflowData.group_id}`);
+       console.log(`Creating ONE maintenance record for group ${workflowData.group_id}`);
+       
+       // Get all assets in the group
+       const groupAssetsResult = await getAssetsByGroupId(workflowData.group_id);
+       const groupAssets = groupAssetsResult.rows;
+       
+       if (groupAssets.length === 0) {
+         console.error(`No assets found in group ${workflowData.group_id}`);
+         throw new Error(`No assets found in group ${workflowData.group_id}`);
+       }
+       
+       console.log(`Found ${groupAssets.length} assets in group ${workflowData.group_id}`);
+       
+       // Don't fill notes column for group maintenance
+       const groupNotes = null;
+       
+       // Check if this is a software asset (once for the group, since all assets in a group have the same asset_type_id)
+       const softwareAssetTypeQuery = `
+         SELECT value 
+         FROM "tblOrgSettings" 
+         WHERE key = 'software_at_id' 
+         AND org_id = $1
+         LIMIT 1
+       `;
+       const softwareAssetTypeResult = await pool.query(softwareAssetTypeQuery, [orgId]);
+       const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
+       const originalMaintTypeId = workflowData.maint_type_id || 'MT002';
+       const isSoftwareAsset = (softwareAssetTypeId && workflowData.asset_type_id === softwareAssetTypeId) || originalMaintTypeId === 'MT001';
+       
+       // Decide maintenance type
+       const isBreakdown = !!workflowData.has_breakdown_note;
+       const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
+       
+       // Generate work order ID (single work order for the entire group)
+       let workOrderId = null;
+       if (!isSoftwareAsset) {
+         if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
+           const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+           if (abrMatch && abrMatch[1]) {
+             workOrderId = `WO-${wfamshId}-${abrMatch[1]}`;
+           } else {
+             workOrderId = `WO-${wfamshId}`;
+           }
+         } else {
+           workOrderId = `WO-${wfamshId}`;
+         }
+       }
+       
+       // Get the next ams_id
+       const maxIdQuery = `
+         SELECT MAX(
+           CASE 
+             WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
+             WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
+             ELSE 0
+           END
+         ) as max_num 
+         FROM "tblAssetMaintSch"
+       `;
+       const maxIdResult = await pool.query(maxIdQuery);
+       const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
+       const amsId = `ams${nextId.toString().padStart(3, '0')}`;
+       
+       console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
+       
+       // Create ONE maintenance record using the representative asset_id from workflow header
+       // Notes field is left empty (null) for group maintenance
+       const insertQuery = `
+         INSERT INTO "tblAssetMaintSch" (
+           ams_id,
+           wfamsh_id,
+           wo_id,
+           asset_id,
+           maint_type_id,
+           vendor_id,
+           at_main_freq_id,
+           maintained_by,
+           notes,
+           status,
+           act_maint_st_date,
+           created_by,
+           created_on,
+           org_id,
+           branch_code
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+       `;
+       
+       const insertParams = [
+         amsId,
+         workflowData.wfamsh_id,
+         isSoftwareAsset ? null : workOrderId, // Work order ID - null for software assets
+         workflowData.asset_id, // Use representative asset_id from workflow header
+         maintTypeId,
+         workflowData.vendor_id, // Use vendor from representative asset
+         workflowData.at_main_freq_id,
+         workflowData.maintained_by, // Use maintained_by from representative asset
+         groupNotes, // Notes field is null for group maintenance
+         'IN', // Initial status
+         workflowData.act_maint_st_date,
+         'system', // created_by
+         orgId,
+         workflowData.branch_code // Use branch_code from representative asset
+       ];
+       
+       console.log(`Creating single maintenance record for group ${workflowData.group_id}:`, { 
+         amsId, 
+         workOrderId, 
+         maintTypeId, 
+         assetId: workflowData.asset_id,
+         assetCount: groupAssets.length,
+         notes: groupNotes
+       });
+       
+       await pool.query(insertQuery, insertParams);
+       
+       // Notify maintenance supervisors (using representative asset_id)
+       console.log(`=== About to notify maintenance supervisors for group ${workflowData.group_id} ===`);
+       try {
+         const notificationResult = await notifyMaintenanceSupervisors(amsId, workflowData.asset_id, wfamshId, orgId);
+         console.log(`Notification result for group ${workflowData.group_id}:`, JSON.stringify(notificationResult, null, 2));
+         if (!notificationResult.success) {
+           console.error(`⚠️  Notification failed for group ${workflowData.group_id}:`, notificationResult.reason || notificationResult.error);
+         }
+       } catch (notifyErr) {
+         console.error(`❌ CRITICAL: Failed to send notification for group ${workflowData.group_id}:`, notifyErr);
+         console.error('Error stack:', notifyErr.stack);
+       }
+       
+       console.log(`=== GROUP MAINTENANCE COMPLETE ===`);
+       console.log(`Created ONE maintenance record (${amsId}) for group ${workflowData.group_id} with ${groupAssets.length} assets`);
+       
+       return amsId;
+     }
      
      // Check if this is a BF01 or BF03 breakdown with existing schedule
      let existingAmsId = null;
@@ -1830,6 +1971,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfd.job_role_id,
         wfh.pl_sch_date,
         wfh.asset_id,
+        wfh.group_id,
         a.text as asset_name,
         a.serial_number,
         wfh.status as header_status,
@@ -1857,6 +1999,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         -- ROLE-BASED: Always show role name (user_id is not used)
         jr.text as user_name,
         NULL as email,
+        -- Group asset maintenance information
+        ag.text as group_name,
+        (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
           CASE 
@@ -1882,6 +2027,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
+      LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
       WHERE wfd.org_id = $1 
         AND wfd.wfamsh_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
@@ -2033,6 +2179,37 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         });
       });
 
+      // If this is a group maintenance, fetch all assets in the group
+      let groupAssets = [];
+      if (firstRecord.group_id) {
+        console.log(`Fetching all assets for group ${firstRecord.group_id}`);
+        const groupAssetsQuery = `
+          SELECT 
+            a.asset_id,
+            a.text as asset_name,
+            a.serial_number,
+            a.description,
+            a.service_vendor_id,
+            a.branch_id,
+            b.branch_code
+          FROM "tblAssets" a
+          LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+          WHERE a.group_id = $1 AND a.org_id = $2
+          ORDER BY a.text ASC
+        `;
+        const groupAssetsResult = await pool.query(groupAssetsQuery, [firstRecord.group_id, orgId]);
+        groupAssets = groupAssetsResult.rows.map(asset => ({
+          assetId: asset.asset_id,
+          assetName: asset.asset_name,
+          serialNumber: asset.serial_number,
+          description: asset.description,
+          vendorId: asset.service_vendor_id,
+          branchId: asset.branch_id,
+          branchCode: asset.branch_code
+        }));
+        console.log(`Found ${groupAssets.length} assets in group ${firstRecord.group_id}`);
+      }
+
       // Format the response
       const formattedDetail = {
         wfamsdId: firstRecord.wfamsd_id,
@@ -2077,7 +2254,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           cin_number: firstRecord.cin_number
         },
         workflowSteps: workflowSteps,
-        workflowDetails: approvalDetails
+        workflowDetails: approvalDetails,
+        // Group asset maintenance information
+        groupId: firstRecord.group_id || null,
+        groupName: firstRecord.group_name || null,
+        groupAssetCount: firstRecord.group_asset_count ? parseInt(firstRecord.group_asset_count) : null,
+        isGroupMaintenance: !!firstRecord.group_id,
+        // All assets in the group (for display in approval screen)
+        groupAssets: groupAssets
       };
 
       return formattedDetail;

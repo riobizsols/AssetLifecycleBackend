@@ -3,6 +3,58 @@ const model = require("../models/maintenanceScheduleModel");
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
 
+const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
+
+const USAGE_BASED_UOMS = new Set([
+    'km',
+    'kms',
+    'kilometer',
+    'kilometers',
+    'kilometre',
+    'kilometres',
+    'mile',
+    'miles',
+    'mi',
+    'hour',
+    'hours',
+    'hr',
+    'hrs'
+]);
+
+const parseUsageAssetTypeValue = (rawValue) => {
+    if (!rawValue) {
+        return [];
+    }
+
+    if (Array.isArray(rawValue)) {
+        return rawValue;
+    }
+
+    if (typeof rawValue === 'string') {
+        const trimmed = rawValue.trim();
+
+        if (!trimmed) {
+            return [];
+        }
+
+        try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+                return parsed;
+            }
+        } catch (error) {
+            // Not a JSON array; fall back to delimiter-based parsing
+        }
+
+        return trimmed
+            .split(/[,;|\n]/)
+            .map(value => value.trim())
+            .filter(Boolean);
+    }
+
+    return [String(rawValue).trim()].filter(Boolean);
+};
+
 // Helper function to process group maintenance
 const processGroupMaintenance = async (group_id, assetType, frequencies, testDate) => {
     console.log(`\n=== Processing Group Maintenance for Group: ${group_id} ===`);
@@ -191,6 +243,39 @@ const generateMaintenanceSchedules = async (req, res) => {
         
         console.log(`Found ${assetTypes.length} asset types requiring maintenance`);
         
+        // Fetch usage-based maintenance configurations
+        const usageSettingsResult = await model.getUsageBasedMaintenanceSettings();
+        const usageSettingsByOrg = {};
+
+        if (usageSettingsResult?.rows?.length) {
+            for (const setting of usageSettingsResult.rows) {
+                const orgId = normalizeOrgId(setting.org_id);
+                if (!orgId) {
+                    continue;
+                }
+                if (!usageSettingsByOrg[orgId]) {
+                    usageSettingsByOrg[orgId] = {
+                        assetTypeIds: new Set(),
+                        leadTime: 0
+                    };
+                }
+
+                if (setting.key === 'at_id_usage_based') {
+                    const assetTypeValues = parseUsageAssetTypeValue(setting.value);
+                    assetTypeValues
+                        .map(value => value.toUpperCase())
+                        .forEach(value => usageSettingsByOrg[orgId].assetTypeIds.add(value));
+                }
+
+                if (setting.key === 'at_ub_lead_time') {
+                    const leadTimeValue = Number(setting.value);
+                    if (!Number.isNaN(leadTimeValue)) {
+                        usageSettingsByOrg[orgId].leadTime = leadTimeValue;
+                    }
+                }
+            }
+        }
+        
         if (assetTypes.length === 0) {
             return res.status(200).json({
                 message: "No asset types found that require maintenance",
@@ -220,33 +305,49 @@ const generateMaintenanceSchedules = async (req, res) => {
                 continue;
             }
             
+            const assetTypeOrgId = normalizeOrgId(assetType.org_id);
+            const usageSettingsForOrg = usageSettingsByOrg[assetTypeOrgId] || { assetTypeIds: new Set(), leadTime: 0 };
+            const assetTypeIdUpper = (assetType.asset_type_id || '').toUpperCase();
+            const isUsageBasedAssetType = usageSettingsForOrg.assetTypeIds.has(assetTypeIdUpper);
+            const assetTypeUsageLeadTime = Number(usageSettingsForOrg.leadTime) || 0;
+            
+            if (isUsageBasedAssetType) {
+                console.log(`Asset type ${assetType.asset_type_id} configured for usage-based maintenance with lead time ${assetTypeUsageLeadTime}`);
+            }
+            
             // Step 2a: Get groups for this asset type FIRST
             const groupsResult = await model.getGroupsByAssetType(assetType.asset_type_id);
             const groups = groupsResult.rows;
             
             console.log(`Found ${groups.length} groups for asset type ${assetType.asset_type_id}`);
             
-            // Process groups first
-            for (const group of groups) {
-                if (!group.group_id) continue;
-                
-                processedGroups++;
-                console.log(`\nProcessing group ${group.group_id} with ${group.asset_count} assets`);
-                
-                const groupResult = await processGroupMaintenance(
-                    group.group_id,
-                    assetType,
-                    frequencies,
-                    testDate
-                );
-                
-                if (!groupResult.skipped) {
-                    groupSchedulesCreated += groupResult.schedulesCreated;
-                    totalSchedulesCreated += groupResult.schedulesCreated;
+            if (isUsageBasedAssetType) {
+                if (groups.length > 0) {
+                    console.log(`Skipping group maintenance generation for usage-based asset type ${assetType.asset_type_id}`);
+                }
+            } else {
+                // Process groups first
+                for (const group of groups) {
+                    if (!group.group_id) continue;
                     
-                    // Track assets in this group to skip them later
-                    if (groupResult.assetIds) {
-                        groupResult.assetIds.forEach(assetId => assetsInGroups.add(assetId));
+                    processedGroups++;
+                    console.log(`\nProcessing group ${group.group_id} with ${group.asset_count} assets`);
+                    
+                    const groupResult = await processGroupMaintenance(
+                        group.group_id,
+                        assetType,
+                        frequencies,
+                        testDate
+                    );
+                    
+                    if (!groupResult.skipped) {
+                        groupSchedulesCreated += groupResult.schedulesCreated;
+                        totalSchedulesCreated += groupResult.schedulesCreated;
+                        
+                        // Track assets in this group to skip them later
+                        if (groupResult.assetIds) {
+                            groupResult.assetIds.forEach(assetId => assetsInGroups.add(assetId));
+                        }
                     }
                 }
             }
@@ -265,7 +366,7 @@ const generateMaintenanceSchedules = async (req, res) => {
             // Process each asset (skip those in groups)
             for (const asset of assets) {
                 // Skip assets that are in groups (already processed)
-                if (assetsInGroups.has(asset.asset_id) || asset.group_id) {
+                if (assetsInGroups.has(asset.asset_id) || (!isUsageBasedAssetType && asset.group_id)) {
                     console.log(`Skipping asset ${asset.asset_id} - already processed as part of a group`);
                     continue;
                 }
@@ -315,26 +416,63 @@ const generateMaintenanceSchedules = async (req, res) => {
                 for (const frequency of frequencies) {
                     console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for asset ${asset.asset_id}`);
                     
-                    // Calculate planned schedule date: dateToConsider + frequency
-                    const plannedScheduleDate = model.calculatePlannedScheduleDate(dateToConsider, frequency.frequency, frequency.uom);
-                    console.log(`Asset ${asset.asset_id} purchased on: ${asset.purchased_on}`);
-                    console.log(`Date to consider: ${dateToConsider}`);
-                    console.log(`Planned schedule date: ${plannedScheduleDate} (dateToConsider + ${frequency.frequency} ${frequency.uom})`);
+                    const frequencyUom = (frequency.uom || '').toString().toLowerCase();
+                    const frequencyValue = Number(frequency.frequency);
+                    const isUsageBasedFrequency = isUsageBasedAssetType && USAGE_BASED_UOMS.has(frequencyUom);
                     
-                    // Step 3g: Check if maintenance is due (schedule 10 days before planned date)
-                    const tenDaysBeforePlanned = new Date(plannedScheduleDate);
-                    tenDaysBeforePlanned.setDate(tenDaysBeforePlanned.getDate() - 10);
+                    let shouldCreateSchedule = false;
+                    let plannedScheduleDate = null;
+                    let triggerContext = '';
                     
-                    const isDue = testDate >= tenDaysBeforePlanned;
-                    
-                    if (!isDue) {
-                        console.log(`Maintenance not due for asset ${asset.asset_id} with frequency ${frequency.frequency} ${frequency.uom}`);
+                    if (isUsageBasedFrequency) {
+                        if (!Number.isFinite(frequencyValue) || frequencyValue <= 0) {
+                            console.log(`Invalid usage frequency value (${frequency.frequency}) for asset ${asset.asset_id}, skipping.`);
+                            continue;
+                        }
+                        
+                        const threshold = Math.max(frequencyValue - assetTypeUsageLeadTime, 0);
+                        const totalUsage = await model.getAssetUsageSinceDate(asset.asset_id, dateToConsider);
+                        
+                        console.log(`Usage check → Asset ${asset.asset_id}: total usage since ${dateToConsider.toISOString()} is ${totalUsage} ${frequency.uom}. Threshold: ${threshold} ${frequency.uom} (frequency ${frequencyValue}, lead time ${assetTypeUsageLeadTime}).`);
+                        
+                        if (totalUsage >= threshold) {
+                            shouldCreateSchedule = true;
+                            plannedScheduleDate = new Date(testDate);
+                            triggerContext = `usage threshold met (${totalUsage}/${frequencyValue} ${frequency.uom}, lead time ${assetTypeUsageLeadTime})`;
+                        } else {
+                            console.log(`Usage below threshold for asset ${asset.asset_id}. Current: ${totalUsage} ${frequency.uom}, threshold: ${threshold}. Skipping.`);
+                            continue;
+                        }
+                    } else {
+                        plannedScheduleDate = model.calculatePlannedScheduleDate(dateToConsider, frequency.frequency, frequency.uom);
+                        console.log(`Asset ${asset.asset_id} purchased on: ${asset.purchased_on}`);
+                        console.log(`Date to consider: ${dateToConsider}`);
+                        console.log(`Planned schedule date: ${plannedScheduleDate} (dateToConsider + ${frequency.frequency} ${frequency.uom})`);
+                        
+                        // Step 3g: Check if maintenance is due (schedule 10 days before planned date)
+                        const tenDaysBeforePlanned = new Date(plannedScheduleDate);
+                        tenDaysBeforePlanned.setDate(tenDaysBeforePlanned.getDate() - 10);
+                        
+                        const isDue = testDate >= tenDaysBeforePlanned;
+                        
+                        if (!isDue) {
+                            console.log(`Maintenance not due for asset ${asset.asset_id} with frequency ${frequency.frequency} ${frequency.uom}`);
+                            console.log(`Test date: ${testDate}, 10 days before planned: ${tenDaysBeforePlanned}, Planned: ${plannedScheduleDate}`);
+                            continue;
+                        }
+                        
+                        shouldCreateSchedule = true;
+                        triggerContext = `time-based schedule (planned ${plannedScheduleDate.toISOString()}, window opened ${tenDaysBeforePlanned.toISOString()})`;
+                        
+                        console.log(`Maintenance is due for asset ${asset.asset_id}, creating schedule...`);
                         console.log(`Test date: ${testDate}, 10 days before planned: ${tenDaysBeforePlanned}, Planned: ${plannedScheduleDate}`);
+                    }
+                    
+                    if (!shouldCreateSchedule || !plannedScheduleDate) {
                         continue;
                     }
                     
-                    console.log(`Maintenance is due for asset ${asset.asset_id}, creating schedule...`);
-                    console.log(`Test date: ${testDate}, 10 days before planned: ${tenDaysBeforePlanned}, Planned: ${plannedScheduleDate}`);
+                    console.log(`Creating maintenance schedule for asset ${asset.asset_id} - trigger: ${triggerContext}`);
                     
                     // Step 3h & 3i: Create workflow maintenance schedule header
                     const wfamshId = await model.getNextWFAMSHId();

@@ -1,4 +1,0 @@
-Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
-2025-11-04T06:25:57.276Z,INFO,QUERYING_ASSET_GROUPS,AssetGroupController,"INFO: Querying asset groups","{""operation"":""query_asset_groups""}",N/A,N/A,USR001
-2025-11-04T06:25:57.299Z,INFO,GET_ALL_ASSET_GROUPS_API_CALLED,AssetGroupController,"INFO: GET /api/asset-groups - Get all asset groups API called","{""operation"":""get_all_asset_groups""}",N/A,173,USR001
-2025-11-04T06:25:57.384Z,INFO,ASSET_GROUPS_RETRIEVED,AssetGroupController,"INFO: Retrieved 5 asset groups","{""count"":5}",N/A,N/A,USR001
