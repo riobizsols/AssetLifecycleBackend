@@ -253,26 +253,46 @@ const generateMaintenanceSchedules = async (req, res) => {
                 if (!orgId) {
                     continue;
                 }
+
                 if (!usageSettingsByOrg[orgId]) {
                     usageSettingsByOrg[orgId] = {
-                        assetTypeIds: new Set(),
-                        leadTime: 0
+                        assetTypeLeadTimes: {},
+                        legacyAssetTypeIds: new Set(),
+                        defaultLeadTime: 0
                     };
                 }
 
-                if (setting.key === 'at_id_usage_based') {
+                const rawKey = (setting.key || '').toString().trim();
+                if (!rawKey) {
+                    continue;
+                }
+
+                const upperKey = rawKey.toUpperCase();
+
+                if (upperKey === 'AT_ID_USAGE_BASED') {
                     const assetTypeValues = parseUsageAssetTypeValue(setting.value);
                     assetTypeValues
                         .map(value => value.toUpperCase())
-                        .forEach(value => usageSettingsByOrg[orgId].assetTypeIds.add(value));
+                        .forEach(value => usageSettingsByOrg[orgId].legacyAssetTypeIds.add(value));
+                    continue;
                 }
 
-                if (setting.key === 'at_ub_lead_time') {
+                if (upperKey === 'AT_UB_LEAD_TIME') {
                     const leadTimeValue = Number(setting.value);
                     if (!Number.isNaN(leadTimeValue)) {
-                        usageSettingsByOrg[orgId].leadTime = leadTimeValue;
+                        usageSettingsByOrg[orgId].defaultLeadTime = leadTimeValue;
                     }
+                    continue;
                 }
+
+                // New-format configuration: key holds the asset type id, value holds the lead time
+                const leadTimeValue = Number(setting.value);
+                if (Number.isNaN(leadTimeValue)) {
+                    console.warn(`Usage-based maintenance: lead time for asset type key ${rawKey} is not numeric (${setting.value}), skipping.`);
+                    continue;
+                }
+
+                usageSettingsByOrg[orgId].assetTypeLeadTimes[upperKey] = leadTimeValue;
             }
         }
         
@@ -306,10 +326,19 @@ const generateMaintenanceSchedules = async (req, res) => {
             }
             
             const assetTypeOrgId = normalizeOrgId(assetType.org_id);
-            const usageSettingsForOrg = usageSettingsByOrg[assetTypeOrgId] || { assetTypeIds: new Set(), leadTime: 0 };
+            const usageSettingsForOrg = usageSettingsByOrg[assetTypeOrgId] || {
+                assetTypeLeadTimes: {},
+                legacyAssetTypeIds: new Set(),
+                defaultLeadTime: 0
+            };
             const assetTypeIdUpper = (assetType.asset_type_id || '').toUpperCase();
-            const isUsageBasedAssetType = usageSettingsForOrg.assetTypeIds.has(assetTypeIdUpper);
-            const assetTypeUsageLeadTime = Number(usageSettingsForOrg.leadTime) || 0;
+            const assetTypeLeadTimes = usageSettingsForOrg.assetTypeLeadTimes || {};
+            const hasExplicitLeadTime = Object.prototype.hasOwnProperty.call(assetTypeLeadTimes, assetTypeIdUpper);
+            const legacyConfigured = usageSettingsForOrg.legacyAssetTypeIds?.has(assetTypeIdUpper);
+            const isUsageBasedAssetType = hasExplicitLeadTime || legacyConfigured;
+            const assetTypeUsageLeadTime = hasExplicitLeadTime
+                ? Number(assetTypeLeadTimes[assetTypeIdUpper])
+                : Number(usageSettingsForOrg.defaultLeadTime) || 0;
             
             if (isUsageBasedAssetType) {
                 console.log(`Asset type ${assetType.asset_type_id} configured for usage-based maintenance with lead time ${assetTypeUsageLeadTime}`);

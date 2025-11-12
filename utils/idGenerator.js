@@ -50,7 +50,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'vendor_doc': 'tblVendorDocs',
         'asset_maint_doc': 'tblAssetMaintDocs',
         'atp': 'tblAssetTypeProps',
-        'userjobrole': 'tblUserJobRoles'
+        'userjobrole': 'tblUserJobRoles',
+        'asset_usage': 'tblAssetUsageReg'
     };
 
     const targetTable = tableMap[tableKey];
@@ -76,7 +77,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'vendor_doc': 'vd_id',
             'asset_maint_doc': 'amd_id',
             'atp': 'asset_type_prop_id',
-            'userjobrole': 'user_job_role_id'
+            'userjobrole': 'user_job_role_id',
+            'asset_usage': 'aug_id'
         };
 
         const columnName = columnMap[tableKey];

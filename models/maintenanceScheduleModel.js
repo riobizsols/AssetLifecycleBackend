@@ -18,6 +18,7 @@ const getUsageBasedMaintenanceSettings = async () => {
         SELECT org_id, key, value
         FROM "tblOrgSettings"
         WHERE key IN ('at_id_usage_based', 'at_ub_lead_time')
+           OR key ~* '^AT[0-9]+$'
     `;
 
     return await db.query(query);
