@@ -1,0 +1,5 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-11-13T12:48:12.686Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":34}",106,USR001
+2025-11-13T12:48:54.427Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":34}",100,USR001
+2025-11-13T14:02:14.931Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":34}",79,USR001
+2025-11-13T16:34:49.211Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":34}",155,USR001

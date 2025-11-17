@@ -1,0 +1,13 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-11-13T11:16:01.644Z,INFO,QUERYING_EXPIRED_ASSETS,AssetController,"INFO: Querying expired assets from database","{""operation"":""fetch_expired_assets""}",N/A,N/A,USR001
+2025-11-13T11:16:01.650Z,INFO,GET_EXPIRED_ASSETS_API_CALLED,AssetController,"INFO: Get expired assets API called","{""operation"":""get_expired_assets""}",N/A,37,USR001
+2025-11-13T11:16:01.742Z,INFO,EXPIRED_ASSETS_RETRIEVED,AssetController,"INFO: Retrieved 14 expired assets","{""count"":14,""message"":""Retrieved 14 expired assets""}",N/A,N/A,USR001
+2025-11-13T11:16:08.909Z,INFO,QUERYING_EXPIRED_ASSETS,AssetController,"INFO: Querying expired assets from database","{""operation"":""fetch_expired_assets""}",N/A,N/A,USR001
+2025-11-13T11:16:08.911Z,INFO,GET_EXPIRED_ASSETS_API_CALLED,AssetController,"INFO: Get expired assets API called","{""operation"":""get_expired_assets""}",N/A,135,USR001
+2025-11-13T11:16:09.243Z,INFO,EXPIRED_ASSETS_RETRIEVED,AssetController,"INFO: Retrieved 14 expired assets","{""count"":14,""message"":""Retrieved 14 expired assets""}",N/A,N/A,USR001
+2025-11-13T11:16:14.220Z,INFO,QUERYING_EXPIRED_ASSETS,AssetController,"INFO: Querying expired assets from database","{""operation"":""fetch_expired_assets""}",N/A,N/A,USR001
+2025-11-13T11:16:14.222Z,INFO,GET_EXPIRED_ASSETS_API_CALLED,AssetController,"INFO: Get expired assets API called","{""operation"":""get_expired_assets""}",N/A,78,USR001
+2025-11-13T11:16:14.272Z,INFO,EXPIRED_ASSETS_RETRIEVED,AssetController,"INFO: Retrieved 14 expired assets","{""count"":14,""message"":""Retrieved 14 expired assets""}",N/A,N/A,USR001
+2025-11-13T11:16:58.058Z,INFO,GET_EXPIRED_ASSETS_API_CALLED,AssetController,"INFO: Get expired assets API called","{""operation"":""get_expired_assets""}",N/A,89,USR001
+2025-11-13T11:16:58.061Z,INFO,QUERYING_EXPIRED_ASSETS,AssetController,"INFO: Querying expired assets from database","{""operation"":""fetch_expired_assets""}",N/A,N/A,USR001
+2025-11-13T11:16:58.112Z,INFO,EXPIRED_ASSETS_RETRIEVED,AssetController,"INFO: Retrieved 14 expired assets","{""count"":14,""message"":""Retrieved 14 expired assets""}",N/A,N/A,USR001
