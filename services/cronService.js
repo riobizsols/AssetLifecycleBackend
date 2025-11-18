@@ -8,6 +8,7 @@ class CronService {
     constructor() {
         this.baseURL = BACKEND_URL;
         this.apiToken = process.env.CRON_API_TOKEN;
+        this.maintenanceCronTask = null; // Store the cron task reference
     }
 
     // Initialize all cron jobs
@@ -43,8 +44,8 @@ class CronService {
 
     // Schedule maintenance schedule generation
     scheduleMaintenanceGeneration() {
-        // Run every day at 12:00 AM (midnight)
-        cron.schedule('0 0 * * *', async () => {
+        // Run every 24 hours at 12:00 AM (midnight) - Currently paused, only runs via manual trigger
+        this.maintenanceCronTask = cron.schedule('0 0 * * *', async () => {
             const startTime = Date.now();
             const executionTime = new Date().toISOString();
             const userId = 'SYSTEM'; // Cron jobs run as system
@@ -75,17 +76,18 @@ class CronService {
                 console.error('❌ [CRON] Error in maintenance schedule generation:', error.message);
             }
         }, {
-            scheduled: true,
+            scheduled: false, // Paused - will only run when manually triggered from dashboard
             timezone: "Asia/Kolkata" // IST timezone
         });
 
         maintenanceCronLogger.logMaintenanceScheduleCronStarted({
-            schedule: '0 0 * * *',
+            schedule: '0 0 * * * (Every 24 hours - PAUSED)',
             timezone: 'Asia/Kolkata',
             userId: 'SYSTEM'
         }).catch(err => console.error('Logging error:', err));
 
-        console.log('📅 [CRON] Maintenance schedule generation scheduled for every day at 12:00 AM (IST)');
+        console.log('📅 [CRON] Maintenance schedule generation configured to run every 24 hours at 12:00 AM (IST) - CURRENTLY PAUSED');
+        console.log('   → The cron job will only execute when manually triggered from the dashboard');
     }
 
     // Call the maintenance schedule generation API
@@ -160,10 +162,12 @@ class CronService {
     getCronStatus() {
         return {
             maintenanceGeneration: {
-                schedule: '0 0 * * *', // Every day at 12:00 AM
-                description: 'Generate maintenance schedules for assets every day at 12:00 AM (IST)',
+                schedule: '0 0 * * *', // Every 24 hours at 12:00 AM
+                description: 'Generate maintenance schedules for assets every 24 hours at 12:00 AM (IST) - Currently PAUSED',
                 timezone: 'Asia/Kolkata',
-                nextRun: 'Daily at midnight IST'
+                nextRun: 'Paused - Only runs when manually triggered',
+                status: 'PAUSED',
+                canTrigger: true
             },
             workflowCutoffEscalation: {
                 name: 'Workflow Cutoff Date Escalation',

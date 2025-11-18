@@ -54,10 +54,13 @@ const auditLogRoutes = require("./routes/auditLogRoutes");
 const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const fcmRoutes = require("./routes/fcmRoutes");
 const CronService = require("./services/cronService");
-
+// const setupWizardRoutes = require("./routes/setupWizardRoutes");
 
 const app = express();
-app.use(express.json());
+const jsonParser = express.json({ limit: "10mb" });
+const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
+app.use(jsonParser);
+app.use(urlEncodedParser);
 
 // Configure query parser to handle array parameters
 const qs = require('qs');
@@ -68,9 +71,30 @@ app.set('query parser', (str) => {
   });
 });
 
-// Log every incoming request
+// Log every incoming API request and response
 app.use((req, res, next) => {
-  console.log(`[INCOMING REQUEST] ${req.method} ${req.originalUrl}`);
+  const startTime = Date.now();
+  const timestamp = new Date().toISOString();
+  
+  // Log incoming request
+  console.log(`[API REQUEST] [${timestamp}] ${req.method} ${req.originalUrl}`);
+  
+  // Store original res.json to intercept responses
+  const originalJson = res.json;
+  res.json = function(body) {
+    const duration = Date.now() - startTime;
+    console.log(`[API RESPONSE] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+    return originalJson.call(this, body);
+  };
+  
+  // Handle response finish for status codes
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    if (res.statusCode >= 400) {
+      console.log(`[API ERROR] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+    }
+  });
+  
   next();
 });
 
@@ -80,11 +104,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json());
 
 // PORT is now imported from environment config
 
 app.use("/api/auth", authRoutes);
+// app.use("/api/setup", setupWizardRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
