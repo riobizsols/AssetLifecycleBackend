@@ -54,7 +54,7 @@ const auditLogRoutes = require("./routes/auditLogRoutes");
 const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const fcmRoutes = require("./routes/fcmRoutes");
 const CronService = require("./services/cronService");
-// const setupWizardRoutes = require("./routes/setupWizardRoutes");
+const setupWizardRoutes = require("./routes/setupWizardRoutes");
 
 const app = express();
 const jsonParser = express.json({ limit: "10mb" });
@@ -108,7 +108,7 @@ app.use(
 // PORT is now imported from environment config
 
 app.use("/api/auth", authRoutes);
-// app.use("/api/setup", setupWizardRoutes);
+app.use("/api/setup", setupWizardRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
