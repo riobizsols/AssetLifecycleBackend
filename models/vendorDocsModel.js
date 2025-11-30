@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Insert vendor document
 const insertVendorDoc = async ({
@@ -18,7 +23,9 @@ const insertVendorDoc = async ({
     RETURNING *
   `;
   const values = [vd_id, vendor_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // List vendor documents by vendor ID
@@ -45,7 +52,9 @@ const listVendorDocs = async (vendor_id) => {
     WHERE vd.vendor_id = $1
     ORDER BY vd.vd_id DESC
   `;
-  return db.query(query, [vendor_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vendor_id]);
 };
 
 // Get vendor document by ID
@@ -64,7 +73,9 @@ const getVendorDocById = async (vd_id) => {
     LEFT JOIN "tblDocTypeObjects" dto ON vd.dto_id = dto.dto_id
     WHERE vd.vd_id = $1
   `;
-  return db.query(query, [vd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vd_id]);
 };
 
 // List vendor documents by vendor ID and dto_id
@@ -91,7 +102,9 @@ const listVendorDocsByDto = async (vendor_id, dto_id) => {
     WHERE vd.vendor_id = $1 AND vd.dto_id = $2
     ORDER BY vd.vd_id DESC
   `;
-  return db.query(query, [vendor_id, dto_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vendor_id, dto_id]);
 };
 
 // Check if vendor exists
@@ -99,7 +112,9 @@ const checkVendorExists = async (vendor_id) => {
   const query = `
     SELECT vendor_id FROM "tblVendors" WHERE vendor_id = $1
   `;
-  return db.query(query, [vendor_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vendor_id]);
 };
 
 // Update vendor document archive status
@@ -111,7 +126,9 @@ const updateVendorDocArchiveStatus = async (vd_id, is_archived, archived_path) =
     RETURNING *
   `;
   const values = [vd_id, is_archived, archived_path];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // Archive vendor document (legacy function)
@@ -122,7 +139,9 @@ const archiveVendorDoc = async (vd_id, archived_path) => {
     WHERE vd_id = $1
     RETURNING *
   `;
-  return db.query(query, [vd_id, archived_path]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vd_id, archived_path]);
 };
 
 // Delete vendor document
@@ -131,7 +150,9 @@ const deleteVendorDoc = async (vd_id) => {
     DELETE FROM "tblVendorDocs" WHERE vd_id = $1
     RETURNING *
   `;
-  return db.query(query, [vd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [vd_id]);
 };
 
 module.exports = { 

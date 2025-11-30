@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { getDb } = require('../utils/dbContext');
 const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
@@ -7,7 +7,7 @@ const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
-  const result = await pool.query(
+  const result = await getDb().query(
     'SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1',
     [empIntId]
   );
@@ -27,7 +27,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       WHERE wfh.asset_id = $1 AND wfd.org_id = $2
     `;
     
-    const basicResult = await pool.query(basicQuery, [assetId, orgId]);
+    const basicResult = await getDb().query(basicQuery, [assetId, orgId]);
     console.log('Basic check - Total records for asset:', basicResult.rows[0].total_records);
     
     // Let's check what status values exist for this asset
@@ -38,7 +38,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       WHERE wfh.asset_id = $1 AND wfd.org_id = $2
     `;
     
-    const statusResult = await pool.query(statusQuery, [assetId, orgId]);
+    const statusResult = await getDb().query(statusQuery, [assetId, orgId]);
     console.log('Status check - All records for asset:', statusResult.rows);
     
     // ROLE-BASED WORKFLOW: Query now shows job role instead of specific user
@@ -114,7 +114,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       ORDER BY wfd.sequence ASC
     `;
 
-    const result = await pool.query(query, [orgId, assetId]);
+    const result = await getDb().query(query, [orgId, assetId]);
     const approvalDetails = result.rows;
 
     console.log('Raw approval details from database:', approvalDetails);
@@ -251,7 +251,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     const userRolesQuery = `
       SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
     `;
-    const userRolesResult = await pool.query(userRolesQuery, [userId]);
+    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
     
     if (userRoleIds.length === 0) {
@@ -271,7 +271,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
       // ROLE-BASED: Find workflow step where user has the required role
       const currentQuery = `
@@ -282,7 +282,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
@@ -298,7 +298,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     
     // ROLE-BASED: Update workflow step status to UA (User Approved)
     // user_id remains NULL - only job_role_id is used
-    await pool.query(
+    await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
        SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
@@ -309,11 +309,11 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who approved
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await pool.query(historyIdQuery);
+    const historyIdResult = await getDb().query(historyIdQuery);
     const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
     const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
     
-    await pool.query(
+    await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
         wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
       ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
@@ -330,13 +330,13 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
       ORDER BY wfd.sequence ASC
     `;
-    const allStepsResult = await pool.query(allWorkflowStepsQuery, [currentUserStep.wfamsh_id, orgId]);
+    const allStepsResult = await getDb().query(allWorkflowStepsQuery, [currentUserStep.wfamsh_id, orgId]);
     const allWorkflowSteps = allStepsResult.rows;
     
     const nextUserStep = allWorkflowSteps.find(w => w.sequence > currentUserStep.sequence);
     if (nextUserStep) {
       // Update next user's status to AP (Approval Pending)
-      await pool.query(
+      await getDb().query(
         `UPDATE "tblWFAssetMaintSch_D" 
          SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
          WHERE wfamsd_id = $3`,
@@ -347,11 +347,11 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       
       // Insert history record for next user status change
       const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-      const nextHistoryIdResult = await pool.query(nextHistoryIdQuery);
+      const nextHistoryIdResult = await getDb().query(nextHistoryIdQuery);
       const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
       const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
       
-      await pool.query(
+      await getDb().query(
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
@@ -386,7 +386,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
         ) latest_status
       `;
       
-      const approvalCheckResult = await pool.query(allUsersApprovedQuery, [currentUserStep.wfamsh_id]);
+      const approvalCheckResult = await getDb().query(allUsersApprovedQuery, [currentUserStep.wfamsh_id]);
       const { total_users, approved_users } = approvalCheckResult.rows[0];
       
       console.log(`Approval check - Total users: ${total_users}, Approved users: ${approved_users}`);
@@ -417,7 +417,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     const userRolesQuery = `
       SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
     `;
-    const userRolesResult = await pool.query(userRolesQuery, [userId]);
+    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
     
     if (userRoleIds.length === 0) {
@@ -437,7 +437,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
       // ROLE-BASED: Find workflow step where user has the required role
       const currentQuery = `
@@ -448,7 +448,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
-      currentResult = await pool.query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
@@ -464,7 +464,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     
     // ROLE-BASED: Update workflow step status to UR (User Rejected)
     // user_id remains NULL - only job_role_id is used
-    await pool.query(
+    await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
        SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
@@ -475,11 +475,11 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who rejected
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await pool.query(historyIdQuery);
+    const historyIdResult = await getDb().query(historyIdQuery);
     const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
     const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
     
-    await pool.query(
+    await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
         wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
       ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
@@ -500,12 +500,12 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       LIMIT 1
     `;
     
-    const previousApprovedResult = await pool.query(previousApprovedUserQuery, [currentUserStep.wfamsh_id, currentUserStep.sequence]);
+    const previousApprovedResult = await getDb().query(previousApprovedUserQuery, [currentUserStep.wfamsh_id, currentUserStep.sequence]);
     const previousApprovedUser = previousApprovedResult.rows[0];
 
     if (previousApprovedUser) {
       // Update previous user's status back to AP (Approval Pending)
-      await pool.query(
+      await getDb().query(
         `UPDATE "tblWFAssetMaintSch_D" 
          SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
          WHERE wfamsd_id = $3`,
@@ -516,11 +516,11 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       
       // Insert history record for previous user status revert
       const prevHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-      const prevHistoryIdResult = await pool.query(prevHistoryIdQuery);
+      const prevHistoryIdResult = await getDb().query(prevHistoryIdQuery);
       const prevNextHistoryId = (prevHistoryIdResult.rows[0].max_num || 0) + 1;
       const prevWfamhisId = `WFAMHIS_${prevNextHistoryId.toString().padStart(2, '0')}`;
       
-      await pool.query(
+      await getDb().query(
         `INSERT INTO "tblWFAssetMaintHist" (
           wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
         ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
@@ -542,7 +542,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
           INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
           WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
         `;
-        const workflowInfoResult = await pool.query(workflowInfoQuery, [currentUserStep.wfamsh_id, orgId]);
+        const workflowInfoResult = await getDb().query(workflowInfoQuery, [currentUserStep.wfamsh_id, orgId]);
         const workflowInfo = workflowInfoResult.rows[0];
         
         // Get job role information for previous approver
@@ -551,7 +551,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
           FROM "tblJobRoles"
           WHERE job_role_id = $1
         `;
-        const jobRoleResult = await pool.query(jobRoleQuery, [previousApprovedUser.job_role_id]);
+        const jobRoleResult = await getDb().query(jobRoleQuery, [previousApprovedUser.job_role_id]);
         const jobRoleInfo = jobRoleResult.rows[0];
         
         if (workflowInfo && jobRoleInfo) {
@@ -561,7 +561,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
             FROM "tblJobRoles"
             WHERE job_role_id = $1
           `;
-          const rejectingUserRoleResult = await pool.query(rejectingUserRoleQuery, [currentUserStep.job_role_id]);
+          const rejectingUserRoleResult = await getDb().query(rejectingUserRoleQuery, [currentUserStep.job_role_id]);
           const rejectingRoleName = rejectingUserRoleResult.rows[0]?.job_role_name || 'next approver';
           
           // Send notification with rejection/reversion content
@@ -604,7 +604,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       ) latest_status
     `;
     
-    const rejectionCheckResult = await pool.query(rejectionCheckQuery, [currentUserStep.wfamsh_id]);
+    const rejectionCheckResult = await getDb().query(rejectionCheckQuery, [currentUserStep.wfamsh_id]);
     const { total_users, rejected_users } = rejectionCheckResult.rows[0];
     
     console.log(`Rejection check - Total: ${total_users}, Rejected: ${rejected_users}`);
@@ -629,7 +629,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       ) latest_status
     `;
     
-    const deadlockResult = await pool.query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
+    const deadlockResult = await getDb().query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
     const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
     
     console.log(`Deadlock check - Total: ${total_users}, Rejected: ${rejected_users}, Approved: ${approved_users}, Pending: ${pending_users}`);
@@ -699,7 +699,7 @@ const getWorkflowHistory = async (assetId, orgId = 'ORG001') => {
     
     console.log(`Querying history for asset ${assetId} and org ${orgId}`);
     
-    const result = await pool.query(historyQuery, [assetId, orgId]);
+    const result = await getDb().query(historyQuery, [assetId, orgId]);
     console.log(`Found ${result.rows.length} history records for asset ${assetId}`);
     console.log('History records:', result.rows);
     return result.rows;
@@ -751,7 +751,7 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
     
     console.log(`Querying history for workflow ${wfamshId} and org ${orgId}`);
     
-    const result = await pool.query(historyQuery, [wfamshId, orgId]);
+    const result = await getDb().query(historyQuery, [wfamshId, orgId]);
     console.log(`Found ${result.rows.length} history records for workflow ${wfamshId}`);
     console.log('History records:', result.rows);
     
@@ -837,7 +837,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
       ) latest_status
     `;
     
-    const statusResult = await pool.query(statusQuery, [wfamshId]);
+    const statusResult = await getDb().query(statusQuery, [wfamshId]);
     const { total_users, approved_users, rejected_users, pending_users } = statusResult.rows[0];
     
     console.log(`Workflow status check - Total: ${total_users}, Approved: ${approved_users}, Rejected: ${rejected_users}, Pending: ${pending_users}`);
@@ -846,7 +846,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      if (parseInt(approved_users) === parseInt(total_users)) {
        console.log(`All users approved! Total: ${total_users}, Approved: ${approved_users}`);
        
-       await pool.query(
+       await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
           SET status = 'CO', 
               changed_by = 'system', 
@@ -871,7 +871,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
     
          // Check for cancellation (all users rejected OR no approved user to return to)
      if (parseInt(rejected_users) === parseInt(total_users)) {
-       await pool.query(
+       await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
           SET status = 'CA', 
               changed_by = 'system', 
@@ -885,7 +885,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      
      // Check for cancellation when no approved users and no pending users
      if (parseInt(approved_users) === 0 && parseInt(pending_users) === 0) {
-       await pool.query(
+       await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
           SET status = 'CA', 
               changed_by = 'system', 
@@ -926,7 +926,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      // ROLE-BASED: Get user's roles first
      const userQuery = `SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`;
-     const userResult = await pool.query(userQuery, [empIntId]);
+     const userResult = await getDb().query(userQuery, [empIntId]);
      
      if (userResult.rows.length === 0) {
        console.log('User not found with emp_int_id:', empIntId);
@@ -936,7 +936,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      const userId = userResult.rows[0].user_id;
      
      const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
-     const rolesResult = await pool.query(rolesQuery, [userId]);
+     const rolesResult = await getDb().query(rolesQuery, [userId]);
      const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
      
      if (userRoleIds.length === 0) {
@@ -988,7 +988,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
 
-     const result = await pool.query(query, [orgId, userBranchCode, userRoleIds]);
+     const result = await getDb().query(query, [orgId, userBranchCode, userRoleIds]);
      console.log('Query executed successfully, found rows:', result.rows.length);
      console.log('Sample row (if any):', result.rows[0] || 'No rows found');
      return result.rows;
@@ -1019,7 +1019,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         WHERE key = 'm_supervisor_role' 
         AND org_id = $1
       `;
-      const orgSettingsResult = await pool.query(orgSettingsQuery, [orgId]);
+      const orgSettingsResult = await getDb().query(orgSettingsQuery, [orgId]);
       
       if (orgSettingsResult.rows.length === 0) {
         console.log('No m_supervisor_role setting found in tblOrgSettings');
@@ -1035,7 +1035,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         FROM "tblAssets" 
         WHERE asset_id = $1 AND org_id = $2
       `;
-      const assetResult = await pool.query(assetQuery, [assetId, orgId]);
+      const assetResult = await getDb().query(assetQuery, [assetId, orgId]);
       const assetName = assetResult.rows.length > 0 ? assetResult.rows[0].asset_name : 'Asset';
       
       // Step 3: Find all users with the supervisor job role
@@ -1046,7 +1046,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         WHERE ujr.job_role_id = $1
         AND u.int_status = 1
       `;
-      const usersResult = await pool.query(usersQuery, [supervisorRoleId]);
+      const usersResult = await getDb().query(usersQuery, [supervisorRoleId]);
       
       console.log(`Query for supervisor role ${supervisorRoleId} returned ${usersResult.rows.length} users`);
       if (usersResult.rows.length > 0) {
@@ -1069,7 +1069,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           WHERE jr.job_role_id = $1
           GROUP BY jr.job_role_id, jr.text
         `;
-        const debugResult = await pool.query(debugQuery, [supervisorRoleId]);
+        const debugResult = await getDb().query(debugQuery, [supervisorRoleId]);
         console.log('Debug - Role info:', debugResult.rows[0] || 'Role not found');
         
         // Also check if USR015 exists and their roles
@@ -1082,7 +1082,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           LEFT JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
           WHERE u.user_id = 'USR015' OR u.emp_int_id = 'USR015'
         `;
-        const userCheckResult = await pool.query(userCheckQuery);
+        const userCheckResult = await getDb().query(userCheckQuery);
         console.log('Debug - USR015 info:', userCheckResult.rows);
         
         return { success: false, reason: 'No supervisors found' };
@@ -1099,7 +1099,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
             FROM "tblNotificationPreferences"
             WHERE user_id = $1 AND notification_type = $2
           `;
-          const preferenceCheck = await pool.query(preferenceCheckQuery, [user.user_id, 'workflow_completed']);
+          const preferenceCheck = await getDb().query(preferenceCheckQuery, [user.user_id, 'workflow_completed']);
           
           if (preferenceCheck.rows.length === 0) {
             // Create default preference for workflow_completed
@@ -1110,7 +1110,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
                 is_enabled, email_enabled, push_enabled
               ) VALUES ($1, $2, $3, true, true, true)
             `;
-            await pool.query(insertPreferenceQuery, [preferenceId, user.user_id, 'workflow_completed']);
+            await getDb().query(insertPreferenceQuery, [preferenceId, user.user_id, 'workflow_completed']);
             console.log(`Initialized workflow_completed preference for user ${user.user_id} (${user.full_name})`);
           } else {
             const pushEnabled = preferenceCheck.rows[0].push_enabled;
@@ -1234,7 +1234,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
       `;
      
      console.log('Executing workflow query with params:', [wfamshId, orgId]);
-     const workflowResult = await pool.query(workflowQuery, [wfamshId, orgId]);
+     const workflowResult = await getDb().query(workflowQuery, [wfamshId, orgId]);
      console.log('Workflow query result rows:', workflowResult.rows.length);
      
      if (workflowResult.rows.length === 0) {
@@ -1277,7 +1277,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          AND org_id = $1
          LIMIT 1
        `;
-       const softwareAssetTypeResult = await pool.query(softwareAssetTypeQuery, [orgId]);
+       const softwareAssetTypeResult = await getDb().query(softwareAssetTypeQuery, [orgId]);
        const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
        const originalMaintTypeId = workflowData.maint_type_id || 'MT002';
        const isSoftwareAsset = (softwareAssetTypeId && workflowData.asset_type_id === softwareAssetTypeId) || originalMaintTypeId === 'MT001';
@@ -1312,7 +1312,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          ) as max_num 
          FROM "tblAssetMaintSch"
        `;
-       const maxIdResult = await pool.query(maxIdQuery);
+       const maxIdResult = await getDb().query(maxIdQuery);
        const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
        const amsId = `ams${nextId.toString().padStart(3, '0')}`;
        
@@ -1366,7 +1366,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          notes: groupNotes
        });
        
-       await pool.query(insertQuery, insertParams);
+       await getDb().query(insertQuery, insertParams);
        
        // Notify maintenance supervisors (using representative asset_id)
        console.log(`=== About to notify maintenance supervisors for group ${workflowData.group_id} ===`);
@@ -1408,7 +1408,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
            WHERE brd.abr_id = $1 AND brd.org_id = $2
          `;
-         const breakdownResult = await pool.query(breakdownQuery, [breakdownId, orgId]);
+         const breakdownResult = await getDb().query(breakdownQuery, [breakdownId, orgId]);
          if (breakdownResult.rows.length > 0) {
            breakdownReasonCode = breakdownResult.rows[0].breakdown_reason || breakdownResult.rows[0].atbrrc_id;
            console.log('Found breakdown reason:', breakdownReasonCode);
@@ -1443,7 +1443,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
            WHERE brd.abr_id = $1 AND brd.org_id = $2
          `;
-         const breakdownResult = await pool.query(breakdownQuery, [breakdownId, orgId]);
+         const breakdownResult = await getDb().query(breakdownQuery, [breakdownId, orgId]);
          if (breakdownResult.rows.length > 0) {
            breakdownReasonCode = breakdownResult.rows[0].breakdown_reason || breakdownResult.rows[0].atbrrc_id;
            console.log('Found BF03 breakdown reason:', breakdownReasonCode);
@@ -1469,7 +1469,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        AND org_id = $1
        LIMIT 1
      `;
-     const softwareAssetTypeResult = await pool.query(softwareAssetTypeQuery, [orgId]);
+     const softwareAssetTypeResult = await getDb().query(softwareAssetTypeQuery, [orgId]);
      const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
      
      // Check original maintenance type from workflow header (before breakdown override)
@@ -1535,7 +1535,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        ];
        
        console.log('BF03 update query params:', updateParams);
-       const updateResult = await pool.query(updateQuery, updateParams);
+       const updateResult = await getDb().query(updateQuery, updateParams);
        
       if (updateResult.rows.length === 0) {
         console.error('Failed to update existing schedule for BF03.');
@@ -1592,7 +1592,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        ];
        
        console.log('BF01 update query params:', updateParams);
-       const updateResult = await pool.query(updateQuery, updateParams);
+       const updateResult = await getDb().query(updateQuery, updateParams);
        
        if (updateResult.rows.length === 0) {
          console.error('Failed to update existing schedule. Creating new one instead.');
@@ -1639,7 +1639,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         ) as max_num 
         FROM "tblAssetMaintSch"
       `;
-      const maxIdResult = await pool.query(maxIdQuery);
+      const maxIdResult = await getDb().query(maxIdQuery);
       const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
       const amsId = `ams${nextId.toString().padStart(3, '0')}`;
       
@@ -1688,7 +1688,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      console.log('Work Order ID to insert:', isSoftwareAsset ? null : workOrderId);
      console.log('About to execute insert query...');
      
-     await pool.query(insertQuery, insertParams);
+     await getDb().query(insertQuery, insertParams);
      
      console.log('Maintenance record created successfully with ams_id:', amsId);
      
@@ -1776,7 +1776,7 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
       ORDER BY wfh.created_on DESC
     `;
 
-    const headersResult = await pool.query(headersQuery, [assetId, orgId]);
+    const headersResult = await getDb().query(headersQuery, [assetId, orgId]);
     const workflowHeaders = headersResult.rows;
     
     console.log('Found workflow headers:', workflowHeaders.length);
@@ -1826,7 +1826,7 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         ORDER BY wfd.sequence ASC
       `;
 
-      const detailsResult = await pool.query(detailsQuery, [header.wfamsh_id, orgId]);
+      const detailsResult = await getDb().query(detailsQuery, [header.wfamsh_id, orgId]);
       const workflowDetails = detailsResult.rows;
       
       console.log(`Workflow ${header.wfamsh_id} has ${workflowDetails.length} details`);
@@ -1944,7 +1944,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
     `;
     
-    const basicResult = await pool.query(basicQuery, [wfamshId, orgId]);
+    const basicResult = await getDb().query(basicQuery, [wfamshId, orgId]);
     console.log('Basic check - Total records for wfamsh_id:', basicResult.rows[0].total_records);
     
     // Let's check what status values exist for this wfamsh_id
@@ -1955,7 +1955,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
     `;
     
-    const statusResult = await pool.query(statusQuery, [wfamshId, orgId]);
+    const statusResult = await getDb().query(statusQuery, [wfamshId, orgId]);
     console.log('Status check - All records for wfamsh_id:', statusResult.rows);
     
     const query = `
@@ -2036,7 +2036,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       ORDER BY wfd.sequence ASC
     `;
 
-    const result = await pool.query(query, [orgId, wfamshId]);
+    const result = await getDb().query(query, [orgId, wfamshId]);
     const approvalDetails = result.rows;
 
     console.log('Raw approval details from database:', approvalDetails);
@@ -2076,7 +2076,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         LIMIT 1
       `;
       
-      const breakdownResult = await pool.query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
+      const breakdownResult = await getDb().query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
       const breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
       
       // Fetch regular checklist items for this asset
@@ -2197,7 +2197,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           WHERE a.group_id = $1 AND a.org_id = $2
           ORDER BY a.text ASC
         `;
-        const groupAssetsResult = await pool.query(groupAssetsQuery, [firstRecord.group_id, orgId]);
+        const groupAssetsResult = await getDb().query(groupAssetsQuery, [firstRecord.group_id, orgId]);
         groupAssets = groupAssetsResult.rows.map(asset => ({
           assetId: asset.asset_id,
           assetName: asset.asset_name,

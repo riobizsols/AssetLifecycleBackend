@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Generate SSH ID (Scrap Sales Header ID)
 const generateSshId = async () => {
@@ -8,7 +13,10 @@ const generateSshId = async () => {
         WHERE ssh_id LIKE 'SSH%'
     `;
     
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query);
     const nextSeq = result.rows[0].next_seq;
     const sshId = `SSH${nextSeq.toString().padStart(4, '0')}`;
     
@@ -24,7 +32,10 @@ const generateSsdId = async () => {
         WHERE ssd_id LIKE 'SSD%'
     `;
     
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query);
     const nextSeq = result.rows[0].next_seq;
     const ssdId = `SSD${nextSeq.toString().padStart(4, '0')}`;
     
@@ -162,7 +173,9 @@ const createScrapSalesDetails = async (client, ssh_id, scrapAssets) => {
 
 // Create complete scrap sale (header + details)
 const createScrapSale = async (saleData) => {
-    const client = await db.connect();
+    const dbPool = getDb();
+
+    const client = await dbPool.connect();
     
     try {
         await client.query('BEGIN');
@@ -221,7 +234,10 @@ const getAllScrapSales = async (org_id, userBranchCode) => {
         ORDER BY ssh.created_on DESC
     `;
     
-    const result = await db.query(query, [org_id, userBranchCode]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [org_id, userBranchCode]);
     console.log('Query executed successfully, found scrap sales:', result.rows.length);
     return result;
 };
@@ -232,7 +248,9 @@ const getScrapSaleById = async (ssh_id) => {
     const headerQuery = `
         SELECT * FROM "tblScrapSales_H" WHERE ssh_id = $1
     `;
-    const headerResult = await db.query(headerQuery, [ssh_id]);
+    const dbPool = getDb();
+
+    const headerResult = await dbPool.query(headerQuery, [ssh_id]);
 
     if (headerResult.rows.length === 0) {
         return null;
@@ -256,7 +274,8 @@ const getScrapSaleById = async (ssh_id) => {
         WHERE ssd.ssh_id = $1
         ORDER BY ssd.ssd_id
     `;
-    const detailsResult = await db.query(detailsQuery, [ssh_id]);
+
+    const detailsResult = await dbPool.query(detailsQuery, [ssh_id]);
 
     return {
         header: headerResult.rows[0],
@@ -285,12 +304,14 @@ const validateScrapAssets = async (asdIds) => {
         WHERE asd.asd_id IN (${placeholders})
     `;
     
-    return await db.query(query, asdIds);
+    return await dbPool.query(query, asdIds);
 };
 
 // Delete scrap sale (header, details, and documents)
 const deleteScrapSale = async (ssh_id) => {
-    const client = await db.connect();
+    const dbPool = getDb();
+
+    const client = await dbPool.connect();
     
     try {
         await client.query('BEGIN');

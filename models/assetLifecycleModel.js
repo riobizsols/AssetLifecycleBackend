@@ -1,4 +1,9 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get asset lifecycle data with all necessary joins
 const getAssetLifecycleData = async (filters = {}) => {
@@ -402,7 +407,9 @@ const getAssetLifecycleData = async (filters = {}) => {
   console.log('🔍 [AssetLifecycleModel] Executing query:', query);
   
   try {
-    const result = await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    const result = await dbPool.query(query, queryParams);
     console.log('🔍 [AssetLifecycleModel] Query result count:', result.rows.length);
     return result;
   } catch (error) {
@@ -738,7 +745,9 @@ const getAssetLifecycleCount = async (filters = {}) => {
   `;
 
   try {
-    const result = await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    const result = await dbPool.query(query, queryParams);
     return result.rows[0].total;
   } catch (error) {
     console.error('❌ [AssetLifecycleModel] Count query error:', error);
@@ -790,7 +799,9 @@ const getAssetLifecycleFilterOptions = async () => {
   `;
 
   try {
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    const result = await dbPool.query(query);
     return result.rows[0];
   } catch (error) {
     console.error('❌ [AssetLifecycleModel] Filter options query error:', error);

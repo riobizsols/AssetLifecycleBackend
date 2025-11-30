@@ -1,7 +1,12 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
 
 const getAllBranches = async (org_id) => {
-  const result = await db.query('SELECT * FROM "tblBranches" WHERE org_id = $1', [org_id]);
+  const dbPool = getDb();
+  const result = await dbPool.query('SELECT * FROM "tblBranches" WHERE org_id = $1', [org_id]);
   return result.rows;
 };
 
@@ -9,7 +14,8 @@ const addBranch = async (branch) => {
   const { branch_id, org_id, text, city, branch_code, created_by } =
     branch;
 
-  const result = await db.query(
+  const dbPool = getDb();
+  const result = await dbPool.query(
     `INSERT INTO "tblBranches" (
         branch_id, org_id, text, city, branch_code, created_by, created_on
       ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
@@ -21,7 +27,8 @@ const addBranch = async (branch) => {
 };
 
 const deleteBranches = async (ids = []) => {
-  const result = await db.query(
+  const dbPool = getDb();
+  const result = await dbPool.query(
     `DELETE FROM "tblBranches" WHERE branch_id = ANY($1::text[])`,
     [ids]
   );
@@ -31,7 +38,8 @@ const deleteBranches = async (ids = []) => {
 const updateBranch = async (branch_id, data, changed_by) => {
   const { text, city, branch_code } = data;
   
-  const result = await db.query(
+  const dbPool = getDb();
+  const result = await dbPool.query(
     `UPDATE "tblBranches" 
      SET text = $1, 
          city = $2, 

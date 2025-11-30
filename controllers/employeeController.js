@@ -1,12 +1,10 @@
 const model = require("../models/employeeModel");
 const userJobRoleModel = require("../models/userJobRoleModel");
 const { sendWelcomeEmail, sendRoleAssignmentEmail } = require("../utils/mailer");
-const db = require("../config/db");
-
 // Helper function to get organization name from employee's department
 const getOrganizationNameFromEmployee = async (emp_int_id) => {
     try {
-        const result = await db.query(`
+        const result = await dbPool.query(`
             SELECT o.text as org_name 
             FROM "tblEmployees" e
             JOIN "tblDepartments" d ON e.dept_id = d.dept_id
@@ -48,8 +46,6 @@ const getEmployeeById = async (req, res) => {
     }
 };
 
-
-
 // GET /api/employees/department/:dept_id - Get employees by department
 const getEmployeesByDepartment = async (req, res) => {
     try {
@@ -61,12 +57,6 @@ const getEmployeesByDepartment = async (req, res) => {
         res.status(500).json({ error: "Failed to fetch employees by department" });
     }
 };
-
-
-
-
-
-
 
 // GET /api/employees/with-roles - Get all employees with their current job roles
 const getAllEmployeesWithJobRoles = async (req, res) => {
@@ -138,7 +128,9 @@ const assignRoleToEmployee = async (req, res) => {
         }
 
         // Get role details for email
-        const roleDetails = await db.query(
+        const dbPool = req.db || require("../config/db");
+
+        const roleDetails = await dbPool.query(
             `SELECT job_role_id, text as job_role_name 
              FROM "tblJobRoles" 
              WHERE job_role_id = ANY($1)`,
@@ -146,7 +138,7 @@ const assignRoleToEmployee = async (req, res) => {
         );
 
         // Get user details for email
-        const userDetails = await db.query(
+        const userDetails = await dbPool.query(
             `SELECT user_id, full_name, email 
              FROM "tblUsers" 
              WHERE user_id = $1`,

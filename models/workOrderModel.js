@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get all work orders from tblAssetMaintSch with detailed information
 const getAllWorkOrders = async (orgId, userBranchId) => {
@@ -196,7 +201,10 @@ const getAllWorkOrders = async (orgId, userBranchId) => {
         ORDER BY ams.created_on DESC
     `;
     
-    return await db.query(query, [orgId, userBranchId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [orgId, userBranchId]);
 };
 
 // Get work order by ID with detailed information
@@ -405,7 +413,10 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
           )
     `;
     
-    const result = await db.query(query, [amsId, orgId, userBranchId]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [amsId, orgId, userBranchId]);
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {
@@ -434,7 +445,10 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
                 ORDER BY a.text ASC
             `;
             
-            const groupAssetsResult = await db.query(groupAssetsQuery, [groupId, orgId]);
+            const dbPool = getDb();
+
+            
+            const groupAssetsResult = await dbPool.query(groupAssetsQuery, [groupId, orgId]);
             workOrder.group_assets = groupAssetsResult.rows;
             workOrder.is_group_maintenance = true;
             workOrder.group_asset_count = groupAssetsResult.rows.length;

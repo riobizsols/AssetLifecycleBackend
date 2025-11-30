@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Insert asset group document
 const insertAssetGroupDoc = async ({
@@ -18,7 +23,9 @@ const insertAssetGroupDoc = async ({
     RETURNING *
   `;
   const values = [agd_id, asset_group_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // List asset group documents by group ID
@@ -45,7 +52,9 @@ const listAssetGroupDocs = async (asset_group_id) => {
     WHERE agd.asset_group_id = $1
     ORDER BY agd.agd_id DESC
   `;
-  return db.query(query, [asset_group_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_group_id]);
 };
 
 // Get asset group document by ID
@@ -71,7 +80,9 @@ const getAssetGroupDocById = async (agd_id) => {
     LEFT JOIN "tblDocTypeObjects" dto ON agd.dto_id = dto.dto_id
     WHERE agd.agd_id = $1
   `;
-  return db.query(query, [agd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [agd_id]);
 };
 
 // List asset group documents by group ID and dto_id
@@ -98,7 +109,9 @@ const listAssetGroupDocsByDto = async (asset_group_id, dto_id) => {
     WHERE agd.asset_group_id = $1 AND agd.dto_id = $2
     ORDER BY agd.agd_id DESC
   `;
-  return db.query(query, [asset_group_id, dto_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_group_id, dto_id]);
 };
 
 // Check if asset group exists
@@ -106,7 +119,9 @@ const checkAssetGroupExists = async (asset_group_id) => {
   const query = `
     SELECT assetgroup_h_id FROM "tblAssetGroup_H" WHERE assetgroup_h_id = $1
   `;
-  return db.query(query, [asset_group_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_group_id]);
 };
 
 // Update asset group document archive status
@@ -118,7 +133,9 @@ const updateAssetGroupDocArchiveStatus = async (agd_id, is_archived, archived_pa
     RETURNING *
   `;
   const values = [agd_id, is_archived, archived_path];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // Archive asset group document (legacy function)
@@ -129,7 +146,9 @@ const archiveAssetGroupDoc = async (agd_id, archived_path) => {
     WHERE agd_id = $1
     RETURNING *
   `;
-  return db.query(query, [agd_id, archived_path]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [agd_id, archived_path]);
 };
 
 // Delete asset group document
@@ -138,7 +157,9 @@ const deleteAssetGroupDoc = async (agd_id) => {
     DELETE FROM "tblAssetGroupDocs" WHERE agd_id = $1
     RETURNING *
   `;
-  return db.query(query, [agd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [agd_id]);
 };
 
 module.exports = { 

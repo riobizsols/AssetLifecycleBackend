@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 class AppEventsModel {
     /**
@@ -23,7 +28,10 @@ class AppEventsModel {
                 ORDER BY e.text ASC
             `;
             
-            const result = await db.query(query, [appId]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [appId]);
             return result.rows;
         } catch (error) {
             console.error('Error in getEnabledEventsForApp:', error);
@@ -52,7 +60,10 @@ class AppEventsModel {
                 ORDER BY e.text ASC
             `;
             
-            const result = await db.query(query, [appId]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [appId]);
             return result.rows;
         } catch (error) {
             console.error('Error in getAllEventsForApp:', error);
@@ -77,7 +88,10 @@ class AppEventsModel {
                 WHERE app_id = $1
             `;
             
-            const result = await db.query(query, [appId]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [appId]);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error in getAppInfo:', error);
@@ -102,7 +116,10 @@ class AppEventsModel {
                 ORDER BY text ASC
             `;
             
-            const result = await db.query(query);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query);
             return result.rows;
         } catch (error) {
             console.error('Error in getAllApps:', error);
@@ -124,7 +141,10 @@ class AppEventsModel {
                 ORDER BY text ASC
             `;
             
-            const result = await db.query(query);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query);
             return result.rows;
         } catch (error) {
             console.error('Error in getAllEvents:', error);
@@ -146,7 +166,10 @@ class AppEventsModel {
                 ORDER BY text ASC
             `;
             
-            const result = await db.query(query);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query);
             return result.rows;
         } catch (error) {
             console.error('Error in getUniqueEvents:', error);

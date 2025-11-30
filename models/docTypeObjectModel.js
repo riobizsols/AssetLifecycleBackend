@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 const getAllDocTypeObjects = async (org_id = null) => {
     let query = `
@@ -20,7 +25,10 @@ const getAllDocTypeObjects = async (org_id = null) => {
     
     query += ` ORDER BY dto_id`;
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 const getDocTypeObjectById = async (dto_id) => {
@@ -35,7 +43,10 @@ const getDocTypeObjectById = async (dto_id) => {
         WHERE dto_id = $1
     `;
     
-    return await db.query(query, [dto_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [dto_id]);
 };
 
 const getDocTypeObjectsByObjectType = async (object_type, org_id = null) => {
@@ -64,7 +75,10 @@ const getDocTypeObjectsByObjectType = async (object_type, org_id = null) => {
         END,
         dto_id`;
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 const getDocTypeObjectsByDocType = async (doc_type, org_id = null) => {
@@ -88,7 +102,10 @@ const getDocTypeObjectsByDocType = async (doc_type, org_id = null) => {
     
     query += ` ORDER BY dto_id`;
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 const getCommonDocTypeObjects = async (org_id = null) => {
@@ -112,7 +129,10 @@ const getCommonDocTypeObjects = async (org_id = null) => {
     
     query += ` ORDER BY dto_id`;
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 module.exports = {

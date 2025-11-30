@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 class AuditLogModel {
     /**
@@ -8,7 +13,9 @@ class AuditLogModel {
     static async generateSequentialId() {
         try {
             // Get the highest existing al_id that matches the new format (AL001, AL002, etc.)
-            const result = await db.query(`
+            const dbPool = getDb();
+
+            const result = await dbPool.query(`
                 SELECT al_id 
                 FROM "tblAuditLogs" 
                 WHERE al_id ~ '^AL[0-9]{3}$'
@@ -54,7 +61,10 @@ class AuditLogModel {
                 AND enabled = true
             `;
             
-            const result = await db.query(query, [appId, eventId]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [appId, eventId]);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error in isEventEnabled:', error);
@@ -95,7 +105,10 @@ class AuditLogModel {
                 RETURNING *
             `;
             
-            const result = await db.query(query, [al_id, user_id, app_id, event_id, truncatedText, org_id]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [al_id, user_id, app_id, event_id, truncatedText, org_id]);
             return result.rows[0];
         } catch (error) {
             console.error('Error in createAuditLog:', error);
@@ -201,7 +214,10 @@ class AuditLogModel {
             query += ` ORDER BY al.created_on DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
             queryParams.push(limit, offset);
 
-            const result = await db.query(query, queryParams);
+            const dbPool = getDb();
+
+
+            const result = await dbPool.query(query, queryParams);
             return result.rows;
         } catch (error) {
             console.error('Error in getUserAuditLogs:', error);
@@ -258,7 +274,10 @@ class AuditLogModel {
             query += ` ORDER BY al.created_on DESC LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}`;
             queryParams.push(limit, offset);
 
-            const result = await db.query(query, queryParams);
+            const dbPool = getDb();
+
+
+            const result = await dbPool.query(query, queryParams);
             return result.rows;
         } catch (error) {
             console.error('Error in getAppAuditLogs:', error);
@@ -323,7 +342,10 @@ class AuditLogModel {
                 queryParams.push(date_to);
             }
 
-            const result = await db.query(query, queryParams);
+            const dbPool = getDb();
+
+
+            const result = await dbPool.query(query, queryParams);
             return result.rows[0];
         } catch (error) {
             console.error('Error in getAuditLogStats:', error);
@@ -383,7 +405,9 @@ class AuditLogModel {
                 FROM "tblAuditLogs" al
                 WHERE ${whereClause}
             `;
-            const countResult = await db.query(countQuery, queryParams);
+            const dbPool = getDb();
+
+            const countResult = await dbPool.query(countQuery, queryParams);
             const total_count = parseInt(countResult.rows[0].total_count);
 
             // Calculate offset for pagination
@@ -413,7 +437,7 @@ class AuditLogModel {
             `;
             
             queryParams.push(limit, offset);
-            const auditLogsResult = await db.query(auditLogsQuery, queryParams);
+            const auditLogsResult = await dbPool.query(auditLogsQuery, queryParams);
 
             return {
                 audit_logs: auditLogsResult.rows,

@@ -1,9 +1,14 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('./dbContext');
+
+// Helper to get database (tenant or default)
+const getDb = () => getDbFromContext();
 
 exports.generateCustomId = async (tableKey, padLength = 3) => {
     console.log(`🔢 Generating ID for tableKey: ${tableKey}`);
     
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
     );
@@ -18,7 +23,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     console.log(`🔢 Current last_number: ${last_number}, Next number: ${next}`);
 
     // Update the last number
-    await db.query(
+    await dbPool.query(
         'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
         [next, tableKey]
     );
@@ -51,7 +56,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'asset_maint_doc': 'tblAssetMaintDocs',
         'atp': 'tblAssetTypeProps',
         'userjobrole': 'tblUserJobRoles',
-        'asset_usage': 'tblAssetUsageReg'
+        'asset_usage': 'tblAssetUsageReg',
+        'vendor_sla': 'tblVendorSLAs'
     };
 
     const targetTable = tableMap[tableKey];
@@ -78,12 +84,13 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'asset_maint_doc': 'amd_id',
             'atp': 'asset_type_prop_id',
             'userjobrole': 'user_job_role_id',
-            'asset_usage': 'aug_id'
+            'asset_usage': 'aug_id',
+            'vendor_sla': 'vsla_id'
         };
 
         const columnName = columnMap[tableKey];
         if (columnName) {
-            const existingCheck = await db.query(
+            const existingCheck = await dbPool.query(
                 `SELECT ${columnName} FROM "${targetTable}" WHERE ${columnName} = $1`,
                 [generatedId]
             );
@@ -103,7 +110,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
 
 
 exports.peekNextId = async (prefix, table, column, padding = 3) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `SELECT ${column} FROM ${table} 
        ORDER BY CAST(SUBSTRING(${column} FROM '\\d+$') AS INTEGER) DESC 
        LIMIT 1`

@@ -1,24 +1,38 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 const getAllOrganizations = async () => {
-  const result = await db.query(`SELECT * FROM "tblOrgs" ORDER BY org_id DESC`);
+  const dbPool = getDb();
+
+  const result = await dbPool.query(`SELECT * FROM "tblOrgs" ORDER BY org_id DESC`);
   return result.rows;
 };
 
 const getOrganizationById = async (orgId) => {
-  const result = await db.query(`SELECT * FROM "tblOrgs" WHERE org_id = $1`, [orgId]);
+  const dbPool = getDb();
+
+  const result = await dbPool.query(`SELECT * FROM "tblOrgs" WHERE org_id = $1`, [orgId]);
   return result.rows[0];
 };
 
 const addOrganization = async (org) => {
-  const { org_id, org_code, text, org_city, int_status = 1, valid_from, valid_to } = org;
+  const { org_id, org_code, text, org_city, subdomain, int_status = 1, valid_from, valid_to } = org;
 
-  const result = await db.query(
+  const dbPool = getDb();
+
+  // Check if subdomain column exists, if not, add it without subdomain
+  const result = await dbPool.query(
     `INSERT INTO "tblOrgs" (
-        org_id, org_code, text, org_city, int_status, valid_from, valid_to
-     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        org_id, org_code, text, org_city, ${subdomain ? 'subdomain, ' : ''}int_status, valid_from, valid_to
+     ) VALUES ($1, $2, $3, $4, ${subdomain ? '$5, $6, $7, $8' : '$5, $6, $7'})
      RETURNING *`,
-    [org_id, org_code, text, org_city, int_status, valid_from, valid_to]
+    subdomain 
+      ? [org_id, org_code, text, org_city, subdomain, int_status, valid_from, valid_to]
+      : [org_id, org_code, text, org_city, int_status, valid_from, valid_to]
   );
 
   return result.rows[0];
@@ -27,7 +41,10 @@ const addOrganization = async (org) => {
 const updateOrganization = async (org) => {
   const { org_id, org_code, text, org_city } = org;
 
-  const result = await db.query(
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(
     `UPDATE "tblOrgs"
      SET org_code = $2,
          text = $3,
@@ -48,7 +65,9 @@ const checkOrgReferences = async (org_id) => {
       FROM "tblUsers" 
       WHERE org_id = $1
     `;
-    const usersResult = await db.query(usersQuery, [org_id]);
+    const dbPool = getDb();
+
+    const usersResult = await dbPool.query(usersQuery, [org_id]);
     const userCount = parseInt(usersResult.rows[0].user_count);
 
     // Check if organization is referenced by other tables
@@ -74,7 +93,10 @@ const deleteOrganizations = async (org_id = []) => {
       }
     }
 
-    const result = await db.query(
+    const dbPool = getDb();
+
+
+    const result = await dbPool.query(
       `DELETE FROM "tblOrgs" WHERE org_id = ANY($1::text[])`,
       [org_id]
     );

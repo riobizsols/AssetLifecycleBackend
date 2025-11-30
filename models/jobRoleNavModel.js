@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 /**
  * Get navigation items for a specific job role filtered by platform
@@ -8,7 +13,9 @@ const db = require('../config/db');
  */
 // Get navigation items for a specific job role
 const getNavigationByJobRole = async (job_role_id, platform = 'D') => {
-    const result = await db.query(
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
         `SELECT 
             job_role_nav_id as id,
             int_status,
@@ -30,7 +37,9 @@ const getNavigationByJobRole = async (job_role_id, platform = 'D') => {
 
 // Get all navigation items for all job roles
 const getAllNavigationItems = async () => {
-    const result = await db.query(
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
         `SELECT 
             job_role_nav_id as id,
             int_status,
@@ -62,7 +71,10 @@ const createNavigationItem = async (data) => {
         mobile_desktop = 'D'
     } = data;
 
-    const result = await db.query(
+    const dbPool = getDb();
+
+
+    const result = await dbPool.query(
         `INSERT INTO "tblJobRoleNav" 
          (job_role_id, parent_id, app_id, label, is_group, seq, access_level, mobile_desktop, int_status)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1)
@@ -84,7 +96,10 @@ const updateNavigationItem = async (id, data) => {
         mobile_desktop
     } = data;
 
-    const result = await db.query(
+    const dbPool = getDb();
+
+
+    const result = await dbPool.query(
         `UPDATE "tblJobRoleNav" 
          SET parent_id = $2, 
              app_id = $3, 
@@ -102,7 +117,9 @@ const updateNavigationItem = async (id, data) => {
 
 // Delete navigation item
 const deleteNavigationItem = async (id) => {
-    const result = await db.query(
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
         `UPDATE "tblJobRoleNav" 
          SET int_status = 0
          WHERE id = $1
@@ -159,28 +176,49 @@ const getNavigationStructure = async (job_role_id, platform = 'D') => {
  */
 // Get user's navigation based on their job roles (supports multiple roles)
 const getUserNavigation = async (user_id, platform = 'D') => {
-    // Get all user's job roles
-    const userJobRoleQuery = await db.query(
-        `SELECT job_role_id FROM "tblUserJobRoles" 
-         WHERE user_id = $1`,
-        [user_id]
-    );
-    
-    if (userJobRoleQuery.rows.length === 0) {
-        return [];
+    try {
+        // Get all user's job roles
+        const dbPool = getDb();
+        
+        console.log(`[JobRoleNavModel] Getting navigation for user_id: ${user_id}, platform: ${platform}`);
+        console.log(`[JobRoleNavModel] Using database pool: ${dbPool ? 'EXISTS' : 'NULL'}`);
+
+        const userJobRoleQuery = await dbPool.query(
+            `SELECT job_role_id FROM "tblUserJobRoles" 
+             WHERE user_id = $1`,
+            [user_id]
+        );
+        
+        console.log(`[JobRoleNavModel] User job roles found: ${userJobRoleQuery.rows.length}`);
+        
+        if (userJobRoleQuery.rows.length === 0) {
+            console.log(`[JobRoleNavModel] No job roles found for user ${user_id}`);
+            return [];
+        }
+        
+        const job_role_ids = userJobRoleQuery.rows.map(row => row.job_role_id);
+        console.log(`[JobRoleNavModel] Job role IDs: ${job_role_ids.join(', ')}`);
+        
+        // Get navigation for all roles and combine permissions
+        const navigation = await getCombinedNavigationStructure(job_role_ids, platform);
+        console.log(`[JobRoleNavModel] Navigation items returned: ${navigation.length}`);
+        
+        return navigation;
+    } catch (error) {
+        console.error(`[JobRoleNavModel] Error in getUserNavigation:`, error);
+        throw error;
     }
-    
-    const job_role_ids = userJobRoleQuery.rows.map(row => row.job_role_id);
-    
-    // Get navigation for all roles and combine permissions
-    return await getCombinedNavigationStructure(job_role_ids, platform);
 };
 
 // Get combined navigation structure for multiple job roles
 const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
     try {
         // Get navigation items for all job roles
-        const allNavigationItems = await db.query(`
+        const dbPool = getDb();
+        
+        console.log(`[JobRoleNavModel] Getting combined navigation for job_role_ids: ${job_role_ids.join(', ')}, platform: ${platform}`);
+
+        const allNavigationItems = await dbPool.query(`
             SELECT 
                 jrn.job_role_nav_id as id,
                 jrn.job_role_id,
@@ -199,6 +237,8 @@ const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
             AND (jrn.mob_desk = $2 OR jrn.mob_desk IS NULL)
             ORDER BY jrn.sequence, jrn.label
         `, [job_role_ids, platform]);
+        
+        console.log(`[JobRoleNavModel] Navigation items from database: ${allNavigationItems.rows.length}`);
 
         // Group items by app_id and combine permissions
         const combinedItems = {};

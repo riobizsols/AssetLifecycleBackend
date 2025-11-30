@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { getDb } = require('../utils/dbContext');
 const { peekNextId } = require('../utils/idGenerator');
 const msModel = require('./maintenanceScheduleModel');
 
@@ -13,7 +13,7 @@ const getAllReports = async (orgId) => {
     WHERE brd.org_id = $1
     ORDER BY brd.reported_by DESC
   `;
-  const result = await pool.query(query, [orgId]);
+  const result = await getDb().query(query, [orgId]);
   return result.rows;
 };
 
@@ -44,7 +44,7 @@ const getBreakdownReasonCodes = async (orgId, assetTypeId = null) => {
   console.log('Reason codes query:', query);
   console.log('Reason codes params:', params);
   
-  const result = await pool.query(query, params);
+  const result = await getDb().query(query, params);
   console.log('Reason codes result:', result.rows.length, 'rows');
   
   return result.rows;
@@ -64,7 +64,7 @@ const getUpcomingMaintenanceDate = async (assetId) => {
     LIMIT 1
   `;
   
-  const result = await pool.query(query, [assetId]);
+  const result = await getDb().query(query, [assetId]);
   
   if (result.rows.length > 0) {
     return result.rows[0].act_maint_st_date;
@@ -80,7 +80,7 @@ const getUpcomingMaintenanceDate = async (assetId) => {
     LIMIT 1
   `;
   
-  const workflowResult = await pool.query(workflowQuery, [assetId]);
+  const workflowResult = await getDb().query(workflowQuery, [assetId]);
   
   return workflowResult.rows.length > 0 ? workflowResult.rows[0].act_sch_date : null;
 };
@@ -114,7 +114,8 @@ const getUpcomingMaintenanceWithRecommendation = async (assetId) => {
 
 // Create a new breakdown report with workflow integration and schedule handling
 const createBreakdownReport = async (breakdownData) => {
-  const client = await pool.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -446,7 +447,8 @@ const createBreakdownReport = async (breakdownData) => {
 
 // Update breakdown report
 const updateBreakdownReport = async (abrId, updateData) => {
-  const client = await pool.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     const {
       atbrrc_id,

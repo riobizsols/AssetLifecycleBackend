@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { getDb } = require('../utils/dbContext');
 
 const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
   // ROLE-BASED WORKFLOW: Fetch all users with the required job role
@@ -61,7 +61,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
   try {
-    const result = await pool.query(query, [orgId, branchId]);
+    const result = await getDb().query(query, [orgId, branchId]);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
@@ -158,7 +158,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     ORDER BY wfh.pl_sch_date ASC
   `;
   try {
-    const result = await pool.query(query, [orgId, branchId, empIntId]);
+    const result = await getDb().query(query, [orgId, branchId, empIntId]);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
@@ -187,7 +187,7 @@ const getNotificationStats = async (orgId = 'ORG001', branchId) => {
       AND wfd.user_id IS NOT NULL
   `;
   try {
-    const result = await pool.query(query, [orgId, branchId]);
+    const result = await getDb().query(query, [orgId, branchId]);
     return result.rows[0];
   } catch (error) {
     console.error('Error in getNotificationStats:', error);

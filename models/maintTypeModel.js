@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 const getAllMaintTypes = async () => {
     const query = `
@@ -11,7 +16,10 @@ const getAllMaintTypes = async () => {
         ORDER BY maint_type_id DESC
     `;
     
-    return await db.query(query);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query);
 };
 
 const getMaintTypeById = async (maint_type_id) => {
@@ -25,7 +33,10 @@ const getMaintTypeById = async (maint_type_id) => {
         WHERE maint_type_id = $1
     `;
     
-    return await db.query(query, [maint_type_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [maint_type_id]);
 };
 
 

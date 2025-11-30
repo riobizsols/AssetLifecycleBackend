@@ -1,5 +1,4 @@
 const model = require("../models/assetModel");
-const db = require("../config/db");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 const {
     // Generic helpers
@@ -337,7 +336,8 @@ const getAllAssets = async (req, res) => {
     const userBranchId = userWithBranch?.branch_id;
 
     // Use user context filtering - filter by user's org and branch
-    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId);
+    // Pass tenant database connection from request (req.db) to use tenant-specific database
+    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db);
     
     // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
@@ -1577,8 +1577,10 @@ const createAsset = async (req, res) => {
         if (prod_serv_id && purchase_vendor_id) {
             console.log('🔍 Checking vendor product service for prod_serv_id:', prod_serv_id, 'vendor_id:', purchase_vendor_id);
             
+            // Use tenant database from request context (set by middleware)
+            const dbPool = req.db || require("../config/db");
             // Check if the combination already exists in tblVendorProdService
-            const existingVendorProdService = await db.query(
+            const existingVendorProdService = await dbPool.query(
                 `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
                  WHERE prod_serv_id = $1 AND vendor_id = $2 AND org_id = $3`,
                 [prod_serv_id, purchase_vendor_id, org_id]
@@ -1588,7 +1590,7 @@ const createAsset = async (req, res) => {
                 console.log('📝 Creating new vendor product service record...');
                 
                 // Generate continuous ven_prod_serv_id
-                const venProdServResult = await db.query(
+                const venProdServResult = await dbPool.query(
                     `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
                      ORDER BY ven_prod_serv_id DESC LIMIT 1`
                 );
@@ -1604,7 +1606,7 @@ const createAsset = async (req, res) => {
                 const ven_prod_serv_id = `VPS${String(newNumber).padStart(3, '0')}`;
                 
                 // Insert new vendor product service record
-                await db.query(
+                await dbPool.query(
                     `INSERT INTO "tblVendorProdService" (ven_prod_serv_id, prod_serv_id, vendor_id, org_id)
                      VALUES ($1, $2, $3, $4)`,
                     [ven_prod_serv_id, prod_serv_id, purchase_vendor_id, org_id]
@@ -1642,12 +1644,14 @@ const createAsset = async (req, res) => {
         
         if (asset_type_id) {
             try {
+                // Use tenant database from request context (set by middleware)
+                const dbPool = req.db || require("../config/db");
                 const assetTypeQuery = `
                     SELECT depreciation_type 
                     FROM "tblAssetTypes" 
                     WHERE asset_type_id = $1
                 `;
-                const assetTypeResult = await db.query(assetTypeQuery, [asset_type_id]);
+                const assetTypeResult = await dbPool.query(assetTypeQuery, [asset_type_id]);
                 
                 if (assetTypeResult.rows.length > 0) {
                     depreciationType = assetTypeResult.rows[0].depreciation_type || 'SL';
@@ -1749,8 +1753,10 @@ if (useful_life_years && useful_life_years > 0) {
             comprehensive_insurance: comprehensive_insurance || null
         };
 
+        // Use tenant database from request context (set by middleware)
+        const dbPool = req.db || require("../config/db");
         // Start a transaction to ensure atomicity
-        const client = await db.connect();
+        const client = await dbPool.connect();
         
         try {
             await client.query('BEGIN');
@@ -1885,7 +1891,6 @@ const getAssetsCount = async (req, res) => {
 // GET /api/assets/assigned - Get count of assigned assets
 const getAssignedAssetsCount = async (req, res) => {
   try {
-    const db = require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -1906,7 +1911,9 @@ const getAssignedAssetsCount = async (req, res) => {
     `;
     const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
     
-    const debugResult = await db.query(debugQuery, debugParams);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const debugResult = await dbPool.query(debugQuery, debugParams);
     console.log('🔍 [Assigned Assets Debug]', {
       userOrgId,
       userBranchId,
@@ -1928,7 +1935,7 @@ const getAssignedAssetsCount = async (req, res) => {
       params.push(userBranchId);
     }
 
-    const result = await db.query(query, params);
+    const result = await dbPool.query(query, params);
     const count = parseInt(result.rows[0].count) || 0;
 
     res.json({
@@ -1954,7 +1961,6 @@ const getAssignedAssetsCount = async (req, res) => {
 // GET /api/assets/under-maintenance - Get count of assets under maintenance
 const getUnderMaintenanceAssetsCount = async (req, res) => {
   try {
-    const db = require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -1977,7 +1983,9 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
     `;
     const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
     
-    const debugResult = await db.query(debugQuery, debugParams);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const debugResult = await dbPool.query(debugQuery, debugParams);
     console.log('🔍 [Under Maintenance Assets Debug]', {
       userOrgId,
       userBranchId,
@@ -2008,7 +2016,7 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
       params.push(userBranchId);
     }
 
-    const result = await db.query(query, params);
+    const result = await dbPool.query(query, params);
     const count = parseInt(result.rows[0].count) || 0;
 
     res.json({
@@ -2034,7 +2042,6 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
 // GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
 const getDashboardSummary = async (req, res) => {
   try {
-    const db = require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -2086,7 +2093,9 @@ const getDashboardSummary = async (req, res) => {
     `;
     const params = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
     
-    const result = await db.query(summaryQuery, params);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(summaryQuery, params);
     const summary = result.rows[0];
 
     res.json({
@@ -2123,7 +2132,6 @@ const getDashboardSummary = async (req, res) => {
 // GET /api/assets/decommissioned - Get count of decommissioned assets
 const getDecommissionedAssetsCount = async (req, res) => {
   try {
-    const db = require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -2145,7 +2153,9 @@ const getDecommissionedAssetsCount = async (req, res) => {
     `;
     const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
     
-    const debugResult = await db.query(debugQuery, debugParams);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const debugResult = await dbPool.query(debugQuery, debugParams);
     console.log('🔍 [Decommissioned Assets Debug]', {
       userOrgId,
       userBranchId,
@@ -2166,7 +2176,7 @@ const getDecommissionedAssetsCount = async (req, res) => {
       params.push(userBranchId);
     }
 
-    const result = await db.query(query, params);
+    const result = await dbPool.query(query, params);
     const count = parseInt(result.rows[0].count) || 0;
 
     res.json({
@@ -2192,7 +2202,7 @@ const getDecommissionedAssetsCount = async (req, res) => {
 // GET /api/assets/department-distribution - Get department-wise asset distribution
 const getDepartmentWiseAssetDistribution = async (req, res) => {
   try {
-    const db = require("../config/db");
+    const dbPool = req.db || require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -2253,8 +2263,8 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
       unassignedQuery += ` AND a.branch_id = $${paramIndex}`;
     }
 
-    const result = await db.query(query, params);
-    const unassignedResult = await db.query(unassignedQuery, params);
+    const result = await dbPool.query(query, params);
+    const unassignedResult = await dbPool.query(unassignedQuery, params);
     
     const departments = result.rows.map(row => ({
       name: row.department_name,
@@ -2292,7 +2302,7 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
 // GET /api/assets/top-5-asset-types - Get top 5 asset types by count
 const getTop5AssetTypes = async (req, res) => {
   try {
-    const db = require("../config/db");
+    const dbPool = req.db || require("../config/db");
     const userModel = require("../models/userModel");
     const userId = req.user?.user_id;
     const userWithBranch = await userModel.getUserWithBranch(userId);
@@ -2331,7 +2341,7 @@ const getTop5AssetTypes = async (req, res) => {
       LIMIT 5
     `;
 
-    const result = await db.query(query, params);
+    const result = await dbPool.query(query, params);
     
     const assetTypes = result.rows.map(row => ({
       asset_type_id: row.asset_type_id,
