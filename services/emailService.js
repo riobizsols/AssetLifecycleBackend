@@ -135,7 +135,10 @@ const sendWorkflowNotificationToRole = async (workflowData, jobRoleId, orgId = '
             WHERE ujr.job_role_id = $1 AND u.int_status = 1 AND u.email IS NOT NULL
         `;
         
-        const usersResult = await db.query(usersQuery, [jobRoleId]);
+        // Use tenant database from context if available
+        const { getDbFromContext } = require('../utils/dbContext');
+        const dbPool = getDbFromContext();
+        const usersResult = await dbPool.query(usersQuery, [jobRoleId]);
         const users = usersResult.rows;
         
         if (users.length === 0) {

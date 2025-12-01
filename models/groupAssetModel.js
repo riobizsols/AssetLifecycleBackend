@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get available assets by asset type (excluding those already in asset groups)
 // Filters by org_id and branch_id if provided
@@ -66,7 +71,10 @@ const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null, branc
 
     query += ` ORDER BY a.text ASC`;
 
-    return await db.query(query, params);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query, params);
 };
 
 // Get all available assets (not in any group) for all asset types
@@ -115,7 +123,10 @@ const getAllAvailableAssets = async () => {
         ORDER BY at.text ASC, a.text ASC
     `;
 
-    return await db.query(query);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query);
 };
 
 // Get available assets by asset type with additional filters
@@ -196,7 +207,10 @@ const getAvailableAssetsByAssetTypeWithFilters = async (asset_type_id, filters =
 
     query += ` ORDER BY a.text ASC`;
 
-    return await db.query(query, params);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query, params);
 };
 
 // Get count of available assets by asset type
@@ -213,7 +227,10 @@ const getAvailableAssetsCountByAssetType = async (asset_type_id) => {
         )
     `;
 
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 // Check if asset is available for grouping
@@ -232,7 +249,10 @@ const isAssetAvailableForGrouping = async (asset_id) => {
         WHERE a.asset_id = $1
     `;
 
-    return await db.query(query, [asset_id]);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query, [asset_id]);
 };
 
 module.exports = {

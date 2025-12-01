@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Insert scrap sales document
 const insertScrapSalesDoc = async ({
@@ -18,7 +23,9 @@ const insertScrapSalesDoc = async ({
     RETURNING *
   `;
   const values = [ssdoc_id, ssh_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // List scrap sales documents by scrap sale ID
@@ -45,7 +52,9 @@ const listScrapSalesDocs = async (ssh_id) => {
     WHERE ssd.ssh_id = $1
     ORDER BY ssd.ssdoc_id DESC
   `;
-  return db.query(query, [ssh_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssh_id]);
 };
 
 // Get scrap sales document by ID
@@ -71,7 +80,9 @@ const getScrapSalesDocById = async (ssdoc_id) => {
     LEFT JOIN "tblDocTypeObjects" dto ON ssd.dto_id = dto.dto_id
     WHERE ssd.ssdoc_id = $1
   `;
-  return db.query(query, [ssdoc_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssdoc_id]);
 };
 
 // List scrap sales documents by scrap sale ID and document type
@@ -98,7 +109,9 @@ const listScrapSalesDocsByType = async (ssh_id, doc_type) => {
     WHERE ssd.ssh_id = $1 AND dto.doc_type = $2
     ORDER BY ssd.ssdoc_id DESC
   `;
-  return db.query(query, [ssh_id, doc_type]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssh_id, doc_type]);
 };
 
 // Check if scrap sale exists
@@ -106,7 +119,9 @@ const checkScrapSaleExists = async (ssh_id) => {
   const query = `
     SELECT ssh_id FROM "tblScrapSales_H" WHERE ssh_id = $1
   `;
-  return db.query(query, [ssh_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssh_id]);
 };
 
 // Archive scrap sales document
@@ -117,7 +132,9 @@ const archiveScrapSalesDoc = async (ssdoc_id, archived_path) => {
     WHERE ssdoc_id = $1
     RETURNING *
   `;
-  return db.query(query, [ssdoc_id, archived_path]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssdoc_id, archived_path]);
 };
 
 // Delete scrap sales document
@@ -126,7 +143,9 @@ const deleteScrapSalesDoc = async (ssdoc_id) => {
     DELETE FROM "tblScrapSalesDocs" WHERE ssdoc_id = $1
     RETURNING *
   `;
-  return db.query(query, [ssdoc_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [ssdoc_id]);
 };
 
 module.exports = { 

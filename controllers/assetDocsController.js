@@ -4,7 +4,6 @@ const crypto = require('crypto');
 const path = require('path');
 const { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus } = require('../models/assetDocsModel');
 const { generateCustomId } = require('../utils/idGenerator');
-const db = require('../config/db');
 const { 
     logDocumentUploadApiCalled,
     logUploadingToMinIO,

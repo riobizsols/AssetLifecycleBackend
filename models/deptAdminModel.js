@@ -1,9 +1,16 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 const { generateCustomId } = require('../utils/idGenerator');
 
 // Get all departments
 const getAllDepartments = async (org_id, branch_id) => {
-    const result = await db.query(`SELECT dept_id, text FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2`, [org_id, branch_id]);
+    const dbPool = getDb();
+
+    const result = await dbPool.query(`SELECT dept_id, text FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2`, [org_id, branch_id]);
     return result.rows;
 };
 
@@ -14,14 +21,19 @@ const getDepartmentIdByName = async (deptName, org_id, branch_id) => {
     console.log('org_id:', org_id);
     console.log('branch_id:', branch_id);
     
-    const result = await db.query(`SELECT dept_id FROM "tblDepartments" WHERE text = $1 AND org_id = $2 AND branch_id = $3`, [deptName, org_id, branch_id]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(`SELECT dept_id FROM "tblDepartments" WHERE text = $1 AND org_id = $2 AND branch_id = $3`, [deptName, org_id, branch_id]);
     console.log('Query executed successfully, found departments:', result.rows.length);
     return result.rows[0];
 };
 
 // Get all admins for a department
 const getAdminsByDeptId = async (dept_id, org_id, branch_id) => {
-    const result = await db.query(
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
         `SELECT u.user_id, u.full_name AS name, u.email
          FROM "tblDeptAdmins" da
          JOIN "tblUsers" u ON da.user_id = u.user_id
@@ -41,7 +53,10 @@ const getUsersByDeptId = async (dept_id, org_id, branch_id) => {
     console.log('org_id:', org_id);
     console.log('branch_id:', branch_id);
     
-    const result = await db.query(`
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(`
         SELECT u.user_id, u.full_name, u.email
         FROM "tblUsers" u
         JOIN "tblDepartments" d ON u.dept_id = d.dept_id
@@ -55,7 +70,10 @@ const getUsersByDeptId = async (dept_id, org_id, branch_id) => {
 const createDeptAdmin = async ({ dept_id, user_id, org_id, created_by }) => {
     const dept_admin_id = await generateCustomId("dept_admin", 3);
 
-    const result = await db.query(`
+    const dbPool = getDb();
+
+
+    const result = await dbPool.query(`
     INSERT INTO "tblDeptAdmins" (dept_admin_id, dept_id, user_id, org_id, created_by)
     VALUES ($1, $2, $3, $4, $5)
     RETURNING *
@@ -66,7 +84,7 @@ const createDeptAdmin = async ({ dept_id, user_id, org_id, created_by }) => {
 
 // Delete a department admin
 const deleteDeptAdmin = async ({ dept_id, user_id }) => {
-    await db.query(`DELETE FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`, [dept_id, user_id]);
+    await dbPool.query(`DELETE FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`, [dept_id, user_id]);
 };
 
 module.exports = {

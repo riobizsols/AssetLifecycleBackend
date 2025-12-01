@@ -1,9 +1,14 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
 
 // ✅ Fetch all departments
 const getAllDepartments = async (org_id, branch_id) => {
     // Fetch departments that match the branch_id exactly (excluding null values)
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         'SELECT * FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2', 
         [org_id, branch_id]
     );
@@ -19,7 +24,8 @@ const checkDepartmentReferences = async (dept_id) => {
             FROM "tblEmployees" 
             WHERE dept_id = $1
         `;
-        const employeesResult = await db.query(employeesQuery, [dept_id]);
+        const dbPool = getDb();
+        const employeesResult = await dbPool.query(employeesQuery, [dept_id]);
         const employeeCount = parseInt(employeesResult.rows[0].employee_count);
 
         // Check if department is referenced by other tables
@@ -44,7 +50,8 @@ const deleteDepartment = async (org_id, dept_id) => {
             throw new Error(`Cannot delete department ${dept_id} - it is referenced by ${references.employeeCount} employee(s)`);
         }
 
-        const result = await db.query(
+        const dbPool = getDb();
+    const result = await dbPool.query(
             `DELETE FROM "tblDepartments" WHERE org_id = $1 AND dept_id = $2`,
             [org_id, dept_id]
         );
@@ -68,7 +75,8 @@ const createDepartment = async (dept) => {
         changed_by = null
     } = dept;
 
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `INSERT INTO "tblDepartments" (
       org_id, dept_id, int_status, text, parent_id,
       branch_id, created_on, changed_on, created_by, changed_by
@@ -93,7 +101,8 @@ const createDepartment = async (dept) => {
 
 
 const updateDepartment = async ({ dept_id, org_id, text, changed_by }) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `UPDATE "tblDepartments"
          SET text = $1,
              changed_by = $2,

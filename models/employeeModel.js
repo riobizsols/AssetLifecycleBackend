@@ -1,5 +1,9 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require("../utils/idGenerator");
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
 
 // GET all employees
 const getAllEmployees = async () => {
@@ -13,7 +17,8 @@ const getAllEmployees = async () => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query);
+  const dbPool = getDb();
+  return await dbPool.query(query);
 };
 
 // GET employee by ID
@@ -28,7 +33,8 @@ const getEmployeeById = async (employee_id) => {
         WHERE employee_id = $1
     `;
 
-  return await db.query(query, [employee_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [employee_id]);
 };
 
 // GET employees by department
@@ -44,7 +50,8 @@ const getEmployeesByDepartment = async (dept_id) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [dept_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [dept_id]);
 };
 
 // GET all employees with their current job roles
@@ -63,7 +70,8 @@ const getAllEmployeesWithJobRoles = async () => {
         ORDER BY e.name
     `;
 
-  return await db.query(query);
+  const dbPool = getDb();
+  return await dbPool.query(query);
 };
 
 // Check existing employee IDs
@@ -76,7 +84,8 @@ const checkExistingEmployeeIds = async (employeeIds) => {
     WHERE employee_id IN (${placeholders})
   `;
   
-  const result = await db.query(query, employeeIds);
+  const dbPool = getDb();
+  const result = await dbPool.query(query, employeeIds);
   return result.rows.map(row => row.employee_id);
 };
 
@@ -127,7 +136,8 @@ const validateAndFormatDate = (dateString) => {
 
 // Bulk upsert employees (insert or update)
 const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) => {
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   
   try {
     await client.query('BEGIN');

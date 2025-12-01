@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get maintenance history with filtering capabilities
 const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
@@ -360,7 +365,10 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
         }
     }
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get maintenance history count for pagination
@@ -669,7 +677,10 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         });
     }
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get maintenance history by asset ID
@@ -722,7 +733,10 @@ const getMaintenanceHistoryByAsset = async (assetId, orgId = 'ORG001') => {
         ORDER BY ams.act_maint_st_date DESC, ams.created_on DESC
     `;
     
-    return await db.query(query, [assetId, orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [assetId, orgId]);
 };
 
 // Get maintenance history by work order ID
@@ -775,7 +789,10 @@ const getMaintenanceHistoryByWorkOrder = async (woId, orgId = 'ORG001') => {
         ORDER BY ams.act_maint_st_date DESC, ams.created_on DESC
     `;
     
-    return await db.query(query, [woId, orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [woId, orgId]);
 };
 
 // Get maintenance history summary statistics
@@ -794,7 +811,10 @@ const getMaintenanceHistorySummary = async (orgId = 'ORG001') => {
         WHERE org_id = $1
     `;
     
-    return await db.query(query, [orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [orgId]);
 };
 
 // Get available filter options for dropdowns
@@ -839,12 +859,13 @@ const getFilterOptions = async (orgId = 'ORG001') => {
         ORDER BY ams.status
     `;
     
+    const dbPool = getDb();
     const [assetResult, vendorResult, workOrderResult, maintenanceTypeResult, statusResult] = await Promise.all([
-        db.query(assetQuery, [orgId]),
-        db.query(vendorQuery, [orgId]),
-        db.query(workOrderQuery, [orgId]),
-        db.query(maintenanceTypeQuery, [orgId]),
-        db.query(statusQuery, [orgId])
+        dbPool.query(assetQuery, [orgId]),
+        dbPool.query(vendorQuery, [orgId]),
+        dbPool.query(workOrderQuery, [orgId]),
+        dbPool.query(maintenanceTypeQuery, [orgId]),
+        dbPool.query(statusQuery, [orgId])
     ]);
     
     return {

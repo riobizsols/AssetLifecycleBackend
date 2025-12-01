@@ -1,5 +1,12 @@
 const db = require('../config/db');
+const { getDb: getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => {
+  const contextDb = getDbFromContext();
+  return contextDb;
+};
 
 const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, depreciation_type = 'ND') => {
     const query = `
@@ -18,21 +25,30 @@ const insertAssetType = async (org_id, asset_type_id, int_status, maint_required
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type
     ];
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+    return await dbPool.query(query, values);
 };
 
-const getAllAssetTypes = async () => {
-    const query = `
+const getAllAssetTypes = async (org_id = null) => {
+    const dbPool = getDb();
+    let query = `
         SELECT 
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type
         FROM "tblAssetTypes"
-        ORDER BY created_on DESC
     `;
     
-    return await db.query(query);
+    const params = [];
+    if (org_id) {
+        query += ` WHERE org_id = $1`;
+        params.push(org_id);
+    }
+    
+    query += ` ORDER BY created_on DESC`;
+    
+    return await dbPool.query(query, params);
 };
 
 const getAssetTypeById = async (asset_type_id) => {
@@ -46,7 +62,8 @@ const getAssetTypeById = async (asset_type_id) => {
         WHERE asset_type_id = $1
     `;
     
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 const updateAssetType = async (asset_type_id, updateData, changed_by) => {
@@ -74,7 +91,8 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type, asset_type_id
     ];
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+    return await dbPool.query(query, values);
 };
 
 const checkAssetTypeExists = async (org_id, asset_type_id) => {
@@ -83,18 +101,20 @@ const checkAssetTypeExists = async (org_id, asset_type_id) => {
         WHERE org_id = $1 AND asset_type_id = $2
     `;
     
-    return await db.query(query, [org_id, asset_type_id]);
+    const dbPool = getDb();
+    return await dbPool.query(query, [org_id, asset_type_id]);
 };
 
 const checkAssetTypeReferences = async (asset_type_id) => {
     try {
+        const dbPool = getDb();
         // Check only tblAssets
         const assetsQuery = `
             SELECT a.asset_id, a.text as asset_name
             FROM "tblAssets" a
             WHERE a.asset_type_id = $1
         `;
-        const assetsResult = await db.query(assetsQuery, [asset_type_id]);
+        const assetsResult = await dbPool.query(assetsQuery, [asset_type_id]);
 
         // Return results
         return {
@@ -120,7 +140,8 @@ const getParentAssetTypes = async () => {
         ORDER BY text
     `;
     
-    return await db.query(query);
+    const dbPool = getDb();
+    return await dbPool.query(query);
 };
 
 const getAssetTypesByAssignmentType = async (assignment_type) => {
@@ -136,7 +157,8 @@ const getAssetTypesByAssignmentType = async (assignment_type) => {
         ORDER BY text
     `;
     
-    return await db.query(query, [assignment_type]);
+    const dbPool = getDb();
+    return await dbPool.query(query, [assignment_type]);
 };
 
 const getAssetTypesByGroupRequired = async () => {
@@ -152,7 +174,8 @@ const getAssetTypesByGroupRequired = async () => {
         ORDER BY text
     `;
     
-    return await db.query(query);
+    const dbPool = getDb();
+    return await dbPool.query(query);
 };
 
 const getAssetTypesByMaintRequired = async () => {
@@ -168,7 +191,8 @@ const getAssetTypesByMaintRequired = async () => {
     `;
     
     // maint_required = true AND
-    return await db.query(query);
+    const dbPool = getDb();
+    return await dbPool.query(query);
 };
 
 const deleteAssetType = async (asset_type_id) => {
@@ -179,7 +203,8 @@ const deleteAssetType = async (asset_type_id) => {
             RETURNING *
         `;
         
-        return await db.query(query, [asset_type_id]);
+        const dbPool = getDb();
+        return await dbPool.query(query, [asset_type_id]);
     } catch (error) {
         console.error('Error in deleteAssetType:', error);
         throw error;
@@ -189,6 +214,7 @@ const deleteAssetType = async (asset_type_id) => {
 // Property mapping functions
 const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, created_by) => {
     try {
+        const dbPool = getDb();
         console.log('🔍 mapAssetTypeToProperties called with:', {
             asset_type_id,
             property_ids,
@@ -198,7 +224,7 @@ const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, cre
 
         // First, delete existing mappings for this asset type
         console.log('🗑️ Deleting existing mappings for asset type:', asset_type_id);
-        await db.query(
+        await dbPool.query(
             'DELETE FROM "tblAssetTypeProps" WHERE asset_type_id = $1',
             [asset_type_id]
         );
@@ -219,7 +245,7 @@ const mapAssetTypeToProperties = async (asset_type_id, property_ids, org_id, cre
                     ) VALUES ($1, $2, $3, $4)
                 `;
                 console.log('📝 Executing insert query with values:', [asset_type_prop_id, asset_type_id, prop_id, org_id]);
-                await db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+                await dbPool.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
                 console.log(`✅ Property mapping ${index + 1} inserted successfully`);
             }
             
@@ -253,7 +279,8 @@ const getAssetTypeProperties = async (asset_type_id, org_id) => {
             ORDER BY p.property
         `;
         
-        const result = await db.query(query, [asset_type_id, org_id]);
+        const dbPool = getDb();
+        const result = await dbPool.query(query, [asset_type_id, org_id]);
         console.log('✅ Found properties:', result.rows.length);
         console.log('Properties:', result.rows);
         return result.rows;
@@ -265,6 +292,7 @@ const getAssetTypeProperties = async (asset_type_id, org_id) => {
 
 const getAllProperties = async (org_id) => {
     try {
+        const dbPool = getDb();
         const query = `
             SELECT 
                 prop_id,
@@ -276,7 +304,7 @@ const getAllProperties = async (org_id) => {
             ORDER BY property
         `;
         
-        const result = await db.query(query, [org_id]);
+        const result = await dbPool.query(query, [org_id]);
         return result.rows;
     } catch (error) {
         console.error('Error fetching all properties:', error);
@@ -289,8 +317,9 @@ const addAssetTypeProperty = async (asset_type_id, prop_id, org_id, created_by) 
     try {
         console.log('➕ Adding individual property to asset type:', { asset_type_id, prop_id, org_id });
         
+        const dbPool = getDb();
         // Check if mapping already exists
-        const existingCheck = await db.query(`
+        const existingCheck = await dbPool.query(`
             SELECT asset_type_prop_id FROM "tblAssetTypeProps" 
             WHERE asset_type_id = $1 AND prop_id = $2
         `, [asset_type_id, prop_id]);
@@ -311,7 +340,7 @@ const addAssetTypeProperty = async (asset_type_id, prop_id, org_id, created_by) 
             ) VALUES ($1, $2, $3, $4)
         `;
         
-        await db.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
+        await dbPool.query(query, [asset_type_prop_id, asset_type_id, prop_id, org_id]);
         console.log('✅ Property mapping added successfully');
         
         return { success: true, asset_type_prop_id };
@@ -332,7 +361,8 @@ const deleteAssetTypeProperty = async (asset_type_prop_id) => {
             RETURNING *
         `;
         
-        const result = await db.query(query, [asset_type_prop_id]);
+        const dbPool = getDb();
+        const result = await dbPool.query(query, [asset_type_prop_id]);
         console.log('✅ Asset type property mapping deleted:', result.rows.length > 0 ? 'Success' : 'Not found');
         
         return result;
@@ -350,28 +380,31 @@ const getAssetTypeByText = async (text, org_id) => {
         WHERE text = $1 AND org_id = $2
     `;
     
-    return await db.query(query, [text, org_id]);
+    const dbPool = getDb();
+    return await dbPool.query(query, [text, org_id]);
 };
 
 // Check if property exists
 const checkPropertyExists = async (prop_id, org_id) => {
+    const dbPool = getDb();
     const query = `
         SELECT prop_id
         FROM "tblProps"
         WHERE prop_id = $1 AND org_id = $2
     `;
     
-    return await db.query(query, [prop_id, org_id]);
+    return await dbPool.query(query, [prop_id, org_id]);
 };
 
 // Delete all property mappings for an asset type
 const deleteAssetTypePropertyMappings = async (asset_type_id) => {
+    const dbPool = getDb();
     const query = `
         DELETE FROM "tblAssetTypeProps"
         WHERE asset_type_id = $1
     `;
     
-    return await db.query(query, [asset_type_id]);
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 module.exports = {

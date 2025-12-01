@@ -1,4 +1,9 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 const getAllAssetAssignments = async () => {
   const query = `
@@ -9,7 +14,8 @@ const getAllAssetAssignments = async () => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query);
+  const dbPool = getDb();
+  return await dbPool.query(query);
 };
 
 const getAssetAssignmentById = async (asset_assign_id) => {
@@ -21,7 +27,8 @@ const getAssetAssignmentById = async (asset_assign_id) => {
         WHERE asset_assign_id = $1
     `;
 
-  return await db.query(query, [asset_assign_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_assign_id]);
 };
 
 const getAssetAssignmentsByDept = async (dept_id) => {
@@ -34,7 +41,8 @@ const getAssetAssignmentsByDept = async (dept_id) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [dept_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [dept_id]);
 };
 
 const getAssetAssignmentsByEmployee = async (employee_id) => {
@@ -50,7 +58,8 @@ const getAssetAssignmentsByEmployee = async (employee_id) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [employee_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [employee_id]);
 };
 
 const getAssetAssignmentsByAsset = async (asset_id) => {
@@ -63,7 +72,8 @@ const getAssetAssignmentsByAsset = async (asset_id) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const getLatestAssetAssignment = async (asset_id) => {
@@ -83,7 +93,8 @@ const getLatestAssetAssignment = async (asset_id) => {
         LIMIT 1
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const getAssetAssignmentsByStatus = async (action) => {
@@ -96,7 +107,8 @@ const getAssetAssignmentsByStatus = async (action) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [action]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [action]);
 };
 
 const getAssetAssignmentsByOrg = async (org_id) => {
@@ -109,7 +121,8 @@ const getAssetAssignmentsByOrg = async (org_id) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [org_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [org_id]);
 };
 
 const getActiveAssetAssignmentsByEmployee = async (employee_id) => {
@@ -122,7 +135,8 @@ const getActiveAssetAssignmentsByEmployee = async (employee_id) => {
         ORDER BY action_on DESC
     `;
 
-  return await db.query(query, [employee_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [employee_id]);
 };
 
 const getActiveAssetAssignmentsByEmployeeWithDetails = async (employee_id) => {
@@ -136,7 +150,8 @@ const getActiveAssetAssignmentsByEmployeeWithDetails = async (employee_id) => {
         WHERE e.emp_int_id = $1 OR e.employee_id = $1
     `;
 
-  const employeeResult = await db.query(employeeQuery, [employee_id]);
+  const dbPool = getDb();
+  const employeeResult = await dbPool.query(employeeQuery, [employee_id]);
   
   // Then get active asset assignments - search by both emp_int_id and employee_id
   const assignmentsQuery = `
@@ -152,7 +167,7 @@ const getActiveAssetAssignmentsByEmployeeWithDetails = async (employee_id) => {
         ORDER BY action_on DESC
     `;
 
-  const assignmentsResult = await db.query(assignmentsQuery, [employee_id]);
+  const assignmentsResult = await dbPool.query(assignmentsQuery, [employee_id]);
 
   return {
     employee: employeeResult.rows[0] || null,
@@ -175,7 +190,8 @@ const getAssetAssignmentWithDetails = async (asset_assign_id) => {
         WHERE aa.asset_assign_id = $1
     `;
 
-  return await db.query(query, [asset_assign_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_assign_id]);
 };
 
 const insertAssetAssignment = async (assignmentData) => {
@@ -209,7 +225,8 @@ const insertAssetAssignment = async (assignmentData) => {
     latest_assignment_flag,
   ];
 
-  return await db.query(query, values);
+  const dbPool = getDb();
+  return await dbPool.query(query, values);
 };
 
 const checkAssetAssignmentExists = async (asset_assign_id) => {
@@ -218,7 +235,8 @@ const checkAssetAssignmentExists = async (asset_assign_id) => {
         WHERE asset_assign_id = $1
     `;
 
-  return await db.query(query, [asset_assign_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_assign_id]);
 };
 
 const checkActiveAssignmentExists = async (asset_id, employee_id, org_id) => {
@@ -227,7 +245,8 @@ const checkActiveAssignmentExists = async (asset_id, employee_id, org_id) => {
         WHERE asset_id = $1 AND employee_int_id = $2 AND org_id = $3 AND latest_assignment_flag = true
     `;
 
-  return await db.query(query, [asset_id, employee_id, org_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id, employee_id, org_id]);
 };
 
 const updateAssetAssignment = async (asset_assign_id, updateData) => {
@@ -282,7 +301,8 @@ const updateAssetAssignment = async (asset_assign_id, updateData) => {
     RETURNING *
   `;
 
-  return await db.query(query, values);
+  const dbPool = getDb();
+  return await dbPool.query(query, values);
 };
 
 const updateAssetAssignmentByAssetId = async (asset_id, latest_assignment_flag) => {
@@ -295,7 +315,8 @@ const updateAssetAssignmentByAssetId = async (asset_id, latest_assignment_flag) 
 
   const values = [asset_id, latest_assignment_flag];
 
-  return await db.query(query, values);
+  const dbPool = getDb();
+  return await dbPool.query(query, values);
 };
 
 const deleteAssetAssignment = async (asset_assign_id) => {
@@ -305,7 +326,8 @@ const deleteAssetAssignment = async (asset_assign_id) => {
         RETURNING *
     `;
 
-  return await db.query(query, [asset_assign_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_assign_id]);
 };
 
 const deleteMultipleAssetAssignments = async (asset_assign_ids) => {
@@ -315,7 +337,8 @@ const deleteMultipleAssetAssignments = async (asset_assign_ids) => {
         RETURNING *
     `;
 
-  return await db.query(query, [asset_assign_ids]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_assign_ids]);
 };
 
 const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id) => {
@@ -330,7 +353,8 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id) => 
         GROUP BY d.dept_id, d.text, d.org_id, d.branch_id
     `;
 
-  const deptResult = await db.query(deptQuery, [dept_id, org_id, branch_id]);
+  const dbPool = getDb();
+  const deptResult = await dbPool.query(deptQuery, [dept_id, org_id, branch_id]);
 
   // Get assigned assets for department with org_id and branch_id filters
   const assignedAssetsQuery = `
@@ -350,7 +374,7 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id) => 
         ORDER BY a.text
     `;
 
-  const assignedAssetsResult = await db.query(assignedAssetsQuery, [dept_id, org_id, branch_id]);
+  const assignedAssetsResult = await dbPool.query(assignedAssetsQuery, [dept_id, org_id, branch_id]);
 
   // Get employees for the department (filtered by org_id)
   const employeesQuery = `
@@ -362,7 +386,7 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id) => 
         ORDER BY e.name
     `;
 
-  const employeesResult = await db.query(employeesQuery, [dept_id, org_id]);
+  const employeesResult = await dbPool.query(employeesQuery, [dept_id, org_id]);
 
   return {
     department: deptResult.rows[0] || null,

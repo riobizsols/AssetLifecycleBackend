@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 const { generateCustomId } = require('../utils/idGenerator');
 
 // Generate asset group header ID using centralized generator
@@ -31,7 +36,9 @@ const createAssetGroupHeader = async (org_id, assetgroup_h_id, text, created_by)
     `;
     
     const values = [assetgroup_h_id, org_id, text, created_by];
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    return await dbPool.query(query, values);
 };
 
 // Create asset group detail
@@ -44,12 +51,16 @@ const createAssetGroupDetail = async (assetgroup_d_id, assetgroup_h_id, asset_id
     `;
     
     const values = [assetgroup_d_id, assetgroup_h_id, asset_id];
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    return await dbPool.query(query, values);
 };
 
 // Create asset group with multiple assets (transaction)
 const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by) => {
-    const client = await db.connect();
+    const dbPool = getDb();
+
+    const client = await dbPool.connect();
     
     try {
         await client.query('BEGIN');
@@ -123,7 +134,10 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
         ORDER BY h.created_on DESC
     `;
     
-    const result = await db.query(query, [org_id, userBranchCode]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [org_id, userBranchCode]);
     console.log('Query executed successfully, found asset groups:', result.rows.length);
     return result;
 };
@@ -149,8 +163,10 @@ const getAssetGroupById = async (assetgroup_h_id) => {
         WHERE d.assetgroup_h_id = $1
     `;
     
-    const headerResult = await db.query(headerQuery, [assetgroup_h_id]);
-    const detailResult = await db.query(detailQuery, [assetgroup_h_id]);
+    const dbPool = getDb();
+
+    const headerResult = await dbPool.query(headerQuery, [assetgroup_h_id]);
+    const detailResult = await dbPool.query(detailQuery, [assetgroup_h_id]);
     
     return {
         header: headerResult.rows[0],
@@ -160,7 +176,9 @@ const getAssetGroupById = async (assetgroup_h_id) => {
 
 // Update asset group
 const updateAssetGroup = async (assetgroup_h_id, text, asset_ids, changed_by) => {
-    const client = await db.connect();
+    const dbPool = getDb();
+
+    const client = await dbPool.connect();
     
     try {
         await client.query('BEGIN');
@@ -264,7 +282,9 @@ const getAssetIdsInGroup = async (client, assetgroup_h_id) => {
 
 // Delete asset group
 const deleteAssetGroup = async (assetgroup_h_id) => {
-    const client = await db.connect();
+    const dbPool = getDb();
+
+    const client = await dbPool.connect();
     
     try {
         await client.query('BEGIN');

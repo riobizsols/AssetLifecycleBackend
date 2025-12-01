@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 class TechnicalLogConfigModel {
     /**
@@ -13,7 +18,9 @@ class TechnicalLogConfigModel {
                 FROM "tblTechnicalLogConfig" 
                 WHERE app_id = $1
             `;
-            const result = await db.query(query, [appId]);
+            const dbPool = getDb();
+
+            const result = await dbPool.query(query, [appId]);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error getting technical log config:', error);
@@ -32,7 +39,9 @@ class TechnicalLogConfigModel {
                 FROM "tblTechnicalLogConfig" 
                 ORDER BY app_id ASC
             `;
-            const result = await db.query(query);
+            const dbPool = getDb();
+
+            const result = await dbPool.query(query);
             return result.rows;
         } catch (error) {
             console.error('Error getting all technical log configs:', error);
@@ -61,7 +70,10 @@ class TechnicalLogConfigModel {
                 RETURNING *
             `;
             
-            const result = await db.query(query, [app_id, log_level, enabled]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [app_id, log_level, enabled]);
             
             if (result.rows.length === 0) {
                 throw new Error(`App ID '${app_id}' not found in technical log configuration`);
@@ -94,7 +106,10 @@ class TechnicalLogConfigModel {
                 RETURNING *
             `;
             
-            const result = await db.query(query, [app_id, log_level, enabled]);
+            const dbPool = getDb();
+
+            
+            const result = await dbPool.query(query, [app_id, log_level, enabled]);
             return result.rows[0];
         } catch (error) {
             console.error('Error upserting technical log config:', error);

@@ -1,6 +1,4 @@
 const assetUsageModel = require("../models/assetUsageModel");
-const db = require("../config/db");
-
 const getAssetsForUsageRecording = async (req, res) => {
   try {
     const { org_id: orgId, emp_int_id: employeeIntId, dept_id: deptId } = req.user || {};
@@ -255,7 +253,9 @@ const getUsageReportFilterOptions = async (req, res) => {
       ORDER BY text
     `;
 
-    const assetTypesResult = await db.query(assetTypesQuery, [assetTypeIds]);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const assetTypesResult = await dbPool.query(assetTypesQuery, [assetTypeIds]);
     const assetTypes = assetTypesResult.rows;
 
     // Get all assets for these asset types (not filtered by user)
@@ -302,7 +302,7 @@ const getUsageReportFilterOptions = async (req, res) => {
         END
     `;
 
-    const departmentsResult = await db.query(departmentsQuery, [orgId, assetTypeIds]);
+    const departmentsResult = await dbPool.query(departmentsQuery, [orgId, assetTypeIds]);
     
     console.log(`🔍 [getUsageReportFilterOptions] Raw departments query result:`, departmentsResult.rows.slice(0, 3));
     
@@ -362,7 +362,7 @@ const getUsageReportFilterOptions = async (req, res) => {
       ORDER BY b.text
     `;
 
-    const branchesResult = await db.query(branchesQuery, [orgId, assetTypeIds]);
+    const branchesResult = await dbPool.query(branchesQuery, [orgId, assetTypeIds]);
     const branches = branchesResult.rows;
 
     // Get users from tblAssetUsageReg created_by column
@@ -377,7 +377,7 @@ const getUsageReportFilterOptions = async (req, res) => {
       ORDER BY u.full_name
     `;
 
-    const usersResult = await db.query(usersQuery, [orgId, assetTypeIds]);
+    const usersResult = await dbPool.query(usersQuery, [orgId, assetTypeIds]);
     const users = usersResult.rows;
 
     // Log the response data for debugging

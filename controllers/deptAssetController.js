@@ -1,6 +1,5 @@
 // controllers/deptAssetController.js
 const model = require("../models/deptAssetsModel");
-const db = require('../config/db');
 const { generateCustomId } = require("../utils/idGenerator");
 
 
@@ -17,8 +16,10 @@ const addDeptAsset = async (req, res) => {
             });
         }
 
+        // Use tenant database from request context (set by middleware)
+        const dbPool = req.db || db;
         // Check if department exists
-        const deptCheck = await db.query(
+        const deptCheck = await dbPool.query(
             `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
             [dept_id]
         );
@@ -42,7 +43,7 @@ const addDeptAsset = async (req, res) => {
         const { org_id } = assetRes.rows[0];
 
         // Check if mapping already exists
-        const existingMapping = await db.query(
+        const existingMapping = await dbPool.query(
             `SELECT * FROM "tblDeptAssetTypes" WHERE dept_id = $1 AND asset_type_id = $2`,
             [dept_id, asset_type_id]
         );
@@ -142,7 +143,9 @@ const getAllAssetTypes = async (req, res) => {
 
         query += ` ORDER BY at.text`;
 
-        const result = await db.query(query, params);
+        // Use tenant database from request if available, otherwise use default
+        const dbPool = req.db || db;
+        const result = await dbPool.query(query, params);
         console.log(`Found ${result.rows.length} asset types for org ${org_id}${branch_id ? ` and branch ${branch_id}` : ''}`);
         res.status(200).json(result.rows);
     } catch (err) {
@@ -186,8 +189,10 @@ const getAssetTypesByDepartment = async (req, res) => {
             });
         }
 
+        // Use tenant database from request context (set by middleware)
+        const dbPool = req.db || db;
         // Check if department exists
-        const deptCheck = await db.query(
+        const deptCheck = await dbPool.query(
             `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
             [dept_id]
         );

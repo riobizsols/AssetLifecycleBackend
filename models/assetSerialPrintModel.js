@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 const { generateCustomId } = require('../utils/idGenerator');
 
 class AssetSerialPrintModel {
@@ -38,7 +43,10 @@ class AssetSerialPrintModel {
         org_id
       ];
 
-      const result = await db.query(query, values);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, values);
       return result.rows[0];
     } catch (error) {
       console.error('Error adding to print queue:', error);
@@ -77,7 +85,10 @@ class AssetSerialPrintModel {
         ORDER BY psq.created_on DESC
       `;
 
-      const result = await db.query(query, [orgId]);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, [orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue:', error);
@@ -116,7 +127,10 @@ class AssetSerialPrintModel {
         ORDER BY psq.created_on DESC
       `;
 
-      const result = await db.query(query, [orgId, status]);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, [orgId, status]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue by status:', error);
@@ -134,7 +148,10 @@ class AssetSerialPrintModel {
         RETURNING *
       `;
 
-      const result = await db.query(query, [status, psnqId, orgId]);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, [status, psnqId, orgId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error updating print status:', error);
@@ -151,7 +168,10 @@ class AssetSerialPrintModel {
         RETURNING *
       `;
 
-      const result = await db.query(query, [psnqId, orgId]);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, [psnqId, orgId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error deleting from print queue:', error);
@@ -189,7 +209,10 @@ class AssetSerialPrintModel {
         WHERE psq.psnq_id = $1 AND psq.org_id = $2
       `;
 
-      const result = await db.query(query, [psnqId, orgId]);
+      const dbPool = getDb();
+
+
+      const result = await dbPool.query(query, [psnqId, orgId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error fetching print queue by ID:', error);

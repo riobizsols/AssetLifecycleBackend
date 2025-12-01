@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 class AssetValuationModel {
     /**
@@ -251,7 +256,9 @@ class AssetValuationModel {
             queryParams.push(limit, offset);
 
             // Execute the main query
-            const result = await db.query(baseQuery, queryParams);
+            const dbPool = getDb();
+
+            const result = await dbPool.query(baseQuery, queryParams);
 
             // Get total count for pagination
             let countQuery = `
@@ -416,7 +423,7 @@ class AssetValuationModel {
                 }
             }
 
-            const countResult = await db.query(countQuery, countParams);
+            const countResult = await dbPool.query(countQuery, countParams);
             const totalCount = parseInt(countResult.rows[0].total);
 
             // Calculate totals
@@ -542,7 +549,10 @@ class AssetValuationModel {
                 ORDER BY asset_status
             `;
 
-            const result = await db.query(query, [orgId]);
+            const dbPool = getDb();
+
+
+            const result = await dbPool.query(query, [orgId]);
             
             const summary = {
                 inUse: { asset_count: 0, total_current_value: 0, total_original_cost: 0, total_accumulated_depreciation: 0 },
@@ -632,7 +642,9 @@ class AssetValuationModel {
             };
             
             for (const [key, query] of Object.entries(queries)) {
-                const result = await db.query(query, [orgId]);
+                const dbPool = getDb();
+
+                const result = await dbPool.query(query, [orgId]);
                 const fieldName = fieldMapping[key];
                 results[key] = result.rows.map(row => row[fieldName]);
             }

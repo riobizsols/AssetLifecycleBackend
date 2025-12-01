@@ -4,6 +4,7 @@ const path = require("path");
 const bcrypt = require("bcrypt");
 const { sendSetupCompletionEmail } = require("./emailService");
 const { FRONTEND_URL } = require("../config/environment");
+const db = require("../config/db");
 const {
   DEFAULT_ASSET_TYPES,
   DEFAULT_PROD_SERVICES,
@@ -27,6 +28,348 @@ const DUMP_FILE_PATH = path.join(
 );
 
 let cachedSchemaSql = null;
+let cachedDynamicSchemaSql = null;
+
+/**
+ * Clear schema cache - useful when database structure changes
+ */
+const clearSchemaCache = () => {
+  cachedSchemaSql = null;
+  cachedDynamicSchemaSql = null;
+  console.log('[SetupWizard] 🗑️ Schema cache cleared');
+};
+
+/**
+ * Dynamically generate schema SQL from the current DATABASE_URL database
+ * This includes all tables, columns, constraints, indexes, and sequences
+ */
+const generateDynamicSchemaSql = async () => {
+  try {
+    console.log('[SetupWizard] 🔄 Generating dynamic schema from DATABASE_URL...');
+    
+    const schemaParts = [];
+    
+    // Get all tables in public schema
+    const tablesResult = await db.query(`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_type = 'BASE TABLE'
+      ORDER BY table_name
+    `);
+    
+    const tables = tablesResult.rows.map(row => row.table_name);
+    
+    if (tables.length === 0) {
+      console.warn('[SetupWizard] ⚠️ No tables found in database, will use static file fallback');
+      return null;
+    }
+    
+    console.log(`[SetupWizard] 📋 Found ${tables.length} tables to process`);
+    console.log(`[SetupWizard] 📋 Table list: ${tables.join(', ')}`);
+    
+    for (const tableName of tables) {
+      console.log(`[SetupWizard] 🔨 Processing table: ${tableName}`);
+      // Get columns for this table
+      const columnsResult = await db.query(`
+        SELECT 
+          column_name,
+          data_type,
+          character_maximum_length,
+          numeric_precision,
+          numeric_scale,
+          is_nullable,
+          column_default,
+          udt_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public' 
+          AND table_name = $1
+        ORDER BY ordinal_position
+      `, [tableName]);
+      
+      // Get primary key constraint
+      const pkResult = await db.query(`
+        SELECT 
+          kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu 
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.table_schema = 'public'
+          AND tc.table_name = $1
+          AND tc.constraint_type = 'PRIMARY KEY'
+        ORDER BY kcu.ordinal_position
+      `, [tableName]);
+      
+      const pkColumns = pkResult.rows.map(row => row.column_name);
+      
+      // Get foreign key constraints
+      const fkResult = await db.query(`
+        SELECT
+          tc.constraint_name,
+          kcu.column_name,
+          ccu.table_name AS foreign_table_name,
+          ccu.column_name AS foreign_column_name,
+          rc.update_rule,
+          rc.delete_rule
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+          AND ccu.table_schema = tc.table_schema
+        LEFT JOIN information_schema.referential_constraints AS rc
+          ON tc.constraint_name = rc.constraint_name
+          AND tc.table_schema = rc.constraint_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND tc.table_name = $1
+      `, [tableName]);
+      
+      // Get unique constraints
+      const uniqueResult = await db.query(`
+        SELECT
+          tc.constraint_name,
+          kcu.column_name
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.constraint_type = 'UNIQUE'
+          AND tc.table_schema = 'public'
+          AND tc.table_name = $1
+          AND tc.constraint_name NOT IN (
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE constraint_type = 'PRIMARY KEY'
+          )
+        ORDER BY tc.constraint_name, kcu.ordinal_position
+      `, [tableName]);
+      
+      // Get check constraints
+      const checkResult = await db.query(`
+        SELECT
+          cc.constraint_name,
+          cc.check_clause
+        FROM information_schema.check_constraints cc
+        JOIN information_schema.constraint_column_usage ccu
+          ON cc.constraint_name = ccu.constraint_name
+        WHERE ccu.table_schema = 'public'
+          AND ccu.table_name = $1
+      `, [tableName]);
+      
+      // Build CREATE TABLE statement
+      let createTableSql = `CREATE TABLE IF NOT EXISTS "${tableName}" (\n`;
+      
+      const columnDefs = [];
+      
+      // Add columns
+      for (const col of columnsResult.rows) {
+        let colDef = `  "${col.column_name}" `;
+        
+        // Map data type
+        let dataType = col.data_type;
+        if (col.udt_name === 'varchar' || col.udt_name === 'character varying') {
+          if (col.character_maximum_length) {
+            dataType = `character varying(${col.character_maximum_length})`;
+          } else {
+            dataType = 'character varying';
+          }
+        } else if (col.udt_name === 'char' || col.udt_name === 'character') {
+          if (col.character_maximum_length) {
+            dataType = `character(${col.character_maximum_length})`;
+          } else {
+            dataType = 'character';
+          }
+        } else if (col.udt_name === 'numeric' || col.udt_name === 'decimal') {
+          if (col.numeric_precision && col.numeric_scale) {
+            dataType = `numeric(${col.numeric_precision},${col.numeric_scale})`;
+          } else if (col.numeric_precision) {
+            dataType = `numeric(${col.numeric_precision})`;
+          } else {
+            dataType = 'numeric';
+          }
+        } else if (col.udt_name === 'timestamp' || col.udt_name === 'timestamptz') {
+          dataType = col.udt_name === 'timestamptz' ? 'timestamp with time zone' : 'timestamp without time zone';
+        } else if (col.udt_name === 'bool') {
+          dataType = 'boolean';
+        } else if (col.udt_name === 'int4') {
+          dataType = 'integer';
+        } else if (col.udt_name === 'int8') {
+          dataType = 'bigint';
+        } else if (col.udt_name === 'text') {
+          dataType = 'text';
+        } else if (col.udt_name === 'date') {
+          dataType = 'date';
+        } else if (col.udt_name === 'time') {
+          dataType = 'time without time zone';
+        } else {
+          dataType = col.udt_name;
+        }
+        
+        colDef += dataType;
+        
+        // Add NOT NULL
+        if (col.is_nullable === 'NO') {
+          colDef += ' NOT NULL';
+        }
+        
+        // Add DEFAULT
+        if (col.column_default) {
+          // Clean up default value (remove ::type casts)
+          let defaultValue = col.column_default;
+          // Handle function calls like CURRENT_TIMESTAMP, CURRENT_DATE, etc.
+          if (defaultValue.includes('::')) {
+            const parts = defaultValue.split('::');
+            defaultValue = parts[0].trim();
+          }
+          colDef += ` DEFAULT ${defaultValue}`;
+        }
+        
+        columnDefs.push(colDef);
+      }
+      
+      // Add PRIMARY KEY
+      if (pkColumns.length > 0) {
+        columnDefs.push(`  PRIMARY KEY (${pkColumns.map(c => `"${c}"`).join(', ')})`);
+      }
+      
+      createTableSql += columnDefs.join(',\n');
+      createTableSql += '\n);\n';
+      
+      schemaParts.push(createTableSql);
+      console.log(`[SetupWizard] ✅ Generated CREATE TABLE for: ${tableName} (${columnsResult.rows.length} columns)`);
+      
+      // Add UNIQUE constraints
+      const uniqueConstraints = {};
+      for (const unique of uniqueResult.rows) {
+        if (!uniqueConstraints[unique.constraint_name]) {
+          uniqueConstraints[unique.constraint_name] = [];
+        }
+        uniqueConstraints[unique.constraint_name].push(unique.column_name);
+      }
+      
+      for (const [constraintName, columns] of Object.entries(uniqueConstraints)) {
+        schemaParts.push(
+          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" UNIQUE (${columns.map(c => `"${c}"`).join(', ')});\n`
+        );
+      }
+      
+      // Add FOREIGN KEY constraints
+      const fkConstraints = {};
+      for (const fk of fkResult.rows) {
+        if (!fkConstraints[fk.constraint_name]) {
+          fkConstraints[fk.constraint_name] = {
+            columns: [],
+            foreignTable: fk.foreign_table_name,
+            foreignColumns: [],
+            updateRule: fk.update_rule || 'NO ACTION',
+            deleteRule: fk.delete_rule || 'NO ACTION'
+          };
+        }
+        fkConstraints[fk.constraint_name].columns.push(fk.column_name);
+        fkConstraints[fk.constraint_name].foreignColumns.push(fk.foreign_column_name);
+      }
+      
+      for (const [constraintName, fk] of Object.entries(fkConstraints)) {
+        const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
+        const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
+        schemaParts.push(
+          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" ` +
+          `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
+          `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`
+        );
+      }
+      
+      // Add CHECK constraints
+      for (const check of checkResult.rows) {
+        schemaParts.push(
+          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${check.constraint_name}" CHECK (${check.check_clause});\n`
+        );
+      }
+    }
+    
+    // Get indexes (non-unique, non-primary key)
+    const indexesResult = await db.query(`
+      SELECT
+        schemaname,
+        tablename,
+        indexname,
+        indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname NOT LIKE '%_pkey'
+        AND indexname NOT IN (
+          SELECT constraint_name 
+          FROM information_schema.table_constraints 
+          WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+        )
+      ORDER BY tablename, indexname
+    `);
+    
+    for (const idx of indexesResult.rows) {
+      // Extract CREATE INDEX statement (remove IF NOT EXISTS if present, we'll add it)
+      let indexDef = idx.indexdef;
+      if (!indexDef.includes('CREATE INDEX')) {
+        continue;
+      }
+      // Replace CREATE INDEX with CREATE INDEX IF NOT EXISTS
+      indexDef = indexDef.replace(/^CREATE (UNIQUE )?INDEX/, 'CREATE $1INDEX IF NOT EXISTS');
+      schemaParts.push(indexDef + ';\n');
+    }
+    
+    // Get sequences
+    const sequencesResult = await db.query(`
+      SELECT 
+        sequence_name,
+        data_type,
+        start_value,
+        increment,
+        minimum_value,
+        maximum_value
+      FROM information_schema.sequences
+      WHERE sequence_schema = 'public'
+      ORDER BY sequence_name
+    `);
+    
+    for (const seq of sequencesResult.rows) {
+      schemaParts.push(
+        `CREATE SEQUENCE IF NOT EXISTS "${seq.sequence_name}" ` +
+        `AS ${seq.data_type} ` +
+        `START WITH ${seq.start_value} ` +
+        `INCREMENT BY ${seq.increment} ` +
+        `MINVALUE ${seq.minimum_value} ` +
+        `MAXVALUE ${seq.maximum_value};\n`
+      );
+    }
+    
+    const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
+    
+    // Count CREATE TABLE statements in the generated schema
+    const createTableMatches = dynamicSchema.match(/CREATE TABLE IF NOT EXISTS/g);
+    const tableCount = createTableMatches ? createTableMatches.length : 0;
+    
+    console.log(`[SetupWizard] ✅ Dynamic schema generated successfully`);
+    console.log(`[SetupWizard] 📊 Statistics:`);
+    console.log(`[SetupWizard]   - Tables found: ${tables.length}`);
+    console.log(`[SetupWizard]   - CREATE TABLE statements: ${tableCount}`);
+    console.log(`[SetupWizard]   - Indexes: ${indexesResult.rows.length}`);
+    console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
+    console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
+    
+    if (tableCount !== tables.length) {
+      console.warn(`[SetupWizard] ⚠️ WARNING: Table count mismatch! Found ${tables.length} tables but generated ${tableCount} CREATE TABLE statements`);
+      console.warn(`[SetupWizard] ⚠️ This might indicate some tables were not processed correctly`);
+    }
+    
+    return dynamicSchema;
+  } catch (error) {
+    console.error('[SetupWizard] ❌ Error generating dynamic schema:', error.message);
+    console.error('[SetupWizard] Stack:', error.stack);
+    return null;
+  }
+};
 
 const CORE_TABLE_DDL = [
   `
@@ -251,11 +594,69 @@ const sanitizeDump = (raw) => {
   return withoutCopy.replace(/^\\.*$/gm, "");
 };
 
-const getSchemaSql = () => {
+/**
+ * Get schema SQL - tries dynamic generation first, falls back to static file
+ * @param {boolean} forceStatic - Force use of static file instead of dynamic generation
+ * @param {boolean} forceRegenerate - Force regeneration even if cached (useful when DB structure changes)
+ * @returns {Promise<string>} Schema SQL string
+ */
+const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
+  // Clear cache if force regeneration is requested
+  if (forceRegenerate) {
+    cachedDynamicSchemaSql = null;
+    cachedSchemaSql = null;
+    console.log('[SetupWizard] 🔄 Force regenerating schema...');
+  }
+  
+  // Try dynamic generation first (unless forced to use static)
+  if (!forceStatic && !cachedDynamicSchemaSql) {
+    try {
+      console.log('[SetupWizard] 🔄 Attempting dynamic schema generation from DATABASE_URL...');
+      const dynamicSchema = await generateDynamicSchemaSql();
+      if (dynamicSchema) {
+        cachedDynamicSchemaSql = dynamicSchema;
+        console.log('[SetupWizard] ✅ Using dynamically generated schema');
+        console.log(`[SetupWizard] 📊 Dynamic schema size: ${dynamicSchema.length} characters`);
+        return cachedDynamicSchemaSql;
+      } else {
+        console.warn('[SetupWizard] ⚠️ Dynamic schema generation returned null, falling back to static file');
+      }
+    } catch (error) {
+      console.error('[SetupWizard] ❌ Dynamic schema generation failed:', error.message);
+      console.error('[SetupWizard] Stack:', error.stack);
+      console.warn('[SetupWizard] ⚠️ Falling back to static file');
+    }
+  } else if (cachedDynamicSchemaSql) {
+    console.log('[SetupWizard] ✅ Using cached dynamically generated schema');
+    return cachedDynamicSchemaSql;
+  }
+  
+  // Fallback to static file
+  if (!cachedSchemaSql) {
+    try {
+      console.log('[SetupWizard] 📄 Reading static schema file...');
+      const raw = fs.readFileSync(DUMP_FILE_PATH, "utf8");
+      const sanitized = sanitizeDump(raw);
+      // Prepend search_path setting to ensure all statements use public schema
+      cachedSchemaSql = `SET search_path TO public;\n${sanitized}`;
+      console.log('[SetupWizard] ✅ Using static schema file as fallback');
+      console.log(`[SetupWizard] 📊 Static schema size: ${cachedSchemaSql.length} characters`);
+    } catch (error) {
+      console.error('[SetupWizard] ❌ Failed to read static schema file:', error.message);
+      throw new Error('Both dynamic schema generation and static file read failed');
+    }
+  }
+  return cachedSchemaSql;
+};
+
+/**
+ * Synchronous version for backward compatibility (uses static file only)
+ * @returns {string} Schema SQL string
+ */
+const getSchemaSqlSync = () => {
   if (!cachedSchemaSql) {
     const raw = fs.readFileSync(DUMP_FILE_PATH, "utf8");
     const sanitized = sanitizeDump(raw);
-    // Prepend search_path setting to ensure all statements use public schema
     cachedSchemaSql = `SET search_path TO public;\n${sanitized}`;
   }
   return cachedSchemaSql;
@@ -943,7 +1344,7 @@ const runSetup = async (payload = {}) => {
       if (options.createSchema !== false) {
         // Ensure search_path before schema import
         await client.query("SET search_path TO public");
-        const schemaSql = getSchemaSql();
+        const schemaSql = await getSchemaSql();
         await client.query(schemaSql);
         logs.push({ message: "Database schema imported", scope: "schema" });
       } else {
@@ -1078,5 +1479,10 @@ module.exports = {
   testConnection,
   runSetup,
   getCatalog,
+  getSchemaSql, // Async version (tries dynamic first, falls back to static)
+  getSchemaSqlSync, // Sync version (static file only, for backward compatibility)
+  generateDynamicSchemaSql, // Export for direct use if needed
+  clearSchemaCache, // Export to clear cache when DB structure changes
+  CORE_TABLE_DDL,
 };
 

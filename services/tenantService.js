@@ -1,0 +1,336 @@
+/**
+ * Tenant Service
+ * 
+ * Manages multi-tenant database connections by looking up organization
+ * database credentials from the main PostgreSQL tenant table.
+ */
+
+const { Client, Pool } = require('pg');
+const crypto = require('crypto');
+require('dotenv').config();
+
+// Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
+let tenantRegistryPool = null;
+
+/**
+ * Initialize tenant registry database connection pool
+ * Uses TENANT_DATABASE_URL if set, otherwise falls back to DATABASE_URL
+ */
+function initTenantRegistryPool() {
+  if (!tenantRegistryPool) {
+    const connectionString = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('Neither TENANT_DATABASE_URL nor DATABASE_URL environment variable is set');
+    }
+    tenantRegistryPool = new Pool({
+      connectionString,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 2000,
+    });
+  }
+  return tenantRegistryPool;
+}
+
+/**
+ * Encrypt password using AES-256
+ */
+function encryptPassword(password) {
+  const algorithm = 'aes-256-cbc';
+  const key = crypto.scryptSync(process.env.JWT_SECRET || 'default-secret-key', 'salt', 32);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv(algorithm, key, iv);
+  
+  let encrypted = cipher.update(password, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+/**
+ * Decrypt password
+ */
+function decryptPassword(encryptedPassword) {
+  try {
+    const algorithm = 'aes-256-cbc';
+    const key = crypto.scryptSync(process.env.JWT_SECRET || 'default-secret-key', 'salt', 32);
+    const parts = encryptedPassword.split(':');
+    const iv = Buffer.from(parts[0], 'hex');
+    const encrypted = parts[1];
+    
+    const decipher = crypto.createDecipheriv(algorithm, key, iv);
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted;
+  } catch (error) {
+    console.error('[TenantService] Error decrypting password:', error);
+    throw new Error('Failed to decrypt database password');
+  }
+}
+
+/**
+ * Check if a tenant exists for the given org_id
+ */
+async function checkTenantExists(orgId) {
+  const pool = initTenantRegistryPool();
+  
+  try {
+    const result = await pool.query(
+      `SELECT org_id FROM "tenants" WHERE org_id = $1 AND is_active = true`,
+      [orgId]
+    );
+    return result.rows.length > 0;
+  } catch (error) {
+    console.error('[TenantService] Error checking tenant existence:', error);
+    return false;
+  }
+}
+
+/**
+ * Get tenant database credentials by org_id
+ */
+async function getTenantCredentials(orgId) {
+  const pool = initTenantRegistryPool();
+  
+  try {
+    const result = await pool.query(
+      `SELECT org_id, db_host, db_port, db_name, db_user, db_password, is_active
+       FROM "tenants"
+       WHERE org_id = $1 AND is_active = true`,
+      [orgId]
+    );
+
+    if (result.rows.length === 0) {
+      throw new Error(`Tenant not found for org_id: ${orgId}`);
+    }
+
+    const tenant = result.rows[0];
+    
+    // Decrypt password
+    const decryptedPassword = decryptPassword(tenant.db_password);
+
+    return {
+      orgId: tenant.org_id,
+      host: tenant.db_host,
+      port: tenant.db_port,
+      database: tenant.db_name,
+      user: tenant.db_user,
+      password: decryptedPassword,
+    };
+  } catch (error) {
+    console.error('[TenantService] Error getting tenant credentials:', error);
+    throw error;
+  }
+}
+
+/**
+ * Create connection string for tenant database
+ */
+function getTenantConnectionString(credentials) {
+  return `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${credentials.host}:${credentials.port}/${credentials.database}`;
+}
+
+/**
+ * Get a database connection pool for a specific tenant
+ */
+async function getTenantPool(orgId) {
+  const credentials = await getTenantCredentials(orgId);
+  const connectionString = getTenantConnectionString(credentials);
+
+  return new Pool({
+    connectionString,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+  });
+}
+
+/**
+ * Get a database client for a specific tenant (for transactions)
+ */
+async function getTenantClient(orgId) {
+  const credentials = await getTenantCredentials(orgId);
+  const connectionString = getTenantConnectionString(credentials);
+
+  const client = new Client({
+    connectionString,
+  });
+
+  await client.connect();
+  return client;
+}
+
+/**
+ * Register a new tenant in the tenant table
+ */
+async function registerTenant(orgId, dbConfig) {
+  const pool = initTenantRegistryPool();
+
+  try {
+    // Encrypt password
+    const encryptedPassword = encryptPassword(dbConfig.password);
+
+    // Check if subdomain column exists
+    const subdomainColumnCheck = await pool.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.columns 
+        WHERE table_name = 'tenants' 
+          AND column_name = 'subdomain'
+      )
+    `);
+    
+    const hasSubdomainColumn = subdomainColumnCheck.rows[0].exists;
+    const subdomain = dbConfig.subdomain || null;
+
+    if (hasSubdomainColumn && subdomain) {
+      await pool.query(
+        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, subdomain, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+         ON CONFLICT (org_id) DO UPDATE
+         SET db_host = EXCLUDED.db_host,
+             db_port = EXCLUDED.db_port,
+             db_name = EXCLUDED.db_name,
+             db_user = EXCLUDED.db_user,
+             db_password = EXCLUDED.db_password,
+             subdomain = EXCLUDED.subdomain,
+             updated_at = CURRENT_TIMESTAMP,
+             is_active = true`,
+        [
+          orgId,
+          dbConfig.host,
+          dbConfig.port || 5432,
+          dbConfig.database,
+          dbConfig.user,
+          encryptedPassword,
+          subdomain,
+        ]
+      );
+      console.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
+    } else {
+      await pool.query(
+        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, true)
+         ON CONFLICT (org_id) DO UPDATE
+         SET db_host = EXCLUDED.db_host,
+             db_port = EXCLUDED.db_port,
+             db_name = EXCLUDED.db_name,
+             db_user = EXCLUDED.db_user,
+             db_password = EXCLUDED.db_password,
+             updated_at = CURRENT_TIMESTAMP,
+             is_active = true`,
+        [
+          orgId,
+          dbConfig.host,
+          dbConfig.port || 5432,
+          dbConfig.database,
+          dbConfig.user,
+          encryptedPassword,
+        ]
+      );
+      console.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
+    }
+
+    return true;
+  } catch (error) {
+    console.error('[TenantService] Error registering tenant:', error);
+    throw error;
+  }
+}
+
+/**
+ * Update tenant credentials
+ */
+async function updateTenant(orgId, dbConfig) {
+  const pool = initTenantRegistryPool();
+
+  try {
+    const encryptedPassword = encryptPassword(dbConfig.password);
+
+    await pool.query(
+      `UPDATE "tenants"
+       SET db_host = $1,
+           db_port = $2,
+           db_name = $3,
+           db_user = $4,
+           db_password = $5,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE org_id = $6`,
+      [
+        dbConfig.host,
+        dbConfig.port || 5432,
+        dbConfig.database,
+        dbConfig.user,
+        encryptedPassword,
+        orgId,
+      ]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('[TenantService] Error updating tenant:', error);
+    throw error;
+  }
+}
+
+/**
+ * Deactivate a tenant
+ */
+async function deactivateTenant(orgId) {
+  const pool = initTenantRegistryPool();
+
+  try {
+    await pool.query(
+      `UPDATE "tenants"
+       SET is_active = false,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE org_id = $1`,
+      [orgId]
+    );
+
+    return true;
+  } catch (error) {
+    console.error('[TenantService] Error deactivating tenant:', error);
+    throw error;
+  }
+}
+
+/**
+ * Test tenant database connection
+ */
+async function testTenantConnection(orgId) {
+  try {
+    const credentials = await getTenantCredentials(orgId);
+    const client = new Client({
+      connectionString: getTenantConnectionString(credentials),
+    });
+
+    await client.connect();
+    const result = await client.query('SELECT version()');
+    await client.end();
+
+    return {
+      connected: true,
+      serverVersion: result.rows[0].version,
+    };
+  } catch (error) {
+    return {
+      connected: false,
+      error: error.message,
+    };
+  }
+}
+
+module.exports = {
+  checkTenantExists,
+  getTenantCredentials,
+  getTenantPool,
+  getTenantClient,
+  getTenantConnectionString,
+  registerTenant,
+  updateTenant,
+  deactivateTenant,
+  testTenantConnection,
+  initTenantRegistryPool,
+};
+

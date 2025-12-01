@@ -1,14 +1,23 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 exports.getAssetMeta = (asset_type_id) => {
-    return db.query(
+    const dbPool = getDb();
+
+    return dbPool.query(
         'SELECT org_id FROM "tblAssetTypes" WHERE asset_type_id = $1',
         [asset_type_id]
     );
 };
 
 exports.getLastDeptAssetId = () => {
-    return db.query('SELECT dept_asset_type_id FROM "tblDeptAssetTypes" ORDER BY dept_asset_type_id DESC LIMIT 1');
+    const dbPool = getDb();
+
+    return dbPool.query('SELECT dept_asset_type_id FROM "tblDeptAssetTypes" ORDER BY dept_asset_type_id DESC LIMIT 1');
 };
 
 exports.insertDeptAsset = (
@@ -18,7 +27,9 @@ exports.insertDeptAsset = (
     org_id,
     created_by
 ) => {
-    return db.query(
+    const dbPool = getDb();
+
+    return dbPool.query(
         `INSERT INTO "tblDeptAssetTypes" (
       dept_asset_type_id, dept_id, asset_type_id, org_id,
       created_by, created_on, changed_by, changed_on, int_status
@@ -31,11 +42,15 @@ exports.insertDeptAsset = (
 };
 
 exports.deleteDeptAsset = (dept_asset_type_id) => {
-    return db.query('DELETE FROM "tblDeptAssetTypes" WHERE dept_asset_type_id = $1', [dept_asset_type_id]);
+    const dbPool = getDb();
+
+    return dbPool.query('DELETE FROM "tblDeptAssetTypes" WHERE dept_asset_type_id = $1', [dept_asset_type_id]);
 };
 
 exports.getAllDeptAssets = () => {
-    return db.query(`
+    const dbPool = getDb();
+
+    return dbPool.query(`
     SELECT da.dept_asset_type_id, da.dept_id, da.asset_type_id, d.text AS dept_name, at.text AS asset_name
     FROM "tblDeptAssetTypes" da
     JOIN "tblDepartments" d ON da.dept_id = d.dept_id
@@ -46,7 +61,9 @@ exports.getAllDeptAssets = () => {
 };
 
 exports.getAssetTypesByDepartment = (dept_id) => {
-    return db.query(`
+    const dbPool = getDb();
+
+    return dbPool.query(`
     SELECT 
         at.asset_type_id,
         at.text AS asset_type_name,

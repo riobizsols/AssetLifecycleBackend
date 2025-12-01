@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 const insertAssetDoc = async ({
   a_d_id,
@@ -17,7 +22,9 @@ const insertAssetDoc = async ({
     RETURNING *
   `;
   const values = [a_d_id, asset_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 const listAssetDocs = async (asset_id) => {
@@ -43,14 +50,18 @@ const listAssetDocs = async (asset_id) => {
     WHERE ad.asset_id = $1
     ORDER BY ad.a_d_id DESC
   `;
-  return db.query(query, [asset_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_id]);
 };
 
 const getAssetDocById = async (a_d_id) => {
   const query = `
     SELECT * FROM "tblAssetDocs" WHERE a_d_id = $1
   `;
-  return db.query(query, [a_d_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [a_d_id]);
 };
 
 const updateAssetDocArchiveStatus = async (a_d_id, is_archived, archived_path) => {
@@ -61,7 +72,9 @@ const updateAssetDocArchiveStatus = async (a_d_id, is_archived, archived_path) =
     RETURNING *
   `;
   const values = [a_d_id, is_archived, archived_path];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 module.exports = { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus };

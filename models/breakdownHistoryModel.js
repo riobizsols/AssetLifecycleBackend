@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get breakdown history with filtering capabilities
 const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
@@ -352,7 +357,10 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
     // console.log('🔍 [BreakdownHistoryModel] Final SQL Query:', query);
     // console.log('🔍 [BreakdownHistoryModel] Query Parameters:', queryParams);
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get breakdown history count for pagination
@@ -453,7 +461,10 @@ const getBreakdownHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         paramIndex++;
     }
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get breakdown history by asset ID
@@ -548,7 +559,10 @@ const getBreakdownHistoryByAsset = async (assetId, orgId = 'ORG001') => {
         ORDER BY brd.created_on DESC
     `;
     
-    return await db.query(query, [assetId, orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [assetId, orgId]);
 };
 
 // Get breakdown history summary statistics
@@ -572,7 +586,10 @@ const getBreakdownHistorySummary = async (orgId = 'ORG001') => {
         WHERE brd.org_id = $1
     `;
     
-    return await db.query(query, [orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [orgId]);
 };
 
 // Get available filter options for dropdowns
@@ -659,16 +676,17 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
         ORDER BY at.text
     `;
     
+    const dbPool = getDb();
     const [assetResult, vendorResult, workOrderResult, reportedByResult, breakdownStatusResult, decisionCodeResult, breakdownReasonResult, departmentResult, assetTypeResult] = await Promise.all([
-        db.query(assetQuery, [orgId]),
-        db.query(vendorQuery, [orgId]),
-        db.query(workOrderQuery, [orgId]),
-        db.query(reportedByQuery, [orgId]),
-        db.query(breakdownStatusQuery, [orgId]),
-        db.query(decisionCodeQuery, [orgId]),
-        db.query(breakdownReasonQuery, [orgId]),
-        db.query(departmentQuery, [orgId]),
-        db.query(assetTypeQuery, [orgId])
+        dbPool.query(assetQuery, [orgId]),
+        dbPool.query(vendorQuery, [orgId]),
+        dbPool.query(workOrderQuery, [orgId]),
+        dbPool.query(reportedByQuery, [orgId]),
+        dbPool.query(breakdownStatusQuery, [orgId]),
+        dbPool.query(decisionCodeQuery, [orgId]),
+        dbPool.query(breakdownReasonQuery, [orgId]),
+        dbPool.query(departmentQuery, [orgId]),
+        dbPool.query(assetTypeQuery, [orgId])
     ]);
     
     return {

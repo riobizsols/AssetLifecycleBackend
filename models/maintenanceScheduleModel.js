@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // 1. Get asset types that require maintenance
 const getAssetTypesRequiringMaintenance = async () => {
@@ -9,7 +14,10 @@ const getAssetTypesRequiringMaintenance = async () => {
         ORDER BY asset_type_id
     `;
     
-    return await db.query(query);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query);
 };
 
 // 1a. Fetch usage-based maintenance configuration from org settings
@@ -21,7 +29,10 @@ const getUsageBasedMaintenanceSettings = async () => {
            OR key ~* '^AT[0-9]+$'
     `;
 
-    return await db.query(query);
+    const dbPool = getDb();
+
+
+    return await dbPool.query(query);
 };
 
 // 2. Get assets for a specific asset type
@@ -43,7 +54,10 @@ const getAssetsByAssetType = async (asset_type_id) => {
         ORDER BY a.asset_id
     `;
     
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 // 2a. Get assets in a group by group_id
@@ -65,7 +79,10 @@ const getAssetsByGroupId = async (group_id) => {
         ORDER BY a.purchased_on ASC
     `;
     
-    return await db.query(query, [group_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [group_id]);
 };
 
 // 2b. Get all unique groups for an asset type
@@ -81,7 +98,10 @@ const getGroupsByAssetType = async (asset_type_id) => {
         HAVING COUNT(a.asset_id) > 0
     `;
     
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 // 2c. Check existing workflow maintenance schedules for a group
@@ -98,7 +118,10 @@ const checkExistingWorkflowMaintenanceSchedulesForGroup = async (group_id) => {
         ORDER BY created_on DESC
     `;
     
-    return await db.query(query, [group_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [group_id]);
 };
 
 // 2d. Check existing maintenance schedules for assets in a group
@@ -115,7 +138,10 @@ const checkExistingMaintenanceSchedulesForGroup = async (group_id) => {
         ORDER BY ams.created_on DESC
     `;
     
-    return await db.query(query, [group_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [group_id]);
 };
 
 // 2e. Get earliest purchase date for a group
@@ -126,7 +152,10 @@ const getEarliestPurchaseDateForGroup = async (group_id) => {
         WHERE group_id = $1
     `;
     
-    const result = await db.query(query, [group_id]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [group_id]);
     return result.rows[0]?.earliest_purchase_date;
 };
 
@@ -148,7 +177,10 @@ const getLatestMaintenanceDateForGroup = async (group_id) => {
         ) direct_dates
     `;
     
-    const result = await db.query(query, [group_id]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [group_id]);
     return result.rows[0]?.latest_maintenance_date;
 };
 
@@ -166,7 +198,10 @@ const getMaintenanceFrequency = async (asset_type_id) => {
         ORDER BY at_main_freq_id
     `;
     
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 // 4. Check existing maintenance schedules for an asset
@@ -182,7 +217,10 @@ const checkExistingMaintenanceSchedules = async (asset_id) => {
         ORDER BY created_on DESC
     `;
     
-    return await db.query(query, [asset_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_id]);
 };
 
 // 5. Check existing workflow maintenance schedules for an asset
@@ -198,7 +236,10 @@ const checkExistingWorkflowMaintenanceSchedules = async (asset_id) => {
         ORDER BY created_on DESC
     `;
     
-    return await db.query(query, [asset_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_id]);
 };
 
 // 6. Get workflow asset sequences for asset type
@@ -215,7 +256,10 @@ const getWorkflowAssetSequences = async (asset_type_id) => {
         ORDER BY seqs_no
     `;
     
-    return await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [asset_type_id]);
 };
 
 // 7. Get workflow job roles for workflow step
@@ -232,7 +276,10 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
         ORDER BY wf_job_role_id
     `;
     
-    return await db.query(query, [wf_steps_id]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [wf_steps_id]);
 };
 
 // 8. Generate next WFAMSH_ID
@@ -244,7 +291,10 @@ const getNextWFAMSHId = async () => {
         LIMIT 1
     `;
     
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query);
     
     if (result.rows.length === 0) {
         return 'WFAMSH_01';
@@ -269,7 +319,10 @@ const getNextWFAMSDId = async () => {
         LIMIT 1
     `;
     
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query);
     
     if (result.rows.length === 0) {
         return 'WFAMSD_01';
@@ -342,7 +395,10 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
         branch_code
     ];
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 // 11. Insert workflow maintenance schedule detail
@@ -392,7 +448,10 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData) => {
         org_id
     ];
     
-    const result = await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, values);
     
     // Send push notification for new workflow detail
     try {
@@ -458,7 +517,10 @@ const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
           AND created_on >= $2
     `;
 
-    const result = await db.query(query, [asset_id, sinceDate]);
+    const dbPool = getDb();
+
+
+    const result = await dbPool.query(query, [asset_id, sinceDate]);
     const totalUsage = result.rows[0]?.total_usage;
 
     return totalUsage !== undefined && totalUsage !== null
@@ -496,7 +558,10 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
         ORDER BY ams.created_on DESC
     `;
     
-    const result = await db.query(query, [orgId, branchId]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [orgId, branchId]);
     console.log('Query executed successfully, found rows:', result.rows.length);
     return result;
 };
@@ -522,7 +587,10 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => 
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2 AND a.branch_id = $3
     `;
     
-    const result = await db.query(query, [amsId, orgId, branchId]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [amsId, orgId, branchId]);
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {
@@ -549,7 +617,10 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => 
                 ORDER BY a.text ASC
             `;
             
-            const groupAssetsResult = await db.query(groupAssetsQuery, [groupId, orgId]);
+            const dbPool = getDb();
+
+            
+            const groupAssetsResult = await dbPool.query(groupAssetsQuery, [groupId, orgId]);
             record.group_assets = groupAssetsResult.rows;
             record.is_group_maintenance = true;
             record.group_asset_count = groupAssetsResult.rows.length;
@@ -616,7 +687,9 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
         changed_on,
         orgId
     ];
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    return await dbPool.query(query, values);
 };
 
 // Check if asset type requires workflow
@@ -627,7 +700,10 @@ const checkAssetTypeWorkflow = async (asset_type_id) => {
         WHERE asset_type_id = $1
     `;
     
-    const result = await db.query(query, [asset_type_id]);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query, [asset_type_id]);
     return result.rows[0].workflow_count > 0;
 };
 
@@ -644,7 +720,10 @@ const getNextAMSId = async () => {
         FROM "tblAssetMaintSch"
     `;
     
-    const result = await db.query(query);
+    const dbPool = getDb();
+
+    
+    const result = await dbPool.query(query);
     const nextId = (result.rows[0].max_num || 0) + 1;
     return `ams${nextId.toString().padStart(3, '0')}`;
 };
@@ -693,7 +772,9 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
             WHERE a.asset_id = $1
         `;
-        const branchResult = await db.query(branchQuery, [asset_id]);
+        const dbPool = getDb();
+
+        const branchResult = await dbPool.query(branchQuery, [asset_id]);
         if (branchResult.rows.length > 0) {
             finalBranchCode = branchResult.rows[0].branch_code;
         }
@@ -736,7 +817,10 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
         finalBranchCode
     ];
     
-    return await db.query(query, values);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, values);
 };
 
 module.exports = {

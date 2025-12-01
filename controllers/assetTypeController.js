@@ -154,7 +154,9 @@ const addAssetType = async (req, res) => {
 // GET /api/asset-types - Get all asset types
 const getAllAssetTypes = async (req, res) => {
     try {
-        const result = await model.getAllAssetTypes();
+        // Filter by user's org_id to show only asset types from their database
+        const org_id = req.user?.org_id;
+        const result = await model.getAllAssetTypes(org_id);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);

@@ -1,4 +1,8 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
 
 // Get all vendors
 const getAllVendors = async (org_id, userBranchCode) => {
@@ -12,14 +16,16 @@ const getAllVendors = async (org_id, userBranchCode) => {
     ORDER BY created_on DESC
   `;
   
-  const result = await db.query(query, [org_id, userBranchCode]);
+  const dbPool = getDb();
+  const result = await dbPool.query(query, [org_id, userBranchCode]);
   console.log('Query executed successfully, found vendors:', result.rows.length);
   return result.rows;
 };
 
 // Get vendor by ID
 const getVendorById = async (vendorId) => {
-  const result = await db.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
+  const dbPool = getDb();
+  const result = await dbPool.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
   return result.rows[0];
 };
 
@@ -49,13 +55,15 @@ const createVendor = async (vendor) => {
       contact_person_name,
       contact_person_email,
       contact_person_number,
+      contract_start_date,
+      contract_end_date,
       created_by,
       created_on,
       changed_by,
       changed_on
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
     ) RETURNING *;
   `;
 
@@ -77,13 +85,16 @@ const createVendor = async (vendor) => {
     vendor.contact_person_name,
     vendor.contact_person_email,
     vendor.contact_person_number,
+    vendor.contract_start_date || null,
+    vendor.contract_end_date || null,
     vendor.created_by,
     vendor.created_on,
     vendor.changed_by,
     vendor.changed_on
   ];
 
-  const { rows } = await db.query(query, values);
+  const dbPool = getDb();
+  const { rows } = await dbPool.query(query, values);
   console.log('Vendor created successfully with branch_code:', vendor.branch_code);
   return rows[0];
 };

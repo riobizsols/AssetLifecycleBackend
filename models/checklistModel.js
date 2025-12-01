@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { getDb } = require('../utils/dbContext');
 
 const getChecklistByAssetType = async (assetTypeId, orgId = 'ORG001') => {
   try {
@@ -15,7 +15,7 @@ const getChecklistByAssetType = async (assetTypeId, orgId = 'ORG001') => {
       ORDER BY at_main_checklist_id ASC
     `;
 
-    const result = await pool.query(query, [assetTypeId, orgId]);
+    const result = await getDb().query(query, [assetTypeId, orgId]);
     return result.rows || [];
   } catch (error) {
     console.error('Error in getChecklistByAssetType:', error);
@@ -42,7 +42,7 @@ const getChecklistByAssetId = async (assetId, orgId = 'ORG001') => {
       ORDER BY cl.at_main_checklist_id ASC
     `;
 
-    const result = await pool.query(query, [assetId, orgId]);
+    const result = await getDb().query(query, [assetId, orgId]);
     return result.rows || [];
   } catch (error) {
     console.error('Error in getChecklistByAssetId:', error);

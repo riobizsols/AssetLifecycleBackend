@@ -1,5 +1,9 @@
 const fcmService = require('./fcmService');
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper to get database (tenant or default)
+const getDb = () => getDbFromContext();
 
 class WorkflowNotificationService {
     /**
@@ -96,7 +100,8 @@ class WorkflowNotificationService {
                 WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
             `;
             
-            const result = await db.query(query, [wfamsh_id, org_id]);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, [wfamsh_id, org_id]);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error getting workflow info:', error);
@@ -116,7 +121,8 @@ class WorkflowNotificationService {
                 WHERE job_role_id = $1 AND int_status = 1
             `;
             
-            const result = await db.query(query, [job_role_id]);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, [job_role_id]);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error getting job role info:', error);
@@ -294,7 +300,8 @@ class WorkflowNotificationService {
                     SELECT preference_id FROM "tblNotificationPreferences"
                     WHERE user_id = $1 AND notification_type = $2
                 `;
-                const existing = await db.query(checkQuery, [userId, notificationType]);
+                const dbPool = getDb();
+                const existing = await dbPool.query(checkQuery, [userId, notificationType]);
 
                 if (existing.rows.length === 0) {
                     // Insert default preference
@@ -305,7 +312,7 @@ class WorkflowNotificationService {
                             is_enabled, email_enabled, push_enabled
                         ) VALUES ($1, $2, $3, true, true, true)
                     `;
-                    await db.query(insertQuery, [preferenceId, userId, notificationType]);
+                    await dbPool.query(insertQuery, [preferenceId, userId, notificationType]);
                     console.log(`Initialized notification preference for user ${userId}, type ${notificationType}`);
                 }
             }

@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Insert asset type document
 const insertAssetTypeDoc = async ({
@@ -18,7 +23,9 @@ const insertAssetTypeDoc = async ({
     RETURNING *
   `;
   const values = [atd_id, asset_type_id, dto_id, doc_type_name, doc_path, is_archived, archived_path, org_id];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // List asset type documents by asset type ID
@@ -45,7 +52,9 @@ const listAssetTypeDocs = async (asset_type_id) => {
     WHERE atd.asset_type_id = $1
     ORDER BY atd.atd_id DESC
   `;
-  return db.query(query, [asset_type_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_type_id]);
 };
 
 // Get asset type document by ID
@@ -64,7 +73,9 @@ const getAssetTypeDocById = async (atd_id) => {
     LEFT JOIN "tblDocTypeObjects" dto ON atd.dto_id = dto.dto_id
     WHERE atd.atd_id = $1
   `;
-  return db.query(query, [atd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [atd_id]);
 };
 
 // List asset type documents by asset type ID and dto_id
@@ -91,7 +102,9 @@ const listAssetTypeDocsByDto = async (asset_type_id, dto_id) => {
     WHERE atd.asset_type_id = $1 AND atd.dto_id = $2
     ORDER BY atd.atd_id DESC
   `;
-  return db.query(query, [asset_type_id, dto_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_type_id, dto_id]);
 };
 
 // Check if asset type exists
@@ -99,7 +112,9 @@ const checkAssetTypeExists = async (asset_type_id) => {
   const query = `
     SELECT asset_type_id FROM "tblAssetTypes" WHERE asset_type_id = $1
   `;
-  return db.query(query, [asset_type_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [asset_type_id]);
 };
 
 // Update asset type document archive status
@@ -111,7 +126,9 @@ const updateAssetTypeDocArchiveStatus = async (atd_id, is_archived, archived_pat
     RETURNING *
   `;
   const values = [atd_id, is_archived, archived_path];
-  return db.query(query, values);
+  const dbPool = getDb();
+
+  return dbPool.query(query, values);
 };
 
 // Archive asset type document
@@ -122,7 +139,9 @@ const archiveAssetTypeDoc = async (atd_id, archived_path) => {
     WHERE atd_id = $1
     RETURNING *
   `;
-  return db.query(query, [atd_id, archived_path]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [atd_id, archived_path]);
 };
 
 // Delete asset type document
@@ -131,7 +150,9 @@ const deleteAssetTypeDoc = async (atd_id) => {
     DELETE FROM "tblATDocs" WHERE atd_id = $1
     RETURNING *
   `;
-  return db.query(query, [atd_id]);
+  const dbPool = getDb();
+
+  return dbPool.query(query, [atd_id]);
 };
 
 module.exports = { 

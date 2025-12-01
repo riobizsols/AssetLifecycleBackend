@@ -236,8 +236,9 @@ const getAssetRegisterSummary = async (req, res) => {
         AND aa.latest_assignment_flag = true
     `;
 
-    const db = require("../config/db");
-    const result = await db.query(summaryQuery);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(summaryQuery);
     
     res.status(200).json({
       success: true,

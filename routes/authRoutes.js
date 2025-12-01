@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
     login,
+    tenantLogin,
     register,
     forgotPassword,
     resetPassword,
@@ -13,7 +14,8 @@ const { protect } = require('../middlewares/authMiddleware');
 const authorize = require('../middlewares/authorize');
 
 // 🟢 Public routes
-router.post('/login', login);
+router.post('/login', login); // Original login (uses default database)
+router.post('/tenant-login', tenantLogin); // Multi-tenant login (requires org_id)
 router.post('/refresh', refreshToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);

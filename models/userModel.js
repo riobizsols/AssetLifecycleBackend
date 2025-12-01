@@ -1,8 +1,14 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
 
 //  Find user by email (used for login)
-const findUserByEmail = async (email) => {
-    const result = await db.query(
+// If tenantPool is provided, use it; otherwise use getDb() which gets from context
+const findUserByEmail = async (email, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    const result = await connection.query(
         'SELECT * FROM "tblUsers" WHERE email = $1',
         [email]
     );
@@ -22,7 +28,8 @@ const createUser = async ({
     time_zone,
     dept_id
 }) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `INSERT INTO "tblUsers" (
             org_id, user_id,
             full_name, email, phone,
@@ -59,7 +66,8 @@ const createUser = async ({
 
 // Set reset token for password reset
 const setResetToken = async (email, token, expiry) => {
-    await db.query(
+    const dbPool = getDb();
+    await dbPool.query(
         `UPDATE "tblUsers"
          SET reset_token = $1, reset_token_expiry = $2
          WHERE email = $3`,
@@ -69,7 +77,8 @@ const setResetToken = async (email, token, expiry) => {
 
 // Find user by valid reset token
 const findUserByResetToken = async (token) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `SELECT * FROM "tblUsers"
          WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
         [token]
@@ -79,7 +88,8 @@ const findUserByResetToken = async (token) => {
 
 // Update user password after reset
 const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) => {
-    await db.query(
+    const dbPool = getDb();
+    await dbPool.query(
         `UPDATE "tblUsers"
          SET password = $1,
              reset_token = NULL,
@@ -93,12 +103,15 @@ const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) =
 
 // Get all users
 const getAllUsers = async () => {
-    const result = await db.query(`SELECT * FROM "tblUsers"`);
+    const dbPool = getDb();
+    const result = await dbPool.query(`SELECT * FROM "tblUsers"`);
     return result.rows;
 };
 
 // Get user with branch information
-const getUserWithBranch = async (userId) => {
+// If tenantPool is provided, use it; otherwise use getDb() which gets from context
+const getUserWithBranch = async (userId, tenantPool = null) => {
+    const connection = tenantPool || getDb();
     const query = `
         SELECT 
             u.user_id,
@@ -123,7 +136,7 @@ const getUserWithBranch = async (userId) => {
         WHERE u.user_id = $1
     `;
     
-    const result = await db.query(query, [userId]);
+    const result = await connection.query(query, [userId]);
     return result.rows[0];
 };
 
@@ -154,7 +167,8 @@ const getAllUsersWithBranch = async (orgId) => {
         ORDER BY u.full_name
     `;
     
-    const result = await db.query(query, [orgId]);
+    const dbPool = getDb();
+    const result = await dbPool.query(query, [orgId]);
     return result.rows;
 };
 
@@ -163,8 +177,9 @@ const deleteUsers = async (userIds = []) => {
     if (!userIds.length) return;
 
     try {
+        const dbPool = getDb();
         // First check for dependencies
-        const dependencies = await db.query(`
+        const dependencies = await dbPool.query(`
             SELECT DISTINCT u.user_id, u.full_name,
                 CASE
                     WHEN da.user_id IS NOT NULL THEN 'Department Admin'
@@ -195,7 +210,7 @@ const deleteUsers = async (userIds = []) => {
         }
 
         // If no dependencies, proceed with deletion
-        const result = await db.query(
+        const result = await dbPool.query(
             `DELETE FROM "tblUsers" WHERE user_id = ANY($1::text[])`,
             [userIds]
         );
@@ -221,7 +236,8 @@ const updateUser = async (user_id, fieldsToUpdate = {}) => {
     const setClause = keys.map((key, idx) => `${key} = $${idx + 2}`).join(", ");
     const values = [user_id, ...keys.map((key) => fieldsToUpdate[key])];
 
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `UPDATE "tblUsers" SET ${setClause} WHERE user_id = $1 RETURNING *`,
         values
     );
