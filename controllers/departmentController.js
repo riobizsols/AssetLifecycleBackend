@@ -1,4 +1,3 @@
-const db = require('../config/db');
 const DepartmentModel = require('../models/departmentModel');
 const { generateCustomId } = require("../utils/idGenerator");
 
@@ -26,7 +25,9 @@ const createDepartment = async (req, res) => {
         const branch_id = userBranchId;
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
-        const deptIdResult = await db.query(
+        const dbPool = req.db || require("../config/db");
+  
+        const deptIdResult = await dbPool.query(
             "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
             [org_id]
         );
@@ -71,7 +72,9 @@ const getNextDepartmentId = async (req, res) => {
         const org_id = req.user.org_id;
 
         // Get the highest department ID for this organization
-        const result = await db.query(
+        const dbPool = req.db || require("../config/db");
+
+        const result = await dbPool.query(
             "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
             [org_id]
         );

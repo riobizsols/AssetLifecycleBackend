@@ -1,4 +1,4 @@
-const pool = require('../config/db');
+const { getDb } = require('../utils/dbContext');
 const { sendEmail } = require('../utils/mailer');
 
 /**
@@ -78,7 +78,7 @@ const getOverdueWorkflows = async (orgId = 'ORG001') => {
       ORDER BY wfd.wfamsh_id, wfd.sequence
     `;
 
-    const result = await pool.query(query, [orgId]);
+    const result = await getDb().query(query, [orgId]);
     return result.rows;
   } catch (error) {
     console.error('Error fetching overdue workflows:', error);
@@ -123,7 +123,7 @@ const getNextApprover = async (wfamshId, currentSequence, orgId = 'ORG001') => {
       LIMIT 1
     `;
 
-    const result = await pool.query(query, [wfamshId, orgId, currentSequence]);
+    const result = await getDb().query(query, [wfamshId, orgId, currentSequence]);
     return result.rows.length > 0 ? result.rows[0] : null;
   } catch (error) {
     console.error('Error fetching next approver:', error);
@@ -146,7 +146,8 @@ const getNextApprover = async (wfamshId, currentSequence, orgId = 'ORG001') => {
  * @returns {Promise<Object>} - Escalation result
  */
 const escalateWorkflow = async (wfamsdId, nextWfamsdId, wfamshId, orgId = 'ORG001') => {
-  const client = await pool.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   
   try {
     await client.query('BEGIN');

@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get asset workflow history with filtering capabilities
 const getAssetWorkflowHistory = async (filters = {}, orgId = 'ORG001') => {
@@ -367,7 +372,10 @@ const getAssetWorkflowHistory = async (filters = {}, orgId = 'ORG001') => {
         }
     }
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get asset workflow history count for pagination
@@ -650,7 +658,10 @@ const getAssetWorkflowHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         });
     }
     
-    return await db.query(query, queryParams);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, queryParams);
 };
 
 // Get asset workflow history by asset ID
@@ -738,7 +749,10 @@ const getAssetWorkflowHistoryByAsset = async (assetId, orgId = 'ORG001') => {
         ORDER BY wfh.created_on DESC, wfd.sequence ASC
     `;
     
-    return await db.query(query, [assetId, orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [assetId, orgId]);
 };
 
 // Get workflow history details for a specific workflow
@@ -785,7 +799,10 @@ const getWorkflowHistoryDetails = async (wfamshId, orgId = 'ORG001') => {
         ORDER BY wh.action_on DESC
     `;
     
-    return await db.query(query, [wfamshId, orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [wfamshId, orgId]);
 };
 
 // Get asset workflow history summary statistics
@@ -807,7 +824,10 @@ const getAssetWorkflowHistorySummary = async (orgId = 'ORG001') => {
         WHERE wfh.org_id = $1
     `;
     
-    return await db.query(query, [orgId]);
+    const dbPool = getDb();
+
+    
+    return await dbPool.query(query, [orgId]);
 };
 
 // Get available filter options for dropdowns
@@ -884,15 +904,16 @@ const getWorkflowFilterOptions = async (orgId = 'ORG001') => {
         ORDER BY d.text
     `;
     
+    const dbPool = getDb();
     const [assetResult, vendorResult, workOrderResult, maintenanceTypeResult, workflowStatusResult, stepStatusResult, userResult, departmentResult] = await Promise.all([
-        db.query(assetQuery, [orgId]),
-        db.query(vendorQuery, [orgId]),
-        db.query(workOrderQuery, [orgId]),
-        db.query(maintenanceTypeQuery, [orgId]),
-        db.query(workflowStatusQuery, [orgId]),
-        db.query(stepStatusQuery, [orgId]),
-        db.query(userQuery, [orgId]),
-        db.query(departmentQuery, [orgId])
+        dbPool.query(assetQuery, [orgId]),
+        dbPool.query(vendorQuery, [orgId]),
+        dbPool.query(workOrderQuery, [orgId]),
+        dbPool.query(maintenanceTypeQuery, [orgId]),
+        dbPool.query(workflowStatusQuery, [orgId]),
+        dbPool.query(stepStatusQuery, [orgId]),
+        dbPool.query(userQuery, [orgId]),
+        dbPool.query(departmentQuery, [orgId])
     ]);
     
     return {

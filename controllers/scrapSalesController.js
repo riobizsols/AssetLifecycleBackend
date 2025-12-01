@@ -1,6 +1,4 @@
 const model = require("../models/scrapSalesModel");
-const db = require("../config/db");
-
 // Import scrap sales logger
 const scrapSalesLogger = require('../eventLoggers/scrapSalesEventLogger');
 
@@ -39,7 +37,9 @@ const createScrapSale = async (req, res) => {
         let userBranchCode = null;
         if (userBranchId) {
             const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const branchResult = await db.query(branchQuery, [userBranchId]);
+            const dbPool = req.db || require("../config/db");
+
+            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
             if (branchResult.rows.length > 0) {
                 userBranchCode = branchResult.rows[0].branch_code;
                 console.log('User branch_code:', userBranchCode);
@@ -289,7 +289,9 @@ const getAllScrapSales = async (req, res) => {
         let userBranchCode = null;
         if (userBranchId) {
             const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const branchResult = await db.query(branchQuery, [userBranchId]);
+            const dbPool = req.db || require("../config/db");
+
+            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
             if (branchResult.rows.length > 0) {
                 userBranchCode = branchResult.rows[0].branch_code;
                 console.log('User branch_code:', userBranchCode);

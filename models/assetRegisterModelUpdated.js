@@ -1,4 +1,9 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get asset register data with all necessary joins (Updated version with new fields)
 const getAssetRegisterData = async (filters = {}) => {
@@ -158,7 +163,9 @@ const getAssetRegisterData = async (filters = {}) => {
     LIMIT $${paramCount - 1} OFFSET $${paramCount}
   `;
 
-  return await db.query(query, queryParams);
+  const dbPool = getDb();
+
+  return await dbPool.query(query, queryParams);
 };
 
 // Get total count for pagination (Updated version)
@@ -285,7 +292,10 @@ const getAssetRegisterCount = async (filters = {}) => {
     ${whereClause}
   `;
 
-  const result = await db.query(query, queryParams);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, queryParams);
   return result.rows[0].total;
 };
 
@@ -302,7 +312,10 @@ const getAssetRegisterFilterOptions = async () => {
       (SELECT JSON_AGG(DISTINCT a.status) FROM "tblAssets" a WHERE a.status IS NOT NULL) as statuses
   `;
 
-  const result = await db.query(query);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query);
   return result.rows[0];
 };
 

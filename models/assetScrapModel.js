@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get all scrap assets
 const getAllScrapAssets = async () => {
@@ -21,7 +26,10 @@ const getAllScrapAssets = async () => {
     ORDER BY asd.scrapped_date DESC
   `;
   
-  return await db.query(query);
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query);
 };
 
 // Get scrap asset by ID
@@ -45,7 +53,10 @@ const getScrapAssetById = async (asd_id) => {
     WHERE asd.asd_id = $1
   `;
   
-  return await db.query(query, [asd_id]);
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query, [asd_id]);
 };
 
 
@@ -58,7 +69,10 @@ const generateAsdId = async () => {
     WHERE asd_id LIKE 'ASD%'
   `;
   
-  const result = await db.query(query);
+  const dbPool = getDb();
+
+  
+  const result = await dbPool.query(query);
   const nextSeq = result.rows[0].next_seq;
   return `ASD${nextSeq.toString().padStart(4, '0')}`;
 };
@@ -78,7 +92,9 @@ const addScrapAsset = async (scrapData) => {
   const asd_id = await generateAsdId();
 
   // Start a transaction to ensure both operations succeed or fail together
-  const client = await db.connect();
+  const dbPool = getDb();
+
+  const client = await dbPool.connect();
   
   try {
     await client.query('BEGIN');
@@ -184,7 +200,10 @@ const updateScrapAsset = async (asd_id, updateData) => {
     asd_id
   ];
 
-  return await db.query(query, values);
+  const dbPool = getDb();
+
+
+  return await dbPool.query(query, values);
 };
 
 // Delete scrap asset
@@ -195,7 +214,10 @@ const deleteScrapAsset = async (asd_id) => {
     RETURNING *
   `;
 
-  return await db.query(query, [asd_id]);
+  const dbPool = getDb();
+
+
+  return await dbPool.query(query, [asd_id]);
 };
 
 // Check if scrap asset exists
@@ -205,7 +227,10 @@ const checkScrapAssetExists = async (asd_id) => {
     WHERE asd_id = $1
   `;
   
-  return await db.query(query, [asd_id]);
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query, [asd_id]);
 };
 
 // Get available assets by asset type (exclude those already scrapped)
@@ -236,7 +261,10 @@ const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null) => {
 
   query += ` ORDER BY a.text`;
 
-  return await db.query(query, params);
+  const dbPool = getDb();
+
+
+  return await dbPool.query(query, params);
 };
 
 module.exports = {

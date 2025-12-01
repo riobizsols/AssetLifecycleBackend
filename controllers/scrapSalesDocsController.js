@@ -2,8 +2,6 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/mini
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
-const db = require('../config/db');
-
 // Import scrap sales logger
 const scrapSalesLogger = require('../eventLoggers/scrapSalesEventLogger');
 const { 
@@ -409,7 +407,9 @@ const updateDocArchiveStatus = async (req, res) => {
       WHERE ssdoc_id = $1
       RETURNING *
     `;
-    const result = await db.query(query, [ssdoc_id, is_archived, archived_path]);
+    const dbPool = req.db || require("../config/db");
+
+    const result = await dbPool.query(query, [ssdoc_id, is_archived, archived_path]);
     
     if (result.rows.length === 0) {
       return res.status(404).json({ message: 'Document not found' });

@@ -1,5 +1,4 @@
 const model = require("../models/scrapAssetsByTypeModel");
-const db = require("../config/db");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 
 // GET /api/scrap-assets-by-type/:asset_type_id - Get scrap assets by asset type
@@ -30,7 +29,9 @@ const getScrapAssetsByAssetType = async (req, res) => {
         }).catch(err => console.error('Logging error:', err));
 
         // Check if asset type exists
-        const assetTypeCheck = await db.query(
+        const dbPool = req.db || require("../config/db");
+
+        const assetTypeCheck = await dbPool.query(
             'SELECT asset_type_id, text FROM "tblAssetTypes" WHERE asset_type_id = $1',
             [asset_type_id]
         );

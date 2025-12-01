@@ -1,4 +1,3 @@
-const db = require("../config/db");
 const { v4: uuidv4 } = require("uuid");
 const prodServModel = require('../models/prodServModel');
 const { generateCustomId } = require('../utils/idGenerator');
@@ -18,7 +17,9 @@ exports.getAllProdserv = async (req, res) => {
     
     query += ` ORDER BY description, brand, model`;
     
-    const result = await db.query(query, params);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(query, params);
     res.status(200).json(result.rows);
   } catch (error) {
     console.error("Error fetching prodserv:", error);
@@ -30,7 +31,9 @@ exports.getAllProdserv = async (req, res) => {
 exports.getBrandsByAssetType = async (req, res) => {
   const { assetTypeId } = req.query;
   try {
-    const result = await db.query(
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(
       `SELECT DISTINCT brand FROM "tblProdServs" WHERE asset_type_id = $1 AND brand IS NOT NULL AND brand <> ''`,
       [assetTypeId]
     );
@@ -44,7 +47,9 @@ exports.getBrandsByAssetType = async (req, res) => {
 exports.getModelsByAssetTypeAndBrand = async (req, res) => {
   const { assetTypeId, brand } = req.query;
   try {
-    const result = await db.query(
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(
       `SELECT DISTINCT model FROM "tblProdServs" WHERE asset_type_id = $1 AND brand = $2 AND model IS NOT NULL AND model <> ''`,
       [assetTypeId, brand]
     );
@@ -68,7 +73,9 @@ exports.findByBrandAndModel = async (req, res) => {
   try {
     console.log('🔍 Searching for prod_serv_id with brand:', brand, 'model:', model);
     
-    const result = await db.query(
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(
       `SELECT prod_serv_id, brand, model, description FROM "tblProdServs" 
        WHERE brand = $1 AND model = $2 AND status = '1' 
        LIMIT 1`,

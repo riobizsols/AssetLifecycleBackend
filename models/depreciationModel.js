@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 /**
  * Depreciation Model
@@ -31,7 +36,10 @@ class DepreciationModel {
             WHERE a.asset_id = $1
         `;
         
-        return await db.query(query, [assetId]);
+        const dbPool = getDb();
+
+        
+        return await dbPool.query(query, [assetId]);
     }
 
     /**
@@ -69,7 +77,9 @@ class DepreciationModel {
         `;
         
         console.log(`[DEBUG] Querying assets for depreciation with org_id: ${orgId}`);
-        const result = await db.query(query, [orgId]);
+        const dbPool = getDb();
+
+        const result = await dbPool.query(query, [orgId]);
         console.log(`[DEBUG] Found ${result.rows.length} assets eligible for depreciation`);
         if (result.rows.length > 0) {
             console.log(`[DEBUG] First asset:`, result.rows[0]);
@@ -128,7 +138,10 @@ class DepreciationModel {
             created_by
         ];
 
-        return await db.query(query, values);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, values);
     }
 
     /**
@@ -168,7 +181,10 @@ class DepreciationModel {
             assetId
         ];
 
-        return await db.query(query, values);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, values);
     }
 
     /**
@@ -197,7 +213,10 @@ class DepreciationModel {
             LIMIT $2
         `;
 
-        return await db.query(query, [assetId, limit]);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, [assetId, limit]);
     }
 
     /**
@@ -235,7 +254,10 @@ class DepreciationModel {
             values.push(dateTo);
         }
 
-        return await db.query(query, values);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, values);
     }
 
     /**
@@ -266,7 +288,10 @@ class DepreciationModel {
             ORDER BY a.text
         `;
 
-        return await db.query(query, [orgId, depreciationMethod]);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, [orgId, depreciationMethod]);
     }
 
     /**
@@ -289,7 +314,10 @@ class DepreciationModel {
             WHERE org_id = $1
         `;
 
-        return await db.query(query, [orgId]);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, [orgId]);
     }
 
     /**
@@ -329,7 +357,10 @@ class DepreciationModel {
             settingId
         ];
 
-        return await db.query(query, values);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, values);
     }
 
     /**
@@ -367,7 +398,10 @@ class DepreciationModel {
             ORDER BY a.last_depreciation_calc_date ASC NULLS FIRST, a.purchased_on ASC
         `;
 
-        return await db.query(query, [orgId, calculationDate]);
+        const dbPool = getDb();
+
+
+        return await dbPool.query(query, [orgId, calculationDate]);
     }
 
     /**
@@ -376,7 +410,9 @@ class DepreciationModel {
      * @returns {Promise<Object>} Update result
      */
     static async bulkUpdateAssetDepreciation(assets) {
-        const client = await db.connect();
+        const dbPool = getDb();
+
+        const client = await dbPool.connect();
         
         try {
             await client.query('BEGIN');

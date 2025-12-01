@@ -1,7 +1,11 @@
 const admin = require('firebase-admin');
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
 const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
+
+// Helper to get database (tenant or default)
+const getDb = () => getDbFromContext();
 
 class FCMService {
     constructor() {
@@ -63,7 +67,8 @@ class FCMService {
                 SELECT token_id FROM "tblFCMTokens" 
                 WHERE user_id = $1 AND device_token = $2
             `;
-            const existingToken = await db.query(existingTokenQuery, [userId, deviceToken]);
+            const dbPool = getDb();
+            const existingToken = await dbPool.query(existingTokenQuery, [userId, deviceToken]);
 
             if (existingToken.rows.length > 0) {
                 // Update existing token
@@ -75,7 +80,7 @@ class FCMService {
                     WHERE token_id = $5
                     RETURNING *
                 `;
-                const result = await db.query(updateQuery, [
+                const result = await dbPool.query(updateQuery, [
                     deviceType, platform, appVersion, JSON.stringify(deviceInfo), 
                     existingToken.rows[0].token_id
                 ]);
@@ -89,7 +94,7 @@ class FCMService {
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, true, CURRENT_TIMESTAMP)
                     RETURNING *
                 `;
-                const result = await db.query(insertQuery, [
+                const result = await dbPool.query(insertQuery, [
                     tokenId, userId, deviceToken, deviceType, platform, 
                     appVersion, JSON.stringify(deviceInfo)
                 ]);
@@ -114,7 +119,8 @@ class FCMService {
                 WHERE user_id = $1 AND device_token = $2
                 RETURNING *
             `;
-            const result = await db.query(query, [userId, deviceToken]);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, [userId, deviceToken]);
             return { success: true, affectedRows: result.rowCount };
         } catch (error) {
             console.error('Error unregistering device token:', error);
@@ -140,7 +146,8 @@ class FCMService {
                 params.push(platform);
             }
 
-            const result = await db.query(query, params);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, params);
             return result.rows;
         } catch (error) {
             console.error('Error getting user device tokens:', error);
@@ -167,7 +174,8 @@ class FCMService {
                 SELECT push_enabled FROM "tblNotificationPreferences" 
                 WHERE user_id = $1 AND notification_type = $2
             `;
-            const preference = await db.query(preferenceQuery, [userId, notificationType]);
+            const dbPool = getDb();
+            const preference = await dbPool.query(preferenceQuery, [userId, notificationType]);
 
             if (preference.rows.length === 0 || !preference.rows[0].push_enabled) {
                 console.log(`Push notifications disabled for user ${userId}, type ${notificationType}`);
@@ -244,7 +252,8 @@ class FCMService {
                             singleError.code === 'messaging/registration-token-not-registered'
                         )) {
                             console.log(`Removing invalid token: ${token.substring(0, 20)}...`);
-                            await db.query(
+                            const dbPool = getDb();
+                            await dbPool.query(
                                 'UPDATE "tblFCMTokens" SET is_active = false WHERE token_id = $1',
                                 [tokenRecord.token_id]
                             );
@@ -324,7 +333,8 @@ class FCMService {
                 INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
                 WHERE ujr.job_role_id = $1 AND u.int_status = 1
             `;
-            const usersResult = await db.query(usersQuery, [jobRoleId]);
+            const dbPool = getDb();
+            const usersResult = await dbPool.query(usersQuery, [jobRoleId]);
             const userIds = usersResult.rows.map(row => row.user_id);
 
             if (userIds.length === 0) {
@@ -431,7 +441,8 @@ class FCMService {
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamp, $11::timestamp)
                 `;
 
-                await db.query(insertQuery, [
+                const dbPool = getDb();
+                await dbPool.query(insertQuery, [
                     notificationId,
                     userId,
                     token.token_id,
@@ -474,7 +485,8 @@ class FCMService {
                     SET is_active = false, updated_on = CURRENT_TIMESTAMP
                     WHERE token_id = ANY($1)
                 `;
-                await db.query(updateQuery, [invalidTokens]);
+                const dbPool = getDb();
+                await dbPool.query(updateQuery, [invalidTokens]);
                 console.log(`Deactivated ${invalidTokens.length} invalid tokens`);
             }
         } catch (error) {
@@ -499,7 +511,8 @@ class FCMService {
                 RETURNING *
             `;
 
-            const result = await db.query(query, [isEnabled, emailEnabled, pushEnabled, userId, notificationType]);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, [isEnabled, emailEnabled, pushEnabled, userId, notificationType]);
             return { success: true, preference: result.rows[0] };
         } catch (error) {
             console.error('Error updating notification preferences:', error);
@@ -518,7 +531,8 @@ class FCMService {
                 WHERE user_id = $1
                 ORDER BY notification_type
             `;
-            const result = await db.query(query, [userId]);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, [userId]);
             return result.rows;
         } catch (error) {
             console.error('Error getting notification preferences:', error);
@@ -592,7 +606,8 @@ class FCMService {
             params.push(Number(limit));
             params.push(Number(offset));
 
-            const result = await db.query(query, params);
+            const dbPool = getDb();
+            const result = await dbPool.query(query, params);
             return result.rows;
         } catch (error) {
             console.error('Error getting user notification history:', error);

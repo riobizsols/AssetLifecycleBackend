@@ -1,8 +1,21 @@
 const db = require("../config/db");
+const { getDb: getDbFromContext } = require("../utils/dbContext");
+
+// Helper function to get database connection (tenant pool or default)
+// First checks if dbConnection is provided, then checks async context, then falls back to default
+const getDb = (dbConnection) => {
+  if (dbConnection) {
+    return dbConnection;
+  }
+  // Try to get from async context (set by middleware)
+  const contextDb = getDbFromContext();
+  return contextDb;
+};
 const { generateCustomId } = require('../utils/idGenerator');
 const { convertAssetTypeToSerialFormat, generateSerialNumber } = require('../utils/serialNumberGenerator');
 
 const getAllAssets = async () => {
+  const dbPool = getDb();
   const query = `
                 SELECT 
             asset_id, asset_type_id, text, serial_number, description,
@@ -13,7 +26,7 @@ const getAllAssets = async () => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query);
+  return await dbPool.query(query);
 };
 
 const getAssetById = async (asset_id) => {
@@ -34,7 +47,8 @@ const getAssetById = async (asset_id) => {
         WHERE a.asset_id = $1
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const getAssetProperties = async (asset_id) => {
@@ -52,7 +66,8 @@ const getAssetProperties = async (asset_id) => {
     ORDER BY p.property
   `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const getAssetsByAssetType = async (asset_type_id) => {
@@ -68,7 +83,8 @@ const getAssetsByAssetType = async (asset_type_id) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [asset_type_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_type_id]);
 };
 
 const getPrinterAssets = async (orgId, branchId) => {
@@ -99,7 +115,8 @@ const getPrinterAssets = async (orgId, branchId) => {
         ORDER BY a.created_on DESC
     `;
 
-  const result = await db.query(query, [orgId, branchId]);
+  const dbPool = getDb();
+  const result = await dbPool.query(query, [orgId, branchId]);
   console.log('Query executed successfully, found printer assets:', result.rows.length);
   return result;
 };
@@ -116,7 +133,8 @@ const getAssetsByBranch = async (branch_id) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [branch_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [branch_id]);
 };
 
 const getAssetsByVendor = async (vendor_id) => {
@@ -131,7 +149,8 @@ const getAssetsByVendor = async (vendor_id) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [vendor_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [vendor_id]);
 };
 
 const getAssetsByStatus = async (current_status) => {
@@ -146,7 +165,8 @@ const getAssetsByStatus = async (current_status) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [current_status]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [current_status]);
 };
 
 const getAssetsBySerialNumber = async (serial_number) => {
@@ -161,7 +181,8 @@ const getAssetsBySerialNumber = async (serial_number) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [serial_number]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [serial_number]);
 };
 
 
@@ -178,7 +199,8 @@ const getAssetsByOrg = async (org_id) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [org_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [org_id]);
 };
 
 const getInactiveAssetsByAssetType = async (asset_type_id, orgId, branchId) => {
@@ -205,7 +227,8 @@ const getInactiveAssetsByAssetType = async (asset_type_id, orgId, branchId) => {
         ORDER BY a.created_on DESC
     `;
 
-  const result = await db.query(query, [asset_type_id, orgId, branchId]);
+  const dbPool = getDb();
+  const result = await dbPool.query(query, [asset_type_id, orgId, branchId]);
   console.log('Query executed successfully, found inactive assets:', result.rows.length);
   return result;
 };
@@ -226,7 +249,8 @@ const searchAssets = async (searchTerm) => {
         ORDER BY created_on DESC
     `;
 
-  return await db.query(query, [`%${searchTerm}%`]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [`%${searchTerm}%`]);
 };
 
 const getAssetWithDetails = async (asset_id) => {
@@ -259,7 +283,8 @@ const getAssetWithDetails = async (asset_id) => {
         WHERE a.asset_id = $1
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 // const getPotentialParentAssets = async (asset_type_id) => {
@@ -290,7 +315,8 @@ const insertAsset = async (assetData) => {
     created_by,
   } = assetData;
 
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -393,7 +419,8 @@ const updateAsset = async (asset_id, {
   insurance_end_date,
   comprehensive_insurance
 }) => {
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -515,7 +542,8 @@ const checkAssetExists = async (org_id) => {
         WHERE org_id = $1
     `;
 
-  return await db.query(query, [org_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [org_id]);
 };
 
 const checkAssetIdExists = async (asset_id) => {
@@ -524,7 +552,8 @@ const checkAssetIdExists = async (asset_id) => {
         WHERE asset_id = $1
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const checkVendorExists = async (vendor_id) => {
@@ -533,7 +562,8 @@ const checkVendorExists = async (vendor_id) => {
         WHERE vendor_id = $1
     `;
 
-  return await db.query(query, [vendor_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [vendor_id]);
 };
 
 const checkProdServExists = async (prod_serv_id) => {
@@ -542,7 +572,8 @@ const checkProdServExists = async (prod_serv_id) => {
         WHERE prod_serv_id = $1
     `;
 
-  return await db.query(query, [prod_serv_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [prod_serv_id]);
 };
 
 const getAssetTypeAssignmentType = async (asset_id) => {
@@ -553,7 +584,8 @@ const getAssetTypeAssignmentType = async (asset_id) => {
         WHERE a.asset_id = $1
     `;
 
-  return await db.query(query, [asset_id]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [asset_id]);
 };
 
 const insertAssetPropValue = async (propValueData) => {
@@ -577,7 +609,8 @@ const insertAssetPropValue = async (propValueData) => {
     `;
 
   const values = [apvId, asset_id, org_id, asset_type_prop_id, value];
-  return await db.query(query, values);
+  const dbPool = getDb();
+  return await dbPool.query(query, values);
 };
 
 const generateAssetId = async () => {
@@ -585,7 +618,8 @@ const generateAssetId = async () => {
   return await generateCustomId("asset", 3);
 }
 const deleteAsset = async (asset_id) => {
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -611,7 +645,8 @@ const deleteAsset = async (asset_id) => {
 };
 
 const deleteMultipleAssets = async (asset_ids) => {
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -644,7 +679,8 @@ const getPotentialParentAssets = async (asset_type_id) => {
     WHERE asset_type_id = $1 AND is_child = true
   `;
   
-  const parentTypeResult = await db.query(parentTypeQuery, [asset_type_id]);
+  const dbPool = getDb();
+  const parentTypeResult = await dbPool.query(parentTypeQuery, [asset_type_id]);
   
   if (parentTypeResult.rows.length === 0 || !parentTypeResult.rows[0].parent_asset_type_id) {
     // Not a child asset type or no parent defined
@@ -669,8 +705,8 @@ const getPotentialParentAssets = async (asset_type_id) => {
     AND a.parent_asset_id IS NULL
     ORDER BY a.text
   `;
-
-  return await db.query(query, [parentAssetTypeId]);
+  
+  return await dbPool.query(query, [parentAssetTypeId]);
 };
 
 // Get assets expiring within 30 days (filtered by user context)
@@ -706,7 +742,8 @@ const getAssetsExpiringWithin30Days = async (orgId, branchId = null) => {
   
   query += ` ORDER BY a.expiry_date ASC`;
 
-  return await db.query(query, params);
+  const dbPool = getDb();
+  return await dbPool.query(query, params);
 };
 
 // Get assets expiring within 30 days grouped by asset type (filtered by user context)
@@ -756,7 +793,8 @@ const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null) => {
     ORDER BY at.text ASC
   `;
 
-  return await db.query(query, params);
+  const dbPool = getDb();
+  return await dbPool.query(query, params);
 };
 
 // Get assets by expiry date with different filter types (filtered by user context)
@@ -911,7 +949,8 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
       throw new Error('Invalid filter type');
   }
 
-  return await db.query(query, params);
+  const dbPool = getDb();
+  return await dbPool.query(query, params);
 };
 
 // WEB MODEL
@@ -948,7 +987,8 @@ const createAsset = async (assetData) => {
     depreciation_start_date
   } = assetData;
 
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
 
@@ -1099,12 +1139,14 @@ const getAssetsCount = async (orgId, branchId = null) => {
     params.push(branchId);
   }
   
-  const result = await db.query(query, params);
+  const dbPool = getDb();
+  const result = await dbPool.query(query, params);
   return result.rows[0].count;
 };
 
 // Get assets filtered by user's organization and branch
-const getAssetsByUserContext = async (orgId, branchId = null) => {
+const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = null) => {
+  const dbPool = getDb(dbConnection);
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -1129,11 +1171,12 @@ const getAssetsByUserContext = async (orgId, branchId = null) => {
   
   query += ` ORDER BY a.created_on DESC`;
   
-  return await db.query(query, params);
+  return await dbPool.query(query, params);
 };
 
 // Get assets with user context filtering and additional filters
-const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}) => {
+const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}, dbConnection = null) => {
+  const dbPool = getDb(dbConnection);
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -1186,7 +1229,7 @@ const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additi
   
   query += ` ORDER BY a.created_on DESC`;
   
-  return await db.query(query, params);
+  return await dbPool.query(query, params);
 };
 
 module.exports = {
@@ -1233,19 +1276,21 @@ const checkExistingAssetIds = async (assetIds) => {
     WHERE asset_id = ANY($1)
   `;
   
-  return await db.query(query, [assetIds]);
+  const dbPool = getDb();
+  return await dbPool.query(query, [assetIds]);
 };
 
 // Get reference data for bulk upload validation
 const getBulkUploadReferenceData = async () => {
   try {
     // Fetch all reference data in parallel
+    const dbPool = getDb();
     const [organizations, assetTypes, branches, vendors, prodServs] = await Promise.all([
-      db.query('SELECT org_id, text as org_name FROM "tblOrgs" WHERE int_status = 1'),
-      db.query('SELECT asset_type_id, text as asset_type_name FROM "tblAssetTypes" WHERE int_status = 1'),
-      db.query('SELECT branch_id, text as branch_name FROM "tblBranches" WHERE int_status = 1'),
-      db.query('SELECT vendor_id, text as vendor_name FROM "tblVendors" WHERE int_status = 1'),
-      db.query('SELECT prod_serv_id, text as prod_serv_name FROM "tblProdServs" WHERE int_status = 1')
+      dbPool.query('SELECT org_id, text as org_name FROM "tblOrgs" WHERE int_status = 1'),
+      dbPool.query('SELECT asset_type_id, text as asset_type_name FROM "tblAssetTypes" WHERE int_status = 1'),
+      dbPool.query('SELECT branch_id, text as branch_name FROM "tblBranches" WHERE int_status = 1'),
+      dbPool.query('SELECT vendor_id, text as vendor_name FROM "tblVendors" WHERE int_status = 1'),
+      dbPool.query('SELECT prod_serv_id, text as prod_serv_name FROM "tblProdServs" WHERE int_status = 1')
     ]);
 
     return {
@@ -1359,7 +1404,8 @@ const validatePropertyValueStandalone = async (assetTypePropId, value, orgId, cr
     WHERE asset_type_prop_id = $1 AND org_id = $2
   `;
   
-  const propIdResult = await db.query(propIdQuery, [assetTypePropId, orgId]);
+  const dbPool = getDb();
+  const propIdResult = await dbPool.query(propIdQuery, [assetTypePropId, orgId]);
   
   if (propIdResult.rows.length === 0) {
     return { 
@@ -1377,7 +1423,7 @@ const validatePropertyValueStandalone = async (assetTypePropId, value, orgId, cr
     ORDER BY value
   `;
   
-  const result = await db.query(query, [actualPropId, orgId]);
+  const result = await dbPool.query(query, [actualPropId, orgId]);
   const existingValues = result.rows;
   
   // 1. Check for exact case-sensitive match first
@@ -1427,7 +1473,7 @@ const validatePropertyValueStandalone = async (assetTypePropId, value, orgId, cr
         RETURNING aplv_id
       `;
       
-      await db.query(insertQuery, [aplvId, actualPropId, trimmedValue, 1, orgId]);
+      await dbPool.query(insertQuery, [aplvId, actualPropId, trimmedValue, 1, orgId]);
       
       console.log(`✅ Auto-created new property value: '${trimmedValue}' for property '${actualPropId}' with ID ${aplvId}`);
       
@@ -1499,7 +1545,8 @@ const validateAndFormatDate = (dateString) => {
 
 // Bulk upsert assets (insert or update)
 const bulkUpsertAssets = async (csvData, created_by, user_org_id, user_branch_id) => {
-  const client = await db.connect();
+  const dbPool = getDb();
+  const client = await dbPool.connect();
   
   try {
     await client.query('BEGIN');

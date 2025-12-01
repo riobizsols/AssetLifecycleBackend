@@ -1,10 +1,15 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
 const bcrypt = require('bcrypt');
 
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 // Get user's job role by user ID
 const getUserJobRole = async (user_id) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `SELECT ujr.user_id, ujr.job_role_id, jr.text as job_role_name, jr.job_function
          FROM "tblUserJobRoles" ujr
          JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
@@ -16,7 +21,8 @@ const getUserJobRole = async (user_id) => {
 
 // Assign job role to user
 const assignJobRoleToUser = async (user_id, job_role_id, assigned_by) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `INSERT INTO "tblUserJobRoles" 
          (user_id, job_role_id, assigned_by, assigned_on, int_status)
          VALUES ($1, $2, $3, CURRENT_DATE, 1)
@@ -34,7 +40,8 @@ const assignJobRoleToUser = async (user_id, job_role_id, assigned_by) => {
 
 // Update user's job role
 const updateUserJobRole = async (user_id, job_role_id, updated_by) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `UPDATE "tblUserJobRoles" 
          SET job_role_id = $2, 
              updated_by = $3, 
@@ -48,7 +55,8 @@ const updateUserJobRole = async (user_id, job_role_id, updated_by) => {
 
 // Get all users with their job roles
 const getAllUsersWithJobRoles = async () => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `SELECT u.user_id, u.full_name, u.email, ujr.job_role_id, jr.text as job_role_name
          FROM "tblUsers" u
          LEFT JOIN "tblUserJobRoles" ujr ON u.user_id = ujr.user_id
@@ -61,7 +69,8 @@ const getAllUsersWithJobRoles = async () => {
 
 // Check if employee exists in tblUsers by emp_int_id
 const checkEmployeeInUsers = async (emp_int_id) => {
-    const result = await db.query(
+    const dbPool = getDb();
+    const result = await dbPool.query(
         `SELECT user_id, emp_int_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`,
         [emp_int_id]
     );
@@ -75,8 +84,9 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         const user_id = await generateCustomId('user', 3);
         console.log(`Generated user_id: ${user_id}`);
         
+        const dbPool = getDb();
         // Fetch employee data
-        const employeeResult = await db.query(
+        const employeeResult = await dbPool.query(
             `SELECT full_name, email_id, phone_number, dept_id, language_code 
              FROM "tblEmployees" 
              WHERE emp_int_id = $1`,
@@ -94,7 +104,7 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         const hashedPassword = await bcrypt.hash(randomPassword, 10);
         
         // Insert user with all mapped fields (job_role_id set to null)
-        const result = await db.query(
+        const result = await dbPool.query(
             `INSERT INTO "tblUsers" (
                 user_id, emp_int_id, org_id, full_name, email, phone,
                 job_role_id, password, created_by, created_on, changed_by, changed_on,
@@ -138,7 +148,8 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
         const user_job_role_id = await generateCustomId('userjobrole', 3);
         console.log(`Generated user_job_role_id: ${user_job_role_id}`);
         
-        const result = await db.query(
+        const dbPool = getDb();
+        const result = await dbPool.query(
             `INSERT INTO "tblUserJobRoles" 
              (user_job_role_id, user_id, job_role_id)
              VALUES ($1, $2, $3)
@@ -159,8 +170,9 @@ const getEmployeeJobRoles = async (emp_int_id) => {
     try {
         console.log(`Querying roles for emp_int_id: ${emp_int_id}`);
         
+        const dbPool = getDb();
         // First, let's check if the employee exists in tblUsers
-        const userCheck = await db.query(
+        const userCheck = await dbPool.query(
             `SELECT user_id, emp_int_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`,
             [emp_int_id]
         );
@@ -176,7 +188,7 @@ const getEmployeeJobRoles = async (emp_int_id) => {
         console.log(`Found user_id: ${user_id} for emp_int_id: ${emp_int_id}`);
         
         // Now get the roles for this user
-        const result = await db.query(
+        const result = await dbPool.query(
             `SELECT ujr.user_job_role_id, ujr.user_id, ujr.job_role_id, jr.text as job_role_name
              FROM "tblUserJobRoles" ujr
              JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
@@ -194,11 +206,13 @@ const getEmployeeJobRoles = async (emp_int_id) => {
 };
 
 // Get all roles for a specific user by user_id
-const getUserRoles = async (user_id) => {
+// If tenantPool is provided, use it; otherwise use default db
+const getUserRoles = async (user_id, tenantPool = null) => {
     try {
         console.log(`Fetching roles for user_id: ${user_id}`);
+        const connection = tenantPool || getDb();
         
-        const result = await db.query(
+        const result = await connection.query(
             `SELECT ujr.user_job_role_id, ujr.user_id, ujr.job_role_id, 
                     jr.text as job_role_name, jr.job_function
              FROM "tblUserJobRoles" ujr
@@ -221,7 +235,8 @@ const deleteUserRole = async (user_job_role_id) => {
     try {
         console.log(`Deleting role assignment: ${user_job_role_id}`);
         
-        const result = await db.query(
+        const dbPool = getDb();
+        const result = await dbPool.query(
             `DELETE FROM "tblUserJobRoles" 
              WHERE user_job_role_id = $1
              RETURNING user_id, job_role_id`,
@@ -245,7 +260,8 @@ const updateUserRole = async (user_job_role_id, new_job_role_id) => {
     try {
         console.log(`Updating role assignment ${user_job_role_id} to role ${new_job_role_id}`);
         
-        const result = await db.query(
+        const dbPool = getDb();
+        const result = await dbPool.query(
             `UPDATE "tblUserJobRoles" 
              SET job_role_id = $1
              WHERE user_job_role_id = $2
@@ -268,7 +284,8 @@ const updateUserRole = async (user_job_role_id, new_job_role_id) => {
 // Check if user has any remaining roles
 const getUserRoleCount = async (user_id) => {
     try {
-        const result = await db.query(
+        const dbPool = getDb();
+        const result = await dbPool.query(
             `SELECT COUNT(*) as role_count 
              FROM "tblUserJobRoles" 
              WHERE user_id = $1`,
@@ -287,7 +304,8 @@ const deactivateUser = async (user_id) => {
     try {
         console.log(`Deactivating user: ${user_id}`);
         
-        const result = await db.query(
+        const dbPool = getDb();
+        const result = await dbPool.query(
             `UPDATE "tblUsers" 
              SET int_status = 0, changed_on = CURRENT_TIMESTAMP
              WHERE user_id = $1

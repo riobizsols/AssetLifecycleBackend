@@ -1,5 +1,12 @@
 const db = require('../config/db');
+const { getDb: getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => {
+  const contextDb = getDbFromContext();
+  return contextDb;
+};
 
 class PropertiesModel {
   // Get properties for a specific asset type
@@ -18,7 +25,8 @@ class PropertiesModel {
         ORDER BY p.property
       `;
       
-      const result = await db.query(query, [assetTypeId, orgId]);
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [assetTypeId, orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching properties by asset type:', error);
@@ -29,6 +37,7 @@ class PropertiesModel {
   // Get values for a specific property
   static async getPropertyValues(propId, orgId) {
     try {
+      const dbPool = getDb();
       const query = `
         SELECT 
           aplv_id,
@@ -41,7 +50,7 @@ class PropertiesModel {
         ORDER BY value
       `;
       
-      const result = await db.query(query, [propId, orgId]);
+      const result = await dbPool.query(query, [propId, orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching property values:', error);
@@ -68,7 +77,8 @@ class PropertiesModel {
         RETURNING aplv_id
       `;
       
-      const result = await db.query(query, [aplvId, propId, value, 1, orgId]);
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [aplvId, propId, value, 1, orgId]);
       console.log(`✅ Created new property value: ${value} for property ${propId} with ID ${aplvId}`);
       return result.rows[0];
     } catch (error) {
@@ -80,6 +90,7 @@ class PropertiesModel {
   // Check if property value exists (case-insensitive)
   static async findPropertyValue(propId, value, orgId) {
     try {
+      const dbPool = getDb();
       const query = `
         SELECT 
           aplv_id,
@@ -93,7 +104,7 @@ class PropertiesModel {
         ORDER BY value
       `;
       
-      const result = await db.query(query, [propId, orgId, value]);
+      const result = await dbPool.query(query, [propId, orgId, value]);
       return result.rows[0] || null;
     } catch (error) {
       console.error('Error finding property value:', error);
@@ -127,7 +138,8 @@ class PropertiesModel {
         ORDER BY p.property
       `;
       
-      const result = await db.query(query, [assetTypeId, orgId]);
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [assetTypeId, orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching properties with values:', error);
@@ -138,13 +150,14 @@ class PropertiesModel {
   // Add new property value to tblAssetPropListValues
   static async addPropertyValue(propId, value, orgId) {
     try {
+      const dbPool = getDb();
       // First, get the next aplv_id by finding the highest existing aplv_id for this prop_id
       const maxIdQuery = `
         SELECT COALESCE(MAX(CAST(SUBSTRING(aplv_id FROM 4) AS INTEGER)), 0) as max_id
         FROM "tblAssetPropListValues"
         WHERE prop_id = $1 AND org_id = $2
       `;
-      const maxIdResult = await db.query(maxIdQuery, [propId, orgId]);
+      const maxIdResult = await dbPool.query(maxIdQuery, [propId, orgId]);
       const nextId = (maxIdResult.rows[0].max_id || 0) + 1;
       const aplvId = `APL${nextId.toString().padStart(6, '0')}`;
 
@@ -155,7 +168,7 @@ class PropertiesModel {
         RETURNING *
       `;
       
-      const result = await db.query(query, [aplvId, propId, value, orgId]);
+      const result = await dbPool.query(query, [aplvId, propId, value, orgId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error adding property value:', error);
@@ -177,7 +190,8 @@ class PropertiesModel {
         ORDER BY text
       `;
       
-      const result = await db.query(query, [orgId]);
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching asset types:', error);
@@ -188,6 +202,7 @@ class PropertiesModel {
   // Get all properties
   static async getAllProperties(orgId) {
     try {
+      const dbPool = getDb();
       const query = `
         SELECT 
           prop_id,
@@ -199,7 +214,7 @@ class PropertiesModel {
         ORDER BY property
       `;
       
-      const result = await db.query(query, [orgId]);
+      const result = await dbPool.query(query, [orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching all properties:', error);
@@ -209,7 +224,8 @@ class PropertiesModel {
 
   // Map properties to existing asset type
   static async mapPropertiesToAssetType(assetTypeId, propertyIds, orgId, createdBy) {
-    const client = await db.connect();
+    const dbPool = getDb();
+    const client = await dbPool.connect();
     
     try {
       await client.query('BEGIN');

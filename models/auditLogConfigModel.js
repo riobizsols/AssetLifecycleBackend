@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 class AuditLogConfigModel {
   // Get all audit log configurations
@@ -18,7 +23,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query);
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs:', error);
@@ -43,7 +50,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query, [alcId]);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query, [alcId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error fetching audit log config by ID:', error);
@@ -61,7 +70,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query, [reportingRequired, alcId]);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query, [reportingRequired, alcId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error updating reporting required:', error);
@@ -79,7 +90,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query, [enabled, alcId]);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query, [enabled, alcId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error updating enabled status:', error);
@@ -97,7 +110,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query, [reportingEmail, alcId]);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query, [reportingEmail, alcId]);
       return result.rows[0];
     } catch (error) {
       console.error('Error updating reporting email:', error);
@@ -123,7 +138,9 @@ class AuditLogConfigModel {
     `;
     
     try {
-      const result = await db.query(query, [appId]);
+      const dbPool = getDb();
+
+      const result = await dbPool.query(query, [appId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs by app ID:', error);

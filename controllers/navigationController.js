@@ -5,9 +5,15 @@ const { getUserJobRole, assignJobRoleToUser, updateUserJobRole, getAllUsersWithJ
 const getUserNavigationData = async (req, res) => {
     try {
         const user_id = req.user.user_id;
-        const platform = req.query.platform; // Default to Desktop ('D'), can be 'M' for mobile
+        const platform = req.query.platform || 'D'; // Default to Desktop ('D'), can be 'M' for mobile
+        
+        console.log(`[NavigationController] Getting navigation for user_id: ${user_id}, platform: ${platform}`);
+        console.log(`[NavigationController] Using database: ${req.isTenant ? 'TENANT' : 'DEFAULT'}`);
+        console.log(`[NavigationController] req.db exists: ${!!req.db}`);
         
         const navigation = await getUserNavigation(user_id, platform);
+        
+        console.log(`[NavigationController] Navigation items found: ${navigation.length}`);
         
         res.json({
             success: true,
@@ -19,7 +25,8 @@ const getUserNavigationData = async (req, res) => {
         console.error('Error fetching user navigation:', error);
         res.status(500).json({
             success: false,
-            message: 'Failed to fetch navigation data'
+            message: 'Failed to fetch navigation data',
+            error: error.message
         });
     }
 };

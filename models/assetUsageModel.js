@@ -1,4 +1,9 @@
 const db = require("../config/db");
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 const { generateCustomId } = require("../utils/idGenerator");
 
 const ASSET_TYPE_REGEX = /^AT[0-9]+$/i;
@@ -22,7 +27,10 @@ const getUsageEligibleAssetTypeIds = async (orgId) => {
       )
   `;
 
-  const result = await db.query(query, [orgId]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [orgId]);
   const assetTypeIds = new Set();
 
   result.rows.forEach(({ key, value }) => {
@@ -80,7 +88,10 @@ const getAssignedAssetsForUser = async (employeeIntId, orgId, assetTypeIds, dept
     ORDER BY a.asset_id, assignment_scope
   `;
 
-  const result = await db.query(query, [employeeIntId, orgId, assetTypeIds, deptId]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [employeeIntId, orgId, assetTypeIds, deptId]);
   return result.rows;
 };
 
@@ -101,7 +112,10 @@ const isAssetAccessibleByUser = async (assetId, employeeIntId, orgId, deptId = n
     LIMIT 1
   `;
 
-  const result = await db.query(query, [assetId, employeeIntId, orgId, deptId]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [assetId, employeeIntId, orgId, deptId]);
   return result.rows.length > 0;
 };
 
@@ -114,7 +128,10 @@ const createUsageRecord = async ({ asset_id, usage_counter, created_by }) => {
     RETURNING aug_id, asset_id, usage_counter, created_by, created_on
   `;
 
-  const result = await db.query(query, [aug_id, asset_id, usage_counter, created_by]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [aug_id, asset_id, usage_counter, created_by]);
   return result.rows[0];
 };
 
@@ -133,7 +150,10 @@ const getUsageHistoryByAsset = async (assetId) => {
     ORDER BY aur.created_on DESC
   `;
 
-  const result = await db.query(query, [assetId]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [assetId]);
   return result.rows;
 };
 
@@ -512,7 +532,10 @@ const getUsageReportData = async (orgId, filters = {}) => {
     paramIndex++;
   }
 
-  const result = await db.query(query, params);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, params);
   return result.rows;
 };
 
@@ -592,7 +615,10 @@ const getUsageReportSummary = async (orgId, filters = {}) => {
     paramIndex++;
   }
 
-  const result = await db.query(query, params);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, params);
   return result.rows[0] || null;
 };
 
@@ -619,7 +645,10 @@ const getAllAssetsForAssetTypes = async (orgId, assetTypeIds) => {
     ORDER BY a.asset_id
   `;
 
-  const result = await db.query(query, [orgId, assetTypeIds]);
+  const dbPool = getDb();
+
+
+  const result = await dbPool.query(query, [orgId, assetTypeIds]);
   return result.rows;
 };
 

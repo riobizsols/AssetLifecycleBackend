@@ -1,4 +1,9 @@
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 // Get scrap assets by asset type, excluding those already in scrap sales
 const getScrapAssetsByAssetType = async (asset_type_id) => {
@@ -28,7 +33,10 @@ const getScrapAssetsByAssetType = async (asset_type_id) => {
     ORDER BY asd.scrapped_date DESC
   `;
   
-  return await db.query(query, [asset_type_id]);
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query, [asset_type_id]);
 };
 
 // Get all asset types that have scrap assets (excluding those in scrap sales)
@@ -51,7 +59,10 @@ const getAssetTypesWithScrapAssets = async () => {
     ORDER BY at.text
   `;
   
-  return await db.query(query);
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query);
 };
 
 module.exports = {

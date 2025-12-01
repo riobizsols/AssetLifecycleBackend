@@ -1,6 +1,5 @@
 const DeptAdminModel = require('../models/deptAdminModel');
 const { v4: uuidv4 } = require("uuid");
-const db = require('../config/db');
 const { generateCustomId } = require("../utils/idGenerator");
 
 
@@ -101,8 +100,11 @@ const createDeptAdmin = async (req, res) => {
         console.log('User org_id:', org_id);
         console.log('User branch_id:', userBranchId);
 
+        // Use tenant database from request context (set by middleware)
+        const dbPool = req.db || require("../config/db");
+
         // Check if user already exists as admin for this department
-        const existingAdmin = await db.query(
+        const existingAdmin = await dbPool.query(
             `SELECT * FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`,
             [dept_id, user_id]
         );
@@ -115,7 +117,7 @@ const createDeptAdmin = async (req, res) => {
         }
 
         // Check if department exists and belongs to user's branch
-        const deptCheck = await db.query(
+        const deptCheck = await dbPool.query(
             `SELECT text FROM "tblDepartments" WHERE dept_id = $1 AND org_id = $2 AND branch_id = $3`,
             [dept_id, org_id, userBranchId]
         );
@@ -128,7 +130,7 @@ const createDeptAdmin = async (req, res) => {
         }
 
         // Check if user exists
-        const userCheck = await db.query(
+        const userCheck = await dbPool.query(
             `SELECT full_name FROM "tblUsers" WHERE user_id = $1`,
             [user_id]
         );
@@ -144,7 +146,8 @@ const createDeptAdmin = async (req, res) => {
         const newDeptAdminId = await generateCustomId("dept_admin", 2);
 
         // Insert into tblDeptAdmins with branch_id
-        const insertResult = await db.query(
+
+        const insertResult = await dbPool.query(
             `INSERT INTO "tblDeptAdmins" (dept_admin_id, org_id, branch_id, dept_id, user_id, created_by, created_on)
          VALUES ($1, $2, $3, $4, $5, $6, CURRENT_DATE)
          RETURNING *`,
@@ -153,7 +156,7 @@ const createDeptAdmin = async (req, res) => {
 
         // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"
         const updatedRoleId = `admin/${dept_id}`;
-        await db.query(
+        await dbPool.query(
             `UPDATE "tblUsers" SET job_role_id = $1 WHERE user_id = $2`,
             [updatedRoleId, user_id]
         );
@@ -201,7 +204,9 @@ const deleteDeptAdmin = async (req, res) => {
         }
 
         // Check if admin exists before deleting
-        const existingAdmin = await db.query(
+        const dbPool = req.db || require("../config/db");
+
+        const existingAdmin = await dbPool.query(
             `SELECT * FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`,
             [dept_id, user_id]
         );
@@ -216,7 +221,7 @@ const deleteDeptAdmin = async (req, res) => {
         await DeptAdminModel.deleteDeptAdmin({ dept_id, user_id });
         
         // Reset job_role_id in tblUsers
-        await db.query(
+        await dbPool.query(
             `UPDATE "tblUsers" SET job_role_id = NULL WHERE user_id = $1`,
             [user_id]
         );
@@ -243,7 +248,10 @@ const fetchAllAdmins = async (req, res) => {
         console.log('User org_id:', org_id);
         console.log('User branch_id:', branch_id);
         
-        const result = await db.query(
+        const dbPool = req.db || require("../config/db");
+
+        
+        const result = await dbPool.query(
             `SELECT d.dept_id, d.text AS dept_name, da.user_id, u.full_name
              FROM "tblDeptAdmins" da
              JOIN "tblUsers" u ON da.user_id = u.user_id

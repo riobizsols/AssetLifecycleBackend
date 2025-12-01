@@ -23,9 +23,10 @@ const createAssetGroup = async (req, res) => {
         // Get branch_code from tblBranches
         let userBranchCode = null;
         if (userBranchId) {
-            const db = require("../config/db");
+            const dbPool = req.db || require("../config/db");
             const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const branchResult = await db.query(branchQuery, [userBranchId]);
+
+            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
             if (branchResult.rows.length > 0) {
                 userBranchCode = branchResult.rows[0].branch_code;
                 console.log('User branch_code:', userBranchCode);
@@ -124,9 +125,10 @@ const getAllAssetGroups = async (req, res) => {
         // Get branch_code from tblBranches
         let userBranchCode = null;
         if (userBranchId) {
-            const db = require("../config/db");
+            const dbPool = req.db || require("../config/db");
             const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const branchResult = await db.query(branchQuery, [userBranchId]);
+
+            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
             if (branchResult.rows.length > 0) {
                 userBranchCode = branchResult.rows[0].branch_code;
                 console.log('User branch_code:', userBranchCode);

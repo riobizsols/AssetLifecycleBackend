@@ -255,8 +255,9 @@ const getAssetLifecycleSummary = async (req, res) => {
       LEFT JOIN "tblScrapSales_H" ssh ON ssd.ssh_id = ssh.ssh_id
     `;
 
-    const db = require("../config/db");
-    const result = await db.query(summaryQuery);
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(summaryQuery);
     
     res.status(200).json({
       success: true,

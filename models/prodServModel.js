@@ -1,5 +1,10 @@
 // models/prodServModel.js
 const db = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
 
 async function addProdserv(data) {
   const {
@@ -20,7 +25,9 @@ async function addProdserv(data) {
     RETURNING *;
   `;
   const values = [prod_serv_id, org_id, asset_type_id, brand, model, status, ps_type, description];
-  const result = await db.query(query, values);
+  const dbPool = getDb();
+
+  const result = await dbPool.query(query, values);
   return result.rows[0];
 }
 
@@ -30,7 +37,9 @@ async function deleteProdserv(prod_serv_id) {
     WHERE prod_serv_id = $1
     RETURNING *;
   `;
-  const result = await db.query(query, [prod_serv_id]);
+  const dbPool = getDb();
+
+  const result = await dbPool.query(query, [prod_serv_id]);
   return result.rows[0];
 }
 
@@ -48,7 +57,10 @@ async function deleteMultipleProdserv(prod_serv_ids) {
     RETURNING *;
   `;
   
-  const result = await db.query(query, prod_serv_ids);
+  const dbPool = getDb();
+
+  
+  const result = await dbPool.query(query, prod_serv_ids);
   return result.rows;
 }
 

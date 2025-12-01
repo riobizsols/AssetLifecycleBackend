@@ -55,12 +55,20 @@ const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const fcmRoutes = require("./routes/fcmRoutes");
 const CronService = require("./services/cronService");
 const setupWizardRoutes = require("./routes/setupWizardRoutes");
+const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
+const slaRoutes = require("./routes/slaRoutes");
+const slaReportRoutes = require("./routes/slaReportRoutes");
+
+const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 
 const app = express();
 const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
 app.use(urlEncodedParser);
+
+// Apply subdomain middleware early to extract subdomain from all requests
+app.use(subdomainMiddleware);
 
 // Configure query parser to handle array parameters
 const qs = require('qs');
@@ -98,9 +106,50 @@ app.use((req, res, next) => {
   next();
 });
 
+// Enhanced CORS configuration to support subdomain-based multi-tenancy
 app.use(
   cors({
-    origin: CORS_ORIGINS,
+    origin: function (origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      // Check if origin matches any of the allowed patterns
+      const allowedOrigins = Array.isArray(CORS_ORIGINS) ? CORS_ORIGINS : [CORS_ORIGINS];
+      
+      for (const allowedOrigin of allowedOrigins) {
+        // If it's a regex pattern, test against it
+        if (allowedOrigin instanceof RegExp) {
+          if (allowedOrigin.test(origin)) {
+            return callback(null, true);
+          }
+        }
+        // If it's a string, do exact match or check if it's a subdomain
+        else if (typeof allowedOrigin === 'string') {
+          if (origin === allowedOrigin) {
+            return callback(null, true);
+          }
+          // Check if origin is a subdomain of the allowed origin
+          try {
+            const originUrl = new URL(origin);
+            const allowedUrl = new URL(allowedOrigin.startsWith('http') ? allowedOrigin : `https://${allowedOrigin}`);
+            
+            // Check if origin hostname ends with allowed hostname (for subdomain matching)
+            if (originUrl.hostname === allowedUrl.hostname || 
+                originUrl.hostname.endsWith('.' + allowedUrl.hostname)) {
+              return callback(null, true);
+            }
+          } catch (e) {
+            // If URL parsing fails, do simple string comparison
+            if (origin.includes(allowedOrigin)) {
+              return callback(null, true);
+            }
+          }
+        }
+      }
+      
+      // Default: allow the request (you can change this to reject if needed)
+      callback(null, true);
+    },
     credentials: true,
   })
 );
@@ -109,6 +158,7 @@ app.use(
 
 app.use("/api/auth", authRoutes);
 app.use("/api/setup", setupWizardRoutes);
+app.use("/api/tenant-setup", tenantSetupRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
@@ -119,6 +169,7 @@ app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
 app.use("/api/", vendorsRoutes);
+app.use("/api/", slaRoutes);
 app.use("/api/", prodServRoutes);
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
@@ -157,6 +208,7 @@ app.use("/api/doc-type-objects", docTypeObjectRoutes);
 app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
+app.use("/api/sla-report", slaReportRoutes);
 app.use("/api/asset-serial-print", assetSerialPrintRoutes);
 app.use("/api/app-events", appEventsRoutes);
 app.use("/api/audit-logs", auditLogRoutes);

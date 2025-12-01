@@ -1,10 +1,11 @@
 const model = require("../models/vendorProdServiceModel");
 const { generateCustomId } = require("../utils/idGenerator");
-const db = require("../config/db");
+const { getDbFromContext } = require("../utils/dbContext");
 
 // Generate vendor product service ID
 const generateVendorProdServiceId = async () => {
-    const result = await db.query(`SELECT ven_prod_serv_id FROM "tblVendorProdService" ORDER BY ven_prod_serv_id DESC LIMIT 1`);
+    const dbPool = getDbFromContext();
+    const result = await dbPool.query(`SELECT ven_prod_serv_id FROM "tblVendorProdService" ORDER BY ven_prod_serv_id DESC LIMIT 1`);
     const lastId = result.rows[0]?.ven_prod_serv_id;
     
     let newNumber = 1; // starting number
