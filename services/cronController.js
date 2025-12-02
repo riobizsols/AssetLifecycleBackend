@@ -15,9 +15,22 @@ class CronController {
             });
         } catch (error) {
             console.error('Error triggering maintenance generation:', error);
+            console.error('Error stack:', error.stack);
+            console.error('Error details:', {
+                message: error.message,
+                name: error.name,
+                stack: error.stack,
+                ...(error.response && { response: error.response }),
+                ...(error.request && { request: error.request })
+            });
+            
             res.status(500).json({
                 error: "Failed to trigger maintenance generation",
-                details: error.message
+                message: error.message,
+                details: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+                name: error.name,
+                ...(error.response?.data && { originalError: error.response.data })
             });
         }
     }

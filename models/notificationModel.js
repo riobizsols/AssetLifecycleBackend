@@ -115,10 +115,10 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
       CASE 
         WHEN wfh.maint_type_id = 'MT005' THEN wfh.pl_sch_date - INTERVAL '10 days'
         ELSE (wfh.pl_sch_date - INTERVAL '1 day' * CAST(
-          CASE 
-            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
-            ELSE at.maint_lead_type::text
-          END AS INTEGER
+        CASE 
+          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+          ELSE at.maint_lead_type::text
+        END AS INTEGER
         ))
       END as cutoff_date,
       -- Calculate days until due
@@ -127,10 +127,10 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
       CASE 
         WHEN wfh.maint_type_id = 'MT005' THEN EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE))
         ELSE EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * CAST(
-          CASE 
-            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
-            ELSE at.maint_lead_type::text
-          END AS INTEGER
+        CASE 
+          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+          ELSE at.maint_lead_type::text
+        END AS INTEGER
         )) - CURRENT_DATE))
       END as days_until_cutoff
     FROM "tblWFAssetMaintSch_H" wfh

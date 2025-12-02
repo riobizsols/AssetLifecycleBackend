@@ -601,10 +601,25 @@ const generateMaintenanceSchedules = async (req, res) => {
         });
         
     } catch (error) {
-        console.error('Error generating maintenance schedules:', error);
+        console.error('❌ Error generating maintenance schedules:', error);
+        console.error('❌ Error stack:', error.stack);
+        console.error('❌ Error details:', {
+            message: error.message,
+            name: error.name,
+            stack: error.stack,
+            code: error.code,
+            ...(error.query && { query: error.query }),
+            ...(error.parameters && { parameters: error.parameters })
+        });
+        
         res.status(500).json({
             error: "Failed to generate maintenance schedules",
-            details: error.message
+            message: error.message,
+            details: error.message,
+            name: error.name,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
+            ...(error.query && { query: error.query }),
+            ...(error.parameters && { parameters: error.parameters })
         });
     }
 };
