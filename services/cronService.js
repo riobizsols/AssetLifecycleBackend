@@ -19,7 +19,7 @@ class CronService {
         console.log('Initializing cron jobs...');
         
         maintenanceCronLogger.logCronJobInitialization({
-            jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
+            jobs: ['maintenance_schedule_generation', 'workflow_escalation'], // 'vendor_contract_renewal' - PAUSED
             userId
         }).catch(err => console.error('Logging error:', err));
         
@@ -29,8 +29,8 @@ class CronService {
         // Schedule workflow escalation every day at 9 AM
         this.scheduleWorkflowEscalation();
         
-        // Schedule vendor contract renewal check every day at 8 AM
-        this.scheduleVendorContractRenewal();
+        // Schedule vendor contract renewal check every day at 8 AM - PAUSED
+        // this.scheduleVendorContractRenewal();
         
         console.log('Cron jobs initialized successfully');
     }
@@ -216,8 +216,8 @@ class CronService {
                 schedule: '0 8 * * *', // Every day at 8:00 AM
                 description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Deactivates vendors with expired contracts that haven\'t been renewed.',
                 timezone: 'Asia/Kolkata',
-                nextRun: 'Daily at 8:00 AM IST',
-                status: 'ACTIVE',
+                nextRun: 'Paused - Only runs when manually triggered',
+                status: 'PAUSED',
                 canTrigger: true,
                 purpose: 'Automatically manages vendor contract renewals and deactivates expired vendors'
             }
