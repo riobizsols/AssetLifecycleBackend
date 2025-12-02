@@ -4,6 +4,7 @@ const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
+const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
 
 class CronService {
     constructor() {
@@ -19,7 +20,7 @@ class CronService {
         console.log('Initializing cron jobs...');
         
         maintenanceCronLogger.logCronJobInitialization({
-            jobs: ['maintenance_schedule_generation', 'workflow_escalation'], // 'vendor_contract_renewal' - PAUSED
+            jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
             userId
         }).catch(err => console.error('Logging error:', err));
         
@@ -29,8 +30,8 @@ class CronService {
         // Schedule workflow escalation every day at 9 AM
         this.scheduleWorkflowEscalation();
         
-        // Schedule vendor contract renewal check every day at 8 AM - PAUSED
-        // this.scheduleVendorContractRenewal();
+        // Schedule vendor contract renewal check every day at 8 AM
+        this.scheduleVendorContractRenewal();
         
         console.log('Cron jobs initialized successfully');
     }
@@ -106,58 +107,129 @@ class CronService {
         console.log('   → The cron job will only execute when manually triggered from the dashboard');
     }
 
-    // Call the maintenance schedule generation API
+    // Call the maintenance schedule generation directly (no HTTP request)
     async generateMaintenanceSchedules() {
         const userId = 'SYSTEM';
         
         try {
-            const url = `${this.baseURL}/api/maintenance-schedules/generate-cron`;
+            console.log('📊 [CRON] Calling maintenance schedule generation directly...');
+            console.log('📊 [CRON] Environment:', {
+                NODE_ENV: process.env.NODE_ENV,
+                DATABASE_URL: process.env.DATABASE_URL ? `${process.env.DATABASE_URL.substring(0, 20)}...` : 'NOT SET'
+            });
             
-            maintenanceCronLogger.logCallingMaintenanceScheduleAPI({
-                url,
-                userId
-            }).catch(err => console.error('Logging error:', err));
-            
-            const requestConfig = {
-                method: 'POST',
-                url: url,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'CronService/1.0'
-                },
-                data: {
-                    // test_date: "2025-09-05"
+            // Create mock request and response objects for the controller
+            const mockReq = {
+                body: {
+                    // test_date: "2025-09-05" // Uncomment to test with specific date
                 }
             };
-
-            const response = await axios(requestConfig);
+            
+            let responseData = null;
+            let responseStatus = 200;
+            let responseError = null;
+            
+            const mockRes = {
+                status: (code) => {
+                    responseStatus = code;
+                    return mockRes;
+                },
+                json: (data) => {
+                    responseData = data;
+                    return mockRes;
+                }
+            };
+            
+            // Call the controller function directly
+            try {
+                await generateMaintenanceSchedules(mockReq, mockRes);
+                
+                // Check if response was set (controller should have called res.json())
+                if (!responseData && responseStatus === 200) {
+                    console.warn('⚠️ [CRON] Controller did not send a response, assuming success');
+                    responseData = { message: "Maintenance generation completed (no response from controller)" };
+                }
+            } catch (controllerError) {
+                console.error('❌ [CRON] Controller threw an error:', {
+                    message: controllerError.message,
+                    stack: controllerError.stack,
+                    name: controllerError.name,
+                    code: controllerError.code,
+                    errno: controllerError.errno,
+                    syscall: controllerError.syscall,
+                    hostname: controllerError.hostname,
+                    port: controllerError.port
+                });
+                
+                // If controller throws, create a proper error response
+                if (responseStatus === 200) {
+                    responseStatus = 500;
+                }
+                
+                // Check if it's a database connection error
+                const isDatabaseError = controllerError.code === 'ECONNREFUSED' || 
+                                      controllerError.code === 'ENOTFOUND' ||
+                                      controllerError.message?.includes('connection') ||
+                                      controllerError.message?.includes('database') ||
+                                      controllerError.message?.includes('timeout');
+                
+                responseData = {
+                    error: "Maintenance generation failed",
+                    message: controllerError.message,
+                    details: controllerError.message,
+                    name: controllerError.name,
+                    code: controllerError.code,
+                    isDatabaseError: isDatabaseError,
+                    stack: process.env.NODE_ENV === 'development' ? controllerError.stack : undefined
+                };
+            }
             
             maintenanceCronLogger.logMaintenanceScheduleAPIResponse({
-                status: response.status,
-                data: response.data,
+                status: responseStatus,
+                data: responseData,
                 userId
             }).catch(err => console.error('Logging error:', err));
             
             console.log('📊 [CRON] Maintenance generation response:', {
-                status: response.status,
-                data: response.data
+                status: responseStatus,
+                data: responseData
             });
 
-            return response.data;
+            if (responseStatus !== 200) {
+                const errorMessage = responseData?.message || 
+                                   responseData?.error || 
+                                   responseData?.details || 
+                                   `Maintenance generation failed with status ${responseStatus}`;
+                const error = new Error(errorMessage);
+                error.status = responseStatus;
+                error.responseData = responseData;
+                throw error;
+            }
+
+            return responseData;
         } catch (error) {
             maintenanceCronLogger.logMaintenanceScheduleAPIError({
                 error,
-                status: error.response?.status,
-                data: error.response?.data,
+                status: error.status || 500,
+                data: error.message,
                 userId
             }).catch(logErr => console.error('Logging error:', logErr));
             
-            console.error('❌ [CRON] API call failed:', {
+            console.error('❌ [CRON] Maintenance generation failed:', {
                 message: error.message,
-                status: error.response?.status,
-                data: error.response?.data
+                stack: error.stack,
+                name: error.name,
+                status: error.status,
+                responseData: error.responseData
             });
-            throw error;
+            
+            // Enhance error with more details
+            const enhancedError = new Error(error.message || 'Maintenance generation failed');
+            enhancedError.stack = error.stack;
+            enhancedError.status = error.status || 500;
+            enhancedError.responseData = error.responseData;
+            enhancedError.originalError = error;
+            throw enhancedError;
         }
     }
 
@@ -216,8 +288,8 @@ class CronService {
                 schedule: '0 8 * * *', // Every day at 8:00 AM
                 description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Deactivates vendors with expired contracts that haven\'t been renewed.',
                 timezone: 'Asia/Kolkata',
-                nextRun: 'Paused - Only runs when manually triggered',
-                status: 'PAUSED',
+                nextRun: 'Daily at 8:00 AM IST',
+                status: 'ACTIVE',
                 canTrigger: true,
                 purpose: 'Automatically manages vendor contract renewals and deactivates expired vendors'
             }

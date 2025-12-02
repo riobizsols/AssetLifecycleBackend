@@ -864,13 +864,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        
        // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
        if (!isVendorContractRenewal) {
-         console.log('About to call createMaintenanceRecord...');
-         try {
-           const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
-           console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
-         } catch (error) {
-           console.error('Error creating maintenance record:', error);
-           throw error;
+       console.log('About to call createMaintenanceRecord...');
+       try {
+         const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
+         console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
+       } catch (error) {
+         console.error('Error creating maintenance record:', error);
+         throw error;
          }
        } else {
          console.log('Skipping maintenance record creation for vendor contract renewal (MT005)');
@@ -2022,11 +2022,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         CASE 
           WHEN wfh.maint_type_id = 'MT005' THEN wfh.pl_sch_date - INTERVAL '10 days'
           ELSE (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
-            CASE 
-              WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
-              WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
-              ELSE 0
-            END, 0
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
           ))
         END as cutoff_date,
         -- Calculate days until due
@@ -2035,11 +2035,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         CASE 
           WHEN wfh.maint_type_id = 'MT005' THEN EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE))
           ELSE EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
-            CASE 
-              WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
-              WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
-              ELSE 0
-            END, 0
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN 0
+            WHEN at.maint_lead_type ~ '^[0-9]+$' THEN CAST(at.maint_lead_type AS INTEGER)
+            ELSE 0
+          END, 0
           )) - CURRENT_DATE))
         END as days_until_cutoff
       FROM "tblWFAssetMaintSch_D" wfd
@@ -2086,63 +2086,63 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       let checklistItems = [];
       
       if (!isVendorContractRenewal && firstRecord.asset_id) {
-        const breakdownQuery = `
-          SELECT brd.abr_id, brd.atbrrc_id, brd.description as breakdown_description, brc.text as breakdown_reason, brd.decision_code
-          FROM "tblAssetBRDet" brd
-          LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
-          WHERE brd.asset_id = $1
-            AND brd.org_id = $2
-            AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
-            AND (
-              -- Match by workflow notes containing abr_id
-              EXISTS (
-                SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
-                WHERE wfd.wfamsh_id = $3
-                  AND wfd.org_id = $2
-                  AND wfd.notes ILIKE '%' || brd.abr_id || '%'
-              )
-              OR
-              -- For breakdown maintenance (MT004), get most recent breakdown
-              (EXISTS (
-                SELECT 1 FROM "tblWFAssetMaintSch_H" wfh
-                WHERE wfh.wfamsh_id = $3
-                  AND wfh.org_id = $2
-                  AND wfh.maint_type_id = 'MT004'
-              ))
+      const breakdownQuery = `
+        SELECT brd.abr_id, brd.atbrrc_id, brd.description as breakdown_description, brc.text as breakdown_reason, brd.decision_code
+        FROM "tblAssetBRDet" brd
+        LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+        WHERE brd.asset_id = $1
+          AND brd.org_id = $2
+          AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+          AND (
+            -- Match by workflow notes containing abr_id
+            EXISTS (
+              SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+              WHERE wfd.wfamsh_id = $3
+                AND wfd.org_id = $2
+                AND wfd.notes ILIKE '%' || brd.abr_id || '%'
             )
-          ORDER BY brd.created_on DESC
-          LIMIT 1
-        `;
-        
-        const breakdownResult = await getDb().query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
+            OR
+            -- For breakdown maintenance (MT004), get most recent breakdown
+            (EXISTS (
+              SELECT 1 FROM "tblWFAssetMaintSch_H" wfh
+              WHERE wfh.wfamsh_id = $3
+                AND wfh.org_id = $2
+                AND wfh.maint_type_id = 'MT004'
+            ))
+          )
+        ORDER BY brd.created_on DESC
+        LIMIT 1
+      `;
+      
+      const breakdownResult = await getDb().query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
         breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
+      
+      // Fetch regular checklist items for this asset
+      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
+      
+      // Build final checklist based on decision code
+      if (breakdownInfo) {
+        const breakdownChecklistItem = {
+          checklist_id: `BREAKDOWN-${breakdownInfo.abr_id}`,
+          text: breakdownInfo.breakdown_reason || breakdownInfo.atbrrc_id || 'Breakdown Reason',
+          at_main_freq_id: null,
+          is_breakdown: true,
+          breakdown_description: breakdownInfo.breakdown_description || null
+        };
         
-        // Fetch regular checklist items for this asset
-        const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
-        
-        // Build final checklist based on decision code
-        if (breakdownInfo) {
-          const breakdownChecklistItem = {
-            checklist_id: `BREAKDOWN-${breakdownInfo.abr_id}`,
-            text: breakdownInfo.breakdown_reason || breakdownInfo.atbrrc_id || 'Breakdown Reason',
-            at_main_freq_id: null,
-            is_breakdown: true,
-            breakdown_description: breakdownInfo.breakdown_description || null
-          };
-          
-          if (breakdownInfo.decision_code === 'BF02') {
-            // BF02: Only show breakdown reason as checklist
-            checklistItems = [breakdownChecklistItem];
-          } else if (breakdownInfo.decision_code === 'BF01') {
-            // BF01: Show regular checklist + breakdown reason
-            checklistItems = [...regularChecklistItems, breakdownChecklistItem];
-          } else {
-            // BF03 or other: Show regular checklist only
-            checklistItems = regularChecklistItems;
-          }
+        if (breakdownInfo.decision_code === 'BF02') {
+          // BF02: Only show breakdown reason as checklist
+          checklistItems = [breakdownChecklistItem];
+        } else if (breakdownInfo.decision_code === 'BF01') {
+          // BF01: Show regular checklist + breakdown reason
+          checklistItems = [...regularChecklistItems, breakdownChecklistItem];
         } else {
-          // No breakdown info: Show regular checklist
+          // BF03 or other: Show regular checklist only
           checklistItems = regularChecklistItems;
+        }
+      } else {
+        // No breakdown info: Show regular checklist
+        checklistItems = regularChecklistItems;
         }
       } else {
         // For MT005 (vendor contract renewal) or when asset_id is null, no checklist
