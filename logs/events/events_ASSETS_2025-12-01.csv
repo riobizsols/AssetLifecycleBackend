@@ -1,0 +1,5 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-12-01T12:58:27.157Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":46}",118,USR002
+2025-12-01T12:58:31.057Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":46}",147,USR002
+2025-12-01T12:58:38.528Z,INFO,API_CALL,AssetController,"INFO: GET /api/assets/ASS109 - Get Asset By ID","{""operation"":""Get Asset By ID"",""method"":""GET"",""url"":""/api/assets/ASS109"",""asset_id"":""ASS109""}","{""status"":""processing""}",N/A,USR002
+2025-12-01T12:58:38.768Z,INFO,ASSET_OPERATION,AssetController,"INFO: Get Asset By ID completed successfully","{""asset_id"":""ASS109""}","{""success"":true,""found"":true,""asset_name"":""Fire Extinguisher"",""asset_type_id"":""AT010"",""current_status"":""Active"",""property_count"":2}",248,USR002

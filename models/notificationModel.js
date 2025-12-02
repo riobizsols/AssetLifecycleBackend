@@ -2,6 +2,7 @@ const { getDb } = require('../utils/dbContext');
 
 const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
   // ROLE-BASED WORKFLOW: Fetch all users with the required job role
+  // Includes both asset-based maintenance and vendor contract renewal (MT005)
   const query = `
     SELECT 
       wfd.wfamsd_id,
@@ -12,6 +13,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
       wfh.pl_sch_date,
       wfh.asset_id,
       wfh.group_id,
+      wfh.vendor_id,
       wfh.status as header_status,
       a.asset_type_id,
       at.maint_lead_type,
@@ -25,16 +27,22 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
       u.emp_int_id,
       u.full_name as user_name,
       u.email,
-      -- Calculate cutoff date: pl_sch_date - maint_lead_type
-      (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) as cutoff_date,
+      -- Calculate cutoff date: pl_sch_date - maint_lead_type (or 10 days for MT005)
+      CASE 
+        WHEN wfh.maint_type_id = 'MT005' THEN wfh.pl_sch_date - INTERVAL '10 days'
+        ELSE (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0))
+      END as cutoff_date,
       -- Calculate days until due
       EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
       -- Calculate days until cutoff
-      EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+      CASE 
+        WHEN wfh.maint_type_id = 'MT005' THEN EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE))
+        ELSE EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) - CURRENT_DATE))
+      END as days_until_cutoff
     FROM "tblWFAssetMaintSch_D" wfd
     INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
-    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
@@ -42,8 +50,13 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
     LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
     WHERE wfd.org_id = $1 
-      AND a.org_id = $1
-      AND a.branch_id = $2
+      AND (
+        -- For asset-based maintenance: check branch_id
+        (wfh.asset_id IS NOT NULL AND a.org_id = $1 AND a.branch_id = $2)
+        OR
+        -- For vendor contract renewal (MT005): check vendor branch_code
+        (wfh.maint_type_id = 'MT005' AND wfh.vendor_id IS NOT NULL)
+      )
       -- Only show pending statuses (IN, IP, AP) - exclude approved (UA) and rejected (UR)
       AND wfd.status IN ('IN', 'IP', 'AP')
       -- Exclude completed (CO) and cancelled (CA) workflows
@@ -73,12 +86,14 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
 
 const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
+  // Includes both asset-based maintenance and vendor contract renewal (MT005)
   const query = `
     SELECT DISTINCT
       wfh.wfamsh_id,
       wfh.pl_sch_date,
       wfh.asset_id,
       wfh.group_id,
+      wfh.vendor_id,
       wfh.status as header_status,
       a.asset_type_id,
       ag.text as group_name,
@@ -87,31 +102,40 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
         ELSE at.maint_lead_type::text
       END as maint_lead_type,
-      COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+      CASE 
+        WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
+        ELSE COALESCE(at.text, 'Unknown Asset Type')
+      END as asset_type_name,
       COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
       COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
       -- Get the current action role and users
       COALESCE(current_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
       current_action_role.job_role_id as current_action_role_id,
-      -- Calculate cutoff date: pl_sch_date - maint_lead_type
-      (wfh.pl_sch_date - INTERVAL '1 day' * CAST(
-        CASE 
-          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
-          ELSE at.maint_lead_type::text
-        END AS INTEGER
-      )) as cutoff_date,
+      -- Calculate cutoff date: pl_sch_date - maint_lead_type (or 10 days for MT005)
+      CASE 
+        WHEN wfh.maint_type_id = 'MT005' THEN wfh.pl_sch_date - INTERVAL '10 days'
+        ELSE (wfh.pl_sch_date - INTERVAL '1 day' * CAST(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+            ELSE at.maint_lead_type::text
+          END AS INTEGER
+        ))
+      END as cutoff_date,
       -- Calculate days until due
       EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
       -- Calculate days until cutoff
-      EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * CAST(
-        CASE 
-          WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
-          ELSE at.maint_lead_type::text
-        END AS INTEGER
-      )) - CURRENT_DATE)) as days_until_cutoff
+      CASE 
+        WHEN wfh.maint_type_id = 'MT005' THEN EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE))
+        ELSE EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * CAST(
+          CASE 
+            WHEN at.maint_lead_type IS NULL OR at.maint_lead_type = '' THEN '0'
+            ELSE at.maint_lead_type::text
+          END AS INTEGER
+        )) - CURRENT_DATE))
+      END as days_until_cutoff
     FROM "tblWFAssetMaintSch_H" wfh
-    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
-    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
     -- Get current action role (workflow step with AP status)
@@ -132,8 +156,13 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     ) current_action_role ON wfh.wfamsh_id = current_action_role.wfamsh_id
     -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
-      AND a.org_id = $1
-      AND a.branch_id = $2
+      AND (
+        -- For asset-based maintenance: check branch_id
+        (wfh.asset_id IS NOT NULL AND a.org_id = $1 AND a.branch_id = $2)
+        OR
+        -- For vendor contract renewal (MT005): include all (branch filtering handled by vendor)
+        (wfh.maint_type_id = 'MT005' AND wfh.vendor_id IS NOT NULL)
+      )
       -- Exclude completed (CO) and cancelled (CA) workflows
       AND wfh.status IN ('IN', 'IP')
       -- Only show if there are pending approvals (status IN, IP, or AP)

@@ -22,6 +22,23 @@ class CronController {
         }
     }
 
+    // Manual trigger for vendor contract renewal (for testing)
+    async triggerVendorContractRenewal(req, res) {
+        try {
+            const result = await this.cronService.triggerVendorContractRenewal();
+            res.status(200).json({
+                message: "Vendor contract renewal triggered successfully",
+                result: result
+            });
+        } catch (error) {
+            console.error('Error triggering vendor contract renewal:', error);
+            res.status(500).json({
+                error: "Failed to trigger vendor contract renewal",
+                details: error.message
+            });
+        }
+    }
+
     // Get cron job status
     getCronStatus(req, res) {
         try {

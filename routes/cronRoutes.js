@@ -7,6 +7,9 @@ const cronController = new CronController();
 // Manual trigger endpoint for maintenance generation (for testing)
 router.post('/trigger-maintenance', cronController.triggerMaintenanceGeneration.bind(cronController));
 
+// Manual trigger endpoint for vendor contract renewal (for testing)
+router.post('/trigger-vendor-contract-renewal', cronController.triggerVendorContractRenewal.bind(cronController));
+
 // Get cron job status
 router.get('/status', cronController.getCronStatus.bind(cronController));
 

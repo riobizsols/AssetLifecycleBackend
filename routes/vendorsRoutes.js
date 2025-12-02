@@ -8,6 +8,7 @@ router.use(protect);
 
 router.get("/get-vendors", vendorsController.getAllVendors);
 router.get("/vendor/:vendorId", vendorsController.getVendorById);
+router.get("/vendor/:vendorId/slas", vendorsController.getVendorSLAs);
 router.get("/vendor-prod-services", vendorsController.getVendorProdServices);
 router.post("/create-vendor", vendorsController.createVendor);
 router.delete("/delete-vendors", vendorsController.deleteVendors);
