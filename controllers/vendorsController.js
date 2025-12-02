@@ -552,3 +552,60 @@ exports.getVendorProdServices = async (req, res) => {
     res.status(500).json({ error: "Failed to fetch vendor-product-services" });
   }
 };
+
+// Get vendor SLAs by vendor ID (returns only filled SLAs with descriptions)
+exports.getVendorSLAs = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const vendorSLAModel = require("../models/vendorSLAModel");
+    const vendorSLAsRow = await vendorSLAModel.getVendorSLAs(vendorId);
+    
+    if (!vendorSLAsRow) {
+      return res.json({
+        success: true,
+        data: [],
+        message: "No SLAs configured for this vendor"
+      });
+    }
+    
+    // Get SLA descriptions from tblsla_desc
+    const dbPool = req.db || require("../config/db");
+    const slaDescriptionsQuery = `
+      SELECT sla_id, description
+      FROM "tblsla_desc"
+      ORDER BY sla_id
+    `;
+    const slaDescriptionsResult = await dbPool.query(slaDescriptionsQuery);
+    const slaDescriptionsMap = {};
+    slaDescriptionsResult.rows.forEach(row => {
+      slaDescriptionsMap[row.sla_id] = row.description || row.sla_id;
+    });
+    
+    // Convert row with columns to array format, only include filled SLAs
+    let vendor_slas = [];
+    for (let i = 1; i <= 10; i++) {
+      const columnName = `SLA-${i}`;
+      const value = vendorSLAsRow[columnName];
+      if (value && value.trim() !== '') {
+        vendor_slas.push({
+          sla_id: columnName,
+          value: value,
+          description: slaDescriptionsMap[columnName] || null
+        });
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: vendor_slas,
+      message: "Vendor SLAs retrieved successfully"
+    });
+  } catch (error) {
+    console.error("Get vendor SLAs error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: "Failed to fetch vendor SLAs",
+      message: error.message 
+    });
+  }
+};

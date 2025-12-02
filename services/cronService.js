@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const axios = require('axios');
 const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
+const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 
 class CronService {
@@ -18,7 +19,7 @@ class CronService {
         console.log('Initializing cron jobs...');
         
         maintenanceCronLogger.logCronJobInitialization({
-            jobs: ['maintenance_schedule_generation', 'workflow_escalation'],
+            jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
             userId
         }).catch(err => console.error('Logging error:', err));
         
@@ -27,6 +28,9 @@ class CronService {
         
         // Schedule workflow escalation every day at 9 AM
         this.scheduleWorkflowEscalation();
+        
+        // Schedule vendor contract renewal check every day at 8 AM
+        this.scheduleVendorContractRenewal();
         
         console.log('Cron jobs initialized successfully');
     }
@@ -39,6 +43,18 @@ class CronService {
             console.log('   → Automatically escalates overdue workflows to next approver when cutoff date is exceeded');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule workflow escalation:', error.message);
+        }
+    }
+
+    // Schedule vendor contract renewal check
+    scheduleVendorContractRenewal() {
+        try {
+            startVendorContractRenewalCron();
+            console.log('📅 [CRON] Vendor Contract Renewal: Scheduled for every day at 8:00 AM (IST)');
+            console.log('   → Checks vendor contract end dates and creates renewal workflows 10 days before expiry');
+            console.log('   → Deactivates vendors with expired contracts that haven\'t been renewed');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule vendor contract renewal:', error.message);
         }
     }
 
@@ -145,6 +161,24 @@ class CronService {
         }
     }
 
+    // Manual trigger for vendor contract renewal
+    async triggerVendorContractRenewal() {
+        const userId = 'SYSTEM';
+        
+        try {
+            console.log('🔧 [CRON] Manually triggering vendor contract renewal check...');
+            
+            const { triggerVendorContractRenewal } = require('../cron/vendorContractRenewalCron');
+            const result = await triggerVendorContractRenewal();
+            
+            console.log('✅ [CRON] Vendor contract renewal check completed successfully');
+            return result;
+        } catch (error) {
+            console.error('❌ [CRON] Error in manual vendor contract renewal trigger:', error);
+            throw error;
+        }
+    }
+
     // Manual trigger for testing
     async triggerMaintenanceGeneration() {
         const userId = 'SYSTEM';
@@ -176,6 +210,16 @@ class CronService {
                 timezone: 'Asia/Kolkata',
                 nextRun: 'Daily at 9:00 AM IST',
                 purpose: 'Ensures timely maintenance approvals by escalating to next superior when deadlines are missed'
+            },
+            vendorContractRenewal: {
+                name: 'Vendor Contract Renewal',
+                schedule: '0 8 * * *', // Every day at 8:00 AM
+                description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Deactivates vendors with expired contracts that haven\'t been renewed.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 8:00 AM IST',
+                status: 'ACTIVE',
+                canTrigger: true,
+                purpose: 'Automatically manages vendor contract renewals and deactivates expired vendors'
             }
         };
     }

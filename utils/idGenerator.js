@@ -8,13 +8,39 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     console.log(`🔢 Generating ID for tableKey: ${tableKey}`);
     
     const dbPool = getDb();
-    const result = await dbPool.query(
+    let result = await dbPool.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        [tableKey]
+    );
+
+    // Auto-create entry if it doesn't exist
+    if (result.rows.length === 0) {
+        console.log(`⚠️ Entry for ${tableKey} not found in tblIDSequences, creating it...`);
+        
+        // Default prefix mapping for auto-creation
+        const defaultPrefixes = {
+            'vendor_sla_rec': 'VSLAR'
+        };
+        
+        const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
+        
+        // Insert new entry with last_number = 0
+        await dbPool.query(
+            'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+            [tableKey, prefix, 0]
+        );
+        
+        console.log(`✅ Created new ID sequence entry: ${tableKey} with prefix ${prefix}`);
+        
+        // Query again to get the newly created entry
+        result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
     );
 
     if (result.rows.length === 0) {
-        throw new Error("Invalid tableKey provided to ID generator");
+            throw new Error(`Failed to create ID sequence entry for ${tableKey}`);
+        }
     }
 
     const { prefix, last_number } = result.rows[0];
@@ -57,7 +83,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'atp': 'tblAssetTypeProps',
         'userjobrole': 'tblUserJobRoles',
         'asset_usage': 'tblAssetUsageReg',
-        'vendor_sla': 'tblVendorSLAs'
+        'vendor_sla': 'tblVendorSLAs',
+        'vendor_sla_rec': 'tblvendorslarecs'
     };
 
     const targetTable = tableMap[tableKey];
@@ -85,7 +112,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'atp': 'asset_type_prop_id',
             'userjobrole': 'user_job_role_id',
             'asset_usage': 'aug_id',
-            'vendor_sla': 'vsla_id'
+            'vendor_sla': 'vsla_id',
+            'vendor_sla_rec': 'vslar_id'
         };
 
         const columnName = columnMap[tableKey];
