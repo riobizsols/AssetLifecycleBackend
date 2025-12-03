@@ -150,16 +150,21 @@ class CronService {
                     responseData = { message: "Maintenance generation completed (no response from controller)" };
                 }
             } catch (controllerError) {
-                console.error('❌ [CRON] Controller threw an error:', {
-                    message: controllerError.message,
-                    stack: controllerError.stack,
-                    name: controllerError.name,
-                    code: controllerError.code,
-                    errno: controllerError.errno,
-                    syscall: controllerError.syscall,
-                    hostname: controllerError.hostname,
-                    port: controllerError.port
-                });
+                console.error('\n❌ [CRON SERVICE] ============================================');
+                console.error('❌ [CRON SERVICE] CONTROLLER THREW AN ERROR');
+                console.error('❌ [CRON SERVICE] ============================================');
+                console.error('❌ Error Message:', controllerError.message);
+                console.error('❌ Error Name:', controllerError.name);
+                console.error('❌ Error Code:', controllerError.code);
+                console.error('❌ Error Errno:', controllerError.errno);
+                console.error('❌ Error Syscall:', controllerError.syscall);
+                console.error('❌ Error Hostname:', controllerError.hostname);
+                console.error('❌ Error Port:', controllerError.port);
+                console.error('\n❌ Full Error Object:');
+                console.error(JSON.stringify(controllerError, Object.getOwnPropertyNames(controllerError), 2));
+                console.error('\n❌ Error Stack Trace:');
+                console.error(controllerError.stack);
+                console.error('❌ [CRON SERVICE] ============================================\n');
                 
                 // If controller throws, create a proper error response
                 if (responseStatus === 200) {
@@ -208,20 +213,36 @@ class CronService {
 
             return responseData;
         } catch (error) {
+            console.error('\n❌ [CRON SERVICE] ============================================');
+            console.error('❌ [CRON SERVICE] MAINTENANCE GENERATION FAILED');
+            console.error('❌ [CRON SERVICE] ============================================');
+            console.error('❌ Error Message:', error.message);
+            console.error('❌ Error Name:', error.name);
+            console.error('❌ Error Status:', error.status || 500);
+            console.error('❌ Error Code:', error.code);
+            console.error('\n❌ Full Error Object:');
+            console.error(JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+            console.error('\n❌ Error Stack Trace:');
+            console.error(error.stack);
+            
+            if (error.responseData) {
+                console.error('\n❌ Response Data:');
+                console.error(JSON.stringify(error.responseData, null, 2));
+            }
+            
+            if (error.originalError) {
+                console.error('\n❌ Original Error:');
+                console.error(JSON.stringify(error.originalError, null, 2));
+            }
+            
+            console.error('❌ [CRON SERVICE] ============================================\n');
+            
             maintenanceCronLogger.logMaintenanceScheduleAPIError({
                 error,
                 status: error.status || 500,
                 data: error.message,
                 userId
             }).catch(logErr => console.error('Logging error:', logErr));
-            
-            console.error('❌ [CRON] Maintenance generation failed:', {
-                message: error.message,
-                stack: error.stack,
-                name: error.name,
-                status: error.status,
-                responseData: error.responseData
-            });
             
             // Enhance error with more details
             const enhancedError = new Error(error.message || 'Maintenance generation failed');

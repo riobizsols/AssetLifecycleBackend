@@ -601,25 +601,60 @@ const generateMaintenanceSchedules = async (req, res) => {
         });
         
     } catch (error) {
-        console.error('❌ Error generating maintenance schedules:', error);
-        console.error('❌ Error stack:', error.stack);
-        console.error('❌ Error details:', {
-            message: error.message,
-            name: error.name,
-            stack: error.stack,
-            code: error.code,
-            ...(error.query && { query: error.query }),
-            ...(error.parameters && { parameters: error.parameters })
-        });
+        console.error('\n❌ [MAINTENANCE CONTROLLER] ============================================');
+        console.error('❌ [MAINTENANCE CONTROLLER] ERROR GENERATING MAINTENANCE SCHEDULES');
+        console.error('❌ [MAINTENANCE CONTROLLER] ============================================');
+        console.error('❌ Error Message:', error.message);
+        console.error('❌ Error Name:', error.name);
+        console.error('❌ Error Code:', error.code);
+        console.error('❌ Error Errno:', error.errno);
+        console.error('❌ Error Syscall:', error.syscall);
+        console.error('❌ Error Hostname:', error.hostname);
+        console.error('❌ Error Port:', error.port);
+        
+        if (error.query) {
+            console.error('❌ Database Query:', error.query);
+        }
+        if (error.parameters) {
+            console.error('❌ Query Parameters:', error.parameters);
+        }
+        if (error.position) {
+            console.error('❌ Error Position:', error.position);
+        }
+        if (error.where) {
+            console.error('❌ Error Where:', error.where);
+        }
+        if (error.schema) {
+            console.error('❌ Error Schema:', error.schema);
+        }
+        if (error.table) {
+            console.error('❌ Error Table:', error.table);
+        }
+        if (error.column) {
+            console.error('❌ Error Column:', error.column);
+        }
+        if (error.constraint) {
+            console.error('❌ Error Constraint:', error.constraint);
+        }
+        
+        console.error('\n❌ Full Error Object:');
+        console.error(JSON.stringify(error, Object.getOwnPropertyNames(error), 2));
+        console.error('\n❌ Error Stack Trace:');
+        console.error(error.stack);
+        console.error('❌ [MAINTENANCE CONTROLLER] ============================================\n');
         
         res.status(500).json({
             error: "Failed to generate maintenance schedules",
             message: error.message,
             details: error.message,
             name: error.name,
+            code: error.code,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined,
             ...(error.query && { query: error.query }),
-            ...(error.parameters && { parameters: error.parameters })
+            ...(error.parameters && { parameters: error.parameters }),
+            ...(error.table && { table: error.table }),
+            ...(error.column && { column: error.column }),
+            ...(error.constraint && { constraint: error.constraint })
         });
     }
 };

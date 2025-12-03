@@ -70,18 +70,47 @@ const protect = async (req, res, next) => {
         // Set database in async context so all models can access it
         // This allows models to use getDb() without passing dbConnection through every function
         return runWithDb(dbPool, async () => {
+            // Helper function to retry on connection pool exhaustion
+            const retryOnPoolExhaustion = async (fn, maxRetries = 3, delay = 100) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        return await fn();
+                    } catch (error) {
+                        // Check if it's a connection pool exhaustion error
+                        if (error.code === '53300' || (error.message && error.message.includes('too many clients'))) {
+                            // Log pool stats if available
+                            if (dbPool && typeof dbPool.totalCount !== 'undefined') {
+                                console.error(`[AuthMiddleware] Pool stats - Total: ${dbPool.totalCount}, Idle: ${dbPool.idleCount}, Waiting: ${dbPool.waitingCount}, Active: ${dbPool.totalCount - dbPool.idleCount}`);
+                            }
+                            
+                            if (i < maxRetries - 1) {
+                                console.warn(`[AuthMiddleware] Connection pool exhausted, retrying (${i + 1}/${maxRetries}) after ${delay * (i + 1)}ms...`);
+                                await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Exponential backoff
+                                continue;
+                            } else {
+                                console.error(`[AuthMiddleware] Connection pool exhausted after ${maxRetries} retries`);
+                                console.error(`[AuthMiddleware] This usually means PostgreSQL max_connections limit is reached.`);
+                                console.error(`[AuthMiddleware] Solution: Close unused DBeaver connections or increase PostgreSQL max_connections`);
+                                throw new Error('Database connection pool is full. Please close unused database connections (e.g., DBeaver) and try again.');
+                            }
+                        }
+                        throw error;
+                    }
+                }
+            };
+
             // Fetch current user roles from tblUserJobRoles (using appropriate database)
-            const userRoles = await getUserRoles(decoded.user_id, dbPool);
+            const userRoles = await retryOnPoolExhaustion(() => getUserRoles(decoded.user_id, dbPool));
 
             // Fetch user with branch information (using appropriate database)
-            const userWithBranch = await getUserWithBranch(decoded.user_id, dbPool);
+            const userWithBranch = await retryOnPoolExhaustion(() => getUserWithBranch(decoded.user_id, dbPool));
 
             // Get internal org_id from tblOrgs (for data operations)
             // This is the org_id that should be used for storing/fetching data
             let internalOrgId = decoded.org_id; // Default to token org_id
             try {
-                const orgResult = await dbPool.query(
-                    'SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1'
+                const orgResult = await retryOnPoolExhaustion(() => 
+                    dbPool.query('SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1')
                 );
                 if (orgResult.rows.length > 0) {
                     internalOrgId = orgResult.rows[0].org_id;
@@ -112,6 +141,16 @@ const protect = async (req, res, next) => {
             next();
         });
     } catch (err) {
+        // Handle connection pool exhaustion specifically
+        if (err.code === '53300' || (err.message && err.message.includes('too many clients'))) {
+            console.error('[AuthMiddleware] Connection pool exhausted:', err.message);
+            return res.status(503).json({ 
+                message: 'Server is busy. Please try again in a moment.',
+                error: 'Database connection pool exhausted'
+            });
+        }
+        // Handle other errors
+        console.error('[AuthMiddleware] Authentication error:', err.message);
         return res.status(401).json({ message: 'Session expired. Please login again.' });
     }
 };
