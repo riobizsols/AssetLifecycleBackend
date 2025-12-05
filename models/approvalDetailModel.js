@@ -1222,13 +1222,13 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
               AND d.org_id = $2 
               AND d.notes ILIKE '%breakdown%'
           ) as has_breakdown_note,
-          -- detect BF01/BF03 breakdown with existing schedule (renamed to bf01_notes for compatibility)
+          -- detect BF01/BF02/BF03 breakdown with existing schedule (renamed to bf01_notes for compatibility)
           (
             SELECT d.notes
             FROM "tblWFAssetMaintSch_D" d
             WHERE d.wfamsh_id = wfh.wfamsh_id
               AND d.org_id = $2
-              AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%')
+              AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%' OR d.notes ILIKE '%Breakdown%')
             LIMIT 1
           ) as bf01_notes,
           -- Determine maintained_by based on service_vendor_id
@@ -1466,6 +1466,46 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          if (match && match[1]) {
            existingAmsId = match[1];
            console.log('Found BF03 with existing schedule:', existingAmsId);
+         }
+       }
+     }
+     
+     // Check for BF02 breakdown (Separate breakdown fix)
+     // BF02 notes format: "Breakdown {abr_id}" (no BF01/BF03 prefix)
+     // Only check if breakdownId wasn't already extracted from BF01/BF03
+     if (workflowData.bf01_notes && !breakdownId) {
+       // Check if it's BF02 format (contains "Breakdown" but NOT "BF01-Breakdown" or "BF03-Breakdown")
+       const isBF02Format = workflowData.bf01_notes.includes('Breakdown') && 
+                           !workflowData.bf01_notes.includes('BF01-Breakdown') && 
+                           !workflowData.bf01_notes.includes('BF03-Breakdown');
+       
+       if (isBF02Format) {
+         console.log('Found BF02 breakdown (or generic breakdown note)');
+         
+         // Try to extract breakdown ID from "Breakdown {ABR_ID}" format
+         // Pattern matches: "Breakdown ABR001" or "Breakdown-ABR001" or "BreakdownABR001"
+         const bf02Match = workflowData.bf01_notes.match(/Breakdown[\s-]*([A-Z0-9]+)/i);
+         if (bf02Match && bf02Match[1]) {
+           breakdownId = bf02Match[1];
+           console.log('BF02 breakdown ID extracted:', breakdownId);
+           
+           // Get breakdown reason code from tblAssetBRDet
+           const breakdownQuery = `
+             SELECT brd.abr_id, brd.atbrrc_id, brd.decision_code, brd.description, brc.text as breakdown_reason
+             FROM "tblAssetBRDet" brd
+             LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+             WHERE brd.abr_id = $1 AND brd.org_id = $2
+           `;
+           const breakdownResult = await getDb().query(breakdownQuery, [breakdownId, orgId]);
+           if (breakdownResult.rows.length > 0) {
+             breakdownReasonCode = breakdownResult.rows[0].breakdown_reason || breakdownResult.rows[0].atbrrc_id;
+             console.log('Found BF02 breakdown reason:', breakdownReasonCode);
+             console.log('BF02 decision code:', breakdownResult.rows[0].decision_code);
+           } else {
+             console.warn('BF02 breakdown ID found in notes but not found in tblAssetBRDet:', breakdownId);
+           }
+         } else {
+           console.warn('BF02 format detected but could not extract breakdown ID from notes:', workflowData.bf01_notes);
          }
        }
      }
