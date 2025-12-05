@@ -279,6 +279,83 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
   }
 };
 
+// Create a single employee
+const createEmployee = async (employeeData, created_by, org_id, userBranchId) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  
+  try {
+    await client.query('BEGIN');
+    
+    // Generate emp_int_id if not provided
+    let finalEmpIntId = employeeData.emp_int_id;
+    if (!finalEmpIntId) {
+      finalEmpIntId = await generateCustomId('emp_int_id', 4);
+    }
+    
+    // Generate employee_id if not provided
+    let finalEmployeeId = employeeData.employee_id;
+    if (!finalEmployeeId) {
+      finalEmployeeId = await generateCustomId('employee', 3);
+    }
+    
+    // Validate and format date fields
+    const joiningDate = validateAndFormatDate(employeeData.joining_date);
+    const releivingDate = null; // releiving_date is always null by default
+    
+    // Construct name field (use first_name if name not provided)
+    const name = employeeData.name || employeeData.first_name || '';
+    
+    // Construct full_name from first_name + middle_name + last_name
+    const nameParts = [];
+    if (employeeData.first_name) nameParts.push(employeeData.first_name.trim());
+    if (employeeData.middle_name) nameParts.push(employeeData.middle_name.trim());
+    if (employeeData.last_name) nameParts.push(employeeData.last_name.trim());
+    const fullName = nameParts.join(' ').trim();
+    
+    // Insert new employee
+    const result = await client.query(`
+      INSERT INTO "tblEmployees" (
+        emp_int_id, employee_id, name, first_name, last_name, middle_name,
+        full_name, email_id, dept_id, phone_number, employee_type,
+        joining_date, releiving_date, language_code, int_status, org_id,
+        branch_id, created_by, created_on, changed_by, changed_on
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+        $17, $18, NOW()::timestamp(3), $18, NOW()::timestamp(3)
+      ) RETURNING *
+    `, [
+      finalEmpIntId,
+      finalEmployeeId,
+      name,
+      employeeData.first_name || null,
+      employeeData.last_name || null,
+      employeeData.middle_name || null,
+      fullName || null,
+      employeeData.email_id,
+      employeeData.dept_id,
+      employeeData.phone_number,
+      employeeData.employee_type || null,
+      joiningDate,
+      releivingDate,
+      employeeData.language_code || 'en',
+      employeeData.int_status !== undefined ? employeeData.int_status : 1,
+      org_id,
+      userBranchId,
+      created_by
+    ]);
+    
+    await client.query('COMMIT');
+    
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getAllEmployees,
   getEmployeeById,
@@ -286,5 +363,6 @@ module.exports = {
   getAllEmployeesWithJobRoles,
   checkExistingEmployeeIds,
   bulkUpsertEmployees,
-  validateAndFormatDate
+  validateAndFormatDate,
+  createEmployee
 };

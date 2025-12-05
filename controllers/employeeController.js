@@ -121,6 +121,8 @@ const assignRoleToEmployee = async (req, res) => {
         }
 
         // Assign all new roles to the user
+        // The assignJobRole function will set tblUsers.job_role_id to the first role if it's null
+        // This allows users to have multiple roles while maintaining a primary role
         const roleAssignments = [];
         for (const job_role_id of newRoleIds) {
             const roleAssignment = await userJobRoleModel.assignJobRole(user_id, job_role_id, assigned_by);
@@ -301,6 +303,78 @@ const updateUserRole = async (req, res) => {
     }
 };
 
+// POST /api/employees - Create a single employee
+const createEmployee = async (req, res) => {
+    try {
+        const created_by = req.user?.user_id;
+        const org_id = req.user?.org_id;
+        
+        if (!org_id) {
+            return res.status(400).json({
+                success: false,
+                error: "Organization ID is required"
+            });
+        }
+        
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+        
+        const employeeData = req.body;
+        
+        // Validate required fields
+        if (!employeeData.first_name || !employeeData.first_name.trim()) {
+            return res.status(400).json({
+                success: false,
+                error: "First name is required"
+            });
+        }
+        
+        if (!employeeData.email_id || !employeeData.email_id.trim()) {
+            return res.status(400).json({
+                success: false,
+                error: "Email is required"
+            });
+        }
+        
+        if (!employeeData.phone_number || !employeeData.phone_number.trim()) {
+            return res.status(400).json({
+                success: false,
+                error: "Phone number is required"
+            });
+        }
+        
+        if (!employeeData.dept_id) {
+            return res.status(400).json({
+                success: false,
+                error: "Department is required"
+            });
+        }
+        
+        // Create employee
+        const newEmployee = await model.createEmployee(
+            employeeData,
+            created_by,
+            org_id,
+            userBranchId
+        );
+        
+        res.status(201).json({
+            success: true,
+            message: "Employee created successfully",
+            data: newEmployee
+        });
+    } catch (error) {
+        console.error("Error creating employee:", error);
+        res.status(500).json({
+            success: false,
+            error: "Failed to create employee",
+            details: error.message
+        });
+    }
+};
+
 module.exports = {
     getAllEmployees,
     getEmployeeById,
@@ -310,4 +384,5 @@ module.exports = {
     getUserRoles,
     deleteUserRole,
     updateUserRole,
+    createEmployee,
 }; 

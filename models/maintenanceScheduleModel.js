@@ -554,7 +554,7 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
-        WHERE ams.org_id = $1 AND a.org_id = $1 AND a.branch_id = $2
+        WHERE ams.org_id = $1 AND a.org_id = $1 AND ($2 IS NULL OR a.branch_id = $2)
         ORDER BY ams.created_on DESC
     `;
     

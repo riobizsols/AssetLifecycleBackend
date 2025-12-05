@@ -99,9 +99,9 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         
         const employee = employeeResult.rows[0];
         
-        // Generate random 8-digit password
-        const randomPassword = Math.floor(10000000 + Math.random() * 90000000).toString();
-        const hashedPassword = await bcrypt.hash(randomPassword, 10);
+        // Set default password to "Initial1"
+        const defaultPassword = "Initial1";
+        const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         
         // Insert user with all mapped fields (job_role_id set to null)
         const result = await dbPool.query(
@@ -131,7 +131,7 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         console.log(`Created user for employee ${emp_int_id} with user_id: ${user_id}`);
         return {
             ...result.rows[0],
-            generatedPassword: randomPassword
+            generatedPassword: defaultPassword
         };
     } catch (error) {
         console.error('Error in createUserForEmployee:', error);
@@ -139,7 +139,7 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
     }
 };
 
-// Assign job role to user (insert into tblUserJobRoles)
+// Assign job role to user (insert into tblUserJobRoles and update tblUsers.job_role_id)
 const assignJobRole = async (user_id, job_role_id, assigned_by) => {
     try {
         console.log(`Assigning role ${job_role_id} to user ${user_id}`);
@@ -149,6 +149,8 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
         console.log(`Generated user_job_role_id: ${user_job_role_id}`);
         
         const dbPool = getDb();
+        
+        // Insert into tblUserJobRoles
         const result = await dbPool.query(
             `INSERT INTO "tblUserJobRoles" 
              (user_job_role_id, user_id, job_role_id)
@@ -157,6 +159,16 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
             [user_job_role_id, user_id, job_role_id]
         );
         
+        // Update job_role_id in tblUsers only if it's null (set to first role assigned)
+        // This allows users to have multiple roles while maintaining a primary role in tblUsers
+        await dbPool.query(
+            `UPDATE "tblUsers" 
+             SET job_role_id = COALESCE(job_role_id, $1), changed_by = $2, changed_on = CURRENT_TIMESTAMP
+             WHERE user_id = $3 AND job_role_id IS NULL`,
+            [job_role_id, assigned_by, user_id]
+        );
+        
+        console.log(`Updated tblUsers.job_role_id to ${job_role_id} for user ${user_id} (if it was null)`);
         console.log('Role assignment result:', result.rows[0]);
         return result.rows[0];
     } catch (error) {

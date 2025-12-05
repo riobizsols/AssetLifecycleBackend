@@ -169,6 +169,9 @@ const login = async (req, res) => {
         // Step 5b: Password matched
         await logPasswordMatched({ email, userId: user.user_id });
 
+        // Check if password is "Initial1" (default password that requires change)
+        const isInitialPassword = await bcrypt.compare("Initial1", user.password);
+        
         // Update last_accessed field (using the appropriate database)
         await dbPool.query(
             `UPDATE "tblUsers" 
@@ -237,6 +240,7 @@ const login = async (req, res) => {
 
         res.json({
             token,
+            requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
             user: {
                 full_name: user.full_name,
                 email: user.email,
@@ -486,6 +490,41 @@ const updateOwnPassword = async (req, res) => {
     res.json({ message: 'Password updated successfully' });
 };
 
+// 🔐 Change Password (for authenticated users, especially those with Initial1 password)
+const changePassword = async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    const { org_id, user_id } = req.user;
+
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    // Use tenant database from request context (set by middleware)
+    const dbPool = req.db || require("../config/db");
+    const result = await dbPool.query(
+        'SELECT * FROM "tblUsers" WHERE org_id = $1 AND user_id = $2',
+        [org_id, user_id]
+    );
+    const user = result.rows[0];
+
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    // Verify current password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+        return res.status(401).json({ message: 'Incorrect current password' });
+    }
+
+    // Hash new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await dbPool.query(
+        'UPDATE "tblUsers" SET password = $1, changed_by = $2, changed_on = CURRENT_TIMESTAMP WHERE org_id = $3 AND user_id = $4',
+        [hashedPassword, user_id, org_id, user_id]
+    );
+
+    res.json({ message: 'Password changed successfully' });
+};
+
 // 🔑 Multi-Tenant Login (requires org_id)
 const tenantLogin = async (req, res) => {
     const startTime = Date.now();
@@ -695,6 +734,7 @@ module.exports = {
     resetPassword,
     refreshToken,
     updateOwnPassword,
+    changePassword,
 };
 
 
