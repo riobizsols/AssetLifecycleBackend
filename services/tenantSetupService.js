@@ -2,8 +2,21 @@ const { Client } = require('pg');
 const bcrypt = require('bcrypt');
 const { registerTenant, deactivateTenant, testTenantConnection: testConnection } = require('./tenantService');
 const { initTenantRegistryPool } = require('./tenantService');
-const setupWizardService = require('./setupWizardService');
+const tenantSchemaService = require('./tenantSchemaService');
 const { generateCustomId } = require('../utils/idGenerator');
+const {
+  DEFAULT_ASSET_TYPES,
+  DEFAULT_PROD_SERVICES,
+  DEFAULT_ORG_SETTINGS,
+  DEFAULT_EVENTS,
+  DEFAULT_APPS,
+  DEFAULT_AUDIT_EVENTS,
+  DEFAULT_MAINT_TYPES,
+  DEFAULT_MAINT_STATUS,
+  DEFAULT_ID_SEQUENCES,
+  DEFAULT_JOB_ROLES,
+  DEFAULT_JOB_ROLE_NAV,
+} = require('../constants/setupDefaults');
 require('dotenv').config();
 
 /**
@@ -181,6 +194,202 @@ async function createAdminUser(client, orgId, adminData) {
 }
 
 /**
+ * Seed default data for tenant database
+ * This includes: ID sequences, job roles, navigation, asset types, maintenance types, etc.
+ * Excludes any RioAdmin-specific data
+ */
+async function seedTenantDefaultData(client, orgId, adminUserId) {
+  console.log(`[TenantSetup] 🌱 Seeding default data for tenant...`);
+  
+  await client.query('SET search_path TO public');
+  
+  try {
+    // 1. Seed ID Sequences (excluding org since it's already created)
+    console.log(`[TenantSetup] Seeding ID sequences...`);
+    for (const seq of DEFAULT_ID_SEQUENCES) {
+      try {
+        await client.query(`
+          INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (table_key) DO NOTHING
+        `, [seq.table_key, seq.prefix, seq.last_number]);
+      } catch (err) {
+        console.warn(`[TenantSetup] ID Sequence ${seq.table_key}:`, err.message);
+      }
+    }
+    
+    // 2. Seed Job Roles (System Administrator already created in createAdminUser)
+    console.log(`[TenantSetup] Seeding job roles...`);
+    for (const role of DEFAULT_JOB_ROLES) {
+      try {
+        await client.query(`
+          INSERT INTO "tblJobRoles" (job_role_id, text, job_function, int_status)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (job_role_id) DO NOTHING
+        `, [role.job_role_id, role.text, role.job_function, role.int_status]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Job Role ${role.job_role_id}:`, err.message);
+      }
+    }
+    
+    // 3. Seed Job Role Navigation (for System Administrator role)
+    console.log(`[TenantSetup] Seeding job role navigation...`);
+    const navItemsForJR001 = DEFAULT_JOB_ROLE_NAV.filter(nav => nav.job_role_id === 'JR001');
+    for (const nav of navItemsForJR001) {
+      try {
+        await client.query(`
+          INSERT INTO "tblJobRoleNav" (job_role_id, display_text, path_url)
+          VALUES ($1, $2, $3)
+          ON CONFLICT DO NOTHING
+        `, [nav.job_role_id, nav.display_text, nav.path_url]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Navigation ${nav.display_text}:`, err.message);
+      }
+    }
+    
+    // 4. Seed Asset Types
+    console.log(`[TenantSetup] Seeding asset types...`);
+    for (const assetType of DEFAULT_ASSET_TYPES) {
+      try {
+        await client.query(`
+          INSERT INTO "tblAssetTypes" (
+            asset_type_id, text, asset_assignment_type, inspection_req, 
+            group_req, maint_req, maint_type_id, serial_format, 
+            depreciation_type, description, int_status
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 1)
+          ON CONFLICT (asset_type_id) DO NOTHING
+        `, [
+          assetType.id,
+          assetType.name,
+          assetType.assignmentType,
+          assetType.inspectionRequired,
+          assetType.groupRequired,
+          assetType.maintRequired,
+          assetType.maintTypeId || null,
+          assetType.serialFormat,
+          assetType.depreciationType,
+          assetType.description
+        ]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Asset Type ${assetType.id}:`, err.message);
+      }
+    }
+    
+    // 5. Seed Product/Services
+    console.log(`[TenantSetup] Seeding products/services...`);
+    for (const prodServ of DEFAULT_PROD_SERVICES) {
+      try {
+        await client.query(`
+          INSERT INTO "tblProdServ" (prod_serv_id, text, int_status)
+          VALUES ($1, $2, 1)
+          ON CONFLICT (prod_serv_id) DO NOTHING
+        `, [prodServ.id, prodServ.name]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Prod/Service ${prodServ.id}:`, err.message);
+      }
+    }
+    
+    // 6. Seed Maintenance Types
+    console.log(`[TenantSetup] Seeding maintenance types...`);
+    for (const maintType of DEFAULT_MAINT_TYPES) {
+      try {
+        await client.query(`
+          INSERT INTO "tblMaintTypes" (maint_type_id, text, int_status)
+          VALUES ($1, $2, 1)
+          ON CONFLICT (maint_type_id) DO NOTHING
+        `, [maintType.id, maintType.name]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Maint Type ${maintType.id}:`, err.message);
+      }
+    }
+    
+    // 7. Seed Maintenance Status
+    console.log(`[TenantSetup] Seeding maintenance status...`);
+    for (const maintStatus of DEFAULT_MAINT_STATUS) {
+      try {
+        await client.query(`
+          INSERT INTO "tblMaintStatus" (status_id, status_text, int_status)
+          VALUES ($1, $2, 1)
+          ON CONFLICT (status_id) DO NOTHING
+        `, [maintStatus.id, maintStatus.text]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Maint Status ${maintStatus.id}:`, err.message);
+      }
+    }
+    
+    // 8. Seed Events
+    console.log(`[TenantSetup] Seeding events...`);
+    for (const event of DEFAULT_EVENTS) {
+      try {
+        await client.query(`
+          INSERT INTO "tblEvents" (event_id, event_text)
+          VALUES ($1, $2)
+          ON CONFLICT (event_id) DO NOTHING
+        `, [event.id, event.text]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Event ${event.id}:`, err.message);
+      }
+    }
+    
+    // 9. Seed Apps
+    console.log(`[TenantSetup] Seeding apps...`);
+    for (const app of DEFAULT_APPS) {
+      try {
+        await client.query(`
+          INSERT INTO "tblApps" (app_id, app_name)
+          VALUES ($1, $2)
+          ON CONFLICT (app_id) DO NOTHING
+        `, [app.id, app.name]);
+      } catch (err) {
+        console.warn(`[TenantSetup] App ${app.id}:`, err.message);
+      }
+    }
+    
+    // 10. Seed Audit Events
+    console.log(`[TenantSetup] Seeding audit events...`);
+    for (const auditEvent of DEFAULT_AUDIT_EVENTS) {
+      try {
+        await client.query(`
+          INSERT INTO "tblAuditEvents" (app_id, event_id, event_name, description)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (app_id, event_id) DO NOTHING
+        `, [auditEvent.app_id, auditEvent.event_id, auditEvent.event_name, auditEvent.description]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Audit Event ${auditEvent.app_id}-${auditEvent.event_id}:`, err.message);
+      }
+    }
+    
+    // 11. Seed Organization Settings (no super_access_users for tenant)
+    console.log(`[TenantSetup] Seeding organization settings...`);
+    for (const setting of DEFAULT_ORG_SETTINGS) {
+      // Skip super_access_users setting as it's only for main org with RioAdmin
+      if (setting.setting_key === 'super_access_users') {
+        console.log(`[TenantSetup] Skipping super_access_users setting (not applicable for tenant)`);
+        continue;
+      }
+      
+      try {
+        await client.query(`
+          INSERT INTO "tblOrgSettings" (org_id, setting_key, setting_value)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (org_id, setting_key) DO UPDATE
+          SET setting_value = EXCLUDED.setting_value
+        `, [orgId, setting.setting_key, setting.setting_value]);
+      } catch (err) {
+        console.warn(`[TenantSetup] Org Setting ${setting.setting_key}:`, err.message);
+      }
+    }
+    
+    console.log(`[TenantSetup] ✅ Default data seeded successfully`);
+    
+  } catch (error) {
+    console.error(`[TenantSetup] ❌ Error seeding default data:`, error.message);
+    throw error;
+  }
+}
+
+/**
  * Create a new tenant
  * This will:
  * 1. Check org_id uniqueness
@@ -300,41 +509,31 @@ async function createTenant(tenantData) {
       await tenantClient.query('SET search_path TO public');
       await tenantClient.query("SET session search_path TO 'public'");
 
-      // Get and execute schema SQL from setup wizard service
+      // Get and execute tenant schema SQL (excludes tblRioAdmin)
       // This includes all tables, primary keys, foreign keys, indexes, and constraints
       let schemaCreated = false;
       try {
-        let schemaSql;
-        try {
-          // Force regeneration to ensure we get the latest schema including any new tables
-          console.log(`[TenantSetup] 🔄 Fetching latest schema (will include any new tables from DATABASE_URL)...`);
-          schemaSql = await setupWizardService.getSchemaSql(false, true); // forceRegenerate = true
-        } catch (fileError) {
-          console.error(`[TenantSetup] Error reading schema SQL file:`, fileError.message);
-          console.error(`[TenantSetup] This is expected if the SQL dump file doesn't exist. Will use CORE_TABLE_DDL fallback.`);
-          schemaSql = null; // Will trigger fallback
-        }
+        console.log(`[TenantSetup] 🔄 Generating tenant schema from DATABASE_URL (excluding tblRioAdmin)...`);
+        
+        const schemaSql = await tenantSchemaService.generateTenantSchemaSql();
         
         if (!schemaSql || schemaSql.trim().length === 0) {
-          console.log(`[TenantSetup] Schema SQL is empty or not available. Will use CORE_TABLE_DDL fallback.`);
-          schemaSql = null; // Will trigger fallback
-        } else {
-          console.log(`[TenantSetup] Executing full schema SQL (includes all tables, PKs, FKs, constraints)...`);
-          console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
+          throw new Error('Tenant schema SQL generation returned empty result');
+        }
+        
+        console.log(`[TenantSetup] Executing tenant schema SQL...`);
+        console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
         
         // Execute the schema SQL as a single transaction
-        // PostgreSQL can handle multiple statements in a single query
         try {
           await tenantClient.query(schemaSql);
           schemaCreated = true;
-          console.log(`[TenantSetup] ✅ Full schema SQL executed successfully`);
+          console.log(`[TenantSetup] ✅ Tenant schema SQL executed successfully`);
         } catch (execError) {
           console.error(`[TenantSetup] Error executing schema SQL as single query:`, execError.message);
           // If single query fails, try executing statement by statement
           console.warn(`[TenantSetup] Single query execution failed, trying statement-by-statement:`, execError.message);
           
-          // Split by semicolons and execute statements one by one for better error handling
-          // But be careful with functions, triggers, etc. that contain semicolons
           const statements = schemaSql
             .split(/;\s*(?=\n|$)/)
             .map(s => s.trim())
@@ -379,41 +578,17 @@ async function createTenant(tenantData) {
             schemaCreated = true;
             console.log(`[TenantSetup] ✅ Schema partially created (${tableCheck.rows[0].count} tables)`);
           } else {
-            console.warn(`[TenantSetup] No tables were created after executing schema SQL. Will use CORE_TABLE_DDL fallback.`);
+            throw new Error('No tables were created after executing tenant schema SQL');
           }
-        }
         }
       } catch (schemaError) {
-        console.error(`[TenantSetup] ❌ Error executing schema SQL:`, schemaError.message);
+        console.error(`[TenantSetup] ❌ Error generating/executing tenant schema:`, schemaError.message);
         console.error(`[TenantSetup] Stack trace:`, schemaError.stack);
-        // Try fallback to core tables
-        console.log(`[TenantSetup] Attempting to create core tables as fallback...`);
+        throw new Error(`Tenant schema creation failed: ${schemaError.message}`);
       }
-
-      // Create core tables (safety net - ensures essential tables exist)
-      // Note: These are basic table definitions. The full schema SQL above should have already
-      // created all tables with complete constraints. This is just a fallback.
+      
       if (!schemaCreated) {
-        console.log(`[TenantSetup] Creating core tables as fallback...`);
-        const CORE_TABLE_DDL = setupWizardService.CORE_TABLE_DDL;
-        if (CORE_TABLE_DDL && Array.isArray(CORE_TABLE_DDL)) {
-          for (const ddl of CORE_TABLE_DDL) {
-            try {
-              if (ddl && ddl.trim()) {
-                await tenantClient.query(ddl);
-                console.log(`[TenantSetup] Created table from CORE_TABLE_DDL`);
-              }
-            } catch (err) {
-              // Table might already exist (from schema SQL), continue
-              if (err.code !== '42P07' && err.code !== '42710') {
-                console.error(`[TenantSetup] Error creating core table:`, err.message);
-                console.error(`[TenantSetup] DDL that failed:`, ddl.substring(0, 200));
-              }
-            }
-          }
-        } else {
-          console.error(`[TenantSetup] CORE_TABLE_DDL is not available or not an array`);
-        }
+        throw new Error('Tenant schema was not created successfully');
       }
       
       // Verify that tblOrgs table exists before trying to insert
@@ -660,6 +835,10 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
       const adminCredentials = await createAdminUser(tenantClient, generatedOrgId, adminUser);
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
+
+      // Step 3: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
+      console.log(`[TenantSetup] Seeding default tenant data...`);
+      await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId);
 
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
       
