@@ -11,6 +11,7 @@ const {
 } = require('../models/userModel');
 const { sendResetEmail } = require('../utils/mailer');
 const { getUserRoles } = require('../models/userJobRoleModel');
+const { getInitialPassword } = require('../utils/orgSettingsUtils');
 const { 
     logLoginApiCalled,
     logCheckingUserInDatabase,
@@ -169,26 +170,82 @@ const login = async (req, res) => {
         // Step 5b: Password matched
         await logPasswordMatched({ email, userId: user.user_id });
 
-        // Check if password is "Initial1" (default password that requires change)
-        const isInitialPassword = await bcrypt.compare("Initial1", user.password);
+        // Check if this is a RioAdmin user (from tblRioAdmin)
+        const isRioAdmin = user.source_table === 'tblRioAdmin';
         
-        // Update last_accessed field (using the appropriate database)
-        await dbPool.query(
-            `UPDATE "tblUsers" 
-             SET last_accessed = CURRENT_DATE 
-             WHERE org_id = $1 AND user_id = $2`,
-            [user.org_id, user.user_id]
-        );
+        // Check if password matches the initial password from org settings
+        const initialPassword = await getInitialPassword(user.org_id, dbPool);
+        const isInitialPassword = await bcrypt.compare(initialPassword, user.password);
+        
+        // Update last_accessed field in the appropriate table
+        if (isRioAdmin) {
+            await dbPool.query(
+                `UPDATE "tblRioAdmin" 
+                 SET last_accessed = CURRENT_DATE 
+                 WHERE org_id = $1 AND user_id = $2`,
+                [user.org_id, user.user_id]
+            );
+        } else {
+            await dbPool.query(
+                `UPDATE "tblUsers" 
+                 SET last_accessed = CURRENT_DATE 
+                 WHERE org_id = $1 AND user_id = $2`,
+                [user.org_id, user.user_id]
+            );
+        }
 
-        // Fetch all user roles from tblUserJobRoles (using the appropriate database)
-        const userRoles = await getUserRoles(user.user_id, dbPool);
+        // Fetch all user roles from tblUserJobRoles (RioAdmin might not have roles, so handle gracefully)
+        let userRoles = [];
+        try {
+            userRoles = await getUserRoles(user.user_id, dbPool);
+        } catch (roleError) {
+            // If RioAdmin doesn't have roles, that's okay - they have admin access by default
+            console.log(`[AuthController] No roles found for user ${user.user_id}, continuing...`);
+        }
+        
+        // For RioAdmin, create a default admin role if no roles exist
+        if (isRioAdmin && userRoles.length === 0) {
+            userRoles = [{
+                user_job_role_id: 'UJR_RIOADMIN',
+                user_id: user.user_id,
+                job_role_id: 'JR001', // System Administrator
+                job_role_name: 'System Administrator'
+            }];
+        }
         
         // Fetch user with branch information (using the appropriate database)
-        const userWithBranch = await getUserWithBranch(user.user_id, dbPool);
+        let userWithBranch = null;
+        if (isRioAdmin) {
+            // For RioAdmin, get branch info directly from the user record or join with departments
+            const branchQuery = `
+                SELECT 
+                    ra.user_id,
+                    ra.full_name,
+                    ra.email,
+                    ra.phone,
+                    ra.job_role_id,
+                    ra.int_status,
+                    ra.dept_id,
+                    ra.branch_id,
+                    d.text as dept_name,
+                    b.text as branch_name,
+                    b.branch_code,
+                    jr.text as job_role_name
+                FROM "tblRioAdmin" ra
+                LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
+                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
+                WHERE ra.user_id = $1
+            `;
+            const branchResult = await dbPool.query(branchQuery, [user.user_id]);
+            userWithBranch = branchResult.rows[0];
+        } else {
+            userWithBranch = await getUserWithBranch(user.user_id, dbPool);
+        }
         
-        // Fetch language_code from employee table if emp_int_id exists (using the appropriate database)
-        let language_code = 'en'; // default language
-        if (user.emp_int_id) {
+        // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
+        let language_code = user.language_code || 'en'; // default language
+        if (!isRioAdmin && user.emp_int_id) {
             const employeeResult = await dbPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
                 [user.emp_int_id]
@@ -501,11 +558,29 @@ const changePassword = async (req, res) => {
 
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
-    const result = await dbPool.query(
-        'SELECT * FROM "tblUsers" WHERE org_id = $1 AND user_id = $2',
-        [org_id, user_id]
+    
+    // First, check if user is in tblRioAdmin (super admin)
+    let user = null;
+    let isRioAdmin = false;
+    let tableName = 'tblUsers';
+    
+    const rioAdminResult = await dbPool.query(
+        'SELECT * FROM "tblRioAdmin" WHERE user_id = $1',
+        [user_id]
     );
-    const user = result.rows[0];
+    
+    if (rioAdminResult.rows.length > 0) {
+        user = rioAdminResult.rows[0];
+        isRioAdmin = true;
+        tableName = 'tblRioAdmin';
+    } else {
+        // If not in tblRioAdmin, check tblUsers
+        const result = await dbPool.query(
+            'SELECT * FROM "tblUsers" WHERE org_id = $1 AND user_id = $2',
+            [org_id, user_id]
+        );
+        user = result.rows[0];
+    }
 
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -517,10 +592,19 @@ const changePassword = async (req, res) => {
 
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
-    await dbPool.query(
-        'UPDATE "tblUsers" SET password = $1, changed_by = $2, changed_on = CURRENT_TIMESTAMP WHERE org_id = $3 AND user_id = $4',
-        [hashedPassword, user_id, org_id, user_id]
-    );
+    
+    // Update password in the appropriate table
+    if (isRioAdmin) {
+        await dbPool.query(
+            'UPDATE "tblRioAdmin" SET password = $1, changed_by = $2, changed_on = CURRENT_TIMESTAMP WHERE user_id = $3',
+            [hashedPassword, user_id, user_id]
+        );
+    } else {
+        await dbPool.query(
+            'UPDATE "tblUsers" SET password = $1, changed_by = $2, changed_on = CURRENT_TIMESTAMP WHERE org_id = $3 AND user_id = $4',
+            [hashedPassword, user_id, org_id, user_id]
+        );
+    }
 
     res.json({ message: 'Password changed successfully' });
 };
@@ -620,23 +704,82 @@ const tenantLogin = async (req, res) => {
         // Step 5b: Password matched
         await logPasswordMatched({ email, userId: user.user_id });
 
-        // Update last_accessed field using tenant database
-        await tenantPool.query(
-            `UPDATE "tblUsers" 
-             SET last_accessed = CURRENT_DATE 
-             WHERE org_id = $1 AND user_id = $2`,
-            [user.org_id, user.user_id]
-        );
+        // Check if this is a RioAdmin user (from tblRioAdmin)
+        const isRioAdmin = user.source_table === 'tblRioAdmin';
+        
+        // Check if password matches the initial password from org settings
+        const initialPassword = await getInitialPassword(user.org_id, tenantPool);
+        const isInitialPassword = await bcrypt.compare(initialPassword, user.password);
 
-        // Fetch all user roles from tblUserJobRoles (using tenant database)
-        const userRoles = await getUserRoles(user.user_id, tenantPool);
+        // Update last_accessed field in the appropriate table
+        if (isRioAdmin) {
+            await tenantPool.query(
+                `UPDATE "tblRioAdmin" 
+                 SET last_accessed = CURRENT_DATE 
+                 WHERE org_id = $1 AND user_id = $2`,
+                [user.org_id, user.user_id]
+            );
+        } else {
+            await tenantPool.query(
+                `UPDATE "tblUsers" 
+                 SET last_accessed = CURRENT_DATE 
+                 WHERE org_id = $1 AND user_id = $2`,
+                [user.org_id, user.user_id]
+            );
+        }
+
+        // Fetch all user roles from tblUserJobRoles (RioAdmin might not have roles, so handle gracefully)
+        let userRoles = [];
+        try {
+            userRoles = await getUserRoles(user.user_id, tenantPool);
+        } catch (roleError) {
+            // If RioAdmin doesn't have roles, that's okay - they have admin access by default
+            console.log(`[AuthController] No roles found for user ${user.user_id}, continuing...`);
+        }
+        
+        // For RioAdmin, create a default admin role if no roles exist
+        if (isRioAdmin && userRoles.length === 0) {
+            userRoles = [{
+                user_job_role_id: 'UJR_RIOADMIN',
+                user_id: user.user_id,
+                job_role_id: 'JR001', // System Administrator
+                job_role_name: 'System Administrator'
+            }];
+        }
         
         // Fetch user with branch information (using tenant database)
-        const userWithBranch = await getUserWithBranch(user.user_id, tenantPool);
+        let userWithBranch = null;
+        if (isRioAdmin) {
+            // For RioAdmin, get branch info directly from the user record or join with departments
+            const branchQuery = `
+                SELECT 
+                    ra.user_id,
+                    ra.full_name,
+                    ra.email,
+                    ra.phone,
+                    ra.job_role_id,
+                    ra.int_status,
+                    ra.dept_id,
+                    ra.branch_id,
+                    d.text as dept_name,
+                    b.text as branch_name,
+                    b.branch_code,
+                    jr.text as job_role_name
+                FROM "tblRioAdmin" ra
+                LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
+                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
+                WHERE ra.user_id = $1
+            `;
+            const branchResult = await tenantPool.query(branchQuery, [user.user_id]);
+            userWithBranch = branchResult.rows[0];
+        } else {
+            userWithBranch = await getUserWithBranch(user.user_id, tenantPool);
+        }
         
-        // Fetch language_code from employee table if emp_int_id exists (using tenant database)
-        let language_code = 'en'; // default language
-        if (user.emp_int_id) {
+        // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
+        let language_code = user.language_code || 'en'; // default language
+        if (!isRioAdmin && user.emp_int_id) {
             const employeeResult = await tenantPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
                 [user.emp_int_id]
@@ -695,6 +838,7 @@ const tenantLogin = async (req, res) => {
 
         res.json({
             token,
+            requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
             user: {
                 full_name: user.full_name,
                 email: user.email,

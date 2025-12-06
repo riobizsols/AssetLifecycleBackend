@@ -21,11 +21,14 @@ const getBreakdownHistory = async (req, res) => {
         const orgId = req.query.orgId || 'ORG001';
         const filters = req.query || {};
         
-        // Add user's branch_id as default filter
+        // Add user's branch_id as default filter only if user doesn't have super access
         const userBranchId = req.user?.branch_id;
-        if (userBranchId) {
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        if (!hasSuperAccess && userBranchId) {
             filters.branch_id = userBranchId;
             console.log('🔍 [BreakdownHistoryController] Added user branch_id filter:', userBranchId);
+        } else if (hasSuperAccess) {
+            console.log('🔍 [BreakdownHistoryController] User has super access - no branch filter applied');
         }
         
         // Log API called

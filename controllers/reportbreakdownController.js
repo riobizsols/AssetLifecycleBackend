@@ -43,15 +43,18 @@ const getAllReports = async (req, res) => {
       return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
     }
 
+    const branchId = req.user?.branch_id;
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+
     // Log data retrieval started
     await logReportDataRetrieval({
       appId: APP_ID,
       reportType: 'Breakdown Reports',
-      filters: { orgId },
+      filters: { orgId, branchId, hasSuperAccess },
       userId
     });
 
-    const reports = await model.getAllReports(orgId);
+    const reports = await model.getAllReports(orgId, branchId, hasSuperAccess);
     const recordCount = reports?.length || 0;
     
     // Log no data or success

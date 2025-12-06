@@ -48,6 +48,34 @@ const generateDynamicSchemaSql = async () => {
     console.log('[SetupWizard] 🔄 Generating dynamic schema from DATABASE_URL...');
     
     const schemaParts = [];
+    const foreignKeyStatements = []; // Collect FK constraints to add at the end
+    
+    // Get sequences FIRST (before tables, since tables may reference them in DEFAULT values)
+    const sequencesResult = await db.query(`
+      SELECT 
+        sequence_name,
+        data_type,
+        start_value,
+        minimum_value,
+        maximum_value,
+        increment,
+        cycle_option
+      FROM information_schema.sequences
+      WHERE sequence_schema = 'public'
+      ORDER BY sequence_name
+    `);
+    
+    console.log(`[SetupWizard] 📊 Found ${sequencesResult.rows.length} sequences`);
+    for (const seq of sequencesResult.rows) {
+      schemaParts.push(
+        `CREATE SEQUENCE IF NOT EXISTS "${seq.sequence_name}" ` +
+        `AS ${seq.data_type} ` +
+        `START WITH ${seq.start_value} ` +
+        `INCREMENT BY ${seq.increment} ` +
+        `MINVALUE ${seq.minimum_value} ` +
+        `MAXVALUE ${seq.maximum_value};\n`
+      );
+    }
     
     // Get all tables in public schema
     const tablesResult = await db.query(`
@@ -103,28 +131,40 @@ const generateDynamicSchemaSql = async () => {
       
       const pkColumns = pkResult.rows.map(row => row.column_name);
       
-      // Get foreign key constraints
+      // Get foreign key constraints - using pg_catalog for accurate column mapping
       const fkResult = await db.query(`
         SELECT
-          tc.constraint_name,
-          kcu.column_name,
-          ccu.table_name AS foreign_table_name,
-          ccu.column_name AS foreign_column_name,
-          rc.update_rule,
-          rc.delete_rule
-        FROM information_schema.table_constraints AS tc
-        JOIN information_schema.key_column_usage AS kcu
-          ON tc.constraint_name = kcu.constraint_name
-          AND tc.table_schema = kcu.table_schema
-        JOIN information_schema.constraint_column_usage AS ccu
-          ON ccu.constraint_name = tc.constraint_name
-          AND ccu.table_schema = tc.table_schema
-        LEFT JOIN information_schema.referential_constraints AS rc
-          ON tc.constraint_name = rc.constraint_name
-          AND tc.table_schema = rc.constraint_schema
-        WHERE tc.constraint_type = 'FOREIGN KEY'
-          AND tc.table_schema = 'public'
-          AND tc.table_name = $1
+          con.conname AS constraint_name,
+          att.attname AS column_name,
+          att.attnum AS column_position,
+          ref_class.relname AS foreign_table_name,
+          ref_att.attname AS foreign_column_name,
+          CASE con.confupdtype
+            WHEN 'a' THEN 'NO ACTION'
+            WHEN 'r' THEN 'RESTRICT'
+            WHEN 'c' THEN 'CASCADE'
+            WHEN 'n' THEN 'SET NULL'
+            WHEN 'd' THEN 'SET DEFAULT'
+          END AS update_rule,
+          CASE con.confdeltype
+            WHEN 'a' THEN 'NO ACTION'
+            WHEN 'r' THEN 'RESTRICT'
+            WHEN 'c' THEN 'CASCADE'
+            WHEN 'n' THEN 'SET NULL'
+            WHEN 'd' THEN 'SET DEFAULT'
+          END AS delete_rule
+        FROM pg_constraint con
+        JOIN pg_class class ON con.conrelid = class.oid
+        JOIN pg_namespace nsp ON class.relnamespace = nsp.oid
+        JOIN pg_class ref_class ON con.confrelid = ref_class.oid
+        JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS src(attnum, ord) ON true
+        JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = src.attnum
+        JOIN LATERAL unnest(con.confkey) WITH ORDINALITY AS ref(attnum, ord) ON src.ord = ref.ord
+        JOIN pg_attribute ref_att ON ref_att.attrelid = con.confrelid AND ref_att.attnum = ref.attnum
+        WHERE con.contype = 'f'
+          AND nsp.nspname = 'public'
+          AND class.relname = $1
+        ORDER BY con.conname, src.ord
       `, [tableName]);
       
       // Get unique constraints
@@ -174,13 +214,17 @@ const generateDynamicSchemaSql = async () => {
           if (col.character_maximum_length) {
             dataType = `character varying(${col.character_maximum_length})`;
           } else {
-            dataType = 'character varying';
+            // If no length specified, use text instead
+            console.log(`[SetupWizard] ⚠️  VARCHAR without length in ${tableName}.${col.column_name}, using text instead`);
+            dataType = 'text';
           }
-        } else if (col.udt_name === 'char' || col.udt_name === 'character') {
+        } else if (col.udt_name === 'char' || col.udt_name === 'character' || col.udt_name === 'bpchar') {
           if (col.character_maximum_length) {
             dataType = `character(${col.character_maximum_length})`;
           } else {
-            dataType = 'character';
+            // PostgreSQL requires a length for character type, default to text if missing
+            console.log(`[SetupWizard] ⚠️  Character type without length in ${tableName}.${col.column_name}, using text instead`);
+            dataType = 'text';
           }
         } else if (col.udt_name === 'numeric' || col.udt_name === 'decimal') {
           if (col.numeric_precision && col.numeric_scale) {
@@ -219,11 +263,16 @@ const generateDynamicSchemaSql = async () => {
         if (col.column_default) {
           // Clean up default value (remove ::type casts)
           let defaultValue = col.column_default;
-          // Handle function calls like CURRENT_TIMESTAMP, CURRENT_DATE, etc.
-          if (defaultValue.includes('::')) {
-            const parts = defaultValue.split('::');
-            defaultValue = parts[0].trim();
-          }
+          
+          // Handle type casts (::typename) - remove the cast part
+          // This handles both single-word types (::text, ::regclass) and 
+          // multi-word types (::character varying, ::timestamp without time zone)
+          // Pattern: :: followed by type name (may contain spaces)
+          defaultValue = defaultValue.replace(/::[a-zA-Z_][a-zA-Z0-9_ ]*/g, '');
+          
+          // Clean up any trailing commas or whitespace
+          defaultValue = defaultValue.trim().replace(/,\s*$/, '');
+          
           colDef += ` DEFAULT ${defaultValue}`;
         }
         
@@ -256,27 +305,38 @@ const generateDynamicSchemaSql = async () => {
         );
       }
       
-      // Add FOREIGN KEY constraints
+      // Collect FOREIGN KEY constraints (to be added AFTER all tables are created)
       const fkConstraints = {};
       for (const fk of fkResult.rows) {
         if (!fkConstraints[fk.constraint_name]) {
           fkConstraints[fk.constraint_name] = {
+            tableName: tableName,
             columns: [],
             foreignTable: fk.foreign_table_name,
             foreignColumns: [],
             updateRule: fk.update_rule || 'NO ACTION',
-            deleteRule: fk.delete_rule || 'NO ACTION'
+            deleteRule: fk.delete_rule || 'NO ACTION',
+            seenColumns: new Set() // Track which columns we've already added
           };
         }
-        fkConstraints[fk.constraint_name].columns.push(fk.column_name);
-        fkConstraints[fk.constraint_name].foreignColumns.push(fk.foreign_column_name);
+        
+        // Only add if we haven't seen this column yet (avoid duplicates)
+        const columnKey = `${fk.column_name}->${fk.foreign_column_name}`;
+        if (!fkConstraints[fk.constraint_name].seenColumns.has(columnKey)) {
+          fkConstraints[fk.constraint_name].columns.push(fk.column_name);
+          fkConstraints[fk.constraint_name].foreignColumns.push(fk.foreign_column_name);
+          fkConstraints[fk.constraint_name].seenColumns.add(columnKey);
+        }
       }
       
+      // Store FK statements for later
       for (const [constraintName, fk] of Object.entries(fkConstraints)) {
+        if (fk.columns.length === 0) continue; // Skip if no columns (shouldn't happen)
+        
         const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
         const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
-        schemaParts.push(
-          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" ` +
+        foreignKeyStatements.push(
+          `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
           `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
           `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`
         );
@@ -319,30 +379,9 @@ const generateDynamicSchemaSql = async () => {
       schemaParts.push(indexDef + ';\n');
     }
     
-    // Get sequences
-    const sequencesResult = await db.query(`
-      SELECT 
-        sequence_name,
-        data_type,
-        start_value,
-        increment,
-        minimum_value,
-        maximum_value
-      FROM information_schema.sequences
-      WHERE sequence_schema = 'public'
-      ORDER BY sequence_name
-    `);
-    
-    for (const seq of sequencesResult.rows) {
-      schemaParts.push(
-        `CREATE SEQUENCE IF NOT EXISTS "${seq.sequence_name}" ` +
-        `AS ${seq.data_type} ` +
-        `START WITH ${seq.start_value} ` +
-        `INCREMENT BY ${seq.increment} ` +
-        `MINVALUE ${seq.minimum_value} ` +
-        `MAXVALUE ${seq.maximum_value};\n`
-      );
-    }
+    // Add all foreign key constraints AFTER all tables are created
+    console.log(`[SetupWizard] 📎 Adding ${foreignKeyStatements.length} foreign key constraints`);
+    schemaParts.push(...foreignKeyStatements);
     
     const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
     
@@ -356,6 +395,7 @@ const generateDynamicSchemaSql = async () => {
     console.log(`[SetupWizard]   - CREATE TABLE statements: ${tableCount}`);
     console.log(`[SetupWizard]   - Indexes: ${indexesResult.rows.length}`);
     console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
+    console.log(`[SetupWizard]   - Foreign keys: ${foreignKeyStatements.length}`);
     console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
     
     if (tableCount !== tables.length) {
@@ -572,7 +612,8 @@ const CORE_TABLE_DDL = [
     CREATE TABLE IF NOT EXISTS "tblUserJobRoles" (
       user_job_role_id character varying(20) PRIMARY KEY,
       user_id character varying(20) NOT NULL,
-      job_role_id character varying(20) NOT NULL
+      job_role_id character varying(20) NOT NULL,
+      org_id character varying(20) NOT NULL
     );
   `,
   `
@@ -728,8 +769,6 @@ const normalizeAdminUser = (admin = {}) => ({
   email: (admin.email || "").trim(),
   phone: (admin.phone || "").trim(),
   username: (admin.username || "USR001").trim().toUpperCase(),
-  password: admin.password || "",
-  confirmPassword: admin.confirmPassword || "",
   employeeCode: (admin.employeeCode || "EMP001").trim().toUpperCase(),
   employeeTempId: admin.employeeTempId || null,
   departmentTempId: admin.departmentTempId || null,
@@ -1181,9 +1220,6 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
   if (!adminUser.email) {
     throw new Error("Admin user email is required.");
   }
-  if (adminUser.password !== adminUser.confirmPassword) {
-    throw new Error("Admin user passwords do not match.");
-  }
 
   const deptMapping =
     mappings.deptMappings.find((dept) => dept.tempId === adminUser.departmentTempId) ||
@@ -1198,92 +1234,174 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
     throw new Error("Unable to resolve branch for admin user. Please ensure at least one branch exists.");
   }
 
-  const employeeId = adminUser.employeeCode || "EMP001";
-  const empIntId = adminUser.employeeTempId || `EMP_INT_${employeeId.replace(/\D/g, "").padStart(4, "0")}`;
-  const passwordHash = await bcrypt.hash(adminUser.password, 10);
+  // Get initial password from org settings (defaults to "Initial1" if not configured)
+  const { getInitialPassword } = require('../utils/orgSettingsUtils');
+  const initialPassword = await getInitialPassword(orgId, client);
+  const passwordHash = await bcrypt.hash(initialPassword, 10);
 
-  await client.query(
-    `
-      INSERT INTO "tblEmployees"
-        (emp_int_id, employee_id, name, first_name, last_name, middle_name, full_name, email_id,
-         dept_id, phone_number, employee_type, joining_date, releiving_date, language_code,
-         int_status, created_by, created_on, changed_by, changed_on, org_id, branch_id)
-      VALUES
-        ($1, $2, $3, $4, $5, NULL, $6, $7,
-         $8, $9, 'Full Time', CURRENT_TIMESTAMP, NULL, 'en',
-         1, 'SETUP', CURRENT_TIMESTAMP, 'SETUP', CURRENT_TIMESTAMP, $10, $11)
-      ON CONFLICT (emp_int_id) DO UPDATE
-      SET name = EXCLUDED.name,
-          email_id = EXCLUDED.email_id,
-          dept_id = EXCLUDED.dept_id,
-          phone_number = EXCLUDED.phone_number,
-          org_id = EXCLUDED.org_id,
-          branch_id = EXCLUDED.branch_id
-    `,
-    [
-      empIntId,
-      employeeId,
-      adminUser.fullName,
-      adminUser.fullName.split(" ")[0],
-      adminUser.fullName.split(" ").slice(1).join(" ") || adminUser.fullName.split(" ")[0],
-      adminUser.fullName,
-      adminUser.email,
-      deptId,
-      adminUser.phone || "0000000000",
-      orgId,
-      branchId,
-    ]
+  // Generate user_id for RioAdmin in USR format (USR001, USR002, etc.)
+  // Query tblIDSequences directly using the client connection
+  let idResult = await client.query(
+    'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+    ['user']
   );
 
+  // Auto-create entry if it doesn't exist
+  if (idResult.rows.length === 0) {
+    await client.query(
+      'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+      ['user', 'USR', 0]
+    );
+    idResult = await client.query(
+      'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+      ['user']
+    );
+  }
+
+  const { prefix, last_number } = idResult.rows[0];
+  const next = last_number + 1;
+  
+  // Update the last number
+  await client.query(
+    'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
+    [next, 'user']
+  );
+
+  // Generate the ID in format USR001, USR002, etc.
+  const rioAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
+  const rioAdminUsername = "rioadmin";
+
+  // Create admin user in tblRioAdmin instead of tblUsers and tblEmployees
   await client.query(
     `
-      INSERT INTO "tblUsers"
-        (org_id, user_id, full_name, email, phone, job_role_id, password,
+      INSERT INTO "tblRioAdmin"
+        (org_id, user_id, full_name, username, email, phone, job_role_id, password,
          created_by, created_on, changed_by, changed_on, time_zone, dept_id,
-         emp_int_id, branch_id, int_status)
+         branch_id, int_status, language_code)
       VALUES
-        ($1, $2, $3, $4, $5, 'JR001', $6,
-         'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 'IST', $7,
-         $8, $9, 1)
+        ($1, $2, $3, $4, $5, $6, 'JR001', $7,
+         'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 'IST', $8,
+         $9, 1, 'en')
       ON CONFLICT (user_id) DO UPDATE
       SET full_name = EXCLUDED.full_name,
+          username = EXCLUDED.username,
           email = EXCLUDED.email,
           phone = EXCLUDED.phone,
           password = EXCLUDED.password,
           dept_id = EXCLUDED.dept_id,
-          emp_int_id = EXCLUDED.emp_int_id,
           branch_id = EXCLUDED.branch_id,
           org_id = EXCLUDED.org_id
     `,
     [
       orgId,
-      adminUser.username,
+      rioAdminUserId,
       adminUser.fullName,
+      rioAdminUsername,
       adminUser.email,
       adminUser.phone || null,
       passwordHash,
       deptId,
-      empIntId,
       branchId,
     ]
   );
 
+  // Add super_access_users entry in tblOrgSettings
+  await client.query(
+    `
+      INSERT INTO "tblOrgSettings" (os_id, org_id, key, value)
+      VALUES ($1, $2, 'super_access_users', $3)
+      ON CONFLICT (os_id) DO UPDATE
+      SET value = EXCLUDED.value
+    `,
+    [`OS_SA_${orgId}`, orgId, rioAdminUserId]
+  );
+
+  // Add user job role entry in tblUserJobRoles
+  // Note: Using only columns that exist in the dynamically generated schema
   await client.query(
     `
       INSERT INTO "tblUserJobRoles" (user_job_role_id, user_id, job_role_id)
-      VALUES ($1, $2, 'JR001')
-      ON CONFLICT (user_job_role_id) DO UPDATE
-      SET user_id = EXCLUDED.user_id,
-          job_role_id = EXCLUDED.job_role_id
+      VALUES ('UJR001_' || $1, $1, 'JR001')
+      ON CONFLICT (user_job_role_id) DO NOTHING
     `,
-    ["UJR001", adminUser.username]
+    [rioAdminUserId]
   );
 
-  logs.push({ message: `Master admin user ${adminUser.username} provisioned`, scope: "admin" });
+  // Add navigation entries in tblJobRoleNav
+  const navEntries = [
+    ['JRN001', orgId, 1, 'JR001', null, 'DASHBOARD', 'Dashboard', null, 1, 'A', false, 'D'],
+    ['JRN002', orgId, 1, 'JR001', null, 'ASSETS', 'Assets', null, 2, 'A', false, 'D'],
+    ['JRN003', orgId, 1, 'JR001', null, 'ASSETASSIGNMENT', 'Asset Assignment', null, 3, 'A', true, 'D'],
+    ['JRN004', orgId, 1, 'JR001', 'JRN003', 'DEPTASSIGNMENT', 'Department Assignment', null, 4, 'A', false, 'D'],
+    ['JRN005', orgId, 1, 'JR001', 'JRN003', 'EMPASSIGNMENT', 'Employee Assignment', null, 5, 'A', false, 'D'],
+    ['JRN006', orgId, 1, 'JR001', null, 'WORKORDERMANAGEMENT', 'Workorder Management', null, 6, 'A', false, 'D'],
+    ['JRN007', orgId, 1, 'JR001', null, 'MAINTENANCEAPPROVAL', 'Maintenance Approval', null, 7, 'A', false, 'D'],
+    ['JRN008', orgId, 1, 'JR001', null, 'SUPERVISORAPPROVAL', 'Maintenance List', null, 8, 'A', false, 'D'],
+    ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
+    ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
+    ['JRN012', orgId, 1, 'JR001', null, 'REPORTS', 'Reports', null, 12, 'A', true, 'D'],
+    ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
+    ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],
+    ['JRN015', orgId, 1, 'JR001', 'JRN012', 'MAINTENANCEHISTORY', 'Maintenance History', null, 15, 'A', false, 'D'],
+    ['JRN016', orgId, 1, 'JR001', 'JRN012', 'ASSETVALUATION', 'Asset Valuation', null, 16, 'A', false, 'D'],
+    ['JRN017', orgId, 1, 'JR001', 'JRN012', 'ASSETWORKFLOWHISTORY', 'Asset Workflow History', null, 17, 'A', false, 'D'],
+    ['JRN018', orgId, 1, 'JR001', 'JRN012', 'BREAKDOWNHISTORY', 'Breakdown History', null, 18, 'A', false, 'D'],
+    ['JRN019', orgId, 1, 'JR001', 'JRN012', 'USAGEBASEDASSETREPORT', 'Usage Based Asset Report', null, 19, 'A', false, 'D'],
+    ['JRN020', orgId, 1, 'JR001', null, 'ADMINSETTINGS', 'Settings', null, 20, 'A', true, 'D'],
+    ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
+    ['JRN022', orgId, 1, 'JR001', null, 'MASTERDATA', 'Master Data', null, 22, 'A', true, 'D'],
+    ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
+    ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
+    ['JRN025', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTS', 'Departments', null, 25, 'A', false, 'D'],
+    ['JRN026', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSADMIN', 'Departments Admin', null, 26, 'A', false, 'D'],
+    ['JRN027', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSASSET', 'Departments Asset type', null, 27, 'A', false, 'D'],
+    ['JRN028', orgId, 1, 'JR001', 'JRN022', 'BRANCHES', 'Branches', null, 28, 'A', false, 'D'],
+    ['JRN029', orgId, 1, 'JR001', 'JRN022', 'VENDORS', 'Vendors', null, 29, 'A', false, 'D'],
+    ['JRN030', orgId, 1, 'JR001', 'JRN022', 'PRODSERV', 'Products/Services', null, 30, 'A', false, 'D'],
+    ['JRN031', orgId, 1, 'JR001', 'JRN022', 'ROLES', 'Bulk Upload', null, 31, 'A', false, 'D'],
+    ['JRN032', orgId, 1, 'JR001', 'JRN022', 'USERS', 'User Roles', null, 32, 'A', false, 'D'],
+    ['JRN033', orgId, 0, 'JR001', 'JRN022', 'MAINTENANCESCHEDULE', 'Maintenance Schedule', null, 33, 'A', false, 'D'],
+    ['JRN034', orgId, 1, 'JR001', null, 'AUDITLOGS', 'Audit Log', null, 34, 'A', false, 'D'],
+    ['JRN035', orgId, 1, 'JR001', null, 'SCRAPSALES', 'Scrap Sales', null, 35, 'A', false, 'D'],
+    ['JRN036', orgId, 1, 'JR001', null, 'SCRAPASSETS', 'Scrap Assets', null, 36, 'A', false, 'D'],
+    ['JRN037', orgId, 1, 'JR001', null, 'GROUPASSET', 'Asset Groups', null, 37, 'A', false, 'D'],
+  ];
+
+  for (const entry of navEntries) {
+    await client.query(
+      `
+        INSERT INTO "tblJobRoleNav" (
+          job_role_nav_id, org_id, int_status, job_role_id, parent_id,
+          app_id, label, sub_menu, sequence, access_level,
+          is_group, mob_desk
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        ON CONFLICT (job_role_nav_id) DO UPDATE
+        SET org_id = EXCLUDED.org_id,
+            int_status = EXCLUDED.int_status,
+            job_role_id = EXCLUDED.job_role_id,
+            parent_id = EXCLUDED.parent_id,
+            app_id = EXCLUDED.app_id,
+            label = EXCLUDED.label,
+            sub_menu = EXCLUDED.sub_menu,
+            sequence = EXCLUDED.sequence,
+            access_level = EXCLUDED.access_level,
+            is_group = EXCLUDED.is_group,
+            mob_desk = EXCLUDED.mob_desk
+      `,
+      entry
+    );
+  }
+
+  logs.push({ message: `Rio Admin user ${rioAdminUsername} provisioned in tblRioAdmin with user_id: ${rioAdminUserId}`, scope: "admin" });
+  logs.push({ message: `Login credentials: username=${rioAdminUsername}, password=${initialPassword}`, scope: "admin" });
+  logs.push({ message: `Super access configured for user ${rioAdminUserId} in tblOrgSettings`, scope: "admin" });
+  logs.push({ message: `User job role UJR001 created for ${rioAdminUserId}`, scope: "admin" });
+  logs.push({ message: `Navigation entries added for job role JR001`, scope: "admin" });
 
   return {
-    userId: adminUser.username,
-    empIntId,
+    userId: rioAdminUserId,
+    username: rioAdminUsername,
+    empIntId: null, // No employee record for RioAdmin
     deptId,
     branchId,
   };
@@ -1330,10 +1448,6 @@ const runSetup = async (payload = {}) => {
     throw new Error("Database configuration is required.");
   }
 
-  if (!adminUser.password) {
-    throw new Error("Admin user password is required.");
-  }
-
   const logs = [];
 
   return withClient(db, async (client) => {
@@ -1342,20 +1456,39 @@ const runSetup = async (payload = {}) => {
     await client.query("BEGIN");
     try {
       if (options.createSchema !== false) {
+        // Clear schema cache to ensure fresh generation with latest code
+        clearSchemaCache();
+        
         // Ensure search_path before schema import
         await client.query("SET search_path TO public");
         const schemaSql = await getSchemaSql();
-        await client.query(schemaSql);
+        
+        try {
+          await client.query(schemaSql);
+        } catch (schemaError) {
+          // If there's a SQL error, log a snippet around the error position
+          if (schemaError.position) {
+            const pos = parseInt(schemaError.position);
+            const start = Math.max(0, pos - 200);
+            const end = Math.min(schemaSql.length, pos + 200);
+            const snippet = schemaSql.substring(start, end);
+            console.error(`[SetupWizard] ❌ SQL Error at position ${pos}:`);
+            console.error(`[SetupWizard] SQL snippet: ...${snippet}...`);
+          }
+          throw schemaError;
+        }
+        
         logs.push({ message: "Database schema imported", scope: "schema" });
       } else {
         logs.push({ message: "Schema creation skipped per configuration", scope: "schema" });
       }
 
-      // Ensure search_path before creating core tables
+      // Note: CORE_TABLE_DDL is not needed when using dynamic schema generation
+      // as all tables are already included in the dynamically generated schema.
+      // The dynamic schema includes the actual structure from DATABASE_URL.
+      
+      // Ensure search_path before any operations
       await client.query("SET search_path TO public");
-      for (const ddl of CORE_TABLE_DDL) {
-        await client.query(ddl);
-      }
       
       // Add gst_number and cin_number columns to tblOrgs if they don't exist
       try {
@@ -1409,6 +1542,10 @@ const runSetup = async (payload = {}) => {
 
       const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs);
       const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs);
+      
+      // Get initial password for email (same as used in seedEmployeeAndUser)
+      const { getInitialPassword } = require('../utils/orgSettingsUtils');
+      const initialPassword = await getInitialPassword(orgId, client);
 
       await client.query("COMMIT");
 
@@ -1420,7 +1557,10 @@ const runSetup = async (payload = {}) => {
           branches: structureMappings.branchMappings.length,
           departments: structureMappings.deptMappings.length,
         },
-        adminUser: adminResult.userId,
+        adminUser: {
+            userId: adminResult.userId,
+            username: adminResult.username || 'rioadmin',
+        },
         logs,
       };
 
@@ -1429,9 +1569,9 @@ const runSetup = async (payload = {}) => {
         if (adminUser.email) {
           const emailResult = await sendSetupCompletionEmail({
             adminEmail: adminUser.email,
-            adminName: adminUser.fullName || adminUser.username,
-            adminUsername: adminUser.username,
-            adminPassword: adminUser.password, // Plain password for email
+            adminName: adminUser.fullName || adminResult.username || 'rioadmin',
+            adminUsername: adminResult.username || 'rioadmin',
+            adminPassword: initialPassword, // Use the actual password (Initial1 or from org settings)
             organizationName: org.name || org.text || `Organization ${orgId}`,
             orgId,
             dbConfig: {

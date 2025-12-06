@@ -1004,7 +1004,7 @@ const getAllMaintenanceSchedules = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAllMaintenanceSchedules(orgId, branchId);
+        const result = await model.getAllMaintenanceSchedules(orgId, branchId, req.user?.hasSuperAccess || false);
         
         // Format the data for frontend - include all columns from tblAssetMaintSch plus joined data
         const formattedData = result.rows.map(record => {
@@ -1112,7 +1112,7 @@ const getMaintenanceScheduleById = async (req, res) => {
             });
         }
         
-        const result = await model.getMaintenanceScheduleById(id, orgId, branchId);
+        const result = await model.getMaintenanceScheduleById(id, orgId, branchId, req.user?.hasSuperAccess || false);
         
         if (result.rows.length === 0) {
             if (context === 'SUPERVISORAPPROVAL') {

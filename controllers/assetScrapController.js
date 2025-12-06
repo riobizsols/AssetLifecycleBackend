@@ -15,7 +15,11 @@ const getAllScrapAssets = async (req, res) => {
 
         scrapAssetsLogger.logQueryingScrapAssets({ userId }).catch(err => console.error('Logging error:', err));
         
-        const result = await model.getAllScrapAssets();
+        const org_id = req.user?.org_id;
+        const branch_id = req.user?.branch_id;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        
+        const result = await model.getAllScrapAssets(org_id, branch_id, hasSuperAccess);
         
         if (result.rows.length === 0) {
             scrapAssetsLogger.logNoScrapAssetsFound({ userId }).catch(err => console.error('Logging error:', err));

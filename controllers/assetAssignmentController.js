@@ -837,7 +837,7 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getDepartmentWiseAssetAssignments(dept_id, org_id, branch_id);
+        const result = await model.getDepartmentWiseAssetAssignments(dept_id, org_id, branch_id, req.user?.hasSuperAccess || false);
         
         // Check if department exists
         if (!result.department) {

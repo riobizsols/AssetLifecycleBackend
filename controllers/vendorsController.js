@@ -17,7 +17,9 @@ exports.getAllVendors = async (req, res) => {
     
     // Get branch_code from tblBranches
     let userBranchCode = null;
-    if (userBranchId) {
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
+    if (!hasSuperAccess && userBranchId) {
       const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
       const dbPool = req.db || require("../config/db");
 
@@ -30,7 +32,7 @@ exports.getAllVendors = async (req, res) => {
       }
     }
     
-    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode);
+    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess);
     res.json(vendors);
   } catch (error) {
     console.error("Get all vendors error:", error);

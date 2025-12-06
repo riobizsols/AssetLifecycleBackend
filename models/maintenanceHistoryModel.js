@@ -58,7 +58,8 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
     let paramIndex = 2;
     
     // Apply branch_id filter first
-    if (filters.branch_id) {
+    // Apply branch_id filter only if hasSuperAccess is false
+    if (filters.branch_id && !filters.hasSuperAccess) {
         query += ` AND a.branch_id = $${paramIndex}`;
         queryParams.push(filters.branch_id);
         paramIndex++;
@@ -387,7 +388,8 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
     let paramIndex = 2;
     
     // Apply branch_id filter first
-    if (filters.branch_id) {
+    // Apply branch_id filter only if hasSuperAccess is false
+    if (filters.branch_id && !filters.hasSuperAccess) {
         query += ` AND a.branch_id = $${paramIndex}`;
         queryParams.push(filters.branch_id);
         paramIndex++;

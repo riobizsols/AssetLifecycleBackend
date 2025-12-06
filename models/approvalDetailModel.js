@@ -921,12 +921,14 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   }
 };
 
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode) => {
+// Supports super access users who can view all branches
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
      console.log('orgId:', orgId);
      console.log('userBranchCode:', userBranchCode);
+     console.log('hasSuperAccess:', hasSuperAccess);
      
      // Handle empty string or null empIntId
      if (!empIntId || empIntId === '') {
@@ -956,8 +958,12 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      console.log('User roles:', userRoleIds);
      
+     // Build parameters array dynamically
+     const params = [orgId];
+     let paramIndex = 2;
+     
      // ROLE-BASED: Query workflows where user's roles match workflow steps AND maintenance belongs to user's org/branch_code
-     const query = `
+     let query = `
        SELECT DISTINCT
          wfh.wfamsh_id,
          wfh.asset_id,
@@ -991,14 +997,23 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
        WHERE wfd.org_id = $1 
          AND a.org_id = $1
-         AND wfh.branch_code = $2
-         AND wfd.job_role_id = ANY($3::varchar[])
+     `;
+     
+     // Apply branch_code filter only if user doesn't have super access
+     if (!hasSuperAccess && userBranchCode) {
+       query += ` AND wfh.branch_code = $${paramIndex}`;
+       params.push(userBranchCode);
+       paramIndex++;
+     }
+     
+     query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
+     params.push(userRoleIds);
 
-     const result = await getDb().query(query, [orgId, userBranchCode, userRoleIds]);
+     const result = await getDb().query(query, params);
      console.log('Query executed successfully, found rows:', result.rows.length);
      console.log('Sample row (if any):', result.rows[0] || 'No rows found');
      return result.rows;

@@ -4,7 +4,15 @@ class AuditLogConfigController {
   // Get all audit log configurations
   static async getAll(req, res) {
     try {
-      const configs = await AuditLogConfigModel.getAll();
+      const orgId = req.user?.org_id;
+      if (!orgId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized - Missing organization ID'
+        });
+      }
+      
+      const configs = await AuditLogConfigModel.getAll(orgId);
       
       res.status(200).json({
         success: true,
@@ -115,6 +123,7 @@ class AuditLogConfigController {
   static async getByAppId(req, res) {
     try {
       const { appId } = req.params;
+      const orgId = req.user?.org_id;
       
       if (!appId) {
         return res.status(400).json({
@@ -122,8 +131,15 @@ class AuditLogConfigController {
           message: 'App ID is required'
         });
       }
+      
+      if (!orgId) {
+        return res.status(401).json({
+          success: false,
+          message: 'Unauthorized - Missing organization ID'
+        });
+      }
 
-      const configs = await AuditLogConfigModel.getByAppId(appId);
+      const configs = await AuditLogConfigModel.getByAppId(appId, orgId);
       
       res.status(200).json({
         success: true,

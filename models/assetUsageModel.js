@@ -279,14 +279,17 @@ const getUsageReportData = async (orgId, filters = {}) => {
     paramIndex++;
   }
 
-  if (branchId && Array.isArray(branchId) && branchId.length > 0) {
-    query += ` AND a.branch_id = ANY($${paramIndex}::text[])`;
-    params.push(branchId);
-    paramIndex++;
-  } else if (branchId && !Array.isArray(branchId)) {
-    query += ` AND a.branch_id = $${paramIndex}`;
-    params.push(branchId);
-    paramIndex++;
+  // Apply branch filter only if user doesn't have super access
+  if (!filters.hasSuperAccess) {
+    if (branchId && Array.isArray(branchId) && branchId.length > 0) {
+      query += ` AND a.branch_id = ANY($${paramIndex}::text[])`;
+      params.push(branchId);
+      paramIndex++;
+    } else if (branchId && !Array.isArray(branchId)) {
+      query += ` AND a.branch_id = $${paramIndex}`;
+      params.push(branchId);
+      paramIndex++;
+    }
   }
 
   // Process advanced conditions
@@ -605,14 +608,17 @@ const getUsageReportSummary = async (orgId, filters = {}) => {
     paramIndex++;
   }
 
-  if (branchId && Array.isArray(branchId) && branchId.length > 0) {
-    query += ` AND a.branch_id = ANY($${paramIndex}::text[])`;
-    params.push(branchId);
-    paramIndex++;
-  } else if (branchId && !Array.isArray(branchId)) {
-    query += ` AND a.branch_id = $${paramIndex}`;
-    params.push(branchId);
-    paramIndex++;
+  // Apply branch filter only if user doesn't have super access
+  if (!filters.hasSuperAccess) {
+    if (branchId && Array.isArray(branchId) && branchId.length > 0) {
+      query += ` AND a.branch_id = ANY($${paramIndex}::text[])`;
+      params.push(branchId);
+      paramIndex++;
+    } else if (branchId && !Array.isArray(branchId)) {
+      query += ` AND a.branch_id = $${paramIndex}`;
+      params.push(branchId);
+      paramIndex++;
+    }
   }
 
   const dbPool = getDb();

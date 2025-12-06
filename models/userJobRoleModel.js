@@ -85,9 +85,9 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         console.log(`Generated user_id: ${user_id}`);
         
         const dbPool = getDb();
-        // Fetch employee data
+        // Fetch employee data including branch_id
         const employeeResult = await dbPool.query(
-            `SELECT full_name, email_id, phone_number, dept_id, language_code 
+            `SELECT full_name, email_id, phone_number, dept_id, branch_id, language_code 
              FROM "tblEmployees" 
              WHERE emp_int_id = $1`,
             [emp_int_id]
@@ -99,8 +99,9 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         
         const employee = employeeResult.rows[0];
         
-        // Set default password to "Initial1"
-        const defaultPassword = "Initial1";
+        // Get initial password from org settings (defaults to "Initial1" if not configured)
+        const { getInitialPassword } = require('../utils/orgSettingsUtils');
+        const defaultPassword = await getInitialPassword(org_id, dbPool);
         const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         
         // Insert user with all mapped fields (job_role_id set to null)
@@ -108,11 +109,11 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
             `INSERT INTO "tblUsers" (
                 user_id, emp_int_id, org_id, full_name, email, phone,
                 job_role_id, password, created_by, created_on, changed_by, changed_on,
-                time_zone, dept_id, language_code, int_status
+                time_zone, dept_id, branch_id, language_code, int_status
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 NULL, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP,
-                'IST', $9, $10, 1
+                'IST', $9, $10, $11, 1
             ) RETURNING user_id, emp_int_id`,
             [
                 user_id, 
@@ -123,7 +124,8 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
                 employee.phone_number,
                 hashedPassword, 
                 created_by, 
-                employee.dept_id, 
+                employee.dept_id,
+                employee.branch_id || null,
                 employee.language_code?.toLowerCase() || 'en'
             ]
         );

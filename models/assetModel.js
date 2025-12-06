@@ -87,10 +87,11 @@ const getAssetsByAssetType = async (asset_type_id) => {
   return await dbPool.query(query, [asset_type_id]);
 };
 
-const getPrinterAssets = async (orgId, branchId) => {
+const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
   console.log('=== Printer Assets Model Debug ===');
   console.log('orgId:', orgId);
   console.log('branchId:', branchId);
+  console.log('hasSuperAccess:', hasSuperAccess);
   
   const query = `
         SELECT 
@@ -110,13 +111,20 @@ const getPrinterAssets = async (orgId, branchId) => {
             )
         )
         AND a.org_id = $1
-        AND a.branch_id = $2
-        AND a.current_status != 'SCRAPPED'
-        ORDER BY a.created_on DESC
     `;
 
+  const params = [orgId];
+  
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branchId) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  query += ` AND a.current_status != 'SCRAPPED' ORDER BY a.created_on DESC`;
+
   const dbPool = getDb();
-  const result = await dbPool.query(query, [orgId, branchId]);
+  const result = await dbPool.query(query, params);
   console.log('Query executed successfully, found printer assets:', result.rows.length);
   return result;
 };
@@ -710,7 +718,8 @@ const getPotentialParentAssets = async (asset_type_id) => {
 };
 
 // Get assets expiring within 30 days (filtered by user context)
-const getAssetsExpiringWithin30Days = async (orgId, branchId = null) => {
+// Supports super access users who can view all branches
+const getAssetsExpiringWithin30Days = async (orgId, branchId = null, hasSuperAccess = false) => {
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -735,7 +744,8 @@ const getAssetsExpiringWithin30Days = async (orgId, branchId = null) => {
   
   const params = [orgId];
   
-  if (branchId) {
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branchId) {
     query += ` AND a.branch_id = $2`;
     params.push(branchId);
   }
@@ -747,7 +757,8 @@ const getAssetsExpiringWithin30Days = async (orgId, branchId = null) => {
 };
 
 // Get assets expiring within 30 days grouped by asset type (filtered by user context)
-const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null) => {
+// Supports super access users who can view all branches
+const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null, hasSuperAccess = false) => {
   let query = `
     SELECT 
       at.text as asset_type_name,
@@ -782,7 +793,8 @@ const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null) => {
   
   const params = [orgId];
   
-  if (branchId) {
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branchId) {
     query += ` AND a.branch_id = $2`;
     params.push(branchId);
   }
@@ -798,7 +810,8 @@ const getAssetsExpiringWithin30DaysByType = async (orgId, branchId = null) => {
 };
 
 // Get assets by expiry date with different filter types (filtered by user context)
-const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId = null) => {
+// Supports super access users who can view all branches
+const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId = null, hasSuperAccess = false) => {
   let query = '';
   let params = [];
 
@@ -826,7 +839,8 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
         AND a.org_id = $1
       `;
       params = [orgId];
-      if (branchId) {
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
         query += ` AND a.branch_id = $2`;
         params.push(branchId);
       }
@@ -858,7 +872,8 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
         AND a.org_id = $1
       `;
       params = [orgId];
-      if (branchId) {
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
         query += ` AND a.branch_id = $2`;
         params.push(branchId);
       }
@@ -882,7 +897,8 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
         AND a.org_id = $2
       `;
       params = [value, orgId];
-      if (branchId) {
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
         query += ` AND a.branch_id = $3`;
         params.push(branchId);
       }
@@ -914,7 +930,8 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
         AND a.org_id = $3
       `;
       params = [startDate, endDate, orgId];
-      if (branchId) {
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
         query += ` AND a.branch_id = $4`;
         params.push(branchId);
       }
@@ -938,11 +955,37 @@ const getAssetsByExpiryDate = async (filterType, value = null, orgId, branchId =
         AND a.org_id = $1
       `;
       params = [orgId];
-      if (branchId) {
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
         query += ` AND a.branch_id = $2`;
         params.push(branchId);
       }
       query += ` ORDER BY a.text`;
+      break;
+
+    case 'all':
+      query = `
+        SELECT 
+          a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
+          a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+          a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+          a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on,
+          b.text as branch_name,
+          at.text as asset_type_name
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        WHERE a.expiry_date IS NOT NULL
+        AND a.current_status != 'SCRAPPED'
+        AND a.org_id = $1
+      `;
+      params = [orgId];
+      // Apply branch filter only if user doesn't have super access
+      if (!hasSuperAccess && branchId) {
+        query += ` AND a.branch_id = $2`;
+        params.push(branchId);
+      }
+      query += ` ORDER BY a.expiry_date ASC`;
       break;
 
     default:
@@ -1124,8 +1167,8 @@ const createAsset = async (assetData) => {
   }
 };
 
-// Get total count of assets
-const getAssetsCount = async (orgId, branchId = null) => {
+// Get total count of assets - supports super access users who can view all branches
+const getAssetsCount = async (orgId, branchId = null, hasSuperAccess = false) => {
   let query = `
     SELECT COUNT(*) as count
     FROM "tblAssets"
@@ -1134,7 +1177,8 @@ const getAssetsCount = async (orgId, branchId = null) => {
   
   const params = [orgId];
   
-  if (branchId) {
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branchId) {
     query += ` AND branch_id = $2`;
     params.push(branchId);
   }
@@ -1145,8 +1189,11 @@ const getAssetsCount = async (orgId, branchId = null) => {
 };
 
 // Get assets filtered by user's organization and branch
-const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = null) => {
+// Get assets by user context - automatically respects super access from req.user.hasSuperAccess
+// If hasSuperAccess is true, branch filter is not applied (user sees all branches)
+const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = null, hasSuperAccess = false) => {
   const dbPool = getDb(dbConnection);
+  
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -1164,7 +1211,9 @@ const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = nul
   
   const params = [orgId];
   
-  if (branchId) {
+  // Apply branch filter only if user doesn't have super access
+  // If hasSuperAccess is true, user can see all branches (no filter applied)
+  if (!hasSuperAccess && branchId) {
     query += ` AND a.branch_id = $2`;
     params.push(branchId);
   }
@@ -1174,9 +1223,11 @@ const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = nul
   return await dbPool.query(query, params);
 };
 
-// Get assets with user context filtering and additional filters
-const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}, dbConnection = null) => {
+// Get assets with user context filtering and additional filters - automatically respects super access
+// If hasSuperAccess is true, branch filter is not applied (user sees all branches)
+const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}, dbConnection = null, hasSuperAccess = false) => {
   const dbPool = getDb(dbConnection);
+  
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -1195,8 +1246,9 @@ const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additi
   const params = [userOrgId];
   let paramIndex = 2;
   
-  // Always apply user branch filter if user has a branch
-  if (userBranchId) {
+  // Apply branch filter only if user doesn't have super access
+  // If hasSuperAccess is true, user can see all branches (no filter applied)
+  if (!hasSuperAccess && userBranchId) {
     query += ` AND a.branch_id = $${paramIndex}`;
     params.push(userBranchId);
     paramIndex++;

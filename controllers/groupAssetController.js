@@ -17,7 +17,7 @@ const getAvailableAssetsByAssetType = async (req, res) => {
 
         console.log(`[getAvailableAssetsByAssetType] Fetching assets for asset_type_id: ${asset_type_id}, org_id: ${org_id}, branch_id: ${branch_id}`);
         
-        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id, branch_id);
+        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id, branch_id, req.user?.hasSuperAccess || false);
         
         // Verify that all returned assets match the requested asset type
         const mismatchedAssets = result.rows.filter(asset => asset.asset_type_id !== asset_type_id);
@@ -97,7 +97,12 @@ const getAvailableAssetsWithFilters = async (req, res) => {
 
         // Build filters object
         const filters = {};
-        if (branch_id) filters.branch_id = branch_id;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        filters.hasSuperAccess = hasSuperAccess; // Pass to model
+        // Only add branch_id filter if user doesn't have super access
+        if (!hasSuperAccess && branch_id) {
+            filters.branch_id = branch_id;
+        }
         if (vendor_id) filters.vendor_id = vendor_id;
         if (expiring_soon) filters.expiring_soon = parseInt(expiring_soon);
         if (search) filters.search = search;

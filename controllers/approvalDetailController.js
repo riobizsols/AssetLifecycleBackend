@@ -736,7 +736,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
       });
     }
 
-    const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId, userBranchCode);
+    const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({

@@ -87,7 +87,8 @@ const getAssetRegisterData = async (filters = {}) => {
     queryParams.push(location);
   }
 
-  if (branch_id) {
+  // Apply branch filter only if user doesn't have super access
+  if (branch_id && !filters.hasSuperAccess) {
     paramCount++;
     whereConditions.push(`a.branch_id = $${paramCount}`);
     queryParams.push(branch_id);
@@ -367,7 +368,8 @@ const getAssetRegisterCount = async (filters = {}) => {
     queryParams.push(location);
   }
 
-  if (branch_id) {
+  // Apply branch filter only if user doesn't have super access
+  if (branch_id && !filters.hasSuperAccess) {
     paramCount++;
     whereConditions.push(`a.branch_id = $${paramCount}`);
     queryParams.push(branch_id);

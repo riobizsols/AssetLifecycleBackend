@@ -48,11 +48,15 @@ const getMaintenanceHistory = async (req, res) => {
         // Build filters object
         const filters = {};
         
-        // Add user's branch_id as default filter
+        // Add user's branch_id as default filter only if user doesn't have super access
         const userBranchId = req.user?.branch_id;
-        if (userBranchId) {
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        filters.hasSuperAccess = hasSuperAccess; // Pass to model
+        if (!hasSuperAccess && userBranchId) {
             filters.branch_id = userBranchId;
             console.log('🔍 [MaintenanceHistoryController] Added user branch_id filter:', userBranchId);
+        } else if (hasSuperAccess) {
+            console.log('🔍 [MaintenanceHistoryController] User has super access - no branch filter applied');
         }
         
         if (asset_id) filters.asset_id = asset_id;

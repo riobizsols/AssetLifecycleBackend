@@ -3,17 +3,28 @@ const { peekNextId } = require('../utils/idGenerator');
 const msModel = require('./maintenanceScheduleModel');
 
 // Get all reports from reports-view
-const getAllReports = async (orgId) => {
-  const query = `
+// Supports super access users who can view all branches
+const getAllReports = async (orgId, branchId = null, hasSuperAccess = false) => {
+  let query = `
     SELECT 
       brd.*,
       a.asset_type_id
     FROM "tblAssetBRDet" brd
     LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
     WHERE brd.org_id = $1
-    ORDER BY brd.reported_by DESC
   `;
-  const result = await getDb().query(query, [orgId]);
+  
+  const params = [orgId];
+  
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branchId) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branchId);
+  }
+  
+  query += ` ORDER BY brd.reported_by DESC`;
+  
+  const result = await getDb().query(query, params);
   return result.rows;
 };
 

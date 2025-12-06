@@ -6,8 +6,9 @@ const getDb = () => getDbFromContext();
 
 
 // Get all work orders from tblAssetMaintSch with detailed information
-const getAllWorkOrders = async (orgId, userBranchId) => {
-    const query = `
+// Supports super access users who can view all branches
+const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => {
+    let query = `
         SELECT 
             ams.*,
             a.asset_type_id,
@@ -178,9 +179,17 @@ const getAllWorkOrders = async (orgId, userBranchId) => {
         INNER JOIN "tblBranches" b ON a.branch_id = b.branch_id
         WHERE ams.org_id = $1 
           AND a.org_id = $1 
-          AND b.org_id = $1 
-          AND b.branch_id = $2 
-          AND ams.status = 'IN' 
+          AND b.org_id = $1
+    `;
+    
+    // Apply branch filter only if user doesn't have super access
+    const params = [orgId];
+    if (!hasSuperAccess && userBranchId) {
+        query += ` AND b.branch_id = $2`;
+        params.push(userBranchId);
+    }
+    
+    query += ` AND ams.status = 'IN' 
           AND ams.wo_id IS NOT NULL
           AND (
             -- Include vendor-maintained work orders
@@ -202,14 +211,13 @@ const getAllWorkOrders = async (orgId, userBranchId) => {
     `;
     
     const dbPool = getDb();
-
-    
-    return await dbPool.query(query, [orgId, userBranchId]);
+    return await dbPool.query(query, params);
 };
 
 // Get work order by ID with detailed information
-const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001') => {
-    const query = `
+// Supports super access users who can view all branches
+const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001', hasSuperAccess = false) => {
+    let query = `
         SELECT 
             ams.*,
             a.asset_type_id,
@@ -388,8 +396,7 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
         WHERE ams.ams_id = $1 
           AND ams.org_id = $2 
           AND a.org_id = $2 
-          AND b.org_id = $2 
-          AND b.branch_id = $3 
+          AND b.org_id = $2
           AND ams.status = 'IN' 
           AND ams.wo_id IS NOT NULL
           AND (
@@ -413,10 +420,15 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001')
           )
     `;
     
-    const dbPool = getDb();
-
+    // Build parameters array dynamically
+    const params = [amsId, orgId];
+    if (!hasSuperAccess && userBranchId) {
+        query += ` AND b.branch_id = $3`;
+        params.push(userBranchId);
+    }
     
-    const result = await dbPool.query(query, [amsId, orgId, userBranchId]);
+    const dbPool = getDb();
+    const result = await dbPool.query(query, params);
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {

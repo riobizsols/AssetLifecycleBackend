@@ -85,11 +85,15 @@ const getAssetRegister = async (req, res) => {
       });
     }
 
-    // Add user's branch_id as default filter
+    // Add user's branch_id as default filter only if user doesn't have super access
     const userBranchId = req.user?.branch_id;
-    if (userBranchId) {
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    filters.hasSuperAccess = hasSuperAccess; // Pass to model
+    if (!hasSuperAccess && userBranchId) {
       filters.branch_id = userBranchId;
       console.log('🔍 [AssetRegisterController] Added user branch_id filter:', userBranchId);
+    } else if (hasSuperAccess) {
+      console.log('🔍 [AssetRegisterController] User has super access - no branch filter applied');
     }
 
     // Step 3: Log data retrieval started
@@ -218,7 +222,11 @@ const getAssetRegisterFilterOptions = async (req, res) => {
 // Get asset register summary statistics
 const getAssetRegisterSummary = async (req, res) => {
   try {
-    const summaryQuery = `
+    const orgId = req.user?.org_id;
+    const branchId = req.user?.branch_id;
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
+    let summaryQuery = `
       SELECT 
         COUNT(*) as total_assets,
         COUNT(CASE WHEN a.current_status = 'Active' THEN 1 END) as active_assets,
@@ -234,11 +242,20 @@ const getAssetRegisterSummary = async (req, res) => {
       LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id 
         AND aa.action = 'A' 
         AND aa.latest_assignment_flag = true
+      WHERE a.org_id = $1
     `;
+    
+    const params = [orgId];
+    
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && branchId) {
+      summaryQuery += ` AND a.branch_id = $2`;
+      params.push(branchId);
+    }
 
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
-    const result = await dbPool.query(summaryQuery);
+    const result = await dbPool.query(summaryQuery, params);
     
     res.status(200).json({
       success: true,

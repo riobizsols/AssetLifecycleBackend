@@ -30,8 +30,8 @@ const getAssetLifecycleData = async (filters = {}) => {
   let queryParams = [];
   let paramCount = 0;
 
-  // Add branch_id filter first
-  if (branch_id) {
+  // Add branch_id filter only if user doesn't have super access
+  if (branch_id && !filters.hasSuperAccess) {
     paramCount++;
     whereConditions.push(`a.branch_id = $${paramCount}`);
     queryParams.push(branch_id);
@@ -440,8 +440,8 @@ const getAssetLifecycleCount = async (filters = {}) => {
   let queryParams = [];
   let paramCount = 0;
 
-  // Add branch_id filter first
-  if (branch_id) {
+  // Add branch_id filter only if user doesn't have super access
+  if (branch_id && !filters.hasSuperAccess) {
     paramCount++;
     whereConditions.push(`a.branch_id = $${paramCount}`);
     queryParams.push(branch_id);

@@ -83,8 +83,8 @@ class AssetValuationModel {
             const queryParams = [orgId];
             let paramIndex = 2;
 
-            // Apply branch_id filter first
-            if (branch_id) {
+            // Apply branch_id filter only if user doesn't have super access
+            if (branch_id && !filters.hasSuperAccess) {
                 baseQuery += ` AND a.branch_id = $${paramIndex}`;
                 queryParams.push(branch_id);
                 paramIndex++;
@@ -274,8 +274,8 @@ class AssetValuationModel {
             const countParams = [orgId];
             let countParamIndex = 2;
 
-            // Apply branch_id filter first
-            if (branch_id) {
+            // Apply branch_id filter only if user doesn't have super access
+            if (branch_id && !filters.hasSuperAccess) {
                 countQuery += ` AND a.branch_id = $${countParamIndex}`;
                 countParams.push(branch_id);
                 countParamIndex++;

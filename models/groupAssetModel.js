@@ -7,7 +7,8 @@ const getDb = () => getDbFromContext();
 
 // Get available assets by asset type (excluding those already in asset groups)
 // Filters by org_id and branch_id if provided
-const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null, branch_id = null) => {
+// Supports super access users who can view all branches
+const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null, branch_id = null, hasSuperAccess = false) => {
     let query = `
         SELECT 
             a.asset_id, 
@@ -62,8 +63,9 @@ const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null, branc
         paramIndex++;
     }
 
-    // Filter by branch ID if provided
-    if (branch_id) {
+    // Filter by branch ID only if user doesn't have super access
+    // hasSuperAccess should be passed as a parameter
+    if (branch_id && !hasSuperAccess) {
         query += ` AND a.branch_id = $${paramIndex}`;
         params.push(branch_id);
         paramIndex++;
@@ -178,8 +180,8 @@ const getAvailableAssetsByAssetTypeWithFilters = async (asset_type_id, filters =
     const params = [asset_type_id];
     let paramIndex = 2;
 
-    // Add branch filter
-    if (filters.branch_id) {
+    // Add branch filter only if user doesn't have super access
+    if (filters.branch_id && !filters.hasSuperAccess) {
         query += ` AND a.branch_id = $${paramIndex}`;
         params.push(filters.branch_id);
         paramIndex++;
