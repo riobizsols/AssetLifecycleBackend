@@ -10,6 +10,9 @@ router.use(protect);
 // GET /api/employees - Get all employees
 router.get("/", controller.getAllEmployees);
 
+// POST /api/employees - Create a single employee
+router.post("/", controller.createEmployee);
+
 // GET /api/employees/with-roles - Get all employees with their current job roles
 router.get("/with-roles", controller.getAllEmployeesWithJobRoles);
 

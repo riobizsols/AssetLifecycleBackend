@@ -287,7 +287,9 @@ const getAllScrapSales = async (req, res) => {
         
         // Get branch_code from tblBranches
         let userBranchCode = null;
-        if (userBranchId) {
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        
+        if (!hasSuperAccess && userBranchId) {
             const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
             const dbPool = req.db || require("../config/db");
 
@@ -307,7 +309,7 @@ const getAllScrapSales = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
         
-        const result = await model.getAllScrapSales(org_id, userBranchCode);
+        const result = await model.getAllScrapSales(org_id, userBranchCode, hasSuperAccess);
         
         // Log success
         if (result.rows.length === 0) {

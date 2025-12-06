@@ -5,9 +5,9 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 
-// Get all scrap assets
-const getAllScrapAssets = async () => {
-  const query = `
+// Get all scrap assets - supports super access users who can view all branches
+const getAllScrapAssets = async (org_id, branch_id, hasSuperAccess = false) => {
+  let query = `
     SELECT 
       asd.asd_id,
       asd.asset_id,
@@ -23,13 +23,22 @@ const getAllScrapAssets = async () => {
     FROM "tblAssetScrapDet" asd
     LEFT JOIN "tblAssets" a ON asd.asset_id = a.asset_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-    ORDER BY asd.scrapped_date DESC
+    WHERE asd.org_id = $1
   `;
+  const params = [org_id];
+  
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && branch_id) {
+    query += ` AND a.branch_id = $2`;
+    params.push(branch_id);
+  }
+  
+  query += ` ORDER BY asd.scrapped_date DESC`;
   
   const dbPool = getDb();
 
   
-  return await dbPool.query(query);
+  return await dbPool.query(query, params);
 };
 
 // Get scrap asset by ID

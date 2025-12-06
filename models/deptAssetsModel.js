@@ -47,17 +47,28 @@ exports.deleteDeptAsset = (dept_asset_type_id) => {
     return dbPool.query('DELETE FROM "tblDeptAssetTypes" WHERE dept_asset_type_id = $1', [dept_asset_type_id]);
 };
 
-exports.getAllDeptAssets = () => {
+// Get all department asset mappings - supports super access users
+exports.getAllDeptAssets = (org_id, branch_id, hasSuperAccess = false) => {
     const dbPool = getDb();
-
-    return dbPool.query(`
+    
+    let query = `
     SELECT da.dept_asset_type_id, da.dept_id, da.asset_type_id, d.text AS dept_name, at.text AS asset_name
     FROM "tblDeptAssetTypes" da
     JOIN "tblDepartments" d ON da.dept_id = d.dept_id
     JOIN "tblAssetTypes" at ON da.asset_type_id = at.asset_type_id
-    WHERE da.int_status = 1
-    ORDER BY da.dept_asset_type_id
-  `);
+    WHERE da.int_status = 1 AND da.org_id = $1 AND d.org_id = $1 AND at.org_id = $1
+    `;
+    const params = [org_id];
+    
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && branch_id) {
+        query += ` AND d.branch_id = $2`;
+        params.push(branch_id);
+    }
+    
+    query += ` ORDER BY da.dept_asset_type_id`;
+    
+    return dbPool.query(query, params);
 };
 
 exports.getAssetTypesByDepartment = (dept_id) => {

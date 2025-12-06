@@ -201,13 +201,14 @@ const createScrapSale = async (saleData) => {
     }
 };
 
-// Get all scrap sales
-const getAllScrapSales = async (org_id, userBranchCode) => {
+// Get all scrap sales - supports super access users who can view all branches
+const getAllScrapSales = async (org_id, userBranchCode, hasSuperAccess = false) => {
     console.log('=== Scrap Sales Model Listing Debug ===');
     console.log('org_id:', org_id);
     console.log('userBranchCode:', userBranchCode);
+    console.log('hasSuperAccess:', hasSuperAccess);
     
-    const query = `
+    let query = `
         SELECT 
             ssh.ssh_id,
             ssh.org_id,
@@ -226,7 +227,17 @@ const getAllScrapSales = async (org_id, userBranchCode) => {
             COUNT(ssd.ssd_id) as total_assets
         FROM "tblScrapSales_H" ssh
         LEFT JOIN "tblScrapSales_D" ssd ON ssh.ssh_id = ssd.ssh_id
-        WHERE ssh.org_id = $1 AND ssh.branch_code = $2
+        WHERE ssh.org_id = $1
+    `;
+    const params = [org_id];
+    
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchCode) {
+        query += ` AND ssh.branch_code = $2`;
+        params.push(userBranchCode);
+    }
+    
+    query += `
         GROUP BY ssh.ssh_id, ssh.org_id, ssh.branch_code, ssh.text, ssh.total_sale_value, 
                  ssh.buyer_name, ssh.buyer_company, ssh.buyer_phone, 
                  ssh.created_by, ssh.created_on, ssh.sale_date, 
@@ -237,7 +248,7 @@ const getAllScrapSales = async (org_id, userBranchCode) => {
     const dbPool = getDb();
 
     
-    const result = await dbPool.query(query, [org_id, userBranchCode]);
+    const result = await dbPool.query(query, params);
     console.log('Query executed successfully, found scrap sales:', result.rows.length);
     return result;
 };

@@ -98,13 +98,17 @@ class AssetValuationController {
 
             // Add user's branch_id as default filter
             const userBranchId = req.user?.branch_id;
-            if (userBranchId) {
+            const hasSuperAccess = req.user?.hasSuperAccess || false;
+            if (!hasSuperAccess && userBranchId) {
                 console.log('🔍 [AssetValuationController] Added user branch_id filter:', userBranchId);
+            } else if (hasSuperAccess) {
+                console.log('🔍 [AssetValuationController] User has super access - no branch filter applied');
             }
 
             // Parse array parameters
             const filters = {
-                branch_id: userBranchId || null,
+                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
+                hasSuperAccess: hasSuperAccess, // Pass to model
                 assetStatus: assetStatus || null,
                 includeScrapAssets: includeScrapAssets === 'true' || includeScrapAssets === true,
                 currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
@@ -324,7 +328,11 @@ class AssetValuationController {
                 sortOrder = 'ASC'
             } = req.query;
 
+            const userBranchId = req.user?.branch_id;
+            const hasSuperAccess = req.user?.hasSuperAccess || false;
             const filters = {
+                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
+                hasSuperAccess: hasSuperAccess, // Pass to model
                 assetStatus: assetStatus || 'In-Use',
                 includeScrapAssets: includeScrapAssets === 'true',
                 currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
@@ -566,7 +574,11 @@ class AssetValuationController {
                 sortOrder = 'ASC'
             } = req.query;
 
+            const userBranchId = req.user?.branch_id;
+            const hasSuperAccess = req.user?.hasSuperAccess || false;
             const filters = {
+                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
+                hasSuperAccess: hasSuperAccess, // Pass to model
                 assetStatus: assetStatus || 'In-Use',
                 includeScrapAssets: includeScrapAssets === 'true',
                 currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
@@ -724,7 +736,11 @@ class AssetValuationController {
                 sortOrder = 'ASC'
             } = req.query;
 
+            const userBranchId = req.user?.branch_id;
+            const hasSuperAccess = req.user?.hasSuperAccess || false;
             const filters = {
+                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
+                hasSuperAccess: hasSuperAccess, // Pass to model
                 assetStatus: assetStatus || 'In-Use',
                 includeScrapAssets: includeScrapAssets === 'true',
                 currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,

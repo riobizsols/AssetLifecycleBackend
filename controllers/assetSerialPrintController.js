@@ -110,6 +110,8 @@ class AssetSerialPrintController {
     
     try {
       const orgId = req.user.org_id;
+      const branchId = req.user?.branch_id;
+      const hasSuperAccess = req.user?.hasSuperAccess || false;
 
       // STEP 1: Log API called (non-blocking)
       serialPrintLogger.logPrintQueueFetchApiCalled({
@@ -125,7 +127,7 @@ class AssetSerialPrintController {
         userId
       }).catch(err => console.error('Logging error:', err));
 
-      const printQueue = await AssetSerialPrintModel.getAllPrintQueue(orgId);
+      const printQueue = await AssetSerialPrintModel.getAllPrintQueue(orgId, branchId, hasSuperAccess);
 
       const count = printQueue.length;
 
@@ -195,6 +197,8 @@ class AssetSerialPrintController {
     
     try {
       const orgId = req.user.org_id;
+      const branchId = req.user?.branch_id;
+      const hasSuperAccess = req.user?.hasSuperAccess || false;
       const { status } = req.params;
 
       // STEP 1: Log API called (non-blocking)
@@ -211,7 +215,7 @@ class AssetSerialPrintController {
         userId
       }).catch(err => console.error('Logging error:', err));
 
-      const printQueue = await AssetSerialPrintModel.getPrintQueueByStatus(orgId, status);
+      const printQueue = await AssetSerialPrintModel.getPrintQueueByStatus(orgId, status, branchId, hasSuperAccess);
 
       const count = printQueue.length;
 

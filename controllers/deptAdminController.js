@@ -8,7 +8,7 @@ const fetchDepartments = async (req, res) => {
     try {
         const org_id = req.user.org_id;
         const branch_id = req.user.branch_id;
-        const data = await DeptAdminModel.getAllDepartments(org_id, branch_id);
+        const data = await DeptAdminModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false);
         res.json(data);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch departments' });
@@ -27,7 +27,7 @@ const fetchDeptIdByName = async (req, res) => {
         console.log('User org_id:', org_id);
         console.log('User branch_id:', branch_id);
         
-        const dept = await DeptAdminModel.getDepartmentIdByName(name, org_id, branch_id);
+        const dept = await DeptAdminModel.getDepartmentIdByName(name, org_id, branch_id, req.user?.hasSuperAccess || false);
         if (!dept) return res.status(404).json({ error: 'Department not found' });
         res.json(dept);
     } catch (err) {
@@ -47,7 +47,7 @@ const fetchAdminsForDept = async (req, res) => {
         console.log('User org_id:', org_id);
         console.log('User branch_id:', branch_id);
         
-        const admins = await DeptAdminModel.getAdminsByDeptId(dept_id, org_id, branch_id);
+        const admins = await DeptAdminModel.getAdminsByDeptId(dept_id, org_id, branch_id, req.user?.hasSuperAccess || false);
         res.json(admins);
     } catch (err) {
         console.error("Error fetching admins:", err); // log it
@@ -68,7 +68,7 @@ const fetchUsersForDept = async (req, res) => {
         console.log('User org_id:', org_id);
         console.log('User branch_id:', branch_id);
         
-        const users = await DeptAdminModel.getUsersByDeptId(dept_id, org_id, branch_id);
+        const users = await DeptAdminModel.getUsersByDeptId(dept_id, org_id, branch_id, req.user?.hasSuperAccess || false);
         res.json(users);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch users' });

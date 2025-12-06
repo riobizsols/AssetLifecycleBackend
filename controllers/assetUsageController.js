@@ -161,6 +161,7 @@ const getUsageReport = async (req, res) => {
       return [value];
     };
 
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
     const filters = {
       assetId: assetId || null,
       assetTypeId: assetTypeId || null,
@@ -171,7 +172,8 @@ const getUsageReport = async (req, res) => {
       usageCounterMin: usageCounterMin ? parseInt(usageCounterMin) : null,
       usageCounterMax: usageCounterMax ? parseInt(usageCounterMax) : null,
       department: parseCommaSeparated(department),
-      branchId: parseCommaSeparated(branchId),
+      branchId: (!hasSuperAccess) ? parseCommaSeparated(branchId) : null, // Only add branchId if no super access
+      hasSuperAccess: hasSuperAccess, // Pass to model
       limit: limit ? parseInt(limit) : 1000,
       offset: offset ? parseInt(offset) : 0,
       advancedConditions: (() => {
@@ -519,6 +521,7 @@ const exportUsageReportPDF = async (req, res) => {
       branchId,
     } = req.query || {};
 
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
     const filters = {
       assetId: assetId || null,
       assetTypeId: assetTypeId || null,
@@ -529,7 +532,8 @@ const exportUsageReportPDF = async (req, res) => {
       usageCounterMin: usageCounterMin ? parseInt(usageCounterMin) : null,
       usageCounterMax: usageCounterMax ? parseInt(usageCounterMax) : null,
       department: department || null,
-      branchId: branchId || null,
+      branchId: (!hasSuperAccess) ? branchId : null, // Only add branchId if no super access
+      hasSuperAccess: hasSuperAccess, // Pass to model
       limit: 10000, // Large limit for export
       offset: 0,
     };

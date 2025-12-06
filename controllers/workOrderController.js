@@ -16,7 +16,7 @@ const getAllWorkOrders = async (req, res) => {
         console.log('Final userBranchId:', userBranchId);
         console.log('=== END CONTROLLER DEBUG ===');
         
-        const result = await model.getAllWorkOrders(orgId, userBranchId);
+        const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
         
         if (result.rows.length === 0) {
             return res.status(200).json({
@@ -131,7 +131,7 @@ const getWorkOrderById = async (req, res) => {
         const orgId = req.query.org_id || req.user?.org_id || 'ORG001';
         const userBranchId = req.query.branch_id || req.user?.branch_id || 'BR001';
         
-        const result = await model.getWorkOrderById(id, orgId, userBranchId);
+        const result = await model.getWorkOrderById(id, orgId, userBranchId, req.user?.hasSuperAccess || false);
         
         if (result.rows.length === 0) {
             return res.status(404).json({

@@ -337,7 +337,9 @@ const getAllAssets = async (req, res) => {
 
     // Use user context filtering - filter by user's org and branch
     // Pass tenant database connection from request (req.db) to use tenant-specific database
-    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db);
+    // Pass hasSuperAccess flag from req.user (set automatically in middleware)
+    // If hasSuperAccess is true, user can see all branches (no branch filter applied)
+    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db, req.user?.hasSuperAccess || false);
     
     // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
@@ -575,7 +577,7 @@ const getPrinterAssets = async (req, res) => {
         console.log('User org_id:', userOrgId);
         console.log('User branch_id:', userBranchId);
         
-        const result = await model.getPrinterAssets(userOrgId, userBranchId);
+        const result = await model.getPrinterAssets(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
         res.status(200).json({
             success: true,
             message: "Printer assets retrieved successfully",
@@ -674,7 +676,7 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
             scrapAssetsLogger.logQueryingNearingExpiryAssets({ userId }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAssetsExpiringWithin30Days(userOrgId, userBranchId);
+        const result = await model.getAssetsExpiringWithin30Days(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
         
         if (context === 'SCRAPASSETS') {
             scrapAssetsLogger.logNearingExpiryAssetsRetrieved({
@@ -739,7 +741,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                 }
                 
                 // Get expired assets
-                const expiredResult = await model.getAssetsByExpiryDate('expired', null, userOrgId, userBranchId);
+                const expiredResult = await model.getAssetsByExpiryDate('expired', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 
                 if (context === 'SCRAPASSETS') {
                     scrapAssetsLogger.logExpiredAssetsRetrieved({
@@ -764,7 +766,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Days parameter must be a positive number" 
                     });
                 }
-                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber, userOrgId, userBranchId);
+                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 res.status(200).json({
                     message: `Found ${expiringSoonResult.rows.length} assets expiring within ${daysNumber} days`,
                     filter_type: 'expiring_soon',
@@ -781,7 +783,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date parameter is required for 'expiring_on' filter" 
                     });
                 }
-                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value, userOrgId, userBranchId);
+                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 res.status(200).json({
                     message: `Found ${expiringOnResult.rows.length} assets expiring on ${value}`,
                     filter_type: 'expiring_on',
@@ -798,7 +800,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date range parameter is required for 'expiring_between' filter (format: startDate,endDate)" 
                     });
                 }
-                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value, userOrgId, userBranchId);
+                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 const [startDate, endDate] = value.split(',');
                 res.status(200).json({
                     message: `Found ${expiringBetweenResult.rows.length} assets expiring between ${startDate} and ${endDate}`,
@@ -812,7 +814,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'no_expiry':
                 // Get assets with no expiry date
-                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry', null, userOrgId, userBranchId);
+                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 res.status(200).json({
                     message: `Found ${noExpiryResult.rows.length} assets with no expiry date`,
                     filter_type: 'no_expiry',
@@ -823,7 +825,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'all':
                 // Get all assets with expiry date info
-                const allResult = await model.getAssetsByExpiryDate('all', null, userOrgId, userBranchId);
+                const allResult = await model.getAssetsByExpiryDate('all', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
                 res.status(200).json({
                     message: `Found ${allResult.rows.length} assets with expiry date information`,
                     filter_type: 'all',
@@ -1023,7 +1025,9 @@ const getAssetsWithFilters = async (req, res) => {
         const result = await model.getAssetsByUserContextWithFilters(
             userOrgId, 
             userBranchId, 
-            additionalFilters
+            additionalFilters,
+            req.db,  // Pass database connection
+            req.user?.hasSuperAccess || false  // Pass hasSuperAccess flag (set automatically in middleware)
         );
 
         // INFO: Assets retrieved successfully with user context filtering
@@ -1824,7 +1828,7 @@ const getAssetsExpiringWithin30DaysByType = async (req, res) => {
             return res.status(400).json({ error: "User organization not found" });
         }
 
-        const result = await model.getAssetsExpiringWithin30DaysByType(userOrgId, userBranchId);
+        const result = await model.getAssetsExpiringWithin30DaysByType(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
         
         // Calculate total count
         const totalCount = result.rows.reduce((sum, type) => sum + parseInt(type.asset_count), 0);
@@ -1866,8 +1870,8 @@ const getAssetsCount = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
-    // Get count with user context filtering
-    const count = await model.getAssetsCount(userOrgId, userBranchId);
+    // Get count with user context filtering - pass hasSuperAccess flag
+    const count = await model.getAssetsCount(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
     
     res.json({
       success: true,
@@ -1897,6 +1901,9 @@ const getAssignedAssetsCount = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Debug: Check total assignments with different conditions
     const debugQuery = `
       SELECT 
@@ -1907,9 +1914,9 @@ const getAssignedAssetsCount = async (req, res) => {
       FROM "tblAssets" a
       INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
       WHERE a.org_id = $1
-      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+      ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
     `;
-    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    const debugParams = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
     
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
@@ -1917,6 +1924,7 @@ const getAssignedAssetsCount = async (req, res) => {
     console.log('🔍 [Assigned Assets Debug]', {
       userOrgId,
       userBranchId,
+      hasSuperAccess,
       debugCounts: debugResult.rows[0]
     });
 
@@ -1930,7 +1938,8 @@ const getAssignedAssetsCount = async (req, res) => {
     `;
     const params = [userOrgId];
 
-    if (userBranchId) {
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       query += ` AND a.branch_id = $2`;
       params.push(userBranchId);
     }
@@ -1967,6 +1976,9 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Debug: Check different ways assets can be under maintenance
     const debugQuery = `
       SELECT 
@@ -1979,9 +1991,9 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
       LEFT JOIN "tblAssetMaintSch" ams ON a.asset_id = ams.asset_id AND ams.status = 'IN' AND ams.org_id = $1
       LEFT JOIN "tblWFAssetMaintSch_H" wfh ON a.asset_id = wfh.asset_id AND wfh.status IN ('IN', 'IP') AND wfh.org_id = $1
       WHERE a.org_id = $1
-      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+      ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
     `;
-    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    const debugParams = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
     
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
@@ -1989,6 +2001,7 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
     console.log('🔍 [Under Maintenance Assets Debug]', {
       userOrgId,
       userBranchId,
+      hasSuperAccess,
       debugCounts: debugResult.rows[0]
     });
 
@@ -2011,7 +2024,8 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
     `;
     const params = [userOrgId];
 
-    if (userBranchId) {
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       query += ` AND a.branch_id = $2`;
       params.push(userBranchId);
     }
@@ -2048,6 +2062,9 @@ const getDashboardSummary = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Comprehensive query to get all metrics and overlaps
     const summaryQuery = `
       WITH asset_status AS (
@@ -2077,7 +2094,7 @@ const getDashboardSummary = async (req, res) => {
           AND wfh.org_id = $1
         LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
         WHERE a.org_id = $1
-          ${userBranchId ? 'AND a.branch_id = $2' : ''}
+          ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
       )
       SELECT 
         COUNT(*) as total_assets,
@@ -2091,7 +2108,7 @@ const getDashboardSummary = async (req, res) => {
         SUM(CASE WHEN is_assigned = 0 AND is_under_maintenance = 0 AND is_decommissioned = 0 THEN 1 ELSE 0 END) as none
       FROM asset_status
     `;
-    const params = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    const params = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
     
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
@@ -2138,6 +2155,9 @@ const getDecommissionedAssetsCount = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Debug: Check breakdown of decommissioned/scrapped assets
     const debugQuery = `
       SELECT 
@@ -2149,9 +2169,9 @@ const getDecommissionedAssetsCount = async (req, res) => {
       FROM "tblAssets" a
       LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
       WHERE a.org_id = $1
-      ${userBranchId ? 'AND a.branch_id = $2' : ''}
+      ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
     `;
-    const debugParams = userBranchId ? [userOrgId, userBranchId] : [userOrgId];
+    const debugParams = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
     
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
@@ -2159,6 +2179,7 @@ const getDecommissionedAssetsCount = async (req, res) => {
     console.log('🔍 [Decommissioned Assets Debug]', {
       userOrgId,
       userBranchId,
+      hasSuperAccess,
       debugCounts: debugResult.rows[0]
     });
 
@@ -2171,7 +2192,8 @@ const getDecommissionedAssetsCount = async (req, res) => {
     `;
     const params = [userOrgId];
 
-    if (userBranchId) {
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       query += ` AND a.branch_id = $2`;
       params.push(userBranchId);
     }
@@ -2209,6 +2231,9 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Query to get asset count by department
     // Start from departments to show all departments, even those with 0 assets
     // Only count assets that are currently assigned (action = 'A' and latest_assignment_flag = true)
@@ -2229,9 +2254,11 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND a.org_id = $1
     `;
     
-    if (userBranchId) {
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       params.push(userBranchId);
       query += ` AND a.branch_id = $${paramIndex}`;
+      paramIndex++;
     }
     
     query += `
@@ -2239,7 +2266,8 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND d.int_status = 1
     `;
     
-    if (userBranchId) {
+    // Apply branch filter for departments only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       query += ` AND d.branch_id = $${paramIndex}`;
     }
     
@@ -2259,12 +2287,17 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND (aa.asset_id IS NULL OR aa.dept_id IS NULL)
     `;
     
-    if (userBranchId) {
-      unassignedQuery += ` AND a.branch_id = $${paramIndex}`;
+    const unassignedParams = [userOrgId];
+    let unassignedParamIndex = 2;
+    
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
+      unassignedQuery += ` AND a.branch_id = $${unassignedParamIndex}`;
+      unassignedParams.push(userBranchId);
     }
 
     const result = await dbPool.query(query, params);
-    const unassignedResult = await dbPool.query(unassignedQuery, params);
+    const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
     
     const departments = result.rows.map(row => ({
       name: row.department_name,
@@ -2309,6 +2342,9 @@ const getTop5AssetTypes = async (req, res) => {
     const userOrgId = req.user?.org_id || userWithBranch?.org_id;
     const userBranchId = userWithBranch?.branch_id;
 
+    // Check if user has super access
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    
     // Query to get top 5 asset types by count
     // Filter by user's org_id and branch_id
     const params = [userOrgId];
@@ -2324,7 +2360,8 @@ const getTop5AssetTypes = async (req, res) => {
         AND a.org_id = $1
     `;
     
-    if (userBranchId) {
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchId) {
       params.push(userBranchId);
       query += ` AND a.branch_id = $${paramIndex}`;
       paramIndex++;

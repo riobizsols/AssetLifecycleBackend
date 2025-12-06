@@ -122,7 +122,10 @@ const getAllAssetTypes = async (req, res) => {
 
         const params = [org_id];
 
-        if (branch_id) {
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        
+        // Apply branch filter only if user doesn't have super access
+        if (!hasSuperAccess && branch_id) {
             params.push(branch_id);
             query += `
               AND (
@@ -132,7 +135,7 @@ const getAllAssetTypes = async (req, res) => {
             `;
             console.log(`Filtering asset types for org ${org_id} and branch ${branch_id}`);
         } else {
-            console.log(`Filtering asset types for org ${org_id} with no branch restriction`);
+            console.log(`Filtering asset types for org ${org_id} with no branch restriction (super access: ${hasSuperAccess})`);
         }
 
         if (assignment_type) {
@@ -169,7 +172,11 @@ const deleteDeptAsset = async (req, res) => {
 
 const fetchAllDeptAssets = async (req, res) => {
     try {
-        const result = await model.getAllDeptAssets();
+        const org_id = req.user?.org_id;
+        const branch_id = req.user?.branch_id;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        
+        const result = await model.getAllDeptAssets(org_id, branch_id, hasSuperAccess);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching dept assets:", err);

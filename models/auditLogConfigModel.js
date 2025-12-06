@@ -6,8 +6,8 @@ const getDb = () => getDbFromContext();
 
 
 class AuditLogConfigModel {
-  // Get all audit log configurations
-  static async getAll() {
+  // Get all audit log configurations for an organization
+  static async getAll(orgId) {
     const query = `
       SELECT 
         alc_id,
@@ -19,13 +19,14 @@ class AuditLogConfigModel {
         description,
         org_id
       FROM "tblAuditLogConfig"
+      WHERE org_id = $1
       ORDER BY app_id, event_id
     `;
     
     try {
       const dbPool = getDb();
 
-      const result = await dbPool.query(query);
+      const result = await dbPool.query(query, [orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs:', error);
@@ -120,8 +121,8 @@ class AuditLogConfigModel {
     }
   }
 
-  // Get configurations by app ID
-  static async getByAppId(appId) {
+  // Get configurations by app ID for an organization
+  static async getByAppId(appId, orgId) {
     const query = `
       SELECT 
         alc_id,
@@ -133,14 +134,14 @@ class AuditLogConfigModel {
         description,
         org_id
       FROM "tblAuditLogConfig"
-      WHERE app_id = $1
+      WHERE app_id = $1 AND org_id = $2
       ORDER BY event_id
     `;
     
     try {
       const dbPool = getDb();
 
-      const result = await dbPool.query(query, [appId]);
+      const result = await dbPool.query(query, [appId, orgId]);
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs by app ID:', error);

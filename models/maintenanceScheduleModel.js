@@ -529,12 +529,14 @@ const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
 };
 
 // Get all maintenance schedules from tblAssetMaintSch
-const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
+// Supports super access users who can view all branches
+const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId, hasSuperAccess = false) => {
     console.log('=== Maintenance Schedule Model Debug ===');
     console.log('orgId:', orgId);
     console.log('branchId:', branchId);
+    console.log('hasSuperAccess:', hasSuperAccess);
     
-    const query = `
+    let query = `
         SELECT 
             ams.*,
             a.asset_type_id,
@@ -554,21 +556,28 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId) => {
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
-        WHERE ams.org_id = $1 AND a.org_id = $1 AND a.branch_id = $2
-        ORDER BY ams.created_on DESC
+        WHERE ams.org_id = $1 AND a.org_id = $1
     `;
     
-    const dbPool = getDb();
-
+    // Apply branch filter only if user doesn't have super access
+    const params = [orgId];
+    if (!hasSuperAccess && branchId) {
+        query += ` AND a.branch_id = $2`;
+        params.push(branchId);
+    }
     
-    const result = await dbPool.query(query, [orgId, branchId]);
+    query += ` ORDER BY ams.created_on DESC`;
+    
+    const dbPool = getDb();
+    const result = await dbPool.query(query, params);
     console.log('Query executed successfully, found rows:', result.rows.length);
     return result;
 };
 
 // Get maintenance schedule details by ID from tblAssetMaintSch
-const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => {
-    const query = `
+// Supports super access users who can view all branches
+const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId, hasSuperAccess = false) => {
+    let query = `
         SELECT 
             ams.*,
             COALESCE(a.asset_type_id, 'N/A') as asset_type_id,
@@ -584,13 +593,18 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId) => 
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblWFAssetMaintSch_H" wfh ON ams.wfamsh_id = wfh.wfamsh_id AND wfh.org_id = ams.org_id
         LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
-        WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2 AND a.branch_id = $3
+        WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2
     `;
     
-    const dbPool = getDb();
-
+    // Apply branch filter only if user doesn't have super access
+    const params = [amsId, orgId];
+    if (!hasSuperAccess && branchId) {
+        query += ` AND a.branch_id = $3`;
+        params.push(branchId);
+    }
     
-    const result = await dbPool.query(query, [amsId, orgId, branchId]);
+    const dbPool = getDb();
+    const result = await dbPool.query(query, params);
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {

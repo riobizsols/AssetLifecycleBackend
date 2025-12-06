@@ -181,7 +181,7 @@ module.exports = {
         const org_id = req.user.org_id;
         const branch_id = req.user.branch_id;   
 
-        const departments = await DepartmentModel.getAllDepartments(org_id, branch_id);
+        const departments = await DepartmentModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false);
         res.status(200).json(departments);
     },
     deleteDepartment,

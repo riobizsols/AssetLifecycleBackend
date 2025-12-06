@@ -1,0 +1,4 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-12-05T14:35:58.885Z,INFO,GET_EXPIRED_ASSETS_API_CALLED,AssetController,"INFO: Get expired assets API called","{""operation"":""get_expired_assets""}",N/A,46,USR002
+2025-12-05T14:35:58.890Z,INFO,QUERYING_EXPIRED_ASSETS,AssetController,"INFO: Querying expired assets from database","{""operation"":""fetch_expired_assets""}",N/A,N/A,USR002
+2025-12-05T14:35:58.960Z,INFO,EXPIRED_ASSETS_RETRIEVED,AssetController,"INFO: Retrieved 43 expired assets","{""count"":43,""message"":""Retrieved 43 expired assets""}",N/A,N/A,USR002

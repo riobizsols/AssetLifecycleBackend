@@ -121,6 +121,16 @@ const protect = async (req, res, next) => {
                 // Fall back to token org_id
             }
 
+            // Check if user has super access (can view all branches)
+            const { hasSuperAccess } = require('../utils/branchAccessUtils');
+            const hasSuperAccessFlag = await retryOnPoolExhaustion(() => 
+                hasSuperAccess(decoded.user_id, internalOrgId)
+            );
+            
+            if (hasSuperAccessFlag) {
+                console.log(`[AuthMiddleware] User ${decoded.user_id} has SUPER ACCESS - can view all branches`);
+            }
+
             // Attach full decoded info with current roles and branch information
             req.user = {
                 org_id: internalOrgId, // Use internal org_id for all data operations
@@ -135,6 +145,7 @@ const protect = async (req, res, next) => {
                 branch_code: userWithBranch?.branch_code || null,
                 dept_id: userWithBranch?.dept_id || null,
                 dept_name: userWithBranch?.dept_name || null,
+                hasSuperAccess: hasSuperAccessFlag, // Flag indicating user can view all branches
                 isTenant: isTenant // Add flag to user object
             };
 

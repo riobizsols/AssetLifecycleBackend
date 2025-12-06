@@ -9,7 +9,7 @@ const getAllNotifications = async (req, res) => {
   try {
     const orgId = req.query.orgId || req.user?.org_id;
     const branchId = req.user?.branch_id;
-    const notifications = await getMaintenanceNotifications(orgId, branchId);
+    const notifications = await getMaintenanceNotifications(orgId, branchId, req.user?.hasSuperAccess || false);
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
@@ -69,7 +69,7 @@ const getUserNotifications = async (req, res) => {
 
     console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
     
-    const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId);
+    const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId, req.user?.hasSuperAccess || false);
     
     console.log(`Found ${notifications.length} notifications for user ${userId}`);
     
@@ -158,7 +158,7 @@ const getFilteredNotifications = async (req, res) => {
     const branchId = req.user?.branch_id;
     const { status, urgency, assetType } = req.query;
     
-    let notifications = await getMaintenanceNotifications(orgId, branchId);
+    let notifications = await getMaintenanceNotifications(orgId, branchId, req.user?.hasSuperAccess || false);
     
     // Apply filters
     if (status) {

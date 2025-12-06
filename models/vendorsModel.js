@@ -4,20 +4,29 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// Get all vendors
-const getAllVendors = async (org_id, userBranchCode) => {
+// Get all vendors - supports super access users who can view all branches
+const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => {
   console.log('=== Vendor Model Listing Debug ===');
   console.log('org_id:', org_id);
   console.log('userBranchCode:', userBranchCode);
+  console.log('hasSuperAccess:', hasSuperAccess);
   
-  const query = `
+  let query = `
     SELECT * FROM "tblVendors" 
-    WHERE org_id = $1 AND branch_code = $2
-    ORDER BY created_on DESC
+    WHERE org_id = $1
   `;
+  const params = [org_id];
+  
+  // Apply branch filter only if user doesn't have super access
+  if (!hasSuperAccess && userBranchCode) {
+    query += ` AND branch_code = $2`;
+    params.push(userBranchCode);
+  }
+  
+  query += ` ORDER BY created_on DESC`;
   
   const dbPool = getDb();
-  const result = await dbPool.query(query, [org_id, userBranchCode]);
+  const result = await dbPool.query(query, params);
   console.log('Query executed successfully, found vendors:', result.rows.length);
   return result.rows;
 };

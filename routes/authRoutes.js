@@ -7,7 +7,8 @@ const {
     forgotPassword,
     resetPassword,
     refreshToken,
-    updateOwnPassword
+    updateOwnPassword,
+    changePassword
 } = require('../controllers/authController');
 
 const { protect } = require('../middlewares/authMiddleware');
@@ -23,6 +24,7 @@ router.post('/reset-password', resetPassword);
 // 🔒 Protected routes
 router.post('/register', protect, authorize(['super_admin']), register); // Only super_admin will be allowed (checked in controller)
 router.put('/update-password', protect, authorize(['super_admin']), updateOwnPassword); // Super_admin updates their own password
+router.put('/change-password', protect, changePassword); // Authenticated users can change their password
 
 module.exports = router;
 

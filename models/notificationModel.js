@@ -1,9 +1,10 @@
 const { getDb } = require('../utils/dbContext');
 
-const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
+// Supports super access users who can view all branches
+const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperAccess = false) => {
   // ROLE-BASED WORKFLOW: Fetch all users with the required job role
   // Includes both asset-based maintenance and vendor contract renewal (MT005)
-  const query = `
+  let query = `
     SELECT 
       wfd.wfamsd_id,
       wfd.wfamsh_id,
@@ -51,8 +52,8 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
     WHERE wfd.org_id = $1 
       AND (
-        -- For asset-based maintenance: check branch_id
-        (wfh.asset_id IS NOT NULL AND a.org_id = $1 AND a.branch_id = $2)
+        -- For asset-based maintenance: check branch_id only if user doesn't have super access
+        (wfh.asset_id IS NOT NULL AND a.org_id = $1${!hasSuperAccess && branchId ? ' AND a.branch_id = $2' : ''})
         OR
         -- For vendor contract renewal (MT005): check vendor branch_code
         (wfh.maint_type_id = 'MT005' AND wfh.vendor_id IS NOT NULL)
@@ -74,19 +75,41 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId) => {
     ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
   try {
-    const result = await getDb().query(query, [orgId, branchId]);
+    const params = [orgId];
+    if (!hasSuperAccess && branchId) {
+      params.push(branchId);
+    }
+    const result = await getDb().query(query, params);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId, branchId]);
+    console.error('Query Parameters:', params);
     throw error;
   }
 };
 
-const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId) => {
+// Supports super access users who can view all branches
+const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId, hasSuperAccess = false) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
   // Includes both asset-based maintenance and vendor contract renewal (MT005)
+  
+  // Build parameters array dynamically
+  const params = [orgId];
+  let paramIndex = 2;
+  
+  // Add branch filter condition if user doesn't have super access
+  let branchFilter = '';
+  if (!hasSuperAccess && branchId) {
+    params.push(branchId);
+    branchFilter = ` AND a.branch_id = $${paramIndex}`;
+    paramIndex++;
+  }
+  
+  // empIntId parameter index
+  const empIntIdParamIndex = paramIndex;
+  params.push(empIntId);
+  
   const query = `
     SELECT DISTINCT
       wfh.wfamsh_id,
@@ -157,8 +180,8 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
       AND (
-        -- For asset-based maintenance: check branch_id
-        (wfh.asset_id IS NOT NULL AND a.org_id = $1 AND a.branch_id = $2)
+        -- For asset-based maintenance: check branch_id only if user doesn't have super access
+        (wfh.asset_id IS NOT NULL AND a.org_id = $1${branchFilter})
         OR
         -- For vendor contract renewal (MT005): include all (branch filtering handled by vendor)
         (wfh.maint_type_id = 'MT005' AND wfh.vendor_id IS NOT NULL)
@@ -180,25 +203,27 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
         WHERE wfd.wfamsh_id = wfh.wfamsh_id
-          AND u.emp_int_id = $3
+          AND u.emp_int_id = $${empIntIdParamIndex}
           AND u.int_status = 1
           AND wfd.status IN ('IN', 'IP', 'AP')
       )
     ORDER BY wfh.pl_sch_date ASC
   `;
+  
   try {
-    const result = await getDb().query(query, [orgId, branchId, empIntId]);
+    const result = await getDb().query(query, params);
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', [orgId, branchId, empIntId]);
+    console.error('Query Parameters:', params);
     throw error;
   }
 };
 
-const getNotificationStats = async (orgId = 'ORG001', branchId) => {
-  const query = `
+// Supports super access users who can view all branches
+const getNotificationStats = async (orgId = 'ORG001', branchId, hasSuperAccess = false) => {
+  let query = `
     SELECT 
       COUNT(*) as total_notifications,
       COUNT(CASE WHEN (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(at.maint_lead_type AS INTEGER), 0)) <= CURRENT_DATE THEN 1 END) as overdue_notifications,
@@ -210,7 +235,6 @@ const getNotificationStats = async (orgId = 'ORG001', branchId) => {
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     WHERE wfd.org_id = $1 
       AND a.org_id = $1
-      AND a.branch_id = $2
       AND wfd.status IN ('IN', 'IP')
       AND wfh.status IN ('IN', 'IP')
       AND wfd.user_id IS NOT NULL

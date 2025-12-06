@@ -48,6 +48,12 @@ const sendWelcomeEmail = async (userData, roles, organizationName) => {
             
             <p>You can now access the system using the credentials provided above.</p>
             
+            <div style="background-color: white; padding: 15px; border-left: 4px solid #007bff; margin: 20px 0; text-align: center;">
+              <p style="margin: 0 0 10px 0;"><strong>Access the system:</strong></p>
+              <a href="http://103.27.234.248:5173/" style="display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Login to System</a>
+              <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">http://103.27.234.248:5173/</p>
+            </div>
+            
             <p>If you have any questions, please contact your system administrator.</p>
             
             <p>Best regards,<br>
@@ -96,6 +102,12 @@ const sendRoleAssignmentEmail = async (userData, newRoles, organizationName) => 
             </div>
             
             <p>You can now access additional features and permissions based on your new role(s).</p>
+            
+            <div style="background-color: white; padding: 15px; border-left: 4px solid #007bff; margin: 20px 0; text-align: center;">
+              <p style="margin: 0 0 10px 0;"><strong>Access the system:</strong></p>
+              <a href="http://103.27.234.248:5173/" style="display: inline-block; padding: 10px 20px; background-color: #007bff; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">Login to System</a>
+              <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">http://103.27.234.248:5173/</p>
+            </div>
             
             <p>If you have any questions about your new role(s), please contact your system administrator.</p>
             

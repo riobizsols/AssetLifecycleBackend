@@ -55,9 +55,10 @@ class AssetSerialPrintModel {
   }
 
   // Get all serial numbers in print queue with asset and asset type details
-  static async getAllPrintQueue(orgId) {
+  // Supports super access users who can view all branches
+  static async getAllPrintQueue(orgId, branchId = null, hasSuperAccess = false) {
     try {
-      const query = `
+      let query = `
         SELECT 
           psq.psnq_id,
           psq.serial_no,
@@ -82,13 +83,21 @@ class AssetSerialPrintModel {
         LEFT JOIN "tblAssets" a ON psq.serial_no = a.serial_number AND a.org_id = psq.org_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id AND at.org_id = psq.org_id
         WHERE psq.org_id = $1
-        ORDER BY psq.created_on DESC
       `;
+      
+      const params = [orgId];
+      
+      // Apply branch filter only if user doesn't have super access and branchId is provided
+      // Filter by asset's branch_id when the serial number is linked to an asset
+      if (!hasSuperAccess && branchId) {
+        query += ` AND (a.branch_id = $2 OR a.asset_id IS NULL)`;
+        params.push(branchId);
+      }
+      
+      query += ` ORDER BY psq.created_on DESC`;
 
       const dbPool = getDb();
-
-
-      const result = await dbPool.query(query, [orgId]);
+      const result = await dbPool.query(query, params);
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue:', error);
@@ -97,9 +106,10 @@ class AssetSerialPrintModel {
   }
 
   // Get print queue by status with asset and asset type details
-  static async getPrintQueueByStatus(orgId, status) {
+  // Supports super access users who can view all branches
+  static async getPrintQueueByStatus(orgId, status, branchId = null, hasSuperAccess = false) {
     try {
-      const query = `
+      let query = `
         SELECT 
           psq.psnq_id,
           psq.serial_no,
@@ -124,13 +134,21 @@ class AssetSerialPrintModel {
         LEFT JOIN "tblAssets" a ON psq.serial_no = a.serial_number AND a.org_id = psq.org_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id AND at.org_id = psq.org_id
         WHERE psq.org_id = $1 AND psq.status = $2
-        ORDER BY psq.created_on DESC
       `;
+      
+      const params = [orgId, status];
+      
+      // Apply branch filter only if user doesn't have super access and branchId is provided
+      // Filter by asset's branch_id when the serial number is linked to an asset
+      if (!hasSuperAccess && branchId) {
+        query += ` AND (a.branch_id = $3 OR a.asset_id IS NULL)`;
+        params.push(branchId);
+      }
+      
+      query += ` ORDER BY psq.created_on DESC`;
 
       const dbPool = getDb();
-
-
-      const result = await dbPool.query(query, [orgId, status]);
+      const result = await dbPool.query(query, params);
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue by status:', error);
