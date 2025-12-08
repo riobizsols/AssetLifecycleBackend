@@ -1,5 +1,12 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+<<<<<<< HEAD
+=======
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -27,6 +34,7 @@ const getAllScrapAssets = async (org_id, branch_id, hasSuperAccess = false) => {
   `;
   const params = [org_id];
   
+<<<<<<< HEAD
   // Apply branch filter only if user doesn't have super access
   if (!hasSuperAccess && branch_id) {
     query += ` AND a.branch_id = $2`;
@@ -39,6 +47,12 @@ const getAllScrapAssets = async (org_id, branch_id, hasSuperAccess = false) => {
 
   
   return await dbPool.query(query, params);
+=======
+  const dbPool = getDb();
+
+  
+  return await dbPool.query(query);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 };
 
 // Get scrap asset by ID

@@ -70,6 +70,7 @@ const protect = async (req, res, next) => {
         // Set database in async context so all models can access it
         // This allows models to use getDb() without passing dbConnection through every function
         return runWithDb(dbPool, async () => {
+<<<<<<< HEAD
             // Helper function to retry on connection pool exhaustion
             const retryOnPoolExhaustion = async (fn, maxRetries = 3, delay = 100) => {
                 for (let i = 0; i < maxRetries; i++) {
@@ -104,13 +105,25 @@ const protect = async (req, res, next) => {
 
             // Fetch user with branch information (using appropriate database)
             const userWithBranch = await retryOnPoolExhaustion(() => getUserWithBranch(decoded.user_id, dbPool));
+=======
+            // Fetch current user roles from tblUserJobRoles (using appropriate database)
+            const userRoles = await getUserRoles(decoded.user_id, dbPool);
+
+            // Fetch user with branch information (using appropriate database)
+            const userWithBranch = await getUserWithBranch(decoded.user_id, dbPool);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 
             // Get internal org_id from tblOrgs (for data operations)
             // This is the org_id that should be used for storing/fetching data
             let internalOrgId = decoded.org_id; // Default to token org_id
             try {
+<<<<<<< HEAD
                 const orgResult = await retryOnPoolExhaustion(() => 
                     dbPool.query('SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1')
+=======
+                const orgResult = await dbPool.query(
+                    'SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1'
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
                 );
                 if (orgResult.rows.length > 0) {
                     internalOrgId = orgResult.rows[0].org_id;
@@ -121,6 +134,7 @@ const protect = async (req, res, next) => {
                 // Fall back to token org_id
             }
 
+<<<<<<< HEAD
             // Check if user has super access (can view all branches)
             const { hasSuperAccess } = require('../utils/branchAccessUtils');
             const hasSuperAccessFlag = await retryOnPoolExhaustion(() => 
@@ -131,6 +145,8 @@ const protect = async (req, res, next) => {
                 console.log(`[AuthMiddleware] User ${decoded.user_id} has SUPER ACCESS - can view all branches`);
             }
 
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             // Attach full decoded info with current roles and branch information
             req.user = {
                 org_id: internalOrgId, // Use internal org_id for all data operations
@@ -145,7 +161,10 @@ const protect = async (req, res, next) => {
                 branch_code: userWithBranch?.branch_code || null,
                 dept_id: userWithBranch?.dept_id || null,
                 dept_name: userWithBranch?.dept_name || null,
+<<<<<<< HEAD
                 hasSuperAccess: hasSuperAccessFlag, // Flag indicating user can view all branches
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
                 isTenant: isTenant // Add flag to user object
             };
 

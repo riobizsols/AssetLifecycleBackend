@@ -1,5 +1,11 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
+<<<<<<< HEAD
+=======
+
+// Helper function to get database connection (tenant pool or default)
+const getDb = () => getDbFromContext();
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -17,6 +23,7 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => 
   `;
   const params = [org_id];
   
+<<<<<<< HEAD
   // Apply branch filter only if user doesn't have super access
   if (!hasSuperAccess && userBranchCode) {
     query += ` AND branch_code = $2`;
@@ -27,6 +34,10 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => 
   
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
+=======
+  const dbPool = getDb();
+  const result = await dbPool.query(query, [org_id, userBranchCode]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
   console.log('Query executed successfully, found vendors:', result.rows.length);
   return result.rows;
 };

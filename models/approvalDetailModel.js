@@ -846,12 +846,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      if (parseInt(approved_users) === parseInt(total_users)) {
        console.log(`All users approved! Total: ${total_users}, Approved: ${approved_users}`);
        
+<<<<<<< HEAD
        // Get workflow type to check if it's vendor contract renewal (MT005)
        const workflowTypeQuery = `SELECT maint_type_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`;
        const workflowTypeResult = await getDb().query(workflowTypeQuery, [wfamshId, orgId]);
        const maintTypeId = workflowTypeResult.rows.length > 0 ? workflowTypeResult.rows[0].maint_type_id : null;
        const isVendorContractRenewal = maintTypeId === 'MT005';
        
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
        await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
           SET status = 'CO', 
@@ -1013,7 +1016,11 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      `;
      params.push(userRoleIds);
 
+<<<<<<< HEAD
      const result = await getDb().query(query, params);
+=======
+     const result = await getDb().query(query, [orgId, userBranchCode, userRoleIds]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
      console.log('Query executed successfully, found rows:', result.rows.length);
      console.log('Sample row (if any):', result.rows[0] || 'No rows found');
      return result.rows;
@@ -2113,6 +2120,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       ORDER BY wfd.sequence ASC
     `;
 
+<<<<<<< HEAD
     let result;
     try {
       result = await getDb().query(query, [orgId, wfamshId]);
@@ -2123,6 +2131,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       throw new Error(`Database query failed: ${queryError.message}`);
     }
     
+=======
+    const result = await getDb().query(query, [orgId, wfamshId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     const approvalDetails = result.rows;
 
     console.log('Raw approval details from database:', approvalDetails);
@@ -2170,7 +2181,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       `;
       
       const breakdownResult = await getDb().query(breakdownQuery, [firstRecord.asset_id, orgId, wfamshId]);
+<<<<<<< HEAD
         breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
+=======
+      const breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       
       // Fetch regular checklist items for this asset
       const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);

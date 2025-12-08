@@ -97,7 +97,13 @@ class AssetSerialPrintModel {
       query += ` ORDER BY psq.created_on DESC`;
 
       const dbPool = getDb();
+<<<<<<< HEAD
       const result = await dbPool.query(query, params);
+=======
+
+
+      const result = await dbPool.query(query, [orgId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue:', error);
@@ -148,7 +154,13 @@ class AssetSerialPrintModel {
       query += ` ORDER BY psq.created_on DESC`;
 
       const dbPool = getDb();
+<<<<<<< HEAD
       const result = await dbPool.query(query, params);
+=======
+
+
+      const result = await dbPool.query(query, [orgId, status]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       return result.rows;
     } catch (error) {
       console.error('Error fetching print queue by status:', error);

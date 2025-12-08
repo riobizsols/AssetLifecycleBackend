@@ -26,7 +26,11 @@ class AuditLogConfigModel {
     try {
       const dbPool = getDb();
 
+<<<<<<< HEAD
       const result = await dbPool.query(query, [orgId]);
+=======
+      const result = await dbPool.query(query);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs:', error);
@@ -141,7 +145,11 @@ class AuditLogConfigModel {
     try {
       const dbPool = getDb();
 
+<<<<<<< HEAD
       const result = await dbPool.query(query, [appId, orgId]);
+=======
+      const result = await dbPool.query(query, [appId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       return result.rows;
     } catch (error) {
       console.error('Error fetching audit log configs by app ID:', error);

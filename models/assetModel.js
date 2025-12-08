@@ -113,6 +113,7 @@ const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
         AND a.org_id = $1
     `;
 
+<<<<<<< HEAD
   const params = [orgId];
   
   // Apply branch filter only if user doesn't have super access
@@ -125,6 +126,10 @@ const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
+=======
+  const dbPool = getDb();
+  const result = await dbPool.query(query, [orgId, branchId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
   console.log('Query executed successfully, found printer assets:', result.rows.length);
   return result;
 };
@@ -1189,11 +1194,16 @@ const getAssetsCount = async (orgId, branchId = null, hasSuperAccess = false) =>
 };
 
 // Get assets filtered by user's organization and branch
+<<<<<<< HEAD
 // Get assets by user context - automatically respects super access from req.user.hasSuperAccess
 // If hasSuperAccess is true, branch filter is not applied (user sees all branches)
 const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = null, hasSuperAccess = false) => {
   const dbPool = getDb(dbConnection);
   
+=======
+const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = null) => {
+  const dbPool = getDb(dbConnection);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
@@ -1223,11 +1233,17 @@ const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = nul
   return await dbPool.query(query, params);
 };
 
+<<<<<<< HEAD
 // Get assets with user context filtering and additional filters - automatically respects super access
 // If hasSuperAccess is true, branch filter is not applied (user sees all branches)
 const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}, dbConnection = null, hasSuperAccess = false) => {
   const dbPool = getDb(dbConnection);
   
+=======
+// Get assets with user context filtering and additional filters
+const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additionalFilters = {}, dbConnection = null) => {
+  const dbPool = getDb(dbConnection);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
   let query = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,

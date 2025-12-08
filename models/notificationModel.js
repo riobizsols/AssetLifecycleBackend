@@ -75,11 +75,15 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
     ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
   try {
+<<<<<<< HEAD
     const params = [orgId];
     if (!hasSuperAccess && branchId) {
       params.push(branchId);
     }
     const result = await getDb().query(query, params);
+=======
+    const result = await getDb().query(query, [orgId, branchId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
@@ -211,7 +215,11 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   `;
   
   try {
+<<<<<<< HEAD
     const result = await getDb().query(query, params);
+=======
+    const result = await getDb().query(query, [orgId, branchId, empIntId]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     return result.rows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);

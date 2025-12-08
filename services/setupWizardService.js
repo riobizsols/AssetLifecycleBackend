@@ -48,6 +48,7 @@ const generateDynamicSchemaSql = async () => {
     console.log('[SetupWizard] 🔄 Generating dynamic schema from DATABASE_URL...');
     
     const schemaParts = [];
+<<<<<<< HEAD
     const foreignKeyStatements = []; // Collect FK constraints to add at the end
     
     // Get sequences FIRST (before tables, since tables may reference them in DEFAULT values)
@@ -76,6 +77,8 @@ const generateDynamicSchemaSql = async () => {
         `MAXVALUE ${seq.maximum_value};\n`
       );
     }
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     // Get all tables in public schema
     const tablesResult = await db.query(`
@@ -131,6 +134,7 @@ const generateDynamicSchemaSql = async () => {
       
       const pkColumns = pkResult.rows.map(row => row.column_name);
       
+<<<<<<< HEAD
       // Get foreign key constraints - using pg_catalog for accurate column mapping
       const fkResult = await db.query(`
         SELECT
@@ -165,6 +169,30 @@ const generateDynamicSchemaSql = async () => {
           AND nsp.nspname = 'public'
           AND class.relname = $1
         ORDER BY con.conname, src.ord
+=======
+      // Get foreign key constraints
+      const fkResult = await db.query(`
+        SELECT
+          tc.constraint_name,
+          kcu.column_name,
+          ccu.table_name AS foreign_table_name,
+          ccu.column_name AS foreign_column_name,
+          rc.update_rule,
+          rc.delete_rule
+        FROM information_schema.table_constraints AS tc
+        JOIN information_schema.key_column_usage AS kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        JOIN information_schema.constraint_column_usage AS ccu
+          ON ccu.constraint_name = tc.constraint_name
+          AND ccu.table_schema = tc.table_schema
+        LEFT JOIN information_schema.referential_constraints AS rc
+          ON tc.constraint_name = rc.constraint_name
+          AND tc.table_schema = rc.constraint_schema
+        WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema = 'public'
+          AND tc.table_name = $1
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       `, [tableName]);
       
       // Get unique constraints
@@ -214,6 +242,7 @@ const generateDynamicSchemaSql = async () => {
           if (col.character_maximum_length) {
             dataType = `character varying(${col.character_maximum_length})`;
           } else {
+<<<<<<< HEAD
             // If no length specified, use text instead
             console.log(`[SetupWizard] ⚠️  VARCHAR without length in ${tableName}.${col.column_name}, using text instead`);
             dataType = 'text';
@@ -225,6 +254,15 @@ const generateDynamicSchemaSql = async () => {
             // PostgreSQL requires a length for character type, default to text if missing
             console.log(`[SetupWizard] ⚠️  Character type without length in ${tableName}.${col.column_name}, using text instead`);
             dataType = 'text';
+=======
+            dataType = 'character varying';
+          }
+        } else if (col.udt_name === 'char' || col.udt_name === 'character') {
+          if (col.character_maximum_length) {
+            dataType = `character(${col.character_maximum_length})`;
+          } else {
+            dataType = 'character';
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
           }
         } else if (col.udt_name === 'numeric' || col.udt_name === 'decimal') {
           if (col.numeric_precision && col.numeric_scale) {
@@ -263,6 +301,7 @@ const generateDynamicSchemaSql = async () => {
         if (col.column_default) {
           // Clean up default value (remove ::type casts)
           let defaultValue = col.column_default;
+<<<<<<< HEAD
           
           // Handle type casts (::typename) - remove the cast part
           // This handles both single-word types (::text, ::regclass) and 
@@ -273,6 +312,13 @@ const generateDynamicSchemaSql = async () => {
           // Clean up any trailing commas or whitespace
           defaultValue = defaultValue.trim().replace(/,\s*$/, '');
           
+=======
+          // Handle function calls like CURRENT_TIMESTAMP, CURRENT_DATE, etc.
+          if (defaultValue.includes('::')) {
+            const parts = defaultValue.split('::');
+            defaultValue = parts[0].trim();
+          }
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
           colDef += ` DEFAULT ${defaultValue}`;
         }
         
@@ -305,16 +351,24 @@ const generateDynamicSchemaSql = async () => {
         );
       }
       
+<<<<<<< HEAD
       // Collect FOREIGN KEY constraints (to be added AFTER all tables are created)
+=======
+      // Add FOREIGN KEY constraints
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       const fkConstraints = {};
       for (const fk of fkResult.rows) {
         if (!fkConstraints[fk.constraint_name]) {
           fkConstraints[fk.constraint_name] = {
+<<<<<<< HEAD
             tableName: tableName,
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             columns: [],
             foreignTable: fk.foreign_table_name,
             foreignColumns: [],
             updateRule: fk.update_rule || 'NO ACTION',
+<<<<<<< HEAD
             deleteRule: fk.delete_rule || 'NO ACTION',
             seenColumns: new Set() // Track which columns we've already added
           };
@@ -337,6 +391,20 @@ const generateDynamicSchemaSql = async () => {
         const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
         foreignKeyStatements.push(
           `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
+=======
+            deleteRule: fk.delete_rule || 'NO ACTION'
+          };
+        }
+        fkConstraints[fk.constraint_name].columns.push(fk.column_name);
+        fkConstraints[fk.constraint_name].foreignColumns.push(fk.foreign_column_name);
+      }
+      
+      for (const [constraintName, fk] of Object.entries(fkConstraints)) {
+        const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
+        const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
+        schemaParts.push(
+          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" ` +
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
           `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
           `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`
         );
@@ -379,9 +447,36 @@ const generateDynamicSchemaSql = async () => {
       schemaParts.push(indexDef + ';\n');
     }
     
+<<<<<<< HEAD
     // Add all foreign key constraints AFTER all tables are created
     console.log(`[SetupWizard] 📎 Adding ${foreignKeyStatements.length} foreign key constraints`);
     schemaParts.push(...foreignKeyStatements);
+=======
+    // Get sequences
+    const sequencesResult = await db.query(`
+      SELECT 
+        sequence_name,
+        data_type,
+        start_value,
+        increment,
+        minimum_value,
+        maximum_value
+      FROM information_schema.sequences
+      WHERE sequence_schema = 'public'
+      ORDER BY sequence_name
+    `);
+    
+    for (const seq of sequencesResult.rows) {
+      schemaParts.push(
+        `CREATE SEQUENCE IF NOT EXISTS "${seq.sequence_name}" ` +
+        `AS ${seq.data_type} ` +
+        `START WITH ${seq.start_value} ` +
+        `INCREMENT BY ${seq.increment} ` +
+        `MINVALUE ${seq.minimum_value} ` +
+        `MAXVALUE ${seq.maximum_value};\n`
+      );
+    }
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
     
@@ -395,7 +490,10 @@ const generateDynamicSchemaSql = async () => {
     console.log(`[SetupWizard]   - CREATE TABLE statements: ${tableCount}`);
     console.log(`[SetupWizard]   - Indexes: ${indexesResult.rows.length}`);
     console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
+<<<<<<< HEAD
     console.log(`[SetupWizard]   - Foreign keys: ${foreignKeyStatements.length}`);
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
     
     if (tableCount !== tables.length) {
@@ -1462,6 +1560,7 @@ const runSetup = async (payload = {}) => {
         // Ensure search_path before schema import
         await client.query("SET search_path TO public");
         const schemaSql = await getSchemaSql();
+<<<<<<< HEAD
         
         try {
           await client.query(schemaSql);
@@ -1478,6 +1577,9 @@ const runSetup = async (payload = {}) => {
           throw schemaError;
         }
         
+=======
+        await client.query(schemaSql);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         logs.push({ message: "Database schema imported", scope: "schema" });
       } else {
         logs.push({ message: "Schema creation skipped per configuration", scope: "schema" });

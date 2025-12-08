@@ -2,6 +2,7 @@ const { Client } = require('pg');
 const bcrypt = require('bcrypt');
 const { registerTenant, deactivateTenant, testTenantConnection: testConnection } = require('./tenantService');
 const { initTenantRegistryPool } = require('./tenantService');
+<<<<<<< HEAD
 const tenantSchemaService = require('./tenantSchemaService');
 const { generateCustomId } = require('../utils/idGenerator');
 const {
@@ -17,6 +18,10 @@ const {
   DEFAULT_JOB_ROLES,
   DEFAULT_JOB_ROLE_NAV,
 } = require('../constants/setupDefaults');
+=======
+const setupWizardService = require('./setupWizardService');
+const { generateCustomId } = require('../utils/idGenerator');
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 require('dotenv').config();
 
 /**
@@ -121,7 +126,11 @@ async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
 
 /**
  * Create admin user in the tenant database
+<<<<<<< HEAD
  * This function adds the admin user to both tblEmployees and tblUsers in the created tenant database
+=======
+ * This function adds the admin user to tblUsers in the created tenant database
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
  */
 async function createAdminUser(client, orgId, adminData) {
   const {
@@ -138,12 +147,20 @@ async function createAdminUser(client, orgId, adminData) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const userId = username.toUpperCase();
+<<<<<<< HEAD
   const employeeId = 'EMP001'; // First employee in the organization
 
   await client.query('SET search_path TO public');
 
   // Ensure System Administrator job role exists
   try {
+=======
+
+  // Ensure System Administrator job role exists
+  // Use fully qualified table name
+  try {
+    await client.query('SET search_path TO public');
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     await client.query(`
       INSERT INTO public."tblJobRoles" (job_role_id, text, job_function, int_status)
       VALUES ('JR001', 'System Administrator', 'Full system access', 1)
@@ -151,6 +168,7 @@ async function createAdminUser(client, orgId, adminData) {
     `);
     console.log(`[TenantSetup] Job role 'JR001' (System Administrator) ensured in tblJobRoles`);
   } catch (err) {
+<<<<<<< HEAD
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
@@ -196,11 +214,37 @@ async function createAdminUser(client, orgId, adminData) {
 
   // Step 3: Assign job role
   try {
+=======
+    // Job role might already exist, continue
+    console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
+  }
+
+  // Add admin user to tblUsers in the created database
+  // Use fully qualified table name
+  await client.query(`
+    INSERT INTO public."tblUsers" (
+      org_id, user_id, full_name, email, phone, job_role_id, password,
+      created_by, created_on, changed_by, changed_on, int_status, time_zone
+    )
+    VALUES ($1, $2, $3, $4, $5, 'JR001', $6, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
+    ON CONFLICT (user_id) DO UPDATE
+    SET full_name = EXCLUDED.full_name,
+        email = EXCLUDED.email,
+        phone = EXCLUDED.phone,
+        password = EXCLUDED.password
+  `, [orgId, userId, fullName, email, phone, passwordHash]);
+  console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId}`);
+
+  // Assign job role - use fully qualified table name
+  try {
+    await client.query('SET search_path TO public');
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     await client.query(`
       INSERT INTO public."tblUserJobRoles" (user_job_role_id, user_id, job_role_id)
       VALUES ('UJR001', $1, 'JR001')
       ON CONFLICT (user_job_role_id) DO NOTHING
     `, [userId]);
+<<<<<<< HEAD
     console.log(`[TenantSetup] Job role assigned: ${userId} -> JR001`);
   } catch (err) {
     console.warn(`[TenantSetup] User job role assignment note: ${err.message}`);
@@ -211,6 +255,17 @@ async function createAdminUser(client, orgId, adminData) {
   return {
     userId,
     employeeId,
+=======
+  } catch (err) {
+    // Role assignment might already exist, continue
+    console.warn(`[TenantSetup] User job role assignment note: ${err.message}`);
+  }
+
+  console.log(`[TenantSetup] Admin user created: ${userId} (${email})`);
+
+  return {
+    userId,
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     email,
     password, // Return plain password for display
     fullName,
@@ -218,6 +273,7 @@ async function createAdminUser(client, orgId, adminData) {
 }
 
 /**
+<<<<<<< HEAD
  * Seed default data for tenant database
  * This includes: ID sequences, job roles, navigation, asset types, maintenance types, etc.
  * Excludes any RioAdmin-specific data
@@ -421,6 +477,8 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
 }
 
 /**
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
  * Create a new tenant
  * This will:
  * 1. Check org_id uniqueness
@@ -540,6 +598,7 @@ async function createTenant(tenantData) {
       await tenantClient.query('SET search_path TO public');
       await tenantClient.query("SET session search_path TO 'public'");
 
+<<<<<<< HEAD
       // Get and execute tenant schema SQL (excludes tblRioAdmin)
       // This includes all tables, primary keys, foreign keys, indexes, and constraints
       let schemaCreated = false;
@@ -560,11 +619,46 @@ async function createTenant(tenantData) {
           await tenantClient.query(schemaSql);
           schemaCreated = true;
           console.log(`[TenantSetup] ✅ Tenant schema SQL executed successfully`);
+=======
+      // Get and execute schema SQL from setup wizard service
+      // This includes all tables, primary keys, foreign keys, indexes, and constraints
+      let schemaCreated = false;
+      try {
+        let schemaSql;
+        try {
+          // Force regeneration to ensure we get the latest schema including any new tables
+          console.log(`[TenantSetup] 🔄 Fetching latest schema (will include any new tables from DATABASE_URL)...`);
+          schemaSql = await setupWizardService.getSchemaSql(false, true); // forceRegenerate = true
+        } catch (fileError) {
+          console.error(`[TenantSetup] Error reading schema SQL file:`, fileError.message);
+          console.error(`[TenantSetup] This is expected if the SQL dump file doesn't exist. Will use CORE_TABLE_DDL fallback.`);
+          schemaSql = null; // Will trigger fallback
+        }
+        
+        if (!schemaSql || schemaSql.trim().length === 0) {
+          console.log(`[TenantSetup] Schema SQL is empty or not available. Will use CORE_TABLE_DDL fallback.`);
+          schemaSql = null; // Will trigger fallback
+        } else {
+          console.log(`[TenantSetup] Executing full schema SQL (includes all tables, PKs, FKs, constraints)...`);
+          console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
+        
+        // Execute the schema SQL as a single transaction
+        // PostgreSQL can handle multiple statements in a single query
+        try {
+          await tenantClient.query(schemaSql);
+          schemaCreated = true;
+          console.log(`[TenantSetup] ✅ Full schema SQL executed successfully`);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         } catch (execError) {
           console.error(`[TenantSetup] Error executing schema SQL as single query:`, execError.message);
           // If single query fails, try executing statement by statement
           console.warn(`[TenantSetup] Single query execution failed, trying statement-by-statement:`, execError.message);
           
+<<<<<<< HEAD
+=======
+          // Split by semicolons and execute statements one by one for better error handling
+          // But be careful with functions, triggers, etc. that contain semicolons
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
           const statements = schemaSql
             .split(/;\s*(?=\n|$)/)
             .map(s => s.trim())
@@ -609,6 +703,7 @@ async function createTenant(tenantData) {
             schemaCreated = true;
             console.log(`[TenantSetup] ✅ Schema partially created (${tableCheck.rows[0].count} tables)`);
           } else {
+<<<<<<< HEAD
             throw new Error('No tables were created after executing tenant schema SQL');
           }
         }
@@ -620,6 +715,43 @@ async function createTenant(tenantData) {
       
       if (!schemaCreated) {
         throw new Error('Tenant schema was not created successfully');
+=======
+            console.warn(`[TenantSetup] No tables were created after executing schema SQL. Will use CORE_TABLE_DDL fallback.`);
+          }
+        }
+        }
+      } catch (schemaError) {
+        console.error(`[TenantSetup] ❌ Error executing schema SQL:`, schemaError.message);
+        console.error(`[TenantSetup] Stack trace:`, schemaError.stack);
+        // Try fallback to core tables
+        console.log(`[TenantSetup] Attempting to create core tables as fallback...`);
+      }
+
+      // Create core tables (safety net - ensures essential tables exist)
+      // Note: These are basic table definitions. The full schema SQL above should have already
+      // created all tables with complete constraints. This is just a fallback.
+      if (!schemaCreated) {
+        console.log(`[TenantSetup] Creating core tables as fallback...`);
+        const CORE_TABLE_DDL = setupWizardService.CORE_TABLE_DDL;
+        if (CORE_TABLE_DDL && Array.isArray(CORE_TABLE_DDL)) {
+          for (const ddl of CORE_TABLE_DDL) {
+            try {
+              if (ddl && ddl.trim()) {
+                await tenantClient.query(ddl);
+                console.log(`[TenantSetup] Created table from CORE_TABLE_DDL`);
+              }
+            } catch (err) {
+              // Table might already exist (from schema SQL), continue
+              if (err.code !== '42P07' && err.code !== '42710') {
+                console.error(`[TenantSetup] Error creating core table:`, err.message);
+                console.error(`[TenantSetup] DDL that failed:`, ddl.substring(0, 200));
+              }
+            }
+          }
+        } else {
+          console.error(`[TenantSetup] CORE_TABLE_DDL is not available or not an array`);
+        }
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       }
       
       // Verify that tblOrgs table exists before trying to insert
@@ -867,10 +999,13 @@ async function createTenant(tenantData) {
       const adminCredentials = await createAdminUser(tenantClient, generatedOrgId, adminUser);
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
+<<<<<<< HEAD
       // Step 3: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
       console.log(`[TenantSetup] Seeding default tenant data...`);
       await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId, adminCredentials.employeeId);
 
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
       
       await tenantClient.end();

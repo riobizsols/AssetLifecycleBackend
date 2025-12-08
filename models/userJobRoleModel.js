@@ -85,9 +85,15 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         console.log(`Generated user_id: ${user_id}`);
         
         const dbPool = getDb();
+<<<<<<< HEAD
         // Fetch employee data including branch_id
         const employeeResult = await dbPool.query(
             `SELECT full_name, email_id, phone_number, dept_id, branch_id, language_code 
+=======
+        // Fetch employee data
+        const employeeResult = await dbPool.query(
+            `SELECT full_name, email_id, phone_number, dept_id, language_code 
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
              FROM "tblEmployees" 
              WHERE emp_int_id = $1`,
             [emp_int_id]
@@ -151,8 +157,11 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
         console.log(`Generated user_job_role_id: ${user_job_role_id}`);
         
         const dbPool = getDb();
+<<<<<<< HEAD
         
         // Insert into tblUserJobRoles
+=======
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         const result = await dbPool.query(
             `INSERT INTO "tblUserJobRoles" 
              (user_job_role_id, user_id, job_role_id)

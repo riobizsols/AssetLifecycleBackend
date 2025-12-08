@@ -7,6 +7,7 @@ const getDb = () => getDbFromContext();
 const { generateCustomId } = require('../utils/idGenerator');
 
 // Get all departments
+<<<<<<< HEAD
 // Supports super access users who can view all branches
 const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false) => {
     const dbPool = getDb();
@@ -20,6 +21,12 @@ const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false) => {
     }
     
     const result = await dbPool.query(query, params);
+=======
+const getAllDepartments = async (org_id, branch_id) => {
+    const dbPool = getDb();
+
+    const result = await dbPool.query(`SELECT dept_id, text FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2`, [org_id, branch_id]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     return result.rows;
 };
 
@@ -32,6 +39,7 @@ const getDepartmentIdByName = async (deptName, org_id, branch_id, hasSuperAccess
     console.log('hasSuperAccess:', hasSuperAccess);
     
     const dbPool = getDb();
+<<<<<<< HEAD
     let query = `SELECT dept_id FROM "tblDepartments" WHERE text = $1 AND org_id = $2`;
     const params = [deptName, org_id];
     
@@ -42,10 +50,16 @@ const getDepartmentIdByName = async (deptName, org_id, branch_id, hasSuperAccess
     }
     
     const result = await dbPool.query(query, params);
+=======
+
+    
+    const result = await dbPool.query(`SELECT dept_id FROM "tblDepartments" WHERE text = $1 AND org_id = $2 AND branch_id = $3`, [deptName, org_id, branch_id]);
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     console.log('Query executed successfully, found departments:', result.rows.length);
     return result.rows[0];
 };
 
+<<<<<<< HEAD
 // Get all admins for a department - supports super access users
 const getAdminsByDeptId = async (dept_id, org_id, branch_id, hasSuperAccess = false) => {
     const dbPool = getDb();
@@ -65,6 +79,22 @@ const getAdminsByDeptId = async (dept_id, org_id, branch_id, hasSuperAccess = fa
     }
     
     const result = await dbPool.query(query, params);
+=======
+// Get all admins for a department
+const getAdminsByDeptId = async (dept_id, org_id, branch_id) => {
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
+        `SELECT u.user_id, u.full_name AS name, u.email
+         FROM "tblDeptAdmins" da
+         JOIN "tblUsers" u ON da.user_id = u.user_id
+         JOIN "tblDepartments" d ON da.dept_id = d.dept_id
+         WHERE da.dept_id = $1 AND da.org_id = $2 
+           AND (da.branch_id = $3 OR da.branch_id IS NULL)
+           AND d.org_id = $2`,
+        [dept_id, org_id, branch_id]
+    );
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     return result.rows;
 };
 
@@ -77,7 +107,13 @@ const getUsersByDeptId = async (dept_id, org_id, branch_id, hasSuperAccess = fal
     console.log('hasSuperAccess:', hasSuperAccess);
     
     const dbPool = getDb();
+<<<<<<< HEAD
     let query = `
+=======
+
+    
+    const result = await dbPool.query(`
+>>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         SELECT u.user_id, u.full_name, u.email
         FROM "tblUsers" u
         JOIN "tblDepartments" d ON u.dept_id = d.dept_id
