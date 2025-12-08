@@ -888,15 +888,14 @@ async function createTenant(tenantData) {
       
       // Get base domain from environment variable or use default
       // Main domain is riowebworks.net (configured in GoDaddy with wildcard DNS)
-      const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'riowebworks.net';
-      const isDevelopment = process.env.NODE_ENV !== 'production';
+      const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost';
       
       // Construct subdomain URL
-      // For development, use subdomain.localhost:port format
-      // For production, use subdomain.riowebworks.net format with HTTPS (secure)
+      // If MAIN_DOMAIN is 'localhost', use development format with port
+      // Otherwise, use production format with HTTPS
       let finalSubdomainUrl;
       
-      if (isDevelopment) {
+      if (MAIN_DOMAIN === 'localhost') {
         // Development: use localhost with port
         const port = process.env.FRONTEND_PORT || '5173';
         finalSubdomainUrl = `http://${subdomain}.localhost:${port}`;
