@@ -191,6 +191,11 @@ const generateTenantSchemaSql = async () => {
       `, [tableName]);
       
       for (const constraint of uniqueResult.rows) {
+        // Handle cases where columns might not be an array
+        if (!constraint.columns || !Array.isArray(constraint.columns) || constraint.columns.length === 0) {
+          console.warn(`[TenantSchema] Skipping invalid unique constraint: ${constraint.constraint_name}`);
+          continue;
+        }
         const columns = constraint.columns.map(c => `"${c}"`).join(', ');
         createTableSql += `,\n  CONSTRAINT "${constraint.constraint_name}" UNIQUE (${columns})`;
       }
