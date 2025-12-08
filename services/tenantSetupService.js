@@ -121,7 +121,7 @@ async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
 
 /**
  * Create admin user in the tenant database
- * This function adds the admin user to tblUsers in the created tenant database
+ * This function adds the admin user to both tblEmployees and tblUsers in the created tenant database
  */
 async function createAdminUser(client, orgId, adminData) {
   const {
@@ -138,11 +138,12 @@ async function createAdminUser(client, orgId, adminData) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const userId = username.toUpperCase();
+  const employeeId = 'EMP001'; // First employee in the organization
+
+  await client.query('SET search_path TO public');
 
   // Ensure System Administrator job role exists
-  // Use fully qualified table name
   try {
-    await client.query('SET search_path TO public');
     await client.query(`
       INSERT INTO public."tblJobRoles" (job_role_id, text, job_function, int_status)
       VALUES ('JR001', 'System Administrator', 'Full system access', 1)
@@ -150,43 +151,66 @@ async function createAdminUser(client, orgId, adminData) {
     `);
     console.log(`[TenantSetup] Job role 'JR001' (System Administrator) ensured in tblJobRoles`);
   } catch (err) {
-    // Job role might already exist, continue
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
-  // Add admin user to tblUsers in the created database
-  // Use fully qualified table name
-  await client.query(`
-    INSERT INTO public."tblUsers" (
-      org_id, user_id, full_name, email, phone, job_role_id, password,
-      created_by, created_on, changed_by, changed_on, int_status, time_zone
-    )
-    VALUES ($1, $2, $3, $4, $5, 'JR001', $6, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
-    ON CONFLICT (user_id) DO UPDATE
-    SET full_name = EXCLUDED.full_name,
-        email = EXCLUDED.email,
-        phone = EXCLUDED.phone,
-        password = EXCLUDED.password
-  `, [orgId, userId, fullName, email, phone, passwordHash]);
-  console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId}`);
-
-  // Assign job role - use fully qualified table name
+  // Step 1: Create employee record in tblEmployees
   try {
-    await client.query('SET search_path TO public');
+    await client.query(`
+      INSERT INTO public."tblEmployees" (
+        org_id, employee_id, full_name, email, phone,
+        created_by, created_on, changed_by, changed_on, int_status
+      )
+      VALUES ($1, $2, $3, $4, $5, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
+      ON CONFLICT (employee_id) DO UPDATE
+      SET full_name = EXCLUDED.full_name,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone
+    `, [orgId, employeeId, fullName, email, phone]);
+    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId}`);
+  } catch (err) {
+    console.error(`[TenantSetup] Error creating employee record:`, err.message);
+    throw new Error(`Failed to create employee record: ${err.message}`);
+  }
+
+  // Step 2: Add admin user to tblUsers with employee_id reference
+  try {
+    await client.query(`
+      INSERT INTO public."tblUsers" (
+        org_id, user_id, employee_id, full_name, email, phone, job_role_id, password,
+        created_by, created_on, changed_by, changed_on, int_status, time_zone
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
+      ON CONFLICT (user_id) DO UPDATE
+      SET employee_id = EXCLUDED.employee_id,
+          full_name = EXCLUDED.full_name,
+          email = EXCLUDED.email,
+          phone = EXCLUDED.phone,
+          password = EXCLUDED.password
+    `, [orgId, userId, employeeId, fullName, email, phone, passwordHash]);
+    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to ${employeeId})`);
+  } catch (err) {
+    console.error(`[TenantSetup] Error creating user record:`, err.message);
+    throw new Error(`Failed to create user record: ${err.message}`);
+  }
+
+  // Step 3: Assign job role
+  try {
     await client.query(`
       INSERT INTO public."tblUserJobRoles" (user_job_role_id, user_id, job_role_id)
       VALUES ('UJR001', $1, 'JR001')
       ON CONFLICT (user_job_role_id) DO NOTHING
     `, [userId]);
+    console.log(`[TenantSetup] Job role assigned: ${userId} -> JR001`);
   } catch (err) {
-    // Role assignment might already exist, continue
     console.warn(`[TenantSetup] User job role assignment note: ${err.message}`);
   }
 
-  console.log(`[TenantSetup] Admin user created: ${userId} (${email})`);
+  console.log(`[TenantSetup] ✅ Admin user created successfully: ${userId} (${email}) with employee record ${employeeId}`);
 
   return {
     userId,
+    employeeId,
     email,
     password, // Return plain password for display
     fullName,
@@ -198,21 +222,28 @@ async function createAdminUser(client, orgId, adminData) {
  * This includes: ID sequences, job roles, navigation, asset types, maintenance types, etc.
  * Excludes any RioAdmin-specific data
  */
-async function seedTenantDefaultData(client, orgId, adminUserId) {
+async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId) {
   console.log(`[TenantSetup] 🌱 Seeding default data for tenant...`);
   
   await client.query('SET search_path TO public');
   
   try {
-    // 1. Seed ID Sequences (excluding org since it's already created)
+    // 1. Seed ID Sequences
     console.log(`[TenantSetup] Seeding ID sequences...`);
     for (const seq of DEFAULT_ID_SEQUENCES) {
       try {
+        // For employee and user sequences, set last_number to 1 since we've already created EMP001 and USR001
+        let lastNumber = seq.last_number;
+        if (seq.table_key === 'employee' || seq.table_key === 'user') {
+          lastNumber = 1; // We've used 001, so next will be 002
+        }
+        
         await client.query(`
           INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
           VALUES ($1, $2, $3)
-          ON CONFLICT (table_key) DO NOTHING
-        `, [seq.table_key, seq.prefix, seq.last_number]);
+          ON CONFLICT (table_key) DO UPDATE
+          SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+        `, [seq.table_key, seq.prefix, lastNumber]);
       } catch (err) {
         console.warn(`[TenantSetup] ID Sequence ${seq.table_key}:`, err.message);
       }
@@ -838,7 +869,7 @@ async function createTenant(tenantData) {
 
       // Step 3: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
       console.log(`[TenantSetup] Seeding default tenant data...`);
-      await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId);
+      await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId, adminCredentials.employeeId);
 
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
       
