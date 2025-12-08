@@ -162,8 +162,6 @@ async function createAdminUser(client, orgId, adminData) {
         created_by, created_on, changed_by, changed_on, int_status
       )
       VALUES ($1, $2, $3, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
-      ON CONFLICT (employee_id) DO UPDATE
-      SET full_name = EXCLUDED.full_name
     `, [orgId, employeeId, fullName]);
     console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId}`);
   } catch (err) {
@@ -179,12 +177,6 @@ async function createAdminUser(client, orgId, adminData) {
         created_by, created_on, changed_by, changed_on, int_status, time_zone
       )
       VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
-      ON CONFLICT (user_id) DO UPDATE
-      SET employee_id = EXCLUDED.employee_id,
-          full_name = EXCLUDED.full_name,
-          email = EXCLUDED.email,
-          phone = EXCLUDED.phone,
-          password = EXCLUDED.password
     `, [orgId, userId, employeeId, fullName, email, phone, passwordHash]);
     console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to ${employeeId})`);
   } catch (err) {
