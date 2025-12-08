@@ -6,12 +6,12 @@ const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'riowebworks.net';
 
 const config = {
   development: {
-    PORT: process.env.PORT || 5000,
+    PORT: process.env.PORT || 5001,
     DATABASE_URL: process.env.DATABASE_URL,
     JWT_SECRET: process.env.JWT_SECRET,
     FRONTEND_URL: process.env.FRONTEND_URL || 'http://localhost:5173',
-    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5000',
-    API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:5000/api',
+    BACKEND_URL: process.env.BACKEND_URL || 'http://localhost:5001',
+    API_BASE_URL: process.env.API_BASE_URL || 'http://localhost:5001/api',
     ENVIRONMENT: 'development',
     MAIN_DOMAIN: MAIN_DOMAIN,
     CORS_ORIGINS: [
@@ -22,12 +22,12 @@ const config = {
     ]
   },
   production: {
-    PORT: process.env.PORT || 5000,
+    PORT: process.env.PORT || 5001,
     DATABASE_URL: process.env.DATABASE_URL,
     JWT_SECRET: process.env.JWT_SECRET,
     FRONTEND_URL: process.env.FRONTEND_URL || `https://${MAIN_DOMAIN}`,
-    BACKEND_URL: process.env.BACKEND_URL || `https://api.${MAIN_DOMAIN}`,
-    API_BASE_URL: process.env.API_BASE_URL || `https://api.${MAIN_DOMAIN}/api`,
+    BACKEND_URL: process.env.BACKEND_URL || `https://api.${MAIN_DOMAIN}:5001`,
+    API_BASE_URL: process.env.API_BASE_URL || `https://api.${MAIN_DOMAIN}:5001/api`,
     ENVIRONMENT: 'production',
     MAIN_DOMAIN: MAIN_DOMAIN,
     CORS_ORIGINS: [
@@ -37,10 +37,12 @@ const config = {
       new RegExp(`^https?://.*\\.${MAIN_DOMAIN.replace(/\./g, '\\.')}$`),
       // Also allow IP-based access for backward compatibility
       'http://103.27.234.248',
+      'http://103.27.234.248:5001',
       'http://103.27.234.248:5173',
       'http://103.27.234.248:3000',
       'http://103.27.234.248:8080',
       'https://103.27.234.248',
+      'https://103.27.234.248:5001',
       'https://103.27.234.248:5173'
     ]
   }
