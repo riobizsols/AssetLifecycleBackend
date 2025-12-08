@@ -244,35 +244,38 @@ const generateTenantSchemaSql = async () => {
     // Add foreign keys (at the end, after all tables are created)
     console.log(`[TenantSchema] 🔗 Processing foreign keys...`);
     const fkResult = await db.query(`
-      SELECT DISTINCT
-        tc.table_name,
-        tc.constraint_name,
-        string_agg(kcu.column_name, ', ' ORDER BY kcu.ordinal_position) as source_columns,
-        ccu.table_name AS foreign_table_name,
-        string_agg(ccu.column_name, ', ' ORDER BY ccu.ordinal_position) as target_columns,
-        rc.update_rule,
-        rc.delete_rule
-      FROM information_schema.table_constraints AS tc
-      JOIN information_schema.key_column_usage AS kcu
-        ON tc.constraint_name = kcu.constraint_name
-        AND tc.table_schema = kcu.table_schema
-      JOIN information_schema.constraint_column_usage AS ccu
-        ON ccu.constraint_name = tc.constraint_name
-        AND ccu.table_schema = tc.table_schema
-      JOIN information_schema.referential_constraints AS rc
-        ON rc.constraint_name = tc.constraint_name
-        AND rc.constraint_schema = tc.table_schema
-      WHERE tc.constraint_type = 'FOREIGN KEY'
-        AND tc.table_schema = 'public'
-        AND tc.table_name NOT IN (${EXCLUDED_TABLES.map((_, i) => `$${i + 1}`).join(', ')})
-        AND ccu.table_name NOT IN (${EXCLUDED_TABLES.map((_, i) => `$${EXCLUDED_TABLES.length + i + 1}`).join(', ')})
-      GROUP BY 
-        tc.table_name,
-        tc.constraint_name,
-        ccu.table_name,
-        rc.update_rule,
-        rc.delete_rule
-      ORDER BY tc.table_name
+      SELECT 
+        conname AS constraint_name,
+        conrelid::regclass::text AS table_name,
+        confrelid::regclass::text AS foreign_table_name,
+        string_agg(a.attname, ', ' ORDER BY ordinality) AS source_columns,
+        string_agg(af.attname, ', ' ORDER BY ordinality) AS target_columns,
+        CASE confupdtype
+          WHEN 'a' THEN 'NO ACTION'
+          WHEN 'r' THEN 'RESTRICT'
+          WHEN 'c' THEN 'CASCADE'
+          WHEN 'n' THEN 'SET NULL'
+          WHEN 'd' THEN 'SET DEFAULT'
+        END AS update_rule,
+        CASE confdeltype
+          WHEN 'a' THEN 'NO ACTION'
+          WHEN 'r' THEN 'RESTRICT'
+          WHEN 'c' THEN 'CASCADE'
+          WHEN 'n' THEN 'SET NULL'
+          WHEN 'd' THEN 'SET DEFAULT'
+        END AS delete_rule
+      FROM pg_constraint
+      CROSS JOIN LATERAL unnest(conkey) WITH ORDINALITY AS u(attnum, ordinality)
+      JOIN pg_attribute a ON a.attnum = u.attnum AND a.attrelid = conrelid
+      CROSS JOIN LATERAL unnest(confkey) WITH ORDINALITY AS uf(attnum, ordinality)
+      JOIN pg_attribute af ON af.attnum = uf.attnum AND af.attrelid = confrelid
+      WHERE contype = 'f'
+        AND connamespace = 'public'::regnamespace
+        AND conrelid::regclass::text NOT IN (${EXCLUDED_TABLES.map((_, i) => `$${i + 1}`).join(', ')})
+        AND confrelid::regclass::text NOT IN (${EXCLUDED_TABLES.map((_, i) => `$${EXCLUDED_TABLES.length + i + 1}`).join(', ')})
+        AND u.ordinality = uf.ordinality
+      GROUP BY conname, conrelid, confrelid, confupdtype, confdeltype
+      ORDER BY table_name
     `, [...EXCLUDED_TABLES, ...EXCLUDED_TABLES]);
     
     console.log(`[TenantSchema] 🔗 Found ${fkResult.rows.length} foreign key constraints (excluding references to ${EXCLUDED_TABLES.join(', ')})`);
