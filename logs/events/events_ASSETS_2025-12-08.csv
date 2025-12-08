@@ -1,0 +1,2 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-12-08T16:03:18.884Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":82}",139,USR002

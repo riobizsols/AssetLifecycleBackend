@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const { getOrgSetting, setOrgSetting } = require('../utils/orgSettingsUtils');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -104,11 +105,11 @@ class DepreciationModel {
             created_by
         } = depreciationData;
 
-        // Generate custom depreciation ID: ORG001-20241225-001 format (max 20 chars)
+        // Generate unique depreciation ID using asset_id and timestamp with milliseconds
+        // Format: DEP-{asset_id}-{timestamp}
         const now = new Date();
-        const dateStr = now.toISOString().slice(0, 10).replace(/-/g, ''); // YYYYMMDD
-        const timeStr = now.toTimeString().slice(0, 8).replace(/:/g, ''); // HHMMSS
-        const depreciation_id = `${org_id}-${dateStr}-${timeStr.slice(-3)}`; // ORG001-20241225-123
+        const timestamp = now.getTime().toString().slice(-9); // Last 9 digits of timestamp for uniqueness
+        const depreciation_id = `DEP-${asset_id}-${timestamp}`;
 
         const query = `
             INSERT INTO "tblAssetDepHist" (
@@ -296,37 +297,43 @@ class DepreciationModel {
 
     /**
      * Get depreciation settings for an organization
+     * Now reads from tblOrgSettings instead of tblDepreciationSettings
      * @param {string} orgId - Organization ID
      * @returns {Promise<Object>} Depreciation settings
      */
     static async getDepreciationSettings(orgId) {
-        const query = `
-            SELECT 
-                setting_id,
-                org_id,
-                fiscal_year_start_month,
-                fiscal_year_start_day,
-                depreciation_calculation_frequency,
-                auto_calculate_depreciation,
-                created_on,
-                changed_on
-            FROM "tblDepreciationSettings"
-            WHERE org_id = $1
-        `;
-
         const dbPool = getDb();
-
-
-        return await dbPool.query(query, [orgId]);
+        
+        // Get settings from tblOrgSettings
+        const fiscalYearStartMonth = await getOrgSetting('fy_start_month', orgId, dbPool);
+        const fiscalYearStartDay = await getOrgSetting('fy_start_day', orgId, dbPool);
+        const depreciationCalcFreq = await getOrgSetting('dep_calc_freq', orgId, dbPool);
+        const autoCalculateDep = await getOrgSetting('auto_calc_dep', orgId, dbPool);
+        
+        // Return in the same format as before for backward compatibility
+        const settings = {
+            org_id: orgId,
+            fiscal_year_start_month: fiscalYearStartMonth ? parseInt(fiscalYearStartMonth) : 1,
+            fiscal_year_start_day: fiscalYearStartDay ? parseInt(fiscalYearStartDay) : 1,
+            depreciation_calculation_frequency: depreciationCalcFreq || 'MONTHLY',
+            auto_calculate_depreciation: autoCalculateDep === 'true' || autoCalculateDep === '1' ? true : false
+        };
+        
+        // Return in the same format as the original query result
+        return {
+            rows: [settings],
+            rowCount: 1
+        };
     }
 
     /**
      * Update depreciation settings
-     * @param {string} settingId - Setting ID
+     * Now writes to tblOrgSettings instead of tblDepreciationSettings
+     * @param {string} orgId - Organization ID (changed from settingId)
      * @param {Object} updateData - Data to update
      * @returns {Promise<Object>} Update result
      */
-    static async updateDepreciationSettings(settingId, updateData) {
+    static async updateDepreciationSettings(orgId, updateData) {
         const {
             fiscal_year_start_month,
             fiscal_year_start_day,
@@ -335,32 +342,34 @@ class DepreciationModel {
             changed_by
         } = updateData;
 
-        const query = `
-            UPDATE "tblDepreciationSettings" 
-            SET 
-                fiscal_year_start_month = $1,
-                fiscal_year_start_day = $2,
-                depreciation_calculation_frequency = $3,
-                auto_calculate_depreciation = $4,
-                changed_by = $5,
-                changed_on = CURRENT_TIMESTAMP
-            WHERE setting_id = $6
-            RETURNING *
-        `;
-
-        const values = [
-            fiscal_year_start_month,
-            fiscal_year_start_day,
-            depreciation_calculation_frequency,
-            auto_calculate_depreciation,
-            changed_by,
-            settingId
-        ];
-
         const dbPool = getDb();
-
-
-        return await dbPool.query(query, values);
+        
+        try {
+            // Update each setting in tblOrgSettings
+            await setOrgSetting('fy_start_month', fiscal_year_start_month.toString(), orgId, dbPool);
+            await setOrgSetting('fy_start_day', fiscal_year_start_day.toString(), orgId, dbPool);
+            await setOrgSetting('dep_calc_freq', depreciation_calculation_frequency, orgId, dbPool);
+            await setOrgSetting('auto_calc_dep', auto_calculate_depreciation ? '1' : '0', orgId, dbPool);
+            
+            // Return updated settings in the same format as before
+            const updatedSettings = {
+                org_id: orgId,
+                fiscal_year_start_month,
+                fiscal_year_start_day,
+                depreciation_calculation_frequency,
+                auto_calculate_depreciation,
+                changed_by,
+                changed_on: new Date()
+            };
+            
+            return {
+                rows: [updatedSettings],
+                rowCount: 1
+            };
+        } catch (error) {
+            console.error('Error updating depreciation settings:', error);
+            throw error;
+        }
     }
 
     /**

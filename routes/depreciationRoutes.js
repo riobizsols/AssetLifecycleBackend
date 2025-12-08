@@ -25,8 +25,8 @@ router.get('/assets/:org_id/:method', DepreciationController.getAssetsByDeprecia
 // Get depreciation settings for an organization
 router.get('/settings/:org_id', DepreciationController.getDepreciationSettings);
 
-// Update depreciation settings
-router.put('/settings/:setting_id', DepreciationController.updateDepreciationSettings);
+// Update depreciation settings (now uses org_id instead of setting_id)
+router.put('/settings/:org_id', DepreciationController.updateDepreciationSettings);
 
 // Generate depreciation schedule for an asset
 router.post('/schedule/:asset_id', DepreciationController.generateDepreciationSchedule);
