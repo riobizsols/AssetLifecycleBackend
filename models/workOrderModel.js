@@ -211,13 +211,7 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
     `;
     
     const dbPool = getDb();
-<<<<<<< HEAD
     return await dbPool.query(query, params);
-=======
-
-    
-    return await dbPool.query(query, [orgId, userBranchId]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 };
 
 // Get work order by ID with detailed information
@@ -426,7 +420,6 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
           )
     `;
     
-<<<<<<< HEAD
     // Build parameters array dynamically
     const params = [amsId, orgId];
     if (!hasSuperAccess && userBranchId) {
@@ -436,12 +429,6 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
     
     const dbPool = getDb();
     const result = await dbPool.query(query, params);
-=======
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query, [amsId, orgId, userBranchId]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {

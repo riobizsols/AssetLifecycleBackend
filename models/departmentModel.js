@@ -5,7 +5,6 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 // ✅ Fetch all departments
-<<<<<<< HEAD
 // Supports super access users who can view all branches
 const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false) => {
     const dbPool = getDb();
@@ -19,15 +18,6 @@ const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false) => {
     }
     
     const result = await dbPool.query(query, params);
-=======
-const getAllDepartments = async (org_id, branch_id) => {
-    // Fetch departments that match the branch_id exactly (excluding null values)
-    const dbPool = getDb();
-    const result = await dbPool.query(
-        'SELECT * FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1 AND branch_id = $2', 
-        [org_id, branch_id]
-    );
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     return result.rows;
 };
 

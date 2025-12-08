@@ -1,6 +1,5 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
-<<<<<<< HEAD
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -35,19 +34,6 @@ const findUserByEmail = async (emailOrUsername, tenantPool = null) => {
     const result = await connection.query(
         'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
         [emailOrUsername]
-=======
-
-// Helper function to get database connection (tenant pool or default)
-const getDb = () => getDbFromContext();
-
-//  Find user by email (used for login)
-// If tenantPool is provided, use it; otherwise use getDb() which gets from context
-const findUserByEmail = async (email, tenantPool = null) => {
-    const connection = tenantPool || getDb();
-    const result = await connection.query(
-        'SELECT * FROM "tblUsers" WHERE email = $1',
-        [email]
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     );
     return result.rows[0];
 };

@@ -363,11 +363,7 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
   deptQuery += ` GROUP BY d.dept_id, d.text, d.org_id, d.branch_id`;
 
   const dbPool = getDb();
-<<<<<<< HEAD
   const deptResult = await dbPool.query(deptQuery, deptParams);
-=======
-  const deptResult = await dbPool.query(deptQuery, [dept_id, org_id, branch_id]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 
   // Get assigned assets for department with org_id and branch_id filters
   let assignedAssetsQuery = `
@@ -392,11 +388,7 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
   
   assignedAssetsQuery += ` AND aa.action = 'A' AND aa.latest_assignment_flag = true ORDER BY a.text`;
 
-<<<<<<< HEAD
   const assignedAssetsResult = await dbPool.query(assignedAssetsQuery, assignedAssetsParams);
-=======
-  const assignedAssetsResult = await dbPool.query(assignedAssetsQuery, [dept_id, org_id, branch_id]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 
   // Get employees for the department (filtered by org_id)
   const employeesQuery = `

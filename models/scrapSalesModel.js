@@ -248,11 +248,7 @@ const getAllScrapSales = async (org_id, userBranchCode, hasSuperAccess = false) 
     const dbPool = getDb();
 
     
-<<<<<<< HEAD
     const result = await dbPool.query(query, params);
-=======
-    const result = await dbPool.query(query, [org_id, userBranchCode]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     console.log('Query executed successfully, found scrap sales:', result.rows.length);
     return result;
 };

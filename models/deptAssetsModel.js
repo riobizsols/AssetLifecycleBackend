@@ -47,18 +47,11 @@ exports.deleteDeptAsset = (dept_asset_type_id) => {
     return dbPool.query('DELETE FROM "tblDeptAssetTypes" WHERE dept_asset_type_id = $1', [dept_asset_type_id]);
 };
 
-<<<<<<< HEAD
 // Get all department asset mappings - supports super access users
 exports.getAllDeptAssets = (org_id, branch_id, hasSuperAccess = false) => {
     const dbPool = getDb();
     
     let query = `
-=======
-exports.getAllDeptAssets = () => {
-    const dbPool = getDb();
-
-    return dbPool.query(`
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     SELECT da.dept_asset_type_id, da.dept_id, da.asset_type_id, d.text AS dept_name, at.text AS asset_name
     FROM "tblDeptAssetTypes" da
     JOIN "tblDepartments" d ON da.dept_id = d.dept_id

@@ -337,13 +337,9 @@ const getAllAssets = async (req, res) => {
 
     // Use user context filtering - filter by user's org and branch
     // Pass tenant database connection from request (req.db) to use tenant-specific database
-<<<<<<< HEAD
     // Pass hasSuperAccess flag from req.user (set automatically in middleware)
     // If hasSuperAccess is true, user can see all branches (no branch filter applied)
     const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db, req.user?.hasSuperAccess || false);
-=======
-    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
@@ -2301,11 +2297,7 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
     }
 
     const result = await dbPool.query(query, params);
-<<<<<<< HEAD
     const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
-=======
-    const unassignedResult = await dbPool.query(unassignedQuery, params);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     const departments = result.rows.map(row => ({
       name: row.department_name,

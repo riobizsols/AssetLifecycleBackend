@@ -13,7 +13,6 @@ const getAllReports = async (orgId, branchId = null, hasSuperAccess = false) => 
     LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
     WHERE brd.org_id = $1
   `;
-<<<<<<< HEAD
   
   const params = [orgId];
   
@@ -26,9 +25,6 @@ const getAllReports = async (orgId, branchId = null, hasSuperAccess = false) => 
   query += ` ORDER BY brd.reported_by DESC`;
   
   const result = await getDb().query(query, params);
-=======
-  const result = await getDb().query(query, [orgId]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
   return result.rows;
 };
 

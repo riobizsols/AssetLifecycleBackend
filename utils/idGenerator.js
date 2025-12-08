@@ -8,7 +8,6 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     console.log(`🔢 Generating ID for tableKey: ${tableKey}`);
     
     const dbPool = getDb();
-<<<<<<< HEAD
     let result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
@@ -35,9 +34,6 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         
         // Query again to get the newly created entry
         result = await dbPool.query(
-=======
-    const result = await dbPool.query(
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
     );
@@ -87,12 +83,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'atp': 'tblAssetTypeProps',
         'userjobrole': 'tblUserJobRoles',
         'asset_usage': 'tblAssetUsageReg',
-<<<<<<< HEAD
         'vendor_sla': 'tblVendorSLAs',
         'vendor_sla_rec': 'tblvendorslarecs'
-=======
-        'vendor_sla': 'tblVendorSLAs'
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     };
 
     const targetTable = tableMap[tableKey];
@@ -120,12 +112,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'atp': 'asset_type_prop_id',
             'userjobrole': 'user_job_role_id',
             'asset_usage': 'aug_id',
-<<<<<<< HEAD
             'vendor_sla': 'vsla_id',
             'vendor_sla_rec': 'vslar_id'
-=======
-            'vendor_sla': 'vsla_id'
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         };
 
         const columnName = columnMap[tableKey];

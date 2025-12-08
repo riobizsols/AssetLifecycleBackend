@@ -255,11 +255,7 @@ const getAssetRegisterSummary = async (req, res) => {
 
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
-<<<<<<< HEAD
     const result = await dbPool.query(summaryQuery, params);
-=======
-    const result = await dbPool.query(summaryQuery);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     res.status(200).json({
       success: true,

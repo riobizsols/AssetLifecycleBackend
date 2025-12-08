@@ -559,7 +559,6 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId, hasSuperAc
         WHERE ams.org_id = $1 AND a.org_id = $1
     `;
     
-<<<<<<< HEAD
     // Apply branch filter only if user doesn't have super access
     const params = [orgId];
     if (!hasSuperAccess && branchId) {
@@ -571,12 +570,6 @@ const getAllMaintenanceSchedules = async (orgId = 'ORG001', branchId, hasSuperAc
     
     const dbPool = getDb();
     const result = await dbPool.query(query, params);
-=======
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query, [orgId, branchId]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     console.log('Query executed successfully, found rows:', result.rows.length);
     return result;
 };
@@ -603,7 +596,6 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId, has
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2
     `;
     
-<<<<<<< HEAD
     // Apply branch filter only if user doesn't have super access
     const params = [amsId, orgId];
     if (!hasSuperAccess && branchId) {
@@ -613,12 +605,6 @@ const getMaintenanceScheduleById = async (amsId, orgId = 'ORG001', branchId, has
     
     const dbPool = getDb();
     const result = await dbPool.query(query, params);
-=======
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query, [amsId, orgId, branchId]);
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
     
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {
