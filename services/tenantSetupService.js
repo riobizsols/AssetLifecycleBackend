@@ -145,10 +145,10 @@ async function createAdminUser(client, orgId, adminData) {
   // Ensure System Administrator job role exists
   try {
     await client.query(`
-      INSERT INTO public."tblJobRoles" (job_role_id, text, job_function, int_status)
-      VALUES ('JR001', 'System Administrator', 'Full system access', 1)
+      INSERT INTO public."tblJobRoles" (org_id, job_role_id, text, job_function, int_status)
+      VALUES ($1, 'JR001', 'System Administrator', 'Full system access', 1)
       ON CONFLICT (job_role_id) DO NOTHING
-    `);
+    `, [orgId]);
     console.log(`[TenantSetup] Job role 'JR001' (System Administrator) ensured in tblJobRoles`);
   } catch (err) {
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
@@ -156,14 +156,17 @@ async function createAdminUser(client, orgId, adminData) {
 
   // Step 1: Create employee record in tblEmployees (minimal columns only)
   try {
+    // Generate emp_int_id (first employee gets ID 1)
+    const empIntId = 1;
+    
     await client.query(`
       INSERT INTO public."tblEmployees" (
-        org_id, employee_id, full_name,
+        emp_int_id, org_id, employee_id, full_name,
         created_by, created_on, changed_by, changed_on, int_status
       )
-      VALUES ($1, $2, $3, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
-    `, [orgId, employeeId, fullName]);
-    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId}`);
+      VALUES ($1, $2, $3, $4, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
+    `, [empIntId, orgId, employeeId, fullName]);
+    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating employee record:`, err.message);
     throw new Error(`Failed to create employee record: ${err.message}`);
