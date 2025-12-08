@@ -154,18 +154,34 @@ async function createAdminUser(client, orgId, adminData) {
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
-  // Step 1: Create employee record in tblEmployees (minimal columns only)
+  // Ensure default department exists
+  try {
+    await client.query(`
+      INSERT INTO public."tblDepartments" (org_id, dept_id, text, int_status)
+      VALUES ($1, 'DEPT001', 'Administration', 1)
+      ON CONFLICT (dept_id) DO NOTHING
+    `, [orgId]);
+    console.log(`[TenantSetup] Department 'DEPT001' (Administration) ensured in tblDepartments`);
+  } catch (err) {
+    console.warn(`[TenantSetup] Department creation note: ${err.message}`);
+  }
+
+  // Step 1: Create employee record in tblEmployees (with all required NOT NULL columns)
   try {
     // Generate emp_int_id (first employee gets ID 1)
     const empIntId = 1;
+    const deptId = 'DEPT001'; // Default department for admin
+    const employeeType = 'PERMANENT';
+    const languageCode = 'en';
     
     await client.query(`
       INSERT INTO public."tblEmployees" (
-        emp_int_id, org_id, employee_id, name, full_name,
-        created_by, created_on, changed_by, changed_on, int_status
+        emp_int_id, employee_id, name, full_name, email_id, dept_id, 
+        phone_number, employee_type, joining_date, language_code,
+        int_status, created_by, created_on, changed_by, changed_on, org_id
       )
-      VALUES ($1, $2, $3, $4, $4, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
-    `, [empIntId, orgId, employeeId, fullName]);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, 1, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $10)
+    `, [empIntId, employeeId, fullName, fullName, email, deptId, phone, employeeType, languageCode, orgId]);
     console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating employee record:`, err.message);
