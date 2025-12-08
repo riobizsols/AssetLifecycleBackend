@@ -154,19 +154,18 @@ async function createAdminUser(client, orgId, adminData) {
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
-  // Step 1: Create employee record in tblEmployees
+  // Step 1: Create employee record in tblEmployees (without email - it doesn't exist in schema)
   try {
     await client.query(`
       INSERT INTO public."tblEmployees" (
-        org_id, employee_id, full_name, email, phone,
+        org_id, employee_id, full_name, phone,
         created_by, created_on, changed_by, changed_on, int_status
       )
-      VALUES ($1, $2, $3, $4, $5, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
+      VALUES ($1, $2, $3, $4, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
       ON CONFLICT (employee_id) DO UPDATE
       SET full_name = EXCLUDED.full_name,
-          email = EXCLUDED.email,
           phone = EXCLUDED.phone
-    `, [orgId, employeeId, fullName, email, phone]);
+    `, [orgId, employeeId, fullName, phone]);
     console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId}`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating employee record:`, err.message);

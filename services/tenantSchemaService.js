@@ -281,12 +281,16 @@ const generateTenantSchemaSql = async () => {
     console.log(`[TenantSchema] 🔗 Found ${fkResult.rows.length} foreign key constraints (excluding references to ${EXCLUDED_TABLES.join(', ')})`);
     
     for (const fk of fkResult.rows) {
+      // Strip quotes from regclass::text output (it already includes quotes)
+      const tableName = fk.table_name.replace(/^"(.*)"$/, '$1');
+      const foreignTableName = fk.foreign_table_name.replace(/^"(.*)"$/, '$1');
+      
       const sourceColumns = fk.source_columns.split(', ').map(c => `"${c}"`).join(', ');
       const targetColumns = fk.target_columns.split(', ').map(c => `"${c}"`).join(', ');
       
-      let fkSql = `ALTER TABLE "${fk.table_name}" ADD CONSTRAINT "${fk.constraint_name}" ` +
+      let fkSql = `ALTER TABLE "${tableName}" ADD CONSTRAINT "${fk.constraint_name}" ` +
                   `FOREIGN KEY (${sourceColumns}) ` +
-                  `REFERENCES "${fk.foreign_table_name}" (${targetColumns})`;
+                  `REFERENCES "${foreignTableName}" (${targetColumns})`;
       
       if (fk.update_rule !== 'NO ACTION') {
         fkSql += ` ON UPDATE ${fk.update_rule}`;
