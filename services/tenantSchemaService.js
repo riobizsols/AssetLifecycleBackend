@@ -248,8 +248,8 @@ const generateTenantSchemaSql = async () => {
         conname AS constraint_name,
         conrelid::regclass::text AS table_name,
         confrelid::regclass::text AS foreign_table_name,
-        string_agg(a.attname, ', ' ORDER BY ordinality) AS source_columns,
-        string_agg(af.attname, ', ' ORDER BY ordinality) AS target_columns,
+        string_agg(a.attname, ', ' ORDER BY u.ordinality) AS source_columns,
+        string_agg(af.attname, ', ' ORDER BY uf.ordinality) AS target_columns,
         CASE confupdtype
           WHEN 'a' THEN 'NO ACTION'
           WHEN 'r' THEN 'RESTRICT'
