@@ -188,16 +188,18 @@ async function createAdminUser(client, orgId, adminData) {
     throw new Error(`Failed to create employee record: ${err.message}`);
   }
 
-  // Step 2: Add admin user to tblUsers with employee_id reference
+  // Step 2: Add admin user to tblUsers with emp_int_id reference
   try {
+    const empIntId = 1; // Reference to the employee record we just created
+    
     await client.query(`
       INSERT INTO public."tblUsers" (
-        org_id, user_id, employee_id, full_name, email, phone, job_role_id, password,
+        org_id, user_id, emp_int_id, full_name, email, phone, job_role_id, password,
         created_by, created_on, changed_by, changed_on, int_status, time_zone
       )
       VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
-    `, [orgId, userId, employeeId, fullName, email, phone, passwordHash]);
-    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to ${employeeId})`);
+    `, [orgId, userId, empIntId.toString(), fullName, email, phone, passwordHash]);
+    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to emp_int_id: ${empIntId})`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating user record:`, err.message);
     throw new Error(`Failed to create user record: ${err.message}`);
