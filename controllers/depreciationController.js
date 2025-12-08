@@ -612,18 +612,19 @@ class DepreciationController {
 
     /**
      * Update depreciation settings
+     * Now uses org_id instead of setting_id (settings stored in tblOrgSettings)
      * @param {Object} req - Express request object
      * @param {Object} res - Express response object
      */
     static async updateDepreciationSettings(req, res) {
         const startTime = Date.now();
-        const { setting_id } = req.params;
+        const { org_id } = req.params;
         const updateData = req.body;
         const user_id = req.user?.user_id || 'SYSTEM';
         
         try {
             depreciationLogger.logUpdateDepreciationSettingsApiCalled({
-                settingId: setting_id,
+                orgId: org_id,
                 updateData: updateData,
                 requestData: { operation: 'update_depreciation_settings' },
                 userId: user_id,
@@ -631,18 +632,18 @@ class DepreciationController {
             }).catch(err => console.error('Logging error:', err));
 
             depreciationLogger.logUpdatingDepreciationSettings({
-                settingId: setting_id,
+                orgId: org_id,
                 updateData: updateData,
                 userId: user_id
             }).catch(err => console.error('Logging error:', err));
 
-            const updatedSettings = await DepreciationModel.updateDepreciationSettings(setting_id, {
+            const updatedSettings = await DepreciationModel.updateDepreciationSettings(org_id, {
                 ...updateData,
                 changed_by: user_id
             });
 
             depreciationLogger.logDepreciationSettingsUpdated({
-                settingId: setting_id,
+                orgId: org_id,
                 userId: user_id
             }).catch(err => console.error('Logging error:', err));
 
@@ -654,7 +655,7 @@ class DepreciationController {
         } catch (error) {
             console.error('Error updating depreciation settings:', error);
             depreciationLogger.logDepreciationSettingsUpdateError({
-                settingId: setting_id,
+                orgId: org_id,
                 error,
                 userId: user_id
             }).catch(logErr => console.error('Logging error:', logErr));
