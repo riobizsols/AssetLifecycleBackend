@@ -157,25 +157,40 @@ async function generateUniqueSubdomain(orgName) {
   let baseSubdomain = generateSubdomain(orgName);
   
   if (!baseSubdomain) {
-    baseSubdomain = 'org-' + Date.now().toString().slice(-6);
+    baseSubdomain = 'org-' + Math.random().toString(36).substring(2, 8);
   }
   
   let subdomain = baseSubdomain;
   let counter = 1;
   
   // Keep trying until we find an available subdomain
-  while (!(await isSubdomainAvailable(subdomain))) {
-    subdomain = `${baseSubdomain}-${counter}`;
-    counter++;
+  try {
+    const isAvailable = await isSubdomainAvailable(subdomain);
     
-    // Safety limit
-    if (counter > 1000) {
-      subdomain = `${baseSubdomain}-${Date.now()}`;
-      break;
+    if (isAvailable) {
+      // Base subdomain is available, use it without any suffix
+      return subdomain;
     }
+    
+    // Base subdomain is taken, try with counter suffix
+    while (counter <= 100) {
+      subdomain = `${baseSubdomain}-${counter}`;
+      
+      if (await isSubdomainAvailable(subdomain)) {
+        return subdomain;
+      }
+      
+      counter++;
+    }
+    
+    // If we still can't find one after 100 tries, throw error
+    throw new Error(`Unable to generate unique subdomain for "${orgName}" after 100 attempts`);
+  } catch (error) {
+    console.error('[SubdomainUtils] Error generating unique subdomain:', error.message);
+    // If there's an error checking availability, return base subdomain and log warning
+    console.warn('[SubdomainUtils] ⚠️ Could not verify subdomain availability. Using base subdomain: ' + baseSubdomain);
+    return baseSubdomain;
   }
-  
-  return subdomain;
 }
 
 module.exports = {
