@@ -161,10 +161,10 @@ async function createAdminUser(client, orgId, adminData) {
     
     await client.query(`
       INSERT INTO public."tblEmployees" (
-        emp_int_id, org_id, employee_id, full_name,
+        emp_int_id, org_id, employee_id, name, full_name,
         created_by, created_on, changed_by, changed_on, int_status
       )
-      VALUES ($1, $2, $3, $4, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
+      VALUES ($1, $2, $3, $4, $4, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1)
     `, [empIntId, orgId, employeeId, fullName]);
     console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
   } catch (err) {
