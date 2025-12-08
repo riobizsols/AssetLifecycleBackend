@@ -40,13 +40,9 @@ const generateToken = (user, useDefaultDb = false) => {
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
-<<<<<<< HEAD
 // 🔑 Login (Supports both subdomain-based multi-tenant and normal database login)
 // - If subdomain exists: Uses subdomain to find org_id and tenant database
 // - If no subdomain (e.g., localhost): Uses default database from .env (normal login)
-=======
-// 🔑 Login (Subdomain-based multi-tenant)
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 const login = async (req, res) => {
     const startTime = Date.now();
     const { email, password } = req.body;
@@ -59,7 +55,6 @@ const login = async (req, res) => {
             url: req.originalUrl
         });
 
-<<<<<<< HEAD
         // Step 2: Check if subdomain-based login or normal database login
         const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
         const hostname = req.get('host') || req.hostname;
@@ -125,63 +120,6 @@ const login = async (req, res) => {
             console.log(`[AuthController] Normal login - user org_id: ${orgId}`);
         }
         
-=======
-        // Step 2: Get org_id from subdomain
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
-        const hostname = req.get('host') || req.hostname;
-        const subdomain = extractSubdomain(hostname);
-        
-        if (!subdomain) {
-            return res.status(400).json({ 
-                message: 'Invalid subdomain. Please access the application using your organization subdomain.' 
-            });
-        }
-        
-        const orgId = await getOrgIdFromSubdomain(subdomain);
-        
-        if (!orgId) {
-            return res.status(404).json({ 
-                message: `Organization not found for subdomain: ${subdomain}` 
-            });
-        }
-        
-        console.log(`[AuthController] Login attempt for subdomain: ${subdomain}, org_id: ${orgId}`);
-
-        // Step 3: Log checking user in database
-        await logCheckingUserInDatabase({ email, orgId, subdomain });
-        
-        // Step 4: Determine which database to use (tenant or default)
-        const { checkTenantExists, getTenantPool } = require('../services/tenantService');
-        const defaultDb = require('../config/db');
-        let dbPool = defaultDb;
-        let isTenant = false;
-        
-        // Check if this is a tenant organization
-        const tenantExists = await checkTenantExists(orgId);
-        if (tenantExists) {
-            dbPool = await getTenantPool(orgId);
-            isTenant = true;
-            console.log(`[AuthController] Using tenant database for org_id: ${orgId}`);
-        } else {
-            console.log(`[AuthController] Using default database for org_id: ${orgId}`);
-        }
-        
-        // Step 5: Find user in the appropriate database
-        const user = await findUserByEmail(email, dbPool);
-        
-        // Verify user belongs to the correct organization
-        if (user && user.org_id !== orgId) {
-            await logUserNotFound({ email, orgId, reason: 'User belongs to different organization' });
-            await logFailedLogin({
-                email,
-                userId: null,
-                reason: 'User not found in this organization',
-                duration: Date.now() - startTime
-            });
-            return res.status(404).json({ message: 'User not found in this organization' });
-        }
-        
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
         if (!user) {
             // Step 3a: User not found
             await logUserNotFound({ email });
@@ -232,7 +170,6 @@ const login = async (req, res) => {
         // Step 5b: Password matched
         await logPasswordMatched({ email, userId: user.user_id });
 
-<<<<<<< HEAD
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = user.source_table === 'tblRioAdmin';
         
@@ -309,25 +246,6 @@ const login = async (req, res) => {
         // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
         let language_code = user.language_code || 'en'; // default language
         if (!isRioAdmin && user.emp_int_id) {
-=======
-        // Update last_accessed field (using the appropriate database)
-        await dbPool.query(
-            `UPDATE "tblUsers" 
-             SET last_accessed = CURRENT_DATE 
-             WHERE org_id = $1 AND user_id = $2`,
-            [user.org_id, user.user_id]
-        );
-
-        // Fetch all user roles from tblUserJobRoles (using the appropriate database)
-        const userRoles = await getUserRoles(user.user_id, dbPool);
-        
-        // Fetch user with branch information (using the appropriate database)
-        const userWithBranch = await getUserWithBranch(user.user_id, dbPool);
-        
-        // Fetch language_code from employee table if emp_int_id exists (using the appropriate database)
-        let language_code = 'en'; // default language
-        if (user.emp_int_id) {
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             const employeeResult = await dbPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
                 [user.emp_int_id]
@@ -355,12 +273,8 @@ const login = async (req, res) => {
                 job_role_id: user.job_role_id,
                 emp_int_id: user.emp_int_id,
                 use_default_db: !isTenant,
-<<<<<<< HEAD
                 subdomain: subdomain || null,
                 loginMode: loginMode
-=======
-                subdomain: subdomain
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             }
         });
         
@@ -633,7 +547,6 @@ const updateOwnPassword = async (req, res) => {
     res.json({ message: 'Password updated successfully' });
 };
 
-<<<<<<< HEAD
 // 🔐 Change Password (for authenticated users, especially those with Initial1 password)
 const changePassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
@@ -696,8 +609,6 @@ const changePassword = async (req, res) => {
     res.json({ message: 'Password changed successfully' });
 };
 
-=======
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
 // 🔑 Multi-Tenant Login (requires org_id)
 const tenantLogin = async (req, res) => {
     const startTime = Date.now();
@@ -793,7 +704,6 @@ const tenantLogin = async (req, res) => {
         // Step 5b: Password matched
         await logPasswordMatched({ email, userId: user.user_id });
 
-<<<<<<< HEAD
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = user.source_table === 'tblRioAdmin';
         
@@ -870,25 +780,6 @@ const tenantLogin = async (req, res) => {
         // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
         let language_code = user.language_code || 'en'; // default language
         if (!isRioAdmin && user.emp_int_id) {
-=======
-        // Update last_accessed field using tenant database
-        await tenantPool.query(
-            `UPDATE "tblUsers" 
-             SET last_accessed = CURRENT_DATE 
-             WHERE org_id = $1 AND user_id = $2`,
-            [user.org_id, user.user_id]
-        );
-
-        // Fetch all user roles from tblUserJobRoles (using tenant database)
-        const userRoles = await getUserRoles(user.user_id, tenantPool);
-        
-        // Fetch user with branch information (using tenant database)
-        const userWithBranch = await getUserWithBranch(user.user_id, tenantPool);
-        
-        // Fetch language_code from employee table if emp_int_id exists (using tenant database)
-        let language_code = 'en'; // default language
-        if (user.emp_int_id) {
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             const employeeResult = await tenantPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
                 [user.emp_int_id]
@@ -947,10 +838,7 @@ const tenantLogin = async (req, res) => {
 
         res.json({
             token,
-<<<<<<< HEAD
             requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
-=======
->>>>>>> 205758be7c8605190654e3f4f51c3e2cb0043142
             user: {
                 full_name: user.full_name,
                 email: user.email,
