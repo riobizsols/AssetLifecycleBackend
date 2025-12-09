@@ -2254,7 +2254,7 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND a.org_id = $1
     `;
     
-    // Apply branch filter only if user doesn't have super access
+    // Apply branch filter for assets only if user doesn't have super access
     if (!hasSuperAccess && userBranchId) {
       params.push(userBranchId);
       query += ` AND a.branch_id = $${paramIndex}`;
@@ -2268,7 +2268,8 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
     
     // Apply branch filter for departments only if user doesn't have super access
     if (!hasSuperAccess && userBranchId) {
-      query += ` AND d.branch_id = $${paramIndex}`;
+      // Note: branch_id was already added to params above
+      query += ` AND d.branch_id = $${paramIndex - 1}`;
     }
     
     query += `
