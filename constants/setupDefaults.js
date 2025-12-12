@@ -433,6 +433,7 @@ const DEFAULT_APPS = [
   { id: "AUDITLOGS", label: "Audit Logs" },
   { id: "AUDITLOGCONFIG", label: "Audit Log Config" },
   { id: "ADMINSETTINGS", label: "Admin Settings" },
+  { id: "COLUMNACCESSCONFIG", label: "Column Access Config" },
   { id: "BULKUPLOAD", label: "Bulk Upload" },
   { id: "REPORTS", label: "Reports" },
   { id: "MAINTENANCEAPPROVAL", label: "Maintenance Approval" },

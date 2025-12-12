@@ -19,7 +19,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         
         // Default prefix mapping for auto-creation
         const defaultPrefixes = {
-            'vendor_sla_rec': 'VSLAR'
+            'vendor_sla_rec': 'VSLAR',
+            'job_role_nav': 'JRN',
+            'job_role': 'JR'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
@@ -84,7 +86,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'userjobrole': 'tblUserJobRoles',
         'asset_usage': 'tblAssetUsageReg',
         'vendor_sla': 'tblVendorSLAs',
-        'vendor_sla_rec': 'tblvendorslarecs'
+        'vendor_sla_rec': 'tblvendorslarecs',
+        'job_role_nav': 'tblJobRoleNav',
+        'job_role': 'tblJobRoles'
     };
 
     const targetTable = tableMap[tableKey];
@@ -113,7 +117,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'userjobrole': 'user_job_role_id',
             'asset_usage': 'aug_id',
             'vendor_sla': 'vsla_id',
-            'vendor_sla_rec': 'vslar_id'
+            'vendor_sla_rec': 'vslar_id',
+            'job_role_nav': 'job_role_nav_id',
+            'job_role': 'job_role_id'
         };
 
         const columnName = columnMap[tableKey];
