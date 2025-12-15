@@ -115,7 +115,14 @@ const login = async (req, res) => {
         }
         
         // Step 5: Find user in the appropriate database
+        console.log(`[AuthController] 🔍 Searching for user with email: "${email}" in ${isTenant ? 'tenant' : 'default'} database`);
         const user = await findUserByEmail(email, dbPool);
+        
+        if (user) {
+            console.log(`[AuthController] ✅ User found: ${user.user_id}, org_id: ${user.org_id}`);
+        } else {
+            console.log(`[AuthController] ❌ User not found with email: "${email}"`);
+        }
         
         // For subdomain-based login, verify user belongs to the correct organization
         if (loginMode === 'subdomain' && user && user.org_id !== orgId) {

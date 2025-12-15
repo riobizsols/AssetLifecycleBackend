@@ -10,11 +10,22 @@ const getDb = () => getDbFromContext();
 const findUserByEmail = async (email, tenantPool = null) => {
     const connection = tenantPool || getDb();
     
+    console.log(`[UserModel] 🔍 Searching for user with email: "${email}"`);
+    console.log(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
+    
     // Query tblUsers by email only (tenant databases use this)
     const result = await connection.query(
         'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
         [email]
     );
+    
+    console.log(`[UserModel] Query result: ${result.rows.length} user(s) found`);
+    if (result.rows.length > 0) {
+        console.log(`[UserModel] ✅ User found: ${result.rows[0].user_id} (${result.rows[0].full_name}), org_id: ${result.rows[0].org_id}`);
+    } else {
+        console.log(`[UserModel] ❌ No user found with email: "${email}"`);
+    }
+    
     return result.rows[0];
 };
 
