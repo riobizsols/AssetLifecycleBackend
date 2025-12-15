@@ -58,34 +58,31 @@ async function getOrgIdFromSubdomain(subdomain) {
     return null;
   }
   
+  // Validate subdomain format (alphanumeric and hyphens only, max 63 chars)
+  const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+  if (!subdomainRegex.test(subdomain)) {
+    console.error(`[SubdomainUtils] ❌ Invalid subdomain format: ${subdomain}`);
+    return null;
+  }
+  
   try {
     // Get the tenant registry pool (same connection used by tenantService)
     const pool = initTenantRegistryPool();
+    
+    if (!pool) {
+      console.error('[SubdomainUtils] ❌ Tenant registry pool not initialized');
+      throw new Error('Database connection not available');
+    }
     
     // Normalize subdomain (trim, lowercase)
     const normalizedSubdomain = subdomain.trim().toLowerCase();
     console.log(`[SubdomainUtils] 🔍 Looking up org_id for subdomain: "${subdomain}" (normalized: "${normalizedSubdomain}")`);
     
-    // First, let's check what's actually in the tenants table
-    const allTenantsResult = await pool.query(
-      `SELECT org_id, subdomain, is_active FROM "tenants" ORDER BY org_id`
-    );
-    console.log(`[SubdomainUtils] 📋 All tenants in database:`, allTenantsResult.rows.map(r => ({
-      org_id: r.org_id,
-      subdomain: r.subdomain,
-      is_active: r.is_active,
-      subdomain_length: r.subdomain?.length,
-      subdomain_lowercase: r.subdomain?.toLowerCase()
-    })));
-    
-    // First check tenants table for subdomain mapping (case-insensitive)
+    // Query tenants table for subdomain mapping (case-insensitive, optimized)
     const tenantResult = await pool.query(
-      `SELECT org_id, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true`,
+      `SELECT org_id, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true LIMIT 1`,
       [normalizedSubdomain]
     );
-    
-    console.log(`[SubdomainUtils] 🔍 Tenants table query (case-insensitive):`, tenantResult.rows);
-    console.log(`[SubdomainUtils] 🔍 Query used: LOWER(TRIM(subdomain)) = '${normalizedSubdomain}' AND is_active = true`);
     
     if (tenantResult.rows.length > 0) {
       const orgId = tenantResult.rows[0].org_id;
@@ -93,26 +90,11 @@ async function getOrgIdFromSubdomain(subdomain) {
       return orgId;
     }
     
-    // Also try exact match (in case there are spaces or case issues)
-    const exactMatchResult = await pool.query(
-      `SELECT org_id, subdomain, is_active FROM "tenants" WHERE subdomain = $1`,
-      [subdomain]
-    );
-    console.log(`[SubdomainUtils] 🔍 Exact match query result:`, exactMatchResult.rows);
-    
-    if (exactMatchResult.rows.length > 0 && exactMatchResult.rows[0].is_active) {
-      const orgId = exactMatchResult.rows[0].org_id;
-      console.log(`[SubdomainUtils] ✅ Found org_id with exact match: ${orgId}`);
-      return orgId;
-    }
-    
     // Fallback: check tblOrgs table for subdomain (use same pool)
     const orgResult = await pool.query(
-      `SELECT org_id, subdomain FROM "tblOrgs" WHERE LOWER(TRIM(subdomain)) = $1 AND int_status = 1`,
+      `SELECT org_id, subdomain FROM "tblOrgs" WHERE LOWER(TRIM(subdomain)) = $1 AND int_status = 1 LIMIT 1`,
       [normalizedSubdomain]
     );
-    
-    console.log(`[SubdomainUtils] 🔍 tblOrgs table query result:`, orgResult.rows);
     
     if (orgResult.rows.length > 0) {
       const orgId = orgResult.rows[0].org_id;

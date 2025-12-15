@@ -33,35 +33,71 @@ const protect = async (req, res, next) => {
         } else {
             // For tenant logins (use_default_db=false), check subdomain to get tenant org_id
             // This is because the user's org_id in the tenant DB might differ from the tenant's org_id
-            const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
-            const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
-            const subdomain = extractSubdomain(hostname);
-            
-            if (!subdomain) {
-                return res.status(400).json({ message: 'Subdomain required for tenant login' });
+            try {
+                const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+                
+                // Try multiple ways to get hostname (for different proxy configurations)
+                const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
+                
+                if (!hostname) {
+                    console.error('[AuthMiddleware] ❌ No hostname found in request');
+                    return res.status(400).json({ message: 'Hostname required for tenant login' });
+                }
+                
+                const subdomain = extractSubdomain(hostname);
+                
+                if (!subdomain) {
+                    console.error(`[AuthMiddleware] ❌ No subdomain found in hostname: ${hostname}`);
+                    return res.status(400).json({ message: 'Subdomain required for tenant login' });
+                }
+                
+                // Get tenant org_id from subdomain with error handling
+                let tenantOrgId;
+                try {
+                    tenantOrgId = await getOrgIdFromSubdomain(subdomain);
+                } catch (subdomainError) {
+                    console.error(`[AuthMiddleware] ❌ Error looking up subdomain "${subdomain}":`, subdomainError);
+                    return res.status(500).json({ message: 'Error looking up organization' });
+                }
+                
+                if (!tenantOrgId) {
+                    console.warn(`[AuthMiddleware] ⚠️ Organization not found for subdomain: ${subdomain}`);
+                    return res.status(404).json({ message: `Organization not found for subdomain: ${subdomain}` });
+                }
+                
+                console.log(`[AuthMiddleware] ✅ Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
+                
+                // Use tenant database - no fallback
+                const { getTenantPool, checkTenantExists } = require('../services/tenantService');
+                
+                // Check if tenant exists
+                let tenantExists;
+                try {
+                    tenantExists = await checkTenantExists(tenantOrgId);
+                } catch (checkError) {
+                    console.error(`[AuthMiddleware] ❌ Error checking tenant existence for org_id "${tenantOrgId}":`, checkError);
+                    return res.status(500).json({ message: 'Error checking tenant status' });
+                }
+                
+                if (!tenantExists) {
+                    console.warn(`[AuthMiddleware] ⚠️ Tenant not found or inactive for org_id: ${tenantOrgId}`);
+                    return res.status(404).json({ message: `Tenant not found for org_id: ${tenantOrgId}` });
+                }
+                
+                // Get tenant database pool with error handling
+                try {
+                    dbPool = await getTenantPool(tenantOrgId);
+                    isTenant = true;
+                    console.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
+                } catch (poolError) {
+                    console.error(`[AuthMiddleware] ❌ Error getting tenant pool for org_id "${tenantOrgId}":`, poolError);
+                    return res.status(500).json({ message: 'Error connecting to tenant database' });
+                }
+            } catch (error) {
+                // Catch any unexpected errors
+                console.error('[AuthMiddleware] ❌ Unexpected error in tenant login flow:', error);
+                return res.status(500).json({ message: 'Internal server error during tenant authentication' });
             }
-            
-            // Get tenant org_id from subdomain
-            const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
-            
-            if (!tenantOrgId) {
-                return res.status(404).json({ message: `Organization not found for subdomain: ${subdomain}` });
-            }
-            
-            console.log(`[AuthMiddleware] Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
-            
-            // Use tenant database - no fallback
-            const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-            const tenantExists = await checkTenantExists(tenantOrgId);
-            
-            if (!tenantExists) {
-                return res.status(404).json({ message: `Tenant not found for org_id: ${tenantOrgId}` });
-            }
-            
-            // This is a tenant user - use tenant database
-            dbPool = await getTenantPool(tenantOrgId);
-            isTenant = true;
-            console.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
         }
 
         // Attach database pool to request so controllers/models can use it

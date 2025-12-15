@@ -134,22 +134,78 @@ function getTenantConnectionString(credentials) {
 /**
  * Get a database connection pool for a specific tenant
  */
-async function getTenantPool(orgId) {
-  console.log(`[TenantService] 🔍 Getting tenant pool for org_id: ${orgId}`);
-  const credentials = await getTenantCredentials(orgId);
-  console.log(`[TenantService] ✅ Got credentials for org_id: ${orgId}, database: ${credentials.database}`);
-  const connectionString = getTenantConnectionString(credentials);
-  console.log(`[TenantService] 🔗 Connection string: postgresql://${credentials.user}@${credentials.host}:${credentials.port}/${credentials.database}`);
+// Cache for tenant pools to avoid recreating them
+const tenantPoolCache = new Map();
 
-  const pool = new Pool({
-    connectionString,
-    max: 10,
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-  });
+async function getTenantPool(orgId) {
+  if (!orgId) {
+    throw new Error('org_id is required');
+  }
   
-  console.log(`[TenantService] ✅ Created pool for org_id: ${orgId}`);
-  return pool;
+  // Check cache first
+  if (tenantPoolCache.has(orgId)) {
+    const cachedPool = tenantPoolCache.get(orgId);
+    // Verify pool is still valid by checking if it's ended
+    if (!cachedPool.ended) {
+      console.log(`[TenantService] ♻️ Using cached pool for org_id: ${orgId}`);
+      return cachedPool;
+    } else {
+      // Pool was ended, remove from cache
+      tenantPoolCache.delete(orgId);
+      console.log(`[TenantService] ⚠️ Cached pool was ended, creating new one for org_id: ${orgId}`);
+    }
+  }
+  
+  console.log(`[TenantService] 🔍 Getting tenant pool for org_id: ${orgId}`);
+  
+  try {
+    const credentials = await getTenantCredentials(orgId);
+    console.log(`[TenantService] ✅ Got credentials for org_id: ${orgId}, database: ${credentials.database}`);
+    
+    // Validate credentials
+    if (!credentials.host || !credentials.port || !credentials.database || !credentials.user) {
+      throw new Error(`Invalid tenant credentials for org_id: ${orgId}`);
+    }
+    
+    const connectionString = getTenantConnectionString(credentials);
+    console.log(`[TenantService] 🔗 Connection string: postgresql://${credentials.user}@${credentials.host}:${credentials.port}/${credentials.database}`);
+
+    const pool = new Pool({
+      connectionString,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000, // Increased timeout for better reliability
+      // Handle pool errors
+      errorHandler: (err, client) => {
+        console.error(`[TenantService] ❌ Pool error for org_id ${orgId}:`, err);
+        // Remove from cache if pool has errors
+        if (tenantPoolCache.has(orgId)) {
+          tenantPoolCache.delete(orgId);
+        }
+      }
+    });
+    
+    // Test the connection before caching
+    try {
+      const testClient = await pool.connect();
+      await testClient.query('SELECT 1');
+      testClient.release();
+      console.log(`[TenantService] ✅ Pool connection test successful for org_id: ${orgId}`);
+    } catch (testError) {
+      console.error(`[TenantService] ❌ Pool connection test failed for org_id ${orgId}:`, testError);
+      await pool.end(); // Clean up failed pool
+      throw new Error(`Failed to connect to tenant database: ${testError.message}`);
+    }
+    
+    // Cache the pool
+    tenantPoolCache.set(orgId, pool);
+    console.log(`[TenantService] ✅ Created and cached pool for org_id: ${orgId}`);
+    
+    return pool;
+  } catch (error) {
+    console.error(`[TenantService] ❌ Error creating pool for org_id ${orgId}:`, error);
+    throw error;
+  }
 }
 
 /**
