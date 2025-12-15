@@ -12,26 +12,36 @@ const db = require('../config/db');
  * @returns {string|null} - The subdomain or null if not found
  */
 function extractSubdomain(hostname) {
-  if (!hostname) return null;
+  if (!hostname) {
+    console.log('[SubdomainUtils] No hostname provided');
+    return null;
+  }
   
   // Remove port if present
   const hostWithoutPort = hostname.split(':')[0];
+  console.log(`[SubdomainUtils] Extracting subdomain from: ${hostname} -> ${hostWithoutPort}`);
   
   // Split by dots
   const parts = hostWithoutPort.split('.');
+  console.log(`[SubdomainUtils] Split parts:`, parts);
   
   // If we have at least 3 parts (subdomain.domain.tld), return the subdomain
   // For localhost or IP addresses, return null
   if (parts.length >= 3 && parts[0] !== 'localhost' && !/^\d+\.\d+\.\d+\.\d+$/.test(hostWithoutPort)) {
-    return parts[0].toLowerCase();
+    const subdomain = parts[0].toLowerCase();
+    console.log(`[SubdomainUtils] ✅ Extracted subdomain (3+ parts): ${subdomain}`);
+    return subdomain;
   }
   
   // For development: check if hostname is localhost with subdomain pattern
-  // e.g., orgname.localhost:3000
-  if (hostWithoutPort.includes('localhost') && parts.length >= 2) {
-    return parts[0].toLowerCase();
+  // e.g., orgname.localhost:3000 or rio.localhost:5173
+  if (hostWithoutPort.includes('localhost') && parts.length >= 2 && parts[0] !== 'localhost') {
+    const subdomain = parts[0].toLowerCase();
+    console.log(`[SubdomainUtils] ✅ Extracted subdomain (localhost pattern): ${subdomain}`);
+    return subdomain;
   }
   
+  console.log(`[SubdomainUtils] ❌ No subdomain found`);
   return null;
 }
 
@@ -41,17 +51,26 @@ function extractSubdomain(hostname) {
  * @returns {Promise<string|null>} - The org_id or null if not found
  */
 async function getOrgIdFromSubdomain(subdomain) {
-  if (!subdomain) return null;
+  if (!subdomain) {
+    console.log('[SubdomainUtils] No subdomain provided for org_id lookup');
+    return null;
+  }
   
   try {
+    console.log(`[SubdomainUtils] 🔍 Looking up org_id for subdomain: ${subdomain}`);
+    
     // First check tenants table for subdomain mapping
     const tenantResult = await db.query(
       `SELECT org_id FROM "tenants" WHERE subdomain = $1 AND is_active = true`,
       [subdomain]
     );
     
+    console.log(`[SubdomainUtils] Tenants table query result:`, tenantResult.rows);
+    
     if (tenantResult.rows.length > 0) {
-      return tenantResult.rows[0].org_id;
+      const orgId = tenantResult.rows[0].org_id;
+      console.log(`[SubdomainUtils] ✅ Found org_id in tenants table: ${orgId}`);
+      return orgId;
     }
     
     // Fallback: check tblOrgs table for subdomain
@@ -60,10 +79,15 @@ async function getOrgIdFromSubdomain(subdomain) {
       [subdomain]
     );
     
+    console.log(`[SubdomainUtils] tblOrgs table query result:`, orgResult.rows);
+    
     if (orgResult.rows.length > 0) {
-      return orgResult.rows[0].org_id;
+      const orgId = orgResult.rows[0].org_id;
+      console.log(`[SubdomainUtils] ✅ Found org_id in tblOrgs table: ${orgId}`);
+      return orgId;
     }
     
+    console.log(`[SubdomainUtils] ❌ No org_id found for subdomain: ${subdomain}`);
     return null;
   } catch (error) {
     console.error('[SubdomainUtils] Error getting org_id from subdomain:', error);

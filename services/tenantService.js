@@ -135,15 +135,21 @@ function getTenantConnectionString(credentials) {
  * Get a database connection pool for a specific tenant
  */
 async function getTenantPool(orgId) {
+  console.log(`[TenantService] 🔍 Getting tenant pool for org_id: ${orgId}`);
   const credentials = await getTenantCredentials(orgId);
+  console.log(`[TenantService] ✅ Got credentials for org_id: ${orgId}, database: ${credentials.database}`);
   const connectionString = getTenantConnectionString(credentials);
+  console.log(`[TenantService] 🔗 Connection string: postgresql://${credentials.user}@${credentials.host}:${credentials.port}/${credentials.database}`);
 
-  return new Pool({
+  const pool = new Pool({
     connectionString,
     max: 10,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
   });
+  
+  console.log(`[TenantService] ✅ Created pool for org_id: ${orgId}`);
+  return pool;
 }
 
 /**
