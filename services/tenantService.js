@@ -383,6 +383,34 @@ async function testTenantConnection(orgId) {
   }
 }
 
+/**
+ * Clear tenant pool cache (useful when tenant credentials are updated)
+ * @param {string} orgId - Optional org_id to clear specific pool, or null to clear all
+ */
+function clearTenantPoolCache(orgId = null) {
+  if (orgId) {
+    const pool = tenantPoolCache.get(orgId);
+    if (pool && !pool.ended) {
+      pool.end().catch(err => {
+        console.error(`[TenantService] Error ending pool for org_id ${orgId}:`, err);
+      });
+    }
+    tenantPoolCache.delete(orgId);
+    console.log(`[TenantService] 🗑️ Cleared pool cache for org_id: ${orgId}`);
+  } else {
+    // Clear all pools
+    for (const [cachedOrgId, pool] of tenantPoolCache.entries()) {
+      if (pool && !pool.ended) {
+        pool.end().catch(err => {
+          console.error(`[TenantService] Error ending pool for org_id ${cachedOrgId}:`, err);
+        });
+      }
+    }
+    tenantPoolCache.clear();
+    console.log(`[TenantService] 🗑️ Cleared all pool caches`);
+  }
+}
+
 module.exports = {
   checkTenantExists,
   getTenantCredentials,
@@ -394,5 +422,6 @@ module.exports = {
   deactivateTenant,
   testTenantConnection,
   initTenantRegistryPool,
+  clearTenantPoolCache,
 };
 
