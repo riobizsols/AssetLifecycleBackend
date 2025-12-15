@@ -31,52 +31,37 @@ const protect = async (req, res, next) => {
             isTenant = false;
             console.log(`[AuthMiddleware] Normal login detected (use_default_db=true) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
         } else {
-            // For tenant logins (use_default_db=false), check subdomain first to get tenant org_id
+            // For tenant logins (use_default_db=false), check subdomain to get tenant org_id
             // This is because the user's org_id in the tenant DB might differ from the tenant's org_id
             const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
             const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
             const subdomain = extractSubdomain(hostname);
             
-            let tenantOrgId = null;
-            
-            // If subdomain exists, use it to get the tenant org_id
-            if (subdomain) {
-                tenantOrgId = await getOrgIdFromSubdomain(subdomain);
-                console.log(`[AuthMiddleware] Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
+            if (!subdomain) {
+                return res.status(400).json({ message: 'Subdomain required for tenant login' });
             }
             
-            // If we have a tenant org_id from subdomain, use it for database routing
-            // Otherwise, try using the token's org_id
-            const orgIdForDbRouting = tenantOrgId || decoded.org_id;
+            // Get tenant org_id from subdomain
+            const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
             
-            if (orgIdForDbRouting) {
-                const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-                try {
-                    // Check if tenant exists
-                    const tenantExists = await checkTenantExists(orgIdForDbRouting);
-                    if (tenantExists) {
-                        // This is a tenant user - use tenant database
-                        dbPool = await getTenantPool(orgIdForDbRouting);
-                        isTenant = true;
-                        console.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${orgIdForDbRouting} (user org_id: ${decoded.org_id})`);
-                    } else {
-                        // This is a normal user - use default database
-                        dbPool = db;
-                        isTenant = false;
-                        console.log(`[AuthMiddleware] Normal user detected - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
-                    }
-                } catch (tenantError) {
-                    // If tenant lookup fails, fall back to default database (for normal users)
-                    console.warn(`[AuthMiddleware] Tenant lookup failed for org_id ${orgIdForDbRouting}, using default database:`, tenantError.message);
-                    dbPool = db;
-                    isTenant = false;
-                }
-            } else {
-                // No org_id in token or subdomain - use default database
-                dbPool = db;
-                isTenant = false;
-                console.log(`[AuthMiddleware] No org_id in token or subdomain - Using default DATABASE_URL`);
+            if (!tenantOrgId) {
+                return res.status(404).json({ message: `Organization not found for subdomain: ${subdomain}` });
             }
+            
+            console.log(`[AuthMiddleware] Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
+            
+            // Use tenant database - no fallback
+            const { getTenantPool, checkTenantExists } = require('../services/tenantService');
+            const tenantExists = await checkTenantExists(tenantOrgId);
+            
+            if (!tenantExists) {
+                return res.status(404).json({ message: `Tenant not found for org_id: ${tenantOrgId}` });
+            }
+            
+            // This is a tenant user - use tenant database
+            dbPool = await getTenantPool(tenantOrgId);
+            isTenant = true;
+            console.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
         }
 
         // Attach database pool to request so controllers/models can use it
