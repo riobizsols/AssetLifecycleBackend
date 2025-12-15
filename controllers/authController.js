@@ -1,6 +1,7 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
+const logger = require('../utils/logger');
 const {
     findUserByEmail,
     createUser,
@@ -62,13 +63,13 @@ const login = async (req, res) => {
         const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
         const subdomain = extractSubdomain(hostname);
         
-        console.log(`[AuthController] 🔍 Login Debug Info:`);
-        console.log(`  - req.get('host'): ${req.get('host')}`);
-        console.log(`  - req.get('x-forwarded-host'): ${req.get('x-forwarded-host')}`);
-        console.log(`  - req.hostname: ${req.hostname}`);
-        console.log(`  - req.headers.host: ${req.headers.host}`);
-        console.log(`  - Extracted hostname: ${hostname}`);
-        console.log(`  - Extracted subdomain: ${subdomain}`);
+        logger.debug(`[AuthController] 🔍 Login Debug Info:`);
+        logger.debug(`  - req.get('host'): ${req.get('host')}`);
+        logger.debug(`  - req.get('x-forwarded-host'): ${req.get('x-forwarded-host')}`);
+        logger.debug(`  - req.hostname: ${req.hostname}`);
+        logger.debug(`  - req.headers.host: ${req.headers.host}`);
+        logger.debug(`  - Extracted hostname: ${hostname}`);
+        logger.debug(`  - Extracted subdomain: ${subdomain}`);
         
         const { checkTenantExists, getTenantPool } = require('../services/tenantService');
         const defaultDb = require('../config/db');
@@ -82,46 +83,46 @@ const login = async (req, res) => {
             loginMode = 'subdomain';
             orgId = await getOrgIdFromSubdomain(subdomain);
             
-            console.log(`[AuthController] 🔍 Subdomain lookup result: org_id = ${orgId}`);
+            logger.debug(`[AuthController] 🔍 Subdomain lookup result: org_id = ${orgId}`);
             
             if (!orgId) {
-                console.error(`[AuthController] ❌ Organization not found for subdomain: ${subdomain}`);
+                logger.error(`[AuthController] ❌ Organization not found for subdomain: ${subdomain}`);
                 return res.status(404).json({ 
                     message: `Organization not found for subdomain: ${subdomain}` 
                 });
             }
             
-            console.log(`[AuthController] ✅ Subdomain-based login: ${subdomain}, org_id: ${orgId}`);
+            logger.log(`[AuthController] ✅ Subdomain-based login: ${subdomain}, org_id: ${orgId}`);
             
             // Step 3: Log checking user in database
             await logCheckingUserInDatabase({ email, orgId, subdomain });
             
             // Check if this is a tenant organization
             const tenantExists = await checkTenantExists(orgId);
-            console.log(`[AuthController] 🔍 Tenant check for org_id ${orgId}: ${tenantExists ? 'EXISTS' : 'NOT FOUND'}`);
+            logger.debug(`[AuthController] 🔍 Tenant check for org_id ${orgId}: ${tenantExists ? 'EXISTS' : 'NOT FOUND'}`);
             
             if (tenantExists) {
                 dbPool = await getTenantPool(orgId);
                 isTenant = true;
-                console.log(`[AuthController] ✅ Using tenant database for org_id: ${orgId}`);
+                logger.log(`[AuthController] ✅ Using tenant database for org_id: ${orgId}`);
             } else {
-                console.log(`[AuthController] ⚠️ Using default database for org_id: ${orgId} (tenant not found)`);
+                logger.warn(`[AuthController] ⚠️ Using default database for org_id: ${orgId} (tenant not found)`);
             }
         } else {
             // No subdomain - use normal database login (from .env DATABASE_URL)
-            console.log(`[AuthController] ℹ️ Normal database login (no subdomain) - using default database from .env`);
+            logger.log(`[AuthController] ℹ️ Normal database login (no subdomain) - using default database from .env`);
             await logCheckingUserInDatabase({ email, orgId: null, subdomain: null });
             // dbPool is already set to defaultDb
         }
         
         // Step 5: Find user in the appropriate database
-        console.log(`[AuthController] 🔍 Searching for user with email: "${email}" in ${isTenant ? 'tenant' : 'default'} database`);
+        logger.debug(`[AuthController] 🔍 Searching for user with email: "${email}" in ${isTenant ? 'tenant' : 'default'} database`);
         const user = await findUserByEmail(email, dbPool);
         
         if (user) {
-            console.log(`[AuthController] ✅ User found: ${user.user_id}, org_id: ${user.org_id}`);
+            logger.debug(`[AuthController] ✅ User found: ${user.user_id}, org_id: ${user.org_id}`);
         } else {
-            console.log(`[AuthController] ❌ User not found with email: "${email}"`);
+            logger.debug(`[AuthController] ❌ User not found with email: "${email}"`);
         }
         
         // For subdomain-based login with tenant database, skip org_id check
@@ -141,7 +142,7 @@ const login = async (req, res) => {
         
         // For tenant databases, update orgId from user if needed (for consistency)
         if (loginMode === 'subdomain' && user && isTenant) {
-            console.log(`[AuthController] ℹ️ Tenant database login - using user's org_id: ${user.org_id} (tenant org_id: ${orgId})`);
+            logger.debug(`[AuthController] ℹ️ Tenant database login - using user's org_id: ${user.org_id} (tenant org_id: ${orgId})`);
             // Keep the tenant orgId for database routing, but use user's org_id for token
             // This ensures the token has the correct org_id for the user
         }

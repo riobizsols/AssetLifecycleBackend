@@ -7,6 +7,7 @@
 // Use the same database connection as tenantService to access the tenants table
 // This ensures we're querying the correct database where the tenants table exists
 const { initTenantRegistryPool } = require('../services/tenantService');
+const logger = require('./logger');
 
 /**
  * Extract subdomain from request hostname
@@ -15,23 +16,23 @@ const { initTenantRegistryPool } = require('../services/tenantService');
  */
 function extractSubdomain(hostname) {
   if (!hostname) {
-    console.log('[SubdomainUtils] No hostname provided');
+    logger.debug('[SubdomainUtils] No hostname provided');
     return null;
   }
   
   // Remove port if present
   const hostWithoutPort = hostname.split(':')[0];
-  console.log(`[SubdomainUtils] Extracting subdomain from: ${hostname} -> ${hostWithoutPort}`);
+  logger.debug(`[SubdomainUtils] Extracting subdomain from: ${hostname} -> ${hostWithoutPort}`);
   
   // Split by dots
   const parts = hostWithoutPort.split('.');
-  console.log(`[SubdomainUtils] Split parts:`, parts);
+  logger.debug(`[SubdomainUtils] Split parts:`, parts);
   
   // If we have at least 3 parts (subdomain.domain.tld), return the subdomain
   // For localhost or IP addresses, return null
   if (parts.length >= 3 && parts[0] !== 'localhost' && !/^\d+\.\d+\.\d+\.\d+$/.test(hostWithoutPort)) {
     const subdomain = parts[0].toLowerCase();
-    console.log(`[SubdomainUtils] ✅ Extracted subdomain (3+ parts): ${subdomain}`);
+    logger.debug(`[SubdomainUtils] ✅ Extracted subdomain (3+ parts): ${subdomain}`);
     return subdomain;
   }
   
@@ -39,11 +40,11 @@ function extractSubdomain(hostname) {
   // e.g., orgname.localhost:3000 or rio.localhost:5173
   if (hostWithoutPort.includes('localhost') && parts.length >= 2 && parts[0] !== 'localhost') {
     const subdomain = parts[0].toLowerCase();
-    console.log(`[SubdomainUtils] ✅ Extracted subdomain (localhost pattern): ${subdomain}`);
+    logger.debug(`[SubdomainUtils] ✅ Extracted subdomain (localhost pattern): ${subdomain}`);
     return subdomain;
   }
   
-  console.log(`[SubdomainUtils] ❌ No subdomain found`);
+  logger.debug(`[SubdomainUtils] ❌ No subdomain found`);
   return null;
 }
 
@@ -54,14 +55,14 @@ function extractSubdomain(hostname) {
  */
 async function getOrgIdFromSubdomain(subdomain) {
   if (!subdomain) {
-    console.log('[SubdomainUtils] No subdomain provided for org_id lookup');
+    logger.debug('[SubdomainUtils] No subdomain provided for org_id lookup');
     return null;
   }
   
   // Validate subdomain format (alphanumeric and hyphens only, max 63 chars)
   const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
   if (!subdomainRegex.test(subdomain)) {
-    console.error(`[SubdomainUtils] ❌ Invalid subdomain format: ${subdomain}`);
+    logger.error(`[SubdomainUtils] ❌ Invalid subdomain format: ${subdomain}`);
     return null;
   }
   
@@ -70,13 +71,13 @@ async function getOrgIdFromSubdomain(subdomain) {
     const pool = initTenantRegistryPool();
     
     if (!pool) {
-      console.error('[SubdomainUtils] ❌ Tenant registry pool not initialized');
+      logger.error('[SubdomainUtils] ❌ Tenant registry pool not initialized');
       throw new Error('Database connection not available');
     }
     
     // Normalize subdomain (trim, lowercase)
     const normalizedSubdomain = subdomain.trim().toLowerCase();
-    console.log(`[SubdomainUtils] 🔍 Looking up org_id for subdomain: "${subdomain}" (normalized: "${normalizedSubdomain}")`);
+    logger.debug(`[SubdomainUtils] 🔍 Looking up org_id for subdomain: "${subdomain}" (normalized: "${normalizedSubdomain}")`);
     
     // Query tenants table for subdomain mapping (case-insensitive, optimized)
     const tenantResult = await pool.query(
@@ -86,7 +87,7 @@ async function getOrgIdFromSubdomain(subdomain) {
     
     if (tenantResult.rows.length > 0) {
       const orgId = tenantResult.rows[0].org_id;
-      console.log(`[SubdomainUtils] ✅ Found org_id in tenants table: ${orgId}`);
+      logger.debug(`[SubdomainUtils] ✅ Found org_id in tenants table: ${orgId}`);
       return orgId;
     }
     
@@ -98,15 +99,15 @@ async function getOrgIdFromSubdomain(subdomain) {
     
     if (orgResult.rows.length > 0) {
       const orgId = orgResult.rows[0].org_id;
-      console.log(`[SubdomainUtils] ✅ Found org_id in tblOrgs table: ${orgId}`);
+      logger.debug(`[SubdomainUtils] ✅ Found org_id in tblOrgs table: ${orgId}`);
       return orgId;
     }
     
-    console.log(`[SubdomainUtils] ❌ No org_id found for subdomain: ${subdomain}`);
+    logger.debug(`[SubdomainUtils] ❌ No org_id found for subdomain: ${subdomain}`);
     return null;
   } catch (error) {
-    console.error('[SubdomainUtils] Error getting org_id from subdomain:', error);
-    console.error('[SubdomainUtils] Error stack:', error.stack);
+    logger.error('[SubdomainUtils] Error getting org_id from subdomain:', error);
+    logger.error('[SubdomainUtils] Error stack:', error.stack);
     return null;
   }
 }

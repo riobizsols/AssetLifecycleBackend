@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { getUserWithBranch } = require('../models/userModel');
+const logger = require('../utils/logger');
 require('dotenv').config();
 
 const protect = async (req, res, next) => {
@@ -14,9 +15,9 @@ const protect = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        console.log('=== Auth Middleware Debug ===');
-        console.log('decoded token:', decoded);
-        console.log('decoded.emp_int_id:', decoded.emp_int_id);
+        logger.debug('=== Auth Middleware Debug ===');
+        logger.debug('decoded token:', decoded);
+        logger.debug('decoded.emp_int_id:', decoded.emp_int_id);
 
         const { runWithDb } = require('../utils/dbContext');
         const db = require('../config/db');
@@ -42,14 +43,14 @@ const protect = async (req, res, next) => {
                     if (tenantExists) {
                         dbPool = await getTenantPool(tenantOrgId);
                         isTenant = true;
-                        console.log(`[AuthMiddleware] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${tenantOrgId} (ignoring use_default_db flag)`);
+                        logger.log(`[AuthMiddleware] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${tenantOrgId} (ignoring use_default_db flag)`);
                     } else {
-                        console.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but tenant not active, falling back to default database`);
+                        logger.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but tenant not active, falling back to default database`);
                         dbPool = db;
                         isTenant = false;
                     }
                 } else {
-                    console.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but no org_id, falling back to default database`);
+                    logger.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but no org_id, falling back to default database`);
                     dbPool = db;
                     isTenant = false;
                 }
@@ -62,7 +63,7 @@ const protect = async (req, res, next) => {
             // No subdomain and use_default_db=true - use default database
             dbPool = db;
             isTenant = false;
-            console.log(`[AuthMiddleware] Normal login detected (use_default_db=true, no subdomain) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
+            logger.log(`[AuthMiddleware] Normal login detected (use_default_db=true, no subdomain) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
         } else {
             // For tenant logins (use_default_db=false), check subdomain to get tenant org_id
             // This is because the user's org_id in the tenant DB might differ from the tenant's org_id
@@ -73,14 +74,14 @@ const protect = async (req, res, next) => {
                 const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
                 
                 if (!hostname) {
-                    console.error('[AuthMiddleware] ❌ No hostname found in request');
+                    logger.error('[AuthMiddleware] ❌ No hostname found in request');
                     return res.status(400).json({ message: 'Hostname required for tenant login' });
                 }
                 
                 const subdomain = extractSubdomain(hostname);
                 
                 if (!subdomain) {
-                    console.error(`[AuthMiddleware] ❌ No subdomain found in hostname: ${hostname}`);
+                    logger.error(`[AuthMiddleware] ❌ No subdomain found in hostname: ${hostname}`);
                     return res.status(400).json({ message: 'Subdomain required for tenant login' });
                 }
                 
@@ -89,16 +90,16 @@ const protect = async (req, res, next) => {
                 try {
                     tenantOrgId = await getOrgIdFromSubdomain(subdomain);
                 } catch (subdomainError) {
-                    console.error(`[AuthMiddleware] ❌ Error looking up subdomain "${subdomain}":`, subdomainError);
+                    logger.error(`[AuthMiddleware] ❌ Error looking up subdomain "${subdomain}":`, subdomainError);
                     return res.status(500).json({ message: 'Error looking up organization' });
                 }
                 
                 if (!tenantOrgId) {
-                    console.warn(`[AuthMiddleware] ⚠️ Organization not found for subdomain: ${subdomain}`);
+                    logger.warn(`[AuthMiddleware] ⚠️ Organization not found for subdomain: ${subdomain}`);
                     return res.status(404).json({ message: `Organization not found for subdomain: ${subdomain}` });
                 }
                 
-                console.log(`[AuthMiddleware] ✅ Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
+                logger.log(`[AuthMiddleware] ✅ Subdomain detected: ${subdomain}, tenant org_id: ${tenantOrgId}`);
                 
                 // Use tenant database - no fallback
                 const { getTenantPool, checkTenantExists } = require('../services/tenantService');
@@ -113,7 +114,7 @@ const protect = async (req, res, next) => {
                 }
                 
                 if (!tenantExists) {
-                    console.warn(`[AuthMiddleware] ⚠️ Tenant not found or inactive for org_id: ${tenantOrgId}`);
+                    logger.warn(`[AuthMiddleware] ⚠️ Tenant not found or inactive for org_id: ${tenantOrgId}`);
                     return res.status(404).json({ message: `Tenant not found for org_id: ${tenantOrgId}` });
                 }
                 
@@ -121,14 +122,14 @@ const protect = async (req, res, next) => {
                 try {
                     dbPool = await getTenantPool(tenantOrgId);
                     isTenant = true;
-                    console.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
+                    logger.log(`[AuthMiddleware] ✅ Tenant user detected - Connected to tenant database for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
                 } catch (poolError) {
-                    console.error(`[AuthMiddleware] ❌ Error getting tenant pool for org_id "${tenantOrgId}":`, poolError);
+                    logger.error(`[AuthMiddleware] ❌ Error getting tenant pool for org_id "${tenantOrgId}":`, poolError);
                     return res.status(500).json({ message: 'Error connecting to tenant database' });
                 }
             } catch (error) {
                 // Catch any unexpected errors
-                console.error('[AuthMiddleware] ❌ Unexpected error in tenant login flow:', error);
+                logger.error('[AuthMiddleware] ❌ Unexpected error in tenant login flow:', error);
                 return res.status(500).json({ message: 'Internal server error during tenant authentication' });
             }
         }
@@ -155,7 +156,7 @@ const protect = async (req, res, next) => {
                             }
                             
                             if (i < maxRetries - 1) {
-                                console.warn(`[AuthMiddleware] Connection pool exhausted, retrying (${i + 1}/${maxRetries}) after ${delay * (i + 1)}ms...`);
+                                logger.warn(`[AuthMiddleware] Connection pool exhausted, retrying (${i + 1}/${maxRetries}) after ${delay * (i + 1)}ms...`);
                                 await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Exponential backoff
                                 continue;
                             } else {
@@ -185,10 +186,10 @@ const protect = async (req, res, next) => {
                 );
                 if (orgResult.rows.length > 0) {
                     internalOrgId = orgResult.rows[0].org_id;
-                    console.log(`[AuthMiddleware] Internal org_id from tblOrgs: ${internalOrgId} (tenant org_id: ${decoded.org_id})`);
+                    logger.log(`[AuthMiddleware] Internal org_id from tblOrgs: ${internalOrgId} (tenant org_id: ${decoded.org_id})`);
                 }
             } catch (orgError) {
-                console.warn(`[AuthMiddleware] Could not fetch internal org_id from tblOrgs:`, orgError.message);
+                logger.warn(`[AuthMiddleware] Could not fetch internal org_id from tblOrgs:`, orgError.message);
                 // Fall back to token org_id
             }
 
@@ -199,7 +200,7 @@ const protect = async (req, res, next) => {
             );
             
             if (hasSuperAccessFlag) {
-                console.log(`[AuthMiddleware] User ${decoded.user_id} has SUPER ACCESS - can view all branches`);
+                logger.log(`[AuthMiddleware] User ${decoded.user_id} has SUPER ACCESS - can view all branches`);
             }
 
             // Attach full decoded info with current roles and branch information
