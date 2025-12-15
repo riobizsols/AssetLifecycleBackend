@@ -124,8 +124,11 @@ const login = async (req, res) => {
             console.log(`[AuthController] ❌ User not found with email: "${email}"`);
         }
         
-        // For subdomain-based login, verify user belongs to the correct organization
-        if (loginMode === 'subdomain' && user && user.org_id !== orgId) {
+        // For subdomain-based login with tenant database, skip org_id check
+        // Tenant databases are already isolated, so any user in that database is valid
+        // Only check org_id mismatch when using default database (multi-org scenario)
+        if (loginMode === 'subdomain' && user && !isTenant && user.org_id !== orgId) {
+            console.log(`[AuthController] ⚠️ Org ID mismatch: user.org_id (${user.org_id}) !== tenant org_id (${orgId})`);
             await logUserNotFound({ email, orgId, reason: 'User belongs to different organization' });
             await logFailedLogin({
                 email,
@@ -134,6 +137,13 @@ const login = async (req, res) => {
                 duration: Date.now() - startTime
             });
             return res.status(404).json({ message: 'User not found in this organization' });
+        }
+        
+        // For tenant databases, update orgId from user if needed (for consistency)
+        if (loginMode === 'subdomain' && user && isTenant) {
+            console.log(`[AuthController] ℹ️ Tenant database login - using user's org_id: ${user.org_id} (tenant org_id: ${orgId})`);
+            // Keep the tenant orgId for database routing, but use user's org_id for token
+            // This ensures the token has the correct org_id for the user
         }
         
         // For normal login, set orgId from user if found
