@@ -3,7 +3,8 @@ const model = require("../models/maintTypeModel");
 // GET /api/maint-types - Get all maintenance types
 const getAllMaintTypes = async (req, res) => {
     try {
-        const result = await model.getAllMaintTypes();
+        const orgId = req.user?.org_id;
+        const result = await model.getAllMaintTypes(orgId);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching maintenance types:", err);

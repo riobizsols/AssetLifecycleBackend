@@ -9,6 +9,27 @@ router.use(protect);
 // Get all properties
 router.get('/', PropertiesController.getAllProperties); //..
 
+// Get all properties with their list values
+router.get('/with-values', PropertiesController.getAllPropertiesWithValues);
+
+// Create a new property
+router.post('/', PropertiesController.createProperty);
+
+// Create property with list values
+router.post('/with-values', PropertiesController.createPropertyWithValues);
+
+// Update property
+router.put('/:id', PropertiesController.updateProperty);
+
+// Delete property
+router.delete('/:id', PropertiesController.deleteProperty);
+
+// Add list value to property
+router.post('/list-values', PropertiesController.addListValueToProperty);
+
+// Delete property list value
+router.delete('/list-values/:id', PropertiesController.deletePropertyValue);
+
 // Create asset type with properties
 router.post('/asset-types', PropertiesController.createAssetTypeWithProperties); //...
 

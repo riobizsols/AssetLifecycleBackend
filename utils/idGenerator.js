@@ -19,7 +19,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         
         // Default prefix mapping for auto-creation
         const defaultPrefixes = {
-            'vendor_sla_rec': 'VSLAR'
+            'vendor_sla_rec': 'VSLAR',
+            'atmf': 'ATMF',
+            'wfs': 'WFS',
+            'wfas': 'WFAS',
+            'wfjr': 'WFJR',
+            'prop': 'PROP',
+            'atbrrc': 'ATBRRC',
+            'atmcl': 'ATMCL'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
@@ -84,7 +91,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'userjobrole': 'tblUserJobRoles',
         'asset_usage': 'tblAssetUsageReg',
         'vendor_sla': 'tblVendorSLAs',
-        'vendor_sla_rec': 'tblvendorslarecs'
+        'vendor_sla_rec': 'tblvendorslarecs',
+        'atmf': 'tblATMaintFreq',
+        'wfs': 'tblWFSteps',
+        'wfas': 'tblWFATSeqs',
+        'wfjr': 'tblWFJobRole',
+        'prop': 'tblProps',
+        'atbrrc': 'tblATBRReasonCodes',
+        'atmcl': 'tblATMaintCheckList'
     };
 
     const targetTable = tableMap[tableKey];
@@ -113,7 +127,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'userjobrole': 'user_job_role_id',
             'asset_usage': 'aug_id',
             'vendor_sla': 'vsla_id',
-            'vendor_sla_rec': 'vslar_id'
+            'vendor_sla_rec': 'vslar_id',
+            'atmf': 'at_main_freq_id',
+            'wfs': 'wf_steps_id',
+            'wfas': 'wf_at_seqs_id',
+            'wfjr': 'wf_job_role_id',
+            'prop': 'prop_id',
+            'atbrrc': 'atbrrc_id',
+            'atmcl': 'at_main_checklist_id'
         };
 
         const columnName = columnMap[tableKey];

@@ -222,6 +222,210 @@ class PropertiesModel {
     }
   }
 
+  // Get all properties with their list values
+  static async getAllPropertiesWithValues(orgId) {
+    try {
+      const dbPool = getDb();
+      const query = `
+        SELECT 
+          p.prop_id,
+          p.property,
+          p.int_status,
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'aplv_id', v.aplv_id,
+                'value', v.value,
+                'int_status', v.int_status
+              ) ORDER BY v.value
+            ) FILTER (WHERE v.aplv_id IS NOT NULL),
+            '[]'::json
+          ) as list_values
+        FROM "tblProps" p
+        LEFT JOIN "tblAssetPropListValues" v ON p.prop_id = v.prop_id 
+          AND v.org_id = p.org_id 
+          AND v.int_status = 1
+        WHERE p.org_id = $1 
+        AND p.int_status = 1
+        GROUP BY p.prop_id, p.property, p.int_status
+        ORDER BY p.property
+      `;
+      
+      const result = await dbPool.query(query, [orgId]);
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching properties with values:', error);
+      throw error;
+    }
+  }
+
+  // Create a new property
+  static async createProperty(propertyName, orgId) {
+    try {
+      const propId = await generateCustomId('prop', 3);
+      
+      const query = `
+        INSERT INTO "tblProps" (
+          prop_id,
+          org_id,
+          property,
+          int_status
+        ) VALUES ($1, $2, $3, 1)
+        RETURNING *
+      `;
+      
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [propId, orgId, propertyName.trim()]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error creating property:', error);
+      throw error;
+    }
+  }
+
+  // Create property with list values
+  static async createPropertyWithValues(propertyName, listValues, orgId) {
+    const dbPool = getDb();
+    const client = await dbPool.connect();
+    
+    try {
+      await client.query('BEGIN');
+      
+      // Create property
+      const propId = await generateCustomId('prop', 3);
+      const propertyQuery = `
+        INSERT INTO "tblProps" (
+          prop_id,
+          org_id,
+          property,
+          int_status
+        ) VALUES ($1, $2, $3, 1)
+        RETURNING *
+      `;
+      
+      const propertyResult = await client.query(propertyQuery, [propId, orgId, propertyName.trim()]);
+      const createdProperty = propertyResult.rows[0];
+      
+      // Create list values if provided
+      const createdValues = [];
+      if (listValues && Array.isArray(listValues) && listValues.length > 0) {
+        for (const value of listValues) {
+          if (value && value.trim()) {
+            const aplvId = await generateCustomId('aplv', 3);
+            const valueQuery = `
+              INSERT INTO "tblAssetPropListValues" (
+                aplv_id,
+                prop_id,
+                value,
+                int_status,
+                org_id
+              ) VALUES ($1, $2, $3, 1, $4)
+              RETURNING *
+            `;
+            
+            const valueResult = await client.query(valueQuery, [aplvId, propId, value.trim(), orgId]);
+            createdValues.push(valueResult.rows[0]);
+          }
+        }
+      }
+      
+      await client.query('COMMIT');
+      
+      return {
+        property: createdProperty,
+        listValues: createdValues
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error creating property with values:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  // Update property
+  static async updateProperty(propId, propertyName, orgId) {
+    try {
+      const query = `
+        UPDATE "tblProps"
+        SET property = $1
+        WHERE prop_id = $2 AND org_id = $3
+        RETURNING *
+      `;
+      
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [propertyName.trim(), propId, orgId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error updating property:', error);
+      throw error;
+    }
+  }
+
+  // Delete property (soft delete by setting int_status = 0)
+  static async deleteProperty(propId, orgId) {
+    try {
+      const query = `
+        UPDATE "tblProps"
+        SET int_status = 0
+        WHERE prop_id = $1 AND org_id = $2
+        RETURNING *
+      `;
+      
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [propId, orgId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error deleting property:', error);
+      throw error;
+    }
+  }
+
+  // Delete property list value (soft delete)
+  static async deletePropertyValue(aplvId, orgId) {
+    try {
+      const query = `
+        UPDATE "tblAssetPropListValues"
+        SET int_status = 0
+        WHERE aplv_id = $1 AND org_id = $2
+        RETURNING *
+      `;
+      
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [aplvId, orgId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error deleting property value:', error);
+      throw error;
+    }
+  }
+
+  // Add list value to existing property
+  static async addListValueToProperty(propId, value, orgId) {
+    try {
+      const aplvId = await generateCustomId('aplv', 3);
+      
+      const query = `
+        INSERT INTO "tblAssetPropListValues" (
+          aplv_id,
+          prop_id,
+          value,
+          int_status,
+          org_id
+        ) VALUES ($1, $2, $3, 1, $4)
+        RETURNING *
+      `;
+      
+      const dbPool = getDb();
+      const result = await dbPool.query(query, [aplvId, propId, value.trim(), orgId]);
+      return result.rows[0];
+    } catch (error) {
+      console.error('Error adding list value:', error);
+      throw error;
+    }
+  }
+
   // Map properties to existing asset type
   static async mapPropertiesToAssetType(assetTypeId, propertyIds, orgId, createdBy) {
     const dbPool = getDb();
