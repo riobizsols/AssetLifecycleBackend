@@ -23,13 +23,46 @@ const protect = async (req, res, next) => {
         let dbPool;
         let isTenant = false;
 
-        // Check if token has use_default_db flag (set by normal login)
-        // If use_default_db is true, always use default database regardless of tenants table
-        if (decoded.use_default_db === true) {
-            // Normal login - always use default database
+        // ALWAYS check subdomain first - subdomain takes precedence over use_default_db flag
+        // This ensures that even if user has an old token with use_default_db=true,
+        // accessing via subdomain will still route to tenant database
+        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+        const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
+        const subdomain = extractSubdomain(hostname);
+        
+        // If subdomain exists, use tenant database (regardless of use_default_db flag)
+        if (subdomain) {
+            try {
+                const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
+                
+                if (tenantOrgId) {
+                    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
+                    const tenantExists = await checkTenantExists(tenantOrgId);
+                    
+                    if (tenantExists) {
+                        dbPool = await getTenantPool(tenantOrgId);
+                        isTenant = true;
+                        console.log(`[AuthMiddleware] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${tenantOrgId} (ignoring use_default_db flag)`);
+                    } else {
+                        console.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but tenant not active, falling back to default database`);
+                        dbPool = db;
+                        isTenant = false;
+                    }
+                } else {
+                    console.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but no org_id, falling back to default database`);
+                    dbPool = db;
+                    isTenant = false;
+                }
+            } catch (subdomainError) {
+                console.error(`[AuthMiddleware] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
+                dbPool = db;
+                isTenant = false;
+            }
+        } else if (decoded.use_default_db === true) {
+            // No subdomain and use_default_db=true - use default database
             dbPool = db;
             isTenant = false;
-            console.log(`[AuthMiddleware] Normal login detected (use_default_db=true) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
+            console.log(`[AuthMiddleware] Normal login detected (use_default_db=true, no subdomain) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
         } else {
             // For tenant logins (use_default_db=false), check subdomain to get tenant org_id
             // This is because the user's org_id in the tenant DB might differ from the tenant's org_id
