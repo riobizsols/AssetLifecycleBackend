@@ -350,6 +350,9 @@ async function deactivateTenant(orgId) {
       [orgId]
     );
 
+    // Clear the pool cache since tenant is deactivated
+    clearTenantPoolCache(orgId);
+
     return true;
   } catch (error) {
     console.error('[TenantService] Error deactivating tenant:', error);
