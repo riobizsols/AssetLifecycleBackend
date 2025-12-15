@@ -4,7 +4,9 @@
  * Utilities for extracting subdomain from request and mapping to org_id
  */
 
-const db = require('../config/db');
+// Use the same database connection as tenantService to access the tenants table
+// This ensures we're querying the correct database where the tenants table exists
+const { initTenantRegistryPool } = require('../services/tenantService');
 
 /**
  * Extract subdomain from request hostname
@@ -57,12 +59,15 @@ async function getOrgIdFromSubdomain(subdomain) {
   }
   
   try {
+    // Get the tenant registry pool (same connection used by tenantService)
+    const pool = initTenantRegistryPool();
+    
     // Normalize subdomain (trim, lowercase)
     const normalizedSubdomain = subdomain.trim().toLowerCase();
     console.log(`[SubdomainUtils] 🔍 Looking up org_id for subdomain: "${subdomain}" (normalized: "${normalizedSubdomain}")`);
     
     // First, let's check what's actually in the tenants table
-    const allTenantsResult = await db.query(
+    const allTenantsResult = await pool.query(
       `SELECT org_id, subdomain, is_active FROM "tenants" ORDER BY org_id`
     );
     console.log(`[SubdomainUtils] 📋 All tenants in database:`, allTenantsResult.rows.map(r => ({
@@ -74,7 +79,7 @@ async function getOrgIdFromSubdomain(subdomain) {
     })));
     
     // First check tenants table for subdomain mapping (case-insensitive)
-    const tenantResult = await db.query(
+    const tenantResult = await pool.query(
       `SELECT org_id, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true`,
       [normalizedSubdomain]
     );
@@ -89,7 +94,7 @@ async function getOrgIdFromSubdomain(subdomain) {
     }
     
     // Also try exact match (in case there are spaces or case issues)
-    const exactMatchResult = await db.query(
+    const exactMatchResult = await pool.query(
       `SELECT org_id, subdomain, is_active FROM "tenants" WHERE subdomain = $1`,
       [subdomain]
     );
@@ -101,8 +106,8 @@ async function getOrgIdFromSubdomain(subdomain) {
       return orgId;
     }
     
-    // Fallback: check tblOrgs table for subdomain
-    const orgResult = await db.query(
+    // Fallback: check tblOrgs table for subdomain (use same pool)
+    const orgResult = await pool.query(
       `SELECT org_id, subdomain FROM "tblOrgs" WHERE LOWER(TRIM(subdomain)) = $1 AND int_status = 1`,
       [normalizedSubdomain]
     );
