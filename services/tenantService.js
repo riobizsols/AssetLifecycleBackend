@@ -328,6 +328,9 @@ async function updateTenant(orgId, dbConfig) {
       ]
     );
 
+    // Clear the pool cache since credentials changed
+    clearTenantPoolCache(orgId);
+
     return true;
   } catch (error) {
     console.error('[TenantService] Error updating tenant:', error);
