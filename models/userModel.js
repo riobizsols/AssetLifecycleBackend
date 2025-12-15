@@ -4,57 +4,16 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// Find user by email or username (used for login)
-// Checks tblRioAdmin first if email/username is "rioadmin", otherwise checks tblUsers
+// Find user by email (used for login)
+// Only queries tblUsers - tenant databases don't have tblRioAdmin
 // If tenantPool is provided, use it; otherwise use getDb() which gets from context
-// Note: Tenant databases don't have tblRioAdmin, so we handle that gracefully
-const findUserByEmail = async (emailOrUsername, tenantPool = null) => {
+const findUserByEmail = async (email, tenantPool = null) => {
     const connection = tenantPool || getDb();
     
-    // Check if this is a RioAdmin login attempt (username = "rioadmin")
-    // Only check tblRioAdmin if it exists (not in tenant databases)
-    if (emailOrUsername && emailOrUsername.toLowerCase() === 'rioadmin') {
-        try {
-            const rioAdminResult = await connection.query(
-                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE username = $1 OR email = $1',
-                [emailOrUsername]
-            );
-            if (rioAdminResult.rows.length > 0) {
-                return rioAdminResult.rows[0];
-            }
-        } catch (error) {
-            // tblRioAdmin doesn't exist in tenant databases - this is expected
-            if (error.code === '42P01') { // relation does not exist
-                console.log('[UserModel] tblRioAdmin table not found (tenant database) - skipping RioAdmin check');
-            } else {
-                throw error; // Re-throw if it's a different error
-            }
-        }
-    }
-    
-    // Check tblRioAdmin by email (in case email is used)
-    // Only if not a tenant database (tenant databases don't have tblRioAdmin)
-    try {
-        const rioAdminByEmailResult = await connection.query(
-            'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE email = $1',
-            [emailOrUsername]
-        );
-        if (rioAdminByEmailResult.rows.length > 0) {
-            return rioAdminByEmailResult.rows[0];
-        }
-    } catch (error) {
-        // tblRioAdmin doesn't exist in tenant databases - this is expected
-        if (error.code === '42P01') { // relation does not exist
-            console.log('[UserModel] tblRioAdmin table not found (tenant database) - skipping RioAdmin email check');
-        } else {
-            throw error; // Re-throw if it's a different error
-        }
-    }
-    
-    // Fall back to tblUsers (normal login - this is what tenant databases use)
+    // Query tblUsers by email only (tenant databases use this)
     const result = await connection.query(
-        'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1 OR username = $1',
-        [emailOrUsername]
+        'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
+        [email]
     );
     return result.rows[0];
 };
