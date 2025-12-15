@@ -1349,6 +1349,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
     ['JRN019', orgId, 1, 'JR001', 'JRN012', 'USAGEBASEDASSETREPORT', 'Usage Based Asset Report', null, 19, 'A', false, 'D'],
     ['JRN020', orgId, 1, 'JR001', null, 'ADMINSETTINGS', 'Settings', null, 20, 'A', true, 'D'],
     ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
+    ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
     ['JRN022', orgId, 1, 'JR001', null, 'MASTERDATA', 'Master Data', null, 22, 'A', true, 'D'],
     ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
     ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],

@@ -127,7 +127,19 @@ const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) =
 // Get all users
 const getAllUsers = async () => {
     const dbPool = getDb();
-    const result = await dbPool.query(`SELECT * FROM "tblUsers"`);
+    const query = `
+        SELECT 
+            u.*,
+            d.text as dept_name,
+            b.text as branch_name,
+            jr.text as job_role_name
+        FROM "tblUsers" u
+        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id AND d.org_id = u.org_id
+        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id AND b.org_id = u.org_id
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id AND jr.org_id = u.org_id
+        ORDER BY u.full_name
+    `;
+    const result = await dbPool.query(query);
     return result.rows;
 };
 
@@ -183,9 +195,9 @@ const getAllUsersWithBranch = async (orgId) => {
             b.text as branch_name,
             jr.text as job_role_name
         FROM "tblUsers" u
-        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
-        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id
-        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
+        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id AND d.org_id = u.org_id
+        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id AND b.org_id = u.org_id
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id AND jr.org_id = u.org_id
         WHERE u.org_id = $1
         ORDER BY u.full_name
     `;
@@ -202,24 +214,13 @@ const deleteUsers = async (userIds = []) => {
     try {
         const dbPool = getDb();
         // First check for dependencies
+        // Note: tblVendors doesn't have a user_id foreign key - contact info is stored as text fields
         const dependencies = await dbPool.query(`
             SELECT DISTINCT u.user_id, u.full_name,
-                CASE
-                    WHEN da.user_id IS NOT NULL THEN 'Department Admin'
-                    WHEN a.user_id IS NOT NULL THEN 'Asset Owner'
-                    WHEN das.user_id IS NOT NULL THEN 'Department Asset Manager'
-                    WHEN v.contact_person_id IS NOT NULL THEN 'Vendor Contact'
-                END as role
+                'Department Admin' as role
             FROM "tblUsers" u
-            LEFT JOIN "tblDeptAdmins" da ON u.user_id = da.user_id
-            LEFT JOIN "tblAssets" a ON u.user_id = a.user_id
-            LEFT JOIN "tblDeptAssets" das ON u.user_id = das.user_id
-            LEFT JOIN "tblVendors" v ON u.user_id = v.contact_person_id
+            INNER JOIN "tblDeptAdmins" da ON u.user_id = da.user_id
             WHERE u.user_id = ANY($1::text[])
-            AND (da.user_id IS NOT NULL 
-                OR a.user_id IS NOT NULL 
-                OR das.user_id IS NOT NULL 
-                OR v.contact_person_id IS NOT NULL)
         `, [userIds]);
 
         // If dependencies found, throw detailed error

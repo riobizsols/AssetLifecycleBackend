@@ -545,13 +545,20 @@ const updateAsset = async (req, res) => {
 const getAssetsByAssetType = async (req, res) => {
     try {
         const { asset_type_id } = req.params;
-        const result = await model.getAssetsByAssetType(asset_type_id);
+        const { excludePrinted } = req.query; // Check if excludePrinted query parameter is provided
+        const orgId = req.user?.org_id || null;
+        
+        // If excludePrinted is 'true' or '1', exclude assets already in print queue
+        const shouldExcludePrinted = excludePrinted === 'true' || excludePrinted === '1';
+        
+        const result = await model.getAssetsByAssetType(asset_type_id, orgId, shouldExcludePrinted);
         res.status(200).json({
             success: true,
             message: "Assets retrieved successfully",
             data: result.rows,
             count: result.rows.length,
             asset_type_id: asset_type_id,
+            excludePrinted: shouldExcludePrinted,
             timestamp: new Date().toISOString()
         });
     } catch (err) {
@@ -567,6 +574,14 @@ const getAssetsByAssetType = async (req, res) => {
 // GET /api/assets/printers - Get printer assets using organization settings
 const getPrinterAssets = async (req, res) => {
     try {
+        // Check if user is authenticated
+        if (!req.user || !req.user.user_id) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized - User not authenticated"
+            });
+        }
+        
         // Get user's organization and branch information
         const userModel = require("../models/userModel");
         const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
@@ -577,16 +592,28 @@ const getPrinterAssets = async (req, res) => {
         console.log('User org_id:', userOrgId);
         console.log('User branch_id:', userBranchId);
         
+        if (!userOrgId) {
+            console.warn('No org_id found for user, returning empty printer list');
+            return res.status(200).json({
+                success: true,
+                message: "No organization found for user",
+                data: [],
+                count: 0,
+                timestamp: new Date().toISOString()
+            });
+        }
+        
         const result = await model.getPrinterAssets(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
         res.status(200).json({
             success: true,
             message: "Printer assets retrieved successfully",
-            data: result.rows,
-            count: result.rows.length,
+            data: result.rows || [],
+            count: result.rows ? result.rows.length : 0,
             timestamp: new Date().toISOString()
         });
     } catch (err) {
         console.error("Error fetching printer assets:", err);
+        console.error("Error stack:", err.stack);
         res.status(500).json({ 
             success: false,
             message: "Failed to fetch printer assets",

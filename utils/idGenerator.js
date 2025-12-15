@@ -26,7 +26,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfjr': 'WFJR',
             'prop': 'PROP',
             'atbrrc': 'ATBRRC',
-            'atmcl': 'ATMCL'
+            'atmcl': 'ATMCL',
+            'job_role_nav': 'JRN',
+            'job_role': 'JR'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
@@ -98,7 +100,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfjr': 'tblWFJobRole',
         'prop': 'tblProps',
         'atbrrc': 'tblATBRReasonCodes',
-        'atmcl': 'tblATMaintCheckList'
+        'atmcl': 'tblATMaintCheckList',
+        'job_role_nav': 'tblJobRoleNav',
+        'job_role': 'tblJobRoles'
     };
 
     const targetTable = tableMap[tableKey];
@@ -134,7 +138,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfjr': 'wf_job_role_id',
             'prop': 'prop_id',
             'atbrrc': 'atbrrc_id',
-            'atmcl': 'at_main_checklist_id'
+            'atmcl': 'at_main_checklist_id',
+            'job_role_nav': 'job_role_nav_id',
+            'job_role': 'job_role_id'
         };
 
         const columnName = columnMap[tableKey];

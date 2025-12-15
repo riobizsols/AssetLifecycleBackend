@@ -70,21 +70,39 @@ const getAssetProperties = async (asset_id) => {
   return await dbPool.query(query, [asset_id]);
 };
 
-const getAssetsByAssetType = async (asset_type_id) => {
-  const query = `
+const getAssetsByAssetType = async (asset_type_id, orgId = null, excludePrinted = false) => {
+  let query = `
         SELECT 
-            asset_type_id, asset_id, text, serial_number, description,
-            branch_id, purchase_vendor_id, service_vendor_id, prod_serv_id, maintsch_id, purchased_cost,
-            purchased_on, purchased_by, expiry_date, current_status, warranty_period,
-            parent_asset_id, group_id, org_id, created_by, created_on, changed_by, changed_on
-        FROM "tblAssets"
-        WHERE asset_type_id = $1
-        AND current_status != 'SCRAPPED'
-        ORDER BY created_on DESC
+            a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
+            a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
+            a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
+            a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
+        FROM "tblAssets" a
+  `;
+  
+  const params = [asset_type_id];
+  
+  // If excludePrinted is true, exclude assets whose serial numbers are already in the print queue
+  if (excludePrinted) {
+    query += `
+        LEFT JOIN "tblPrintSerialNoQueue" psq 
+          ON a.serial_number = psq.serial_no 
+          AND psq.org_id = a.org_id
+        WHERE a.asset_type_id = $1
+        AND a.current_status != 'SCRAPPED'
+        AND psq.serial_no IS NULL
     `;
-
+  } else {
+    query += `
+        WHERE a.asset_type_id = $1
+        AND a.current_status != 'SCRAPPED'
+    `;
+  }
+  
+  query += ` ORDER BY a.created_on DESC`;
+  
   const dbPool = getDb();
-  return await dbPool.query(query, [asset_type_id]);
+  return await dbPool.query(query, params);
 };
 
 const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
@@ -93,7 +111,31 @@ const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
   console.log('branchId:', branchId);
   console.log('hasSuperAccess:', hasSuperAccess);
   
-  const query = `
+  if (!orgId) {
+    console.error('orgId is required for getPrinterAssets');
+    return { rows: [] };
+  }
+  
+  const dbPool = getDb();
+  
+  try {
+    // First, try to get the printer asset type from org settings
+    const orgSettingQuery = `
+      SELECT value 
+      FROM "tblOrgSettings" 
+      WHERE key = 'printer_asset_type'
+      AND org_id = $1
+    `;
+    const orgSettingResult = await dbPool.query(orgSettingQuery, [orgId]);
+    
+    let query = '';
+    let params = [];
+    
+    if (orgSettingResult.rows.length > 0 && orgSettingResult.rows[0].value) {
+      // Use the asset type from org settings
+      const printerAssetTypeName = orgSettingResult.rows[0].value;
+      
+      query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
             a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
@@ -103,30 +145,35 @@ const getPrinterAssets = async (orgId, branchId, hasSuperAccess = false) => {
         WHERE a.asset_type_id = (
             SELECT asset_type_id 
             FROM "tblAssetTypes" 
-            WHERE text = (
-                SELECT value 
-                FROM "tblOrgSettings" 
-                WHERE key = 'printer_asset_type'
-                AND org_id = $1
-            )
+            WHERE text = $1
+            AND org_id = $2
         )
-        AND a.org_id = $1
-    `;
+        AND a.org_id = $2
+      `;
+      
+      params = [printerAssetTypeName, orgId];
+    } else {
+      // Fallback: return empty result if no org setting is found
+      console.log('No printer_asset_type setting found in org settings, returning empty result');
+      return { rows: [] };
+    }
+    
+    // Apply branch filter only if user doesn't have super access
+    if (!hasSuperAccess && branchId) {
+      query += ` AND a.branch_id = $${params.length + 1}`;
+      params.push(branchId);
+    }
+    
+    query += ` AND a.current_status != 'SCRAPPED' ORDER BY a.created_on DESC`;
 
-  const params = [orgId];
-  
-  // Apply branch filter only if user doesn't have super access
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $2`;
-    params.push(branchId);
+    const result = await dbPool.query(query, params);
+    console.log('Query executed successfully, found printer assets:', result.rows.length);
+    return result;
+  } catch (error) {
+    console.error('Error in getPrinterAssets:', error);
+    // Return empty result instead of throwing to prevent 500 error
+    return { rows: [] };
   }
-  
-  query += ` AND a.current_status != 'SCRAPPED' ORDER BY a.created_on DESC`;
-
-  const dbPool = getDb();
-  const result = await dbPool.query(query, params);
-  console.log('Query executed successfully, found printer assets:', result.rows.length);
-  return result;
 };
 
 const getAssetsByBranch = async (branch_id) => {

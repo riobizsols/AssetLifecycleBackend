@@ -600,10 +600,114 @@ const deleteScrapSale = async (req, res) => {
     }
 };
 
+// PUT /api/scrap-sales/:id - Update scrap sale
+const updateScrapSale = async (req, res) => {
+    const startTime = Date.now();
+    const userId = req.user?.user_id;
+    
+    try {
+        const { id } = req.params;
+        const {
+            text,
+            total_sale_value,
+            buyer_name,
+            buyer_company,
+            buyer_phone,
+            sale_date,
+            collection_date,
+            invoice_no,
+            po_no,
+            scrapAssets
+        } = req.body;
+
+        const org_id = req.user?.org_id;
+        const changed_by = req.user?.user_id;
+        
+        // Validation
+        if (!text || !total_sale_value || !buyer_name || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Missing required fields",
+                message: "text, total_sale_value, buyer_name, and scrapAssets array are required"
+            });
+        }
+
+        // Validate scrap assets
+        const asdIds = scrapAssets.map(asset => asset.asd_id);
+        const validationResult = await model.validateScrapAssets(asdIds);
+        
+        if (validationResult.rows.length !== asdIds.length) {
+            return res.status(400).json({
+                success: false,
+                error: "Invalid scrap assets",
+                message: "Some scrap assets do not exist"
+            });
+        }
+
+        // Check if assets are already sold in other sales
+        const alreadySold = validationResult.rows.filter(asset => asset.already_sold);
+        const currentSaleDetails = await model.getScrapSaleById(id);
+        const currentAsdIds = currentSaleDetails?.details?.map(d => d.asd_id) || [];
+        
+        // Filter out assets that are already sold but are in the current sale
+        const actuallySold = alreadySold.filter(asset => !currentAsdIds.includes(asset.asd_id));
+        
+        if (actuallySold.length > 0) {
+            return res.status(400).json({
+                success: false,
+                error: "Assets already sold",
+                message: "Some assets are already sold in another sale",
+                alreadySold: actuallySold.map(asset => ({
+                    asd_id: asset.asd_id,
+                    asset_name: asset.asset_name,
+                    serial_number: asset.serial_number
+                }))
+            });
+        }
+
+        // Prepare sale data
+        const saleData = {
+            header: {
+                text,
+                total_sale_value,
+                buyer_name,
+                buyer_company: buyer_company || null,
+                buyer_phone: buyer_phone || null,
+                sale_date: sale_date || null,
+                collection_date: collection_date || null,
+                invoice_no: invoice_no || null,
+                po_no: po_no || null,
+                changed_by
+            },
+            scrapAssets: scrapAssets.map(asset => ({
+                asd_id: asset.asd_id,
+                sale_value: asset.sale_value || 0
+            }))
+        };
+
+        // Update scrap sale
+        const result = await model.updateScrapSale(id, saleData);
+        
+        res.status(200).json({
+            success: true,
+            message: "Scrap sale updated successfully",
+            scrap_sale: result
+        });
+    } catch (error) {
+        console.error("Error updating scrap sale:", error);
+        res.status(500).json({
+            success: false,
+            error: "Failed to update scrap sale",
+            message: error.message
+        });
+    }
+};
+
 module.exports = {
     createScrapSale,
     getAllScrapSales,
     getScrapSaleById,
+    updateScrapSale,
     validateScrapAssetsForSale,
     deleteScrapSale
 };
