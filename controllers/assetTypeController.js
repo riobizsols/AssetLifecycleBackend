@@ -39,7 +39,7 @@ const addAssetType = async (req, res) => {
             parent_asset_type_id = null,  // from frontend
             maint_type_id = null,  // from frontend
             maint_lead_type = null,  // from frontend
-            depreciation_type = 'ND'  // from frontend
+            depreciation_type = 'ND',  // from frontend
         } = req.body;
 
         // Get org_id and user_id from authenticated user
@@ -139,6 +139,7 @@ const addAssetType = async (req, res) => {
         } else {
             console.log('⚠️ No properties provided or properties array is empty');
         }
+
 
         res.status(201).json({
             message: "Asset type added successfully",
@@ -267,7 +268,7 @@ const updateAssetType = async (req, res) => {
             parent_asset_type_id,
             maint_type_id,
             maint_lead_type,
-            depreciation_type
+            depreciation_type,
         } = req.body;
 
         const changed_by = req.user.user_id;
@@ -329,6 +330,7 @@ const updateAssetType = async (req, res) => {
             console.error('Update query returned no rows');
             return res.status(500).json({ error: "Update query returned no rows" });
         }
+
 
         res.status(200).json({
             success: true,

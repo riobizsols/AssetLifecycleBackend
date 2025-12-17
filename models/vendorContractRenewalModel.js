@@ -91,13 +91,18 @@ const createVendorContractRenewalWorkflow = async (vendor) => {
 };
 
 /**
- * Deactivate vendors with expired contracts that haven't been renewed
+ * Deactivate vendors with expired contracts where maintenance is not approved within expiry date
+ * Sets vendor status to inactive (int_status = 0) if:
+ * 1. Contract end date has passed (contract_end_date < today)
+ * 2. Maintenance workflow (MT005) is not approved (status != 'CO')
  */
 const deactivateExpiredVendors = async (todayDate) => {
   const dbPool = getDb();
   
   try {
-    // Find vendors with expired contracts that haven't been renewed
+    // Find vendors with expired contracts where maintenance is not approved within expiry date
+    // This checks if the workflow exists but is not completed (status != 'CO')
+    // OR if no workflow exists at all
     const expiredVendorsQuery = `
       UPDATE "tblVendors" v
       SET int_status = 0,
@@ -106,19 +111,31 @@ const deactivateExpiredVendors = async (todayDate) => {
       WHERE v.contract_end_date IS NOT NULL
         AND v.contract_end_date::date < $1::date
         AND v.int_status = 1
-        AND NOT EXISTS (
-          SELECT 1 
-          FROM "tblWFAssetMaintSch_H" wfh
-          WHERE wfh.vendor_id = v.vendor_id
-            AND wfh.maint_type_id = 'MT005'
-            AND wfh.status = 'CO'
+        AND v.int_status != 4  -- Don't update blacklisted vendors
+        AND (
+          -- No workflow exists for this vendor renewal
+          NOT EXISTS (
+            SELECT 1 
+            FROM "tblWFAssetMaintSch_H" wfh
+            WHERE wfh.vendor_id = v.vendor_id
+              AND wfh.maint_type_id = 'MT005'
+          )
+          OR
+          -- Workflow exists but is not completed (status != 'CO')
+          EXISTS (
+            SELECT 1 
+            FROM "tblWFAssetMaintSch_H" wfh
+            WHERE wfh.vendor_id = v.vendor_id
+              AND wfh.maint_type_id = 'MT005'
+              AND wfh.status != 'CO'
+          )
         )
       RETURNING v.vendor_id, v.vendor_name, v.contract_end_date
     `;
     
     const result = await dbPool.query(expiredVendorsQuery, [todayDate]);
     
-    console.log(`Deactivated ${result.rows.length} vendor(s) with expired contracts:`);
+    console.log(`Deactivated ${result.rows.length} vendor(s) with expired contracts (maintenance not approved within expiry date):`);
     result.rows.forEach(vendor => {
       console.log(`   - ${vendor.vendor_name} (${vendor.vendor_id}) - Contract ended: ${vendor.contract_end_date}`);
     });

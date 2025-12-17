@@ -4,6 +4,7 @@ const { getVendorById } = require('./vendorsModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
+const { insertVendorRenewal } = require('./vendorRenewalModel');
 
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
@@ -862,19 +863,79 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        );
        console.log('Workflow completed - Status set to CO');
        
-       // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
-       if (!isVendorContractRenewal) {
-       console.log('About to call createMaintenanceRecord...');
-       try {
-         const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
-         console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
-       } catch (error) {
-         console.error('Error creating maintenance record:', error);
-         throw error;
-         }
-       } else {
-         console.log('Skipping maintenance record creation for vendor contract renewal (MT005)');
-       }
+      // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
+      if (!isVendorContractRenewal) {
+      console.log('About to call createMaintenanceRecord...');
+      try {
+        const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
+        console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
+      } catch (error) {
+        console.error('Error creating maintenance record:', error);
+        throw error;
+        }
+      } else {
+        console.log('Vendor contract renewal (MT005) approved - Creating vendor renewal record...');
+        
+        // Get workflow header details for vendor renewal
+        try {
+          const vendorRenewalQuery = `
+            SELECT 
+              wfh.wfamsh_id,
+              wfh.vendor_id,
+              wfh.org_id,
+              wfh.branch_code,
+              wfh.pl_sch_date,
+              v.vendor_name,
+              v.contract_start_date,
+              v.contract_end_date,
+              wfh.created_by
+            FROM "tblWFAssetMaintSch_H" wfh
+            LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
+            WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+          `;
+          
+          const vendorRenewalResult = await getDb().query(vendorRenewalQuery, [wfamshId, orgId]);
+          
+          if (vendorRenewalResult.rows.length > 0) {
+            const workflowData = vendorRenewalResult.rows[0];
+            
+            // Get approval notes from workflow details
+            const notesQuery = `
+              SELECT notes 
+              FROM "tblWFAssetMaintSch_D" 
+              WHERE wfamsh_id = $1 AND org_id = $2 
+              ORDER BY sequence DESC 
+              LIMIT 1
+            `;
+            const notesResult = await getDb().query(notesQuery, [wfamshId, orgId]);
+            const renewalNotes = notesResult.rows.length > 0 ? notesResult.rows[0].notes : null;
+            
+            // Prepare vendor renewal data
+            const renewalData = {
+              wfamsh_id: workflowData.wfamsh_id,
+              vendor_id: workflowData.vendor_id,
+              vendor_name: workflowData.vendor_name,
+              contract_start_date: workflowData.contract_start_date,
+              contract_end_date: workflowData.contract_end_date,
+              previous_contract_end_date: workflowData.pl_sch_date, // pl_sch_date is the contract end date
+              renewal_approved_by: 'SYSTEM',
+              renewal_notes: renewalNotes,
+              org_id: workflowData.org_id,
+              branch_code: workflowData.branch_code,
+              created_by: workflowData.created_by || 'SYSTEM'
+            };
+            
+            // Insert vendor renewal record
+            const renewalResult = await insertVendorRenewal(renewalData);
+            console.log(`✅ Vendor renewal record created successfully: ${renewalResult.vr_id}`);
+          } else {
+            console.error('No workflow data found for vendor contract renewal');
+          }
+        } catch (error) {
+          console.error('Error creating vendor renewal record:', error);
+          // Don't throw error - allow workflow to complete even if renewal record fails
+        }
+      }
        
        return 'CO';
      }

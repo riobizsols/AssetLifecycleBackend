@@ -104,11 +104,26 @@ const createScrapSalesHeader = async (client, headerData) => {
     // Handle total_sale_value - check if column is ARRAY or NUMERIC
     const sanitizedValues = values.map((value, index) => {
         // total_sale_value is at index 4 (5th parameter) - ssh_id, org_id, branch_code, text, total_sale_value
-        if (index === 4 && typeof value === 'number') {
-            // For now, convert to array to handle ARRAY column type
-            // This can be removed once the table structure is fixed
-            console.log(`🔧 Converting total_sale_value to array: ${value} -> [${value}]`);
-            return [value]; // Convert to array for ARRAY column
+        if (index === 4) {
+            // Convert to integer and then to array for bigint[] column type
+            let numericValue = value;
+            if (typeof value === 'string') {
+                numericValue = parseFloat(value);
+            }
+            if (typeof numericValue === 'number') {
+                const intValue = Math.round(numericValue); // Convert decimal to integer for bigint
+                console.log(`🔧 Converting total_sale_value to integer array: ${value} -> [${intValue}]`);
+                return [intValue]; // Convert to array for ARRAY column
+            }
+            if (Array.isArray(value)) {
+                // If already an array, convert each element to integer
+                const intArray = value.map(v => {
+                    const num = typeof v === 'string' ? parseFloat(v) : v;
+                    return Math.round(num);
+                });
+                console.log(`🔧 Converting total_sale_value array elements to integers: ${JSON.stringify(value)} -> ${JSON.stringify(intArray)}`);
+                return intArray;
+            }
         }
         if (Array.isArray(value)) {
             console.warn(`⚠️ Warning: Value at index ${index} is an array:`, value);
@@ -150,11 +165,17 @@ const createScrapSalesDetails = async (client, ssh_id, scrapAssets) => {
             RETURNING *
         `;
 
+        // Convert sale_value to integer (bigint) - round decimal values
+        // If the column is bigint, we need to convert decimal to integer
+        const saleValue = asset.sale_value != null 
+            ? Math.round(parseFloat(asset.sale_value)) 
+            : 0;
+
         const values = [
             ssd_id,
             ssh_id,
             asset.asd_id,
-            asset.sale_value
+            saleValue
         ];
 
         try {
@@ -277,6 +298,7 @@ const getScrapSaleById = async (ssh_id) => {
             asd.asset_id,
             a.text as asset_name,
             a.serial_number,
+            a.asset_type_id,
             at.text as asset_type_name
         FROM "tblScrapSales_D" ssd
         LEFT JOIN "tblAssetScrapDet" asd ON ssd.asd_id = asd.asd_id
@@ -296,6 +318,8 @@ const getScrapSaleById = async (ssh_id) => {
 
 // Validate scrap assets exist and are not already sold
 const validateScrapAssets = async (asdIds) => {
+    const dbPool = getDb();
+    
     // Create placeholders for the IN clause
     const placeholders = asdIds.map((_, index) => `$${index + 1}`).join(',');
     
@@ -316,6 +340,132 @@ const validateScrapAssets = async (asdIds) => {
     `;
     
     return await dbPool.query(query, asdIds);
+};
+
+// Update scrap sale (header and details)
+const updateScrapSale = async (ssh_id, saleData) => {
+    const dbPool = getDb();
+    const client = await dbPool.connect();
+    
+    try {
+        await client.query('BEGIN');
+        
+        // First, get the current header to preserve required fields
+        const currentHeaderQuery = `SELECT * FROM "tblScrapSales_H" WHERE ssh_id = $1`;
+        const currentHeaderResult = await client.query(currentHeaderQuery, [ssh_id]);
+        
+        if (currentHeaderResult.rows.length === 0) {
+            throw new Error(`Scrap sale with ID ${ssh_id} not found`);
+        }
+        
+        const currentHeader = currentHeaderResult.rows[0];
+        
+        const {
+            header: {
+                text,
+                total_sale_value,
+                buyer_name,
+                buyer_company,
+                buyer_phone,
+                sale_date,
+                collection_date,
+                invoice_no,
+                po_no,
+                changed_by
+            },
+            scrapAssets
+        } = saleData;
+        
+        // Update header
+        const totalValue = Array.isArray(total_sale_value) 
+            ? total_sale_value 
+            : [Math.round(parseFloat(total_sale_value) || 0)];
+        
+        // Use provided sale_date or preserve existing one (required field)
+        const finalSaleDate = sale_date || currentHeader.sale_date || new Date().toISOString().split('T')[0];
+        
+        const updateHeaderQuery = `
+            UPDATE "tblScrapSales_H"
+            SET 
+                text = $1,
+                total_sale_value = $2,
+                buyer_name = $3,
+                buyer_company = $4,
+                buyer_phone = $5,
+                sale_date = $6,
+                collection_date = $7,
+                invoice_no = $8,
+                po_no = $9,
+                changed_by = $10,
+                changed_on = CURRENT_TIMESTAMP
+            WHERE ssh_id = $11
+            RETURNING *
+        `;
+        
+        const headerResult = await client.query(updateHeaderQuery, [
+            text,
+            totalValue,
+            buyer_name,
+            buyer_company || null,
+            buyer_phone || null,
+            finalSaleDate,
+            collection_date || null,
+            invoice_no || null,
+            po_no || null,
+            changed_by,
+            ssh_id
+        ]);
+        
+        // Delete existing details
+        await client.query('DELETE FROM "tblScrapSales_D" WHERE ssh_id = $1', [ssh_id]);
+        
+        // Insert new details
+        const detailResults = [];
+        if (scrapAssets && scrapAssets.length > 0) {
+            const baseSsdId = await generateSsdId();
+            const baseNumber = parseInt(baseSsdId.substring(3));
+            
+            for (let i = 0; i < scrapAssets.length; i++) {
+                const asset = scrapAssets[i];
+                const ssd_id = `SSD${(baseNumber + i).toString().padStart(4, '0')}`;
+                
+                const saleValue = asset.sale_value != null 
+                    ? Math.round(parseFloat(asset.sale_value)) 
+                    : 0;
+                
+                const insertDetailQuery = `
+                    INSERT INTO "tblScrapSales_D" (
+                        ssd_id,
+                        ssh_id,
+                        asd_id,
+                        sale_value
+                    ) VALUES ($1, $2, $3, $4)
+                    RETURNING *
+                `;
+                
+                const detailResult = await client.query(insertDetailQuery, [
+                    ssd_id,
+                    ssh_id,
+                    asset.asd_id,
+                    saleValue
+                ]);
+                
+                detailResults.push(detailResult);
+            }
+        }
+        
+        await client.query('COMMIT');
+        
+        return {
+            header: headerResult.rows[0],
+            details: detailResults.map(result => result.rows[0])
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
 };
 
 // Delete scrap sale (header, details, and documents)
@@ -372,6 +522,7 @@ module.exports = {
     createScrapSalesDetails,
     getAllScrapSales,
     getScrapSaleById,
+    updateScrapSale,
     validateScrapAssets,
     generateSshId,
     generateSsdId,

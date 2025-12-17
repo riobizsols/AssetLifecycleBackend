@@ -407,6 +407,140 @@ const deleteAssetTypePropertyMappings = async (asset_type_id) => {
     return await dbPool.query(query, [asset_type_id]);
 };
 
+// Insert maintenance frequency into tblATMaintFreq
+const insertMaintenanceFrequency = async (asset_type_id, frequency, uom, maint_type_id, maintained_by, text, org_id, created_by) => {
+    try {
+        const dbPool = getDb();
+        
+        // Generate at_main_freq_id in format ATMF001
+        const at_main_freq_id = await generateCustomId('atmf', 3);
+        
+        const query = `
+            INSERT INTO "tblATMaintFreq" (
+                at_main_freq_id,
+                asset_type_id,
+                frequency,
+                uom,
+                text,
+                maintained_by,
+                maint_type_id,
+                int_status,
+                org_id
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)
+            RETURNING *
+        `;
+        
+        const values = [
+            at_main_freq_id,
+            asset_type_id,
+            frequency,
+            uom,
+            text || `${frequency} ${uom}`,
+            maintained_by || 'Internal',
+            maint_type_id,
+            org_id
+        ];
+        
+        const result = await dbPool.query(query, values);
+        return result;
+    } catch (error) {
+        console.error('Error inserting maintenance frequency:', error);
+        throw error;
+    }
+};
+
+// Get maintenance frequency for asset type
+const getMaintenanceFrequency = async (asset_type_id) => {
+    try {
+        const dbPool = getDb();
+        const query = `
+            SELECT 
+                at_main_freq_id,
+                asset_type_id,
+                frequency,
+                uom,
+                text,
+                maintained_by,
+                maint_type_id,
+                int_status,
+                org_id
+            FROM "tblATMaintFreq"
+            WHERE asset_type_id = $1
+            ORDER BY at_main_freq_id
+            LIMIT 1
+        `;
+        
+        const result = await dbPool.query(query, [asset_type_id]);
+        return result;
+    } catch (error) {
+        console.error('Error getting maintenance frequency:', error);
+        throw error;
+    }
+};
+
+// Update maintenance frequency for asset type
+const updateMaintenanceFrequency = async (asset_type_id, frequency, uom, maint_type_id, maintained_by, text, org_id) => {
+    try {
+        const dbPool = getDb();
+        
+        // Check if frequency exists
+        const existing = await getMaintenanceFrequency(asset_type_id);
+        
+        if (existing.rows.length > 0) {
+            // Update existing frequency
+            const at_main_freq_id = existing.rows[0].at_main_freq_id;
+            const query = `
+                UPDATE "tblATMaintFreq"
+                SET 
+                    frequency = $1,
+                    uom = $2,
+                    text = $3,
+                    maintained_by = $4,
+                    maint_type_id = $5,
+                    int_status = 1
+                WHERE at_main_freq_id = $6
+                RETURNING *
+            `;
+            
+            const values = [
+                frequency,
+                uom,
+                text || `${frequency} ${uom}`,
+                maintained_by || 'Internal',
+                maint_type_id,
+                at_main_freq_id
+            ];
+            
+            const result = await dbPool.query(query, values);
+            return result;
+        } else {
+            // Insert new frequency
+            return await insertMaintenanceFrequency(asset_type_id, frequency, uom, maint_type_id, maintained_by, text, org_id, null);
+        }
+    } catch (error) {
+        console.error('Error updating maintenance frequency:', error);
+        throw error;
+    }
+};
+
+// Delete maintenance frequency for asset type
+const deleteMaintenanceFrequency = async (asset_type_id) => {
+    try {
+        const dbPool = getDb();
+        const query = `
+            DELETE FROM "tblATMaintFreq"
+            WHERE asset_type_id = $1
+            RETURNING *
+        `;
+        
+        const result = await dbPool.query(query, [asset_type_id]);
+        return result;
+    } catch (error) {
+        console.error('Error deleting maintenance frequency:', error);
+        throw error;
+    }
+};
+
 module.exports = {
     insertAssetType,
     getAllAssetTypes,
@@ -426,5 +560,9 @@ module.exports = {
     deleteAssetTypeProperty,
     getAssetTypeByText,
     checkPropertyExists,
-    deleteAssetTypePropertyMappings
+    deleteAssetTypePropertyMappings,
+    insertMaintenanceFrequency,
+    getMaintenanceFrequency,
+    updateMaintenanceFrequency,
+    deleteMaintenanceFrequency
 }; 

@@ -80,31 +80,55 @@ const createUser = async ({
 
 
 // Set reset token for password reset
-const setResetToken = async (email, token, expiry) => {
-    const dbPool = getDb();
-    await dbPool.query(
+// If tenantPool is provided, use it; otherwise use getDb() which gets from context
+const setResetToken = async (email, token, expiry, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    
+    logger.debug(`[UserModel] Setting reset token for email: "${email}"`);
+    logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
+    
+    await connection.query(
         `UPDATE "tblUsers"
          SET reset_token = $1, reset_token_expiry = $2
          WHERE email = $3`,
         [token, expiry, email]
     );
+    
+    logger.debug(`[UserModel] ✅ Reset token set for email: "${email}"`);
 };
 
 // Find user by valid reset token
-const findUserByResetToken = async (token) => {
-    const dbPool = getDb();
-    const result = await dbPool.query(
+// If tenantPool is provided, use it; otherwise use getDb() which gets from context
+const findUserByResetToken = async (token, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    
+    logger.debug(`[UserModel] 🔍 Searching for user with reset token`);
+    logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
+    
+    const result = await connection.query(
         `SELECT * FROM "tblUsers"
          WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
         [token]
     );
+    
+    if (result.rows.length > 0) {
+        logger.debug(`[UserModel] ✅ User found with valid reset token: ${result.rows[0].user_id} (${result.rows[0].email})`);
+    } else {
+        logger.debug(`[UserModel] ❌ No user found with valid reset token`);
+    }
+    
     return result.rows[0];
 };
 
 // Update user password after reset
-const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) => {
-    const dbPool = getDb();
-    await dbPool.query(
+// If tenantPool is provided, use it; otherwise use getDb() which gets from context
+const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    
+    logger.debug(`[UserModel] Updating password for user_id: ${user_id}, org_id: ${org_id}`);
+    logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
+    
+    await connection.query(
         `UPDATE "tblUsers"
          SET password = $1,
              reset_token = NULL,
@@ -114,12 +138,26 @@ const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) =
          WHERE org_id = $3 AND user_id = $4`,
         [hashedPassword, changed_by, org_id, user_id]
     );
+    
+    logger.debug(`[UserModel] ✅ Password updated for user_id: ${user_id}`);
 };
 
 // Get all users
 const getAllUsers = async () => {
     const dbPool = getDb();
-    const result = await dbPool.query(`SELECT * FROM "tblUsers"`);
+    const query = `
+        SELECT 
+            u.*,
+            d.text as dept_name,
+            b.text as branch_name,
+            jr.text as job_role_name
+        FROM "tblUsers" u
+        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id AND d.org_id = u.org_id
+        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id AND b.org_id = u.org_id
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id AND jr.org_id = u.org_id
+        ORDER BY u.full_name
+    `;
+    const result = await dbPool.query(query);
     return result.rows;
 };
 
@@ -175,9 +213,9 @@ const getAllUsersWithBranch = async (orgId) => {
             b.text as branch_name,
             jr.text as job_role_name
         FROM "tblUsers" u
-        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
-        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id
-        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
+        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id AND d.org_id = u.org_id
+        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id AND b.org_id = u.org_id
+        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id AND jr.org_id = u.org_id
         WHERE u.org_id = $1
         ORDER BY u.full_name
     `;
@@ -194,24 +232,13 @@ const deleteUsers = async (userIds = []) => {
     try {
         const dbPool = getDb();
         // First check for dependencies
+        // Note: tblVendors doesn't have a user_id foreign key - contact info is stored as text fields
         const dependencies = await dbPool.query(`
             SELECT DISTINCT u.user_id, u.full_name,
-                CASE
-                    WHEN da.user_id IS NOT NULL THEN 'Department Admin'
-                    WHEN a.user_id IS NOT NULL THEN 'Asset Owner'
-                    WHEN das.user_id IS NOT NULL THEN 'Department Asset Manager'
-                    WHEN v.contact_person_id IS NOT NULL THEN 'Vendor Contact'
-                END as role
+                'Department Admin' as role
             FROM "tblUsers" u
-            LEFT JOIN "tblDeptAdmins" da ON u.user_id = da.user_id
-            LEFT JOIN "tblAssets" a ON u.user_id = a.user_id
-            LEFT JOIN "tblDeptAssets" das ON u.user_id = das.user_id
-            LEFT JOIN "tblVendors" v ON u.user_id = v.contact_person_id
+            INNER JOIN "tblDeptAdmins" da ON u.user_id = da.user_id
             WHERE u.user_id = ANY($1::text[])
-            AND (da.user_id IS NOT NULL 
-                OR a.user_id IS NOT NULL 
-                OR das.user_id IS NOT NULL 
-                OR v.contact_person_id IS NOT NULL)
         `, [userIds]);
 
         // If dependencies found, throw detailed error

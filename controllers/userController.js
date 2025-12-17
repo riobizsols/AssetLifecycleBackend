@@ -12,13 +12,23 @@ exports.getAllUsers = async (req, res) => {
             
         console.log('Users from model:', users.length);
         
+        // Debug: Log first user to check dept_id and dept_name
+        if (users.length > 0) {
+            console.log('🔍 Sample user data:', {
+                user_id: users[0].user_id,
+                full_name: users[0].full_name,
+                dept_id: users[0].dept_id,
+                dept_name: users[0].dept_name,
+                org_id: users[0].org_id
+            });
+        }
+        
         const response = {
             success: true,
             message: `Found ${users.length} users`,
             data: users
         };
         
-        console.log('Sending response:', response);
         res.json(response);
     } catch (error) {
         console.error('Error in getAllUsers controller:', error);

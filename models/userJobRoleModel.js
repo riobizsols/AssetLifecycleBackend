@@ -85,9 +85,17 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         console.log(`Generated user_id: ${user_id}`);
         
         const dbPool = getDb();
-        // Fetch employee data including branch_id
+        // Fetch employee data including all necessary fields for user creation
         const employeeResult = await dbPool.query(
-            `SELECT full_name, email_id, phone_number, dept_id, branch_id, language_code 
+            `SELECT 
+                full_name, 
+                email_id, 
+                phone_number, 
+                dept_id, 
+                branch_id, 
+                language_code,
+                org_id,
+                int_status
              FROM "tblEmployees" 
              WHERE emp_int_id = $1`,
             [emp_int_id]
@@ -99,36 +107,80 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         
         const employee = employeeResult.rows[0];
         
+        // Use employee's org_id if provided, otherwise use the passed org_id
+        const finalOrgId = employee.org_id || org_id;
+        
         // Get initial password from org settings (defaults to "Initial1" if not configured)
         const { getInitialPassword } = require('../utils/orgSettingsUtils');
-        const defaultPassword = await getInitialPassword(org_id, dbPool);
+        const defaultPassword = await getInitialPassword(finalOrgId, dbPool);
         const hashedPassword = await bcrypt.hash(defaultPassword, 10);
         
+        // Handle dept_id - check if it's a valid non-empty string
+        // Use null only if dept_id is actually null/undefined, not if it's an empty string
+        const deptId = (employee.dept_id && employee.dept_id.trim() !== '') 
+            ? employee.dept_id.trim() 
+            : null;
+        
+        // Handle branch_id similarly
+        const branchId = (employee.branch_id && employee.branch_id.trim() !== '') 
+            ? employee.branch_id.trim() 
+            : null;
+        
+        // Log the employee data for debugging
+        console.log(`Creating user for employee ${emp_int_id}:`, {
+            full_name: employee.full_name,
+            email_id: employee.email_id,
+            phone_number: employee.phone_number,
+            dept_id: employee.dept_id,
+            branch_id: employee.branch_id,
+            language_code: employee.language_code,
+            org_id: finalOrgId,
+            int_status: employee.int_status
+        });
+        
         // Insert user with all mapped fields (job_role_id set to null)
+        // Map all fields from tblEmployees to tblUsers correctly
+        // Field mappings:
+        // - full_name -> full_name
+        // - email_id -> email
+        // - phone_number -> phone
+        // - dept_id -> dept_id (properly handled for empty strings)
+        // - branch_id -> branch_id (properly handled for empty strings)
+        // - language_code -> language_code (uppercase)
+        // - org_id -> org_id (from employee or parameter)
+        // - Defaults: time_zone='IST', date_format='YYYY-MM-DD', int_status=1
         const result = await dbPool.query(
             `INSERT INTO "tblUsers" (
                 user_id, emp_int_id, org_id, full_name, email, phone,
                 job_role_id, password, created_by, created_on, changed_by, changed_on,
-                time_zone, dept_id, branch_id, language_code, int_status
+                time_zone, date_format, dept_id, branch_id, language_code, int_status
             ) VALUES (
                 $1, $2, $3, $4, $5, $6,
                 NULL, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP,
-                'IST', $9, $10, $11, 1
-            ) RETURNING user_id, emp_int_id`,
+                'IST', 'YYYY-MM-DD', $9, $10, $11, $12
+            ) RETURNING user_id, emp_int_id, full_name, email, phone, dept_id, branch_id, language_code, org_id, int_status`,
             [
                 user_id, 
                 emp_int_id, 
-                org_id, 
-                employee.full_name, 
-                employee.email_id, 
-                employee.phone_number,
+                finalOrgId, 
+                employee.full_name || null, 
+                employee.email_id || null, 
+                employee.phone_number || null,
                 hashedPassword, 
                 created_by, 
-                employee.dept_id,
-                employee.branch_id || null,
-                employee.language_code?.toLowerCase() || 'en'
+                deptId,  // Use properly handled dept_id
+                branchId,  // Use properly handled branch_id
+                (employee.language_code?.toLowerCase() || 'en').toUpperCase(),
+                employee.int_status || 1  // Use employee status or default to 1 (active)
             ]
         );
+        
+        console.log(`User created successfully:`, {
+            user_id: result.rows[0].user_id,
+            emp_int_id: result.rows[0].emp_int_id,
+            dept_id: result.rows[0].dept_id,
+            branch_id: result.rows[0].branch_id
+        });
         
         console.log(`Created user for employee ${emp_int_id} with user_id: ${user_id}`);
         return {

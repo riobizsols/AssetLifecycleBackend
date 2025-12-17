@@ -5,21 +5,35 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 
-const getAllMaintTypes = async () => {
-    const query = `
+const getAllMaintTypes = async (orgId = null) => {
+    let query = `
         SELECT 
             maint_type_id,
             org_id,
             text,
             int_status
         FROM "tblMaintTypes"
-        ORDER BY maint_type_id DESC
     `;
     
-    const dbPool = getDb();
-
+    const params = [];
+    const conditions = [];
     
-    return await dbPool.query(query);
+    // Filter by int_status = 1 (numeric type in database)
+    conditions.push(`int_status = 1`);
+    
+    if (orgId) {
+        conditions.push(`(org_id = $${params.length + 1} OR org_id IS NULL)`);
+        params.push(orgId);
+    }
+    
+    if (conditions.length > 0) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+    
+    query += ` ORDER BY text ASC`;
+    
+    const dbPool = getDb();
+    return await dbPool.query(query, params);
 };
 
 const getMaintTypeById = async (maint_type_id) => {

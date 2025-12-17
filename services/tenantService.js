@@ -160,7 +160,7 @@ async function getTenantPool(orgId) {
   logger.log(`[TenantService] 🔍 Getting tenant pool for org_id: ${orgId}`);
   
   try {
-    const credentials = await getTenantCredentials(orgId);
+  const credentials = await getTenantCredentials(orgId);
     logger.log(`[TenantService] ✅ Got credentials for org_id: ${orgId}, database: ${credentials.database}`);
     
     // Validate credentials
@@ -168,13 +168,13 @@ async function getTenantPool(orgId) {
       throw new Error(`Invalid tenant credentials for org_id: ${orgId}`);
     }
     
-    const connectionString = getTenantConnectionString(credentials);
+  const connectionString = getTenantConnectionString(credentials);
     logger.debug(`[TenantService] 🔗 Connection string: postgresql://${credentials.user}@${credentials.host}:${credentials.port}/${credentials.database}`);
 
     const pool = new Pool({
-      connectionString,
-      max: 10,
-      idleTimeoutMillis: 30000,
+    connectionString,
+    max: 10,
+    idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000, // Increased timeout for better reliability
       // Handle pool errors
       errorHandler: (err, client) => {
