@@ -152,12 +152,12 @@ const createWorkflowSequence = async (req, res) => {
             });
         }
 
-        // Validate sequence number format (should be 5, 10, 15, 20, etc.)
+        // Validate sequence number format (should be 1, 2, 3, etc.)
         const seqNum = parseInt(seqs_no);
-        if (isNaN(seqNum) || seqNum % 5 !== 0 || seqNum < 5) {
+        if (isNaN(seqNum) || seqNum < 1) {
             return res.status(400).json({
                 success: false,
-                error: 'Sequence number must be a multiple of 5 (e.g., 5, 10, 15, 20)'
+                error: 'Sequence number must be a positive integer (e.g., 1, 2, 3)'
             });
         }
 
@@ -200,12 +200,12 @@ const updateWorkflowSequence = async (req, res) => {
             });
         }
 
-        // Validate sequence number format (should be 5, 10, 15, 20, etc.)
+        // Validate sequence number format (should be 1, 2, 3, etc.)
         const seqNum = parseInt(seqs_no);
-        if (isNaN(seqNum) || seqNum % 5 !== 0 || seqNum < 5) {
+        if (isNaN(seqNum) || seqNum < 1) {
             return res.status(400).json({
                 success: false,
-                error: 'Sequence number must be a multiple of 5 (e.g., 5, 10, 15, 20)'
+                error: 'Sequence number must be a positive integer (e.g., 1, 2, 3)'
             });
         }
 

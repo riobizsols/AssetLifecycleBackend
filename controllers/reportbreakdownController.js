@@ -278,8 +278,8 @@ const createBreakdownReport = async (req, res) => {
       userId
     });
 
-    // Validate required fields
-    if (!asset_id || !atbrrc_id || !reported_by || !description || !decision_code) {
+    // Validate required fields (decision_code is optional/nullable)
+    if (!asset_id || !atbrrc_id || !reported_by || !description) {
       await logMissingParameters({
         appId: APP_ID,
         operation: 'Create Breakdown Report',
@@ -287,21 +287,20 @@ const createBreakdownReport = async (req, res) => {
           !asset_id && 'asset_id',
           !atbrrc_id && 'atbrrc_id',
           !reported_by && 'reported_by',
-          !description && 'description',
-          !decision_code && 'decision_code'
+          !description && 'description'
         ].filter(Boolean),
         userId,
         duration: Date.now() - startTime
       });
       
       return res.status(400).json({ 
-        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description, decision_code' 
+        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description' 
       });
     }
 
-    // Validate decision code
+    // Validate decision code (only if provided)
     const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
-    if (!validDecisionCodes.includes(decision_code)) {
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
       await logInvalidFilters({
         appId: APP_ID,
         reportType: 'Breakdown Report',
@@ -422,28 +421,27 @@ const updateBreakdownReport = async (req, res) => {
       userId
     });
 
-    // Validate required fields
-    if (!atbrrc_id || !description || !decision_code) {
+    // Validate required fields (decision_code is optional/nullable)
+    if (!atbrrc_id || !description) {
       await logMissingParameters({
         appId: APP_ID,
         operation: 'Update Breakdown Report',
         missingParams: [
           !atbrrc_id && 'atbrrc_id',
-          !description && 'description',
-          !decision_code && 'decision_code'
+          !description && 'description'
         ].filter(Boolean),
         userId,
         duration: Date.now() - startTime
       });
       
       return res.status(400).json({ 
-        error: 'Missing required fields: atbrrc_id, description, decision_code' 
+        error: 'Missing required fields: atbrrc_id, description' 
       });
     }
 
-    // Validate decision code
+    // Validate decision code (only if provided)
     const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
-    if (!validDecisionCodes.includes(decision_code)) {
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
       await logInvalidFilters({
         appId: APP_ID,
         reportType: 'Breakdown Report',

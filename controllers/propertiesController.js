@@ -301,6 +301,16 @@ class PropertiesController {
       });
     } catch (error) {
       console.error('Error in createProperty:', error);
+      
+      // Handle duplicate property error
+      if (error.code === 'DUPLICATE_PROPERTY') {
+        return res.status(409).json({
+          success: false,
+          message: error.message,
+          code: 'DUPLICATE_PROPERTY'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: 'Failed to create property',
@@ -336,6 +346,16 @@ class PropertiesController {
       });
     } catch (error) {
       console.error('Error in createPropertyWithValues:', error);
+      
+      // Handle duplicate property error
+      if (error.code === 'DUPLICATE_PROPERTY') {
+        return res.status(409).json({
+          success: false,
+          message: error.message,
+          code: 'DUPLICATE_PROPERTY'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: 'Failed to create property with values',
@@ -376,6 +396,16 @@ class PropertiesController {
       });
     } catch (error) {
       console.error('Error in updateProperty:', error);
+      
+      // Handle duplicate property error
+      if (error.code === 'DUPLICATE_PROPERTY') {
+        return res.status(409).json({
+          success: false,
+          message: error.message,
+          code: 'DUPLICATE_PROPERTY'
+        });
+      }
+      
       res.status(500).json({
         success: false,
         message: 'Failed to update property',
