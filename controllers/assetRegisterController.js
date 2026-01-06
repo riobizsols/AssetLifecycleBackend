@@ -104,11 +104,55 @@ const getAssetRegister = async (req, res) => {
       userId
     });
 
+    // Add orgId to filters for property filtering
+    filters.orgId = req.user?.org_id;
+    filters.org_id = req.user?.org_id;
+
     // Get data and count
     const [data, count] = await Promise.all([
       assetRegisterModel.getAssetRegisterData(filters),
       assetRegisterModel.getAssetRegisterCount(filters)
     ]);
+
+    // Transform data: flatten Properties JSON into individual columns
+    if (data.rows && data.rows.length > 0) {
+      // Collect all unique property names to create columns
+      const allProperties = new Set();
+      data.rows.forEach(row => {
+        if (row.Properties && Array.isArray(row.Properties)) {
+          row.Properties.forEach(prop => {
+            if (prop.property) {
+              allProperties.add(prop.property);
+            }
+          });
+        }
+      });
+
+      // Transform each row: add property columns and keep Properties for reference
+      data.rows = data.rows.map(row => {
+        const transformedRow = { ...row };
+        
+        // Parse Properties if it's a string
+        let properties = row.Properties;
+        if (typeof properties === 'string') {
+          try {
+            properties = JSON.parse(properties);
+          } catch (e) {
+            properties = [];
+          }
+        }
+        
+        // Create columns for each property
+        allProperties.forEach(propName => {
+          const propData = Array.isArray(properties) 
+            ? properties.find(p => p.property === propName)
+            : null;
+          transformedRow[`Property: ${propName}`] = propData ? propData.value : '';
+        });
+        
+        return transformedRow;
+      });
+    }
 
     const recordCount = data.rows?.length || 0;
 
@@ -272,8 +316,77 @@ const getAssetRegisterSummary = async (req, res) => {
   }
 };
 
+// Get distinct property values for a property
+const getPropertyValues = async (req, res) => {
+  try {
+    const { propertyName } = req.params;
+    const { assetId } = req.query;
+    const orgId = req.user?.org_id;
+
+    console.log('🔍 [getPropertyValues] Request params:', { propertyName, assetId, orgId });
+
+    if (!propertyName) {
+      return res.status(400).json({
+        success: false,
+        message: "Property name is required"
+      });
+    }
+
+    const values = await assetRegisterModel.getPropertyValues(propertyName, orgId, assetId);
+    console.log('✅ [getPropertyValues] Found values:', values.length, values);
+
+    res.status(200).json({
+      success: true,
+      message: "Property values retrieved successfully",
+      data: values
+    });
+  } catch (error) {
+    console.error("❌ [getPropertyValues] Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error retrieving property values",
+      error: error.message
+    });
+  }
+};
+
+// Get properties for a specific asset
+const getAssetProperties = async (req, res) => {
+  try {
+    const { assetId } = req.params;
+    const orgId = req.user?.org_id;
+
+    console.log('🔍 [getAssetProperties] Request params:', { assetId, orgId });
+
+    if (!assetId) {
+      return res.status(400).json({
+        success: false,
+        message: "Asset ID is required"
+      });
+    }
+
+    const properties = await assetRegisterModel.getAssetProperties(assetId, orgId);
+    console.log('✅ [getAssetProperties] Found properties:', properties.length, properties);
+
+    res.status(200).json({
+      success: true,
+      message: "Asset properties retrieved successfully",
+      data: properties
+    });
+  } catch (error) {
+    console.error("❌ [getAssetProperties] Error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Error retrieving asset properties",
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAssetRegister,
   getAssetRegisterFilterOptions,
-  getAssetRegisterSummary
+  getAssetRegisterSummary,
+  getPropertyValues,
+  getAssetProperties
 };
