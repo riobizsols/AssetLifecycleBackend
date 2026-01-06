@@ -222,6 +222,37 @@ class PropertiesModel {
     }
   }
 
+  // Check if property name already exists (case-insensitive)
+  static async findPropertyByName(propertyName, orgId, excludePropId = null) {
+    try {
+      const dbPool = getDb();
+      let query = `
+        SELECT 
+          prop_id,
+          property,
+          int_status
+        FROM "tblProps"
+        WHERE org_id = $1 
+        AND int_status = 1
+        AND LOWER(TRIM(property)) = LOWER(TRIM($2))
+      `;
+      
+      const params = [orgId, propertyName];
+      
+      // If excludePropId is provided, exclude it from the search (for updates)
+      if (excludePropId) {
+        query += ` AND prop_id != $3`;
+        params.push(excludePropId);
+      }
+      
+      const result = await dbPool.query(query, params);
+      return result.rows[0] || null;
+    } catch (error) {
+      console.error('Error finding property by name:', error);
+      throw error;
+    }
+  }
+
   // Get all properties with their list values
   static async getAllPropertiesWithValues(orgId) {
     try {
@@ -262,6 +293,14 @@ class PropertiesModel {
   // Create a new property
   static async createProperty(propertyName, orgId) {
     try {
+      // Check if property with same name already exists
+      const existingProperty = await this.findPropertyByName(propertyName, orgId);
+      if (existingProperty) {
+        const error = new Error(`A property with the name "${propertyName.trim()}" already exists. Please add values to the existing property or choose a different name.`);
+        error.code = 'DUPLICATE_PROPERTY';
+        throw error;
+      }
+      
       const propId = await generateCustomId('prop', 3);
       
       const query = `
@@ -290,6 +329,14 @@ class PropertiesModel {
     
     try {
       await client.query('BEGIN');
+      
+      // Check if property with same name already exists
+      const existingProperty = await this.findPropertyByName(propertyName, orgId);
+      if (existingProperty) {
+        const error = new Error(`A property with the name "${propertyName.trim()}" already exists. Please add values to the existing property or choose a different name.`);
+        error.code = 'DUPLICATE_PROPERTY';
+        throw error;
+      }
       
       // Create property
       const propId = await generateCustomId('prop', 3);
@@ -347,6 +394,14 @@ class PropertiesModel {
   // Update property
   static async updateProperty(propId, propertyName, orgId) {
     try {
+      // Check if another property with same name already exists (excluding current property)
+      const existingProperty = await this.findPropertyByName(propertyName, orgId, propId);
+      if (existingProperty) {
+        const error = new Error(`A property with the name "${propertyName.trim()}" already exists. Please choose a different name.`);
+        error.code = 'DUPLICATE_PROPERTY';
+        throw error;
+      }
+      
       const query = `
         UPDATE "tblProps"
         SET property = $1

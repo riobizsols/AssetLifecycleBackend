@@ -123,6 +123,259 @@ const getUpcomingMaintenanceWithRecommendation = async (assetId) => {
   };
 };
 
+// Extracted workflow triggering logic - reusable for both create and update
+const triggerBreakdownWorkflow = async (client, {
+  asset_id,
+  decision_code,
+  reported_by,
+  org_id,
+  abr_id,
+  assetRow,
+  existingSchedule
+}) => {
+  const nowDate = new Date();
+  const nowISODateOnly = new Date().toISOString().split('T')[0];
+  let maintenanceResult = null;
+
+  // Determine if workflow applies (by asset type)
+  let hasWorkflow = false;
+  if (assetRow && assetRow.asset_type_id) {
+    hasWorkflow = await msModel.checkAssetTypeWorkflow(assetRow.asset_type_id);
+  }
+
+  const appendWorkOrderNote = (currentWo, suffix) => {
+    const base = currentWo ? String(currentWo) : '';
+    return base && base.length > 0 ? `${base} - ${suffix}` : `${suffix}`;
+  };
+
+  if (decision_code === 'BF01') {
+    // Prepone: create workflow if required, or direct schedule if no workflow
+    // Always create workflow even if existing schedule exists (for approval process)
+    if (hasWorkflow) {
+      // Create workflow H/D entries for BF01
+      // Determine frequency/maint_type if available
+      let at_main_freq_id = null;
+      let maint_type_id = null;
+      if (assetRow && assetRow.asset_type_id) {
+        const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
+        if (freqRes.rows && freqRes.rows.length > 0) {
+          at_main_freq_id = freqRes.rows[0].at_main_freq_id;
+          maint_type_id = freqRes.rows[0].maint_type_id;
+        }
+      }
+      const wfamsh_id = await msModel.getNextWFAMSHId();
+      const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
+        wfamsh_id,
+        at_main_freq_id,
+        maint_type_id: 'MT004',
+        asset_id,
+        group_id: null,
+        vendor_id: assetRow ? assetRow.service_vendor_id : null,
+        pl_sch_date: nowDate,
+        act_sch_date: nowDate,
+        status: 'IP',
+        created_by: reported_by,
+        org_id,
+        branch_code: assetRow ? assetRow.branch_code : null,
+        isBreakdown: true
+      });
+      // Create first detail step as AP (Approval Pending), others IN (Inactive)
+      const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
+      for (let i = 0; i < seqsRes.rows.length; i++) {
+        const seq = seqsRes.rows[i];
+        const wfamsd_id = await msModel.getNextWFAMSDId();
+        // Fetch approvers for step
+        const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
+        const firstDetailStatus = i === 0 ? 'AP' : 'IN';
+        // Add BF01 marker to notes to identify this as a prepone breakdown
+        const noteText = existingSchedule 
+          ? `BF01-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
+          : `BF01-Breakdown-${abr_id}`;
+        await msModel.insertWorkflowMaintenanceScheduleDetail({
+          wfamsd_id,
+          wfamsh_id: headerRes.rows[0].wfamsh_id,
+          job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
+          user_id: jobRolesRes.rows[0]?.emp_int_id || null,
+          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          sequence: seq.seqs_no,
+          status: firstDetailStatus,
+          notes: noteText,
+          created_by: reported_by,
+          org_id
+        });
+      }
+      maintenanceResult = headerRes.rows[0];
+    } else if (existingSchedule) {
+      // No workflow but existing schedule: update the existing schedule directly
+      // Note: wo_id is not updated, only the maintenance date is preponed
+      const updateRes = await client.query(
+        `UPDATE "tblAssetMaintSch"
+         SET act_maint_st_date = $1,
+             branch_code = COALESCE($2, branch_code),
+             changed_on = CURRENT_TIMESTAMP
+         WHERE ams_id = $3
+         RETURNING *`,
+        [nowISODateOnly, assetRow ? assetRow.branch_code : null, existingSchedule.ams_id]
+      );
+      maintenanceResult = updateRes.rows[0];
+    } else {
+      // No workflow and no existing schedule: create direct schedule in AMS
+      const ams_id = await msModel.getNextAMSId();
+      // Determine maintained_by based on service_vendor_id (similar to BF02 logic)
+      const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
+      const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
+        ams_id,
+        asset_id,
+        maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
+        vendor_id: assetRow ? assetRow.service_vendor_id : null,
+        at_main_freq_id: null,
+        maintained_by: maintainedBy,
+        notes: `Breakdown Maintenance - ${abr_id}`,
+        status: 'IN',
+        act_maint_st_date: nowISODateOnly,
+        created_by: reported_by,
+        org_id
+      });
+      maintenanceResult = insertDirectRes.rows[0];
+    }
+  } else if (decision_code === 'BF02') {
+    // Separate breakdown fix, do not modify existing schedule
+    if (hasWorkflow) {
+      // Create workflow H/D entries
+      let at_main_freq_id = null;
+      let maint_type_id = null;
+      if (assetRow && assetRow.asset_type_id) {
+        const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
+        if (freqRes.rows && freqRes.rows.length > 0) {
+          at_main_freq_id = freqRes.rows[0].at_main_freq_id;
+          maint_type_id = freqRes.rows[0].maint_type_id;
+        }
+      }
+      const wfamsh_id = await msModel.getNextWFAMSHId();
+      const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
+        wfamsh_id,
+        at_main_freq_id,
+        maint_type_id: 'MT004',
+        asset_id,
+        group_id: null,
+        vendor_id: assetRow ? assetRow.service_vendor_id : null,
+        pl_sch_date: nowDate,
+        act_sch_date: nowDate,
+        status: 'IP',
+        created_by: reported_by,
+        org_id,
+        branch_code: assetRow ? assetRow.branch_code : null,
+        isBreakdown: true
+      });
+      const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
+      for (let i = 0; i < seqsRes.rows.length; i++) {
+        const seq = seqsRes.rows[i];
+        const wfamsd_id = await msModel.getNextWFAMSDId();
+        const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
+        await msModel.insertWorkflowMaintenanceScheduleDetail({
+          wfamsd_id,
+          wfamsh_id: headerRes.rows[0].wfamsh_id,
+          job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
+          user_id: jobRolesRes.rows[0]?.emp_int_id || null,
+          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          sequence: seq.seqs_no,
+          status: i === 0 ? 'AP' : 'IN',
+          notes: `Breakdown ${abr_id}`,
+          created_by: reported_by,
+          org_id
+        });
+      }
+      maintenanceResult = headerRes.rows[0];
+    } else {
+      // Create a new AMS line, do not touch existing
+      const ams_id = await msModel.getNextAMSId();
+      // Determine maintained_by based on service_vendor_id (similar to workflow logic)
+      const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
+      const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
+        ams_id,
+        asset_id,
+        maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
+        vendor_id: assetRow ? assetRow.service_vendor_id : null,
+        at_main_freq_id: null,
+        maintained_by: maintainedBy,
+        notes: `Breakdown Maintenance - ${abr_id}`,
+        status: 'IN',
+        act_maint_st_date: nowISODateOnly,
+        created_by: reported_by,
+        org_id
+      });
+      maintenanceResult = insertDirectRes.rows[0];
+    }
+  } else if (decision_code === 'BF03') {
+    // Postpone: Create workflow for approval without immediate changes to schedule
+    if (hasWorkflow) {
+      // Create workflow for BF03 postpone breakdown
+      let at_main_freq_id = null;
+      let maint_type_id = null;
+      if (assetRow && assetRow.asset_type_id) {
+        const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
+        if (freqRes.rows && freqRes.rows.length > 0) {
+          at_main_freq_id = freqRes.rows[0].at_main_freq_id;
+          maint_type_id = freqRes.rows[0].maint_type_id;
+        }
+      }
+      
+      const wfamsh_id = await msModel.getNextWFAMSHId();
+      
+      // Create workflow header with BF03 postpone information
+      const noteText = existingSchedule 
+        ? `BF03-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
+        : `BF03-Breakdown-${abr_id}`;
+      
+      const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
+        wfamsh_id,
+        at_main_freq_id,
+        maint_type_id: 'MT004', // Breakdown maintenance
+        asset_id,
+        group_id: null,
+        vendor_id: assetRow ? assetRow.service_vendor_id : null,
+        pl_sch_date: nowDate,
+        act_sch_date: nowDate,
+        status: 'IP',
+        created_by: reported_by,
+        org_id,
+        branch_code: assetRow ? assetRow.branch_code : null,
+        isBreakdown: true
+      });
+      
+      // Create workflow details for each approver
+      const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
+      for (let i = 0; i < seqsRes.rows.length; i++) {
+        const seq = seqsRes.rows[i];
+        const wfamsd_id = await msModel.getNextWFAMSDId();
+        const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
+        const firstDetailStatus = i === 0 ? 'AP' : 'IN';
+        
+        await msModel.insertWorkflowMaintenanceScheduleDetail({
+          wfamsd_id,
+          wfamsh_id: headerRes.rows[0].wfamsh_id,
+          job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
+          user_id: jobRolesRes.rows[0]?.emp_int_id || null,
+          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          sequence: seq.seqs_no,
+          status: firstDetailStatus,
+          notes: noteText,
+          created_by: reported_by,
+          org_id
+        });
+      }
+      maintenanceResult = headerRes.rows[0];
+    } else {
+      // No workflow: Just return existing schedule without changes
+      if (existingSchedule) {
+        maintenanceResult = existingSchedule;
+      }
+    }
+  }
+
+  return maintenanceResult;
+};
+
 // Create a new breakdown report with workflow integration and schedule handling
 const createBreakdownReport = async (breakdownData) => {
   const dbPool = getDb();
@@ -188,10 +441,6 @@ const createBreakdownReport = async (breakdownData) => {
     // Upcoming maintenance info
     const upcomingMaintenance = await getUpcomingMaintenanceWithRecommendation(asset_id);
 
-    let maintenanceResult = null;
-    const nowDate = new Date();
-    const nowISODateOnly = new Date().toISOString().split('T')[0];
-
     // Check existing IN schedule
     const existingSchRes = await client.query(
       `SELECT ams_id, status, act_maint_st_date, wo_id
@@ -203,240 +452,18 @@ const createBreakdownReport = async (breakdownData) => {
     );
     const existingSchedule = existingSchRes.rows[0] || null;
 
-    // Determine if workflow applies (by asset type)
-    let hasWorkflow = false;
-    if (assetRow && assetRow.asset_type_id) {
-      hasWorkflow = await msModel.checkAssetTypeWorkflow(assetRow.asset_type_id);
-    }
-
-    const appendWorkOrderNote = (currentWo, suffix) => {
-      const base = currentWo ? String(currentWo) : '';
-      return base && base.length > 0 ? `${base} - ${suffix}` : `${suffix}`;
-    };
-
-    if (decision_code === 'BF01') {
-      // Prepone: create workflow if required, or direct schedule if no workflow
-      // Always create workflow even if existing schedule exists (for approval process)
-      if (hasWorkflow) {
-        // Create workflow H/D entries for BF01
-        // Determine frequency/maint_type if available
-        let at_main_freq_id = null;
-        let maint_type_id = null;
-        if (assetRow && assetRow.asset_type_id) {
-          const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
-          if (freqRes.rows && freqRes.rows.length > 0) {
-            at_main_freq_id = freqRes.rows[0].at_main_freq_id;
-            maint_type_id = freqRes.rows[0].maint_type_id;
-          }
-        }
-        const wfamsh_id = await msModel.getNextWFAMSHId();
-        const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
-          wfamsh_id,
-          at_main_freq_id,
-          maint_type_id: 'MT004',
-          asset_id,
-          group_id: null,
-          vendor_id: assetRow ? assetRow.service_vendor_id : null,
-          pl_sch_date: nowDate,
-          act_sch_date: nowDate,
-          status: 'IP',
-          created_by: reported_by,
-          org_id,
-          branch_code: assetRow ? assetRow.branch_code : null,
-          isBreakdown: true
-        });
-        // Create first detail step as AP (Approval Pending), others IN (Inactive)
-        const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
-        for (let i = 0; i < seqsRes.rows.length; i++) {
-          const seq = seqsRes.rows[i];
-          const wfamsd_id = await msModel.getNextWFAMSDId();
-          // Fetch approvers for step
-          const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
-          const firstDetailStatus = i === 0 ? 'AP' : 'IN';
-          // Add BF01 marker to notes to identify this as a prepone breakdown
-          const noteText = existingSchedule 
-            ? `BF01-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
-            : `BF01-Breakdown-${abr_id}`;
-          await msModel.insertWorkflowMaintenanceScheduleDetail({
-            wfamsd_id,
-            wfamsh_id: headerRes.rows[0].wfamsh_id,
-            job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
-            user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-            dept_id: jobRolesRes.rows[0]?.dept_id || null,
-            sequence: seq.seqs_no,
-            status: firstDetailStatus,
-            notes: noteText,
-            created_by: reported_by,
-            org_id
-          });
-        }
-        maintenanceResult = headerRes.rows[0];
-      } else if (existingSchedule) {
-        // No workflow but existing schedule: update the existing schedule directly
-        // Note: wo_id is not updated, only the maintenance date is preponed
-        const updateRes = await client.query(
-          `UPDATE "tblAssetMaintSch"
-           SET act_maint_st_date = $1,
-               branch_code = COALESCE($2, branch_code),
-               changed_on = CURRENT_TIMESTAMP
-           WHERE ams_id = $3
-           RETURNING *`,
-          [nowISODateOnly, assetRow ? assetRow.branch_code : null, existingSchedule.ams_id]
-        );
-        maintenanceResult = updateRes.rows[0];
-      } else {
-        // No workflow and no existing schedule: create direct schedule in AMS
-        const ams_id = await msModel.getNextAMSId();
-        // Determine maintained_by based on service_vendor_id (similar to BF02 logic)
-        const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
-        const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
-          ams_id,
-          asset_id,
-          maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
-          vendor_id: assetRow ? assetRow.service_vendor_id : null,
-          at_main_freq_id: null,
-          maintained_by: maintainedBy,
-          notes: `Breakdown Maintenance - ${abr_id}`,
-          status: 'IN',
-          act_maint_st_date: nowISODateOnly,
-          created_by: reported_by,
-          org_id
-        });
-        maintenanceResult = insertDirectRes.rows[0];
-      }
-    } else if (decision_code === 'BF02') {
-      // Separate breakdown fix, do not modify existing schedule
-      if (hasWorkflow) {
-        // Create workflow H/D entries
-        let at_main_freq_id = null;
-        let maint_type_id = null;
-        if (assetRow && assetRow.asset_type_id) {
-          const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
-          if (freqRes.rows && freqRes.rows.length > 0) {
-            at_main_freq_id = freqRes.rows[0].at_main_freq_id;
-            maint_type_id = freqRes.rows[0].maint_type_id;
-          }
-        }
-        const wfamsh_id = await msModel.getNextWFAMSHId();
-        const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
-          wfamsh_id,
-          at_main_freq_id,
-          maint_type_id: 'MT004',
-          asset_id,
-          group_id: null,
-          vendor_id: assetRow ? assetRow.service_vendor_id : null,
-          pl_sch_date: nowDate,
-          act_sch_date: nowDate,
-          status: 'IP',
-          created_by: reported_by,
-          org_id,
-          branch_code: assetRow ? assetRow.branch_code : null,
-          isBreakdown: true
-        });
-        const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
-        for (let i = 0; i < seqsRes.rows.length; i++) {
-          const seq = seqsRes.rows[i];
-          const wfamsd_id = await msModel.getNextWFAMSDId();
-          const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
-          await msModel.insertWorkflowMaintenanceScheduleDetail({
-            wfamsd_id,
-            wfamsh_id: headerRes.rows[0].wfamsh_id,
-            job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
-            user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-            dept_id: jobRolesRes.rows[0]?.dept_id || null,
-            sequence: seq.seqs_no,
-            status: i === 0 ? 'AP' : 'IN',
-            notes: `Breakdown ${abr_id}`,
-            created_by: reported_by,
-            org_id
-          });
-        }
-        maintenanceResult = headerRes.rows[0];
-      } else {
-        // Create a new AMS line, do not touch existing
-        const ams_id = await msModel.getNextAMSId();
-        // Determine maintained_by based on service_vendor_id (similar to workflow logic)
-        const maintainedBy = (assetRow && assetRow.service_vendor_id) ? 'Vendor' : 'Inhouse';
-        const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
-          ams_id,
-          asset_id,
-          maint_type_id: 'MT004', // Set MT004 for breakdown maintenance
-          vendor_id: assetRow ? assetRow.service_vendor_id : null,
-          at_main_freq_id: null,
-          maintained_by: maintainedBy,
-          notes: `Breakdown Maintenance - ${abr_id}`,
-          status: 'IN',
-          act_maint_st_date: nowISODateOnly,
-          created_by: reported_by,
-          org_id
-        });
-        maintenanceResult = insertDirectRes.rows[0];
-      }
-    } else if (decision_code === 'BF03') {
-      // Postpone: Create workflow for approval without immediate changes to schedule
-      if (hasWorkflow) {
-        // Create workflow for BF03 postpone breakdown
-        let at_main_freq_id = null;
-        let maint_type_id = null;
-        if (assetRow && assetRow.asset_type_id) {
-          const freqRes = await msModel.getMaintenanceFrequency(assetRow.asset_type_id);
-          if (freqRes.rows && freqRes.rows.length > 0) {
-            at_main_freq_id = freqRes.rows[0].at_main_freq_id;
-            maint_type_id = freqRes.rows[0].maint_type_id;
-          }
-        }
-        
-        const wfamsh_id = await msModel.getNextWFAMSHId();
-        
-        // Create workflow header with BF03 postpone information
-        const noteText = existingSchedule 
-          ? `BF03-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
-          : `BF03-Breakdown-${abr_id}`;
-        
-        const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
-          wfamsh_id,
-          at_main_freq_id,
-          maint_type_id: 'MT004', // Breakdown maintenance
-          asset_id,
-          group_id: null,
-          vendor_id: assetRow ? assetRow.service_vendor_id : null,
-          pl_sch_date: nowDate,
-          act_sch_date: nowDate,
-          status: 'IP',
-          created_by: reported_by,
-          org_id,
-          branch_code: assetRow ? assetRow.branch_code : null,
-          isBreakdown: true
-        });
-        
-        // Create workflow details for each approver
-        const seqsRes = await msModel.getWorkflowAssetSequences(assetRow.asset_type_id);
-        for (let i = 0; i < seqsRes.rows.length; i++) {
-          const seq = seqsRes.rows[i];
-          const wfamsd_id = await msModel.getNextWFAMSDId();
-          const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
-          const firstDetailStatus = i === 0 ? 'AP' : 'IN';
-          
-          await msModel.insertWorkflowMaintenanceScheduleDetail({
-            wfamsd_id,
-            wfamsh_id: headerRes.rows[0].wfamsh_id,
-            job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
-            user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-            dept_id: jobRolesRes.rows[0]?.dept_id || null,
-            sequence: seq.seqs_no,
-            status: firstDetailStatus,
-            notes: noteText,
-            created_by: reported_by,
-            org_id
-          });
-        }
-        maintenanceResult = headerRes.rows[0];
-      } else {
-        // No workflow: Just return existing schedule without changes
-        if (existingSchedule) {
-          maintenanceResult = existingSchedule;
-        }
-      }
+    // Trigger workflow if decision_code is provided
+    let maintenanceResult = null;
+    if (decision_code) {
+      maintenanceResult = await triggerBreakdownWorkflow(client, {
+        asset_id,
+        decision_code,
+        reported_by,
+        org_id,
+        abr_id,
+        assetRow,
+        existingSchedule
+      });
     }
 
     await client.query('COMMIT');
@@ -454,13 +481,13 @@ const createBreakdownReport = async (breakdownData) => {
   }
 };
 
-
-
 // Update breakdown report
 const updateBreakdownReport = async (abrId, updateData) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
   try {
+    await client.query('BEGIN');
+
     const {
       atbrrc_id,
       description,
@@ -471,15 +498,24 @@ const updateBreakdownReport = async (abrId, updateData) => {
       reported_by_dept_id
     } = updateData;
 
-    // Validate required fields
-    if (!atbrrc_id || !description || !decision_code) {
-      throw new Error('Missing required fields: atbrrc_id, description, decision_code');
+    // Validate required fields (decision_code is optional)
+    if (!atbrrc_id || !description) {
+      throw new Error('Missing required fields: atbrrc_id, description');
     }
 
-    // Validate decision code
+    // Validate decision code (only if provided)
     const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
-    if (!validDecisionCodes.includes(decision_code)) {
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
       throw new Error('Invalid decision code. Must be BF01, BF02, or BF03');
+    }
+
+    // Get current breakdown to check if decision_code is being set for first time
+    const currentQuery = `SELECT * FROM "tblAssetBRDet" WHERE abr_id = $1`;
+    const currentResult = await client.query(currentQuery, [abrId]);
+    const currentBreakdown = currentResult.rows[0];
+
+    if (!currentBreakdown) {
+      throw new Error('Breakdown report not found');
     }
 
     const updateQuery = `
@@ -500,13 +536,53 @@ const updateBreakdownReport = async (abrId, updateData) => {
     ];
 
     const result = await client.query(updateQuery, updateValues);
-    
-    if (result.rows.length === 0) {
-      throw new Error('Breakdown report not found');
+    const updatedBreakdown = result.rows[0];
+
+    // Check if decision_code is being set for the first time (null -> BF01/BF02/BF03)
+    const isDecisionCodeSet = !currentBreakdown.decision_code && decision_code;
+
+    if (isDecisionCodeSet) {
+      console.log(`Decision code set for breakdown ${abrId}: ${decision_code} - Triggering workflow`);
+      
+      // Fetch asset details for workflow processing
+      const assetQuery = `
+        SELECT a.asset_id, a.asset_type_id, a.service_vendor_id, a.org_id, a.branch_id, b.branch_code
+        FROM "tblAssets" a
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        WHERE a.asset_id = $1
+      `;
+      const assetRes = await client.query(assetQuery, [currentBreakdown.asset_id]);
+      const assetRow = assetRes.rows[0] || null;
+
+      // Check for existing maintenance schedule
+      const existingSchRes = await client.query(
+        `SELECT ams_id, status, act_maint_st_date, wo_id
+         FROM "tblAssetMaintSch"
+         WHERE asset_id = $1 AND status = 'IN'
+         ORDER BY act_maint_st_date ASC
+         LIMIT 1`,
+        [currentBreakdown.asset_id]
+      );
+      const existingSchedule = existingSchRes.rows[0] || null;
+
+      // Trigger the workflow
+      await triggerBreakdownWorkflow(client, {
+        asset_id: currentBreakdown.asset_id,
+        decision_code: decision_code,
+        reported_by: currentBreakdown.reported_by,
+        org_id: currentBreakdown.org_id,
+        abr_id: abrId,
+        assetRow,
+        existingSchedule
+      });
+
+      console.log(`Workflow triggered successfully for breakdown ${abrId}`);
     }
 
-    return result.rows[0];
+    await client.query('COMMIT');
+    return updatedBreakdown;
   } catch (err) {
+    await client.query('ROLLBACK');
     throw err;
   } finally {
     client.release();
