@@ -3,15 +3,30 @@ const getAssetsForUsageRecording = async (req, res) => {
   try {
     const { org_id: orgId, emp_int_id: employeeIntId, dept_id: deptId } = req.user || {};
 
+    console.log('🔍 [getAssetsForUsageRecording] User info:', {
+      orgId,
+      employeeIntId,
+      deptId,
+      hasOrgId: !!orgId,
+      hasEmployeeIntId: !!employeeIntId,
+      hasDeptId: !!deptId
+    });
+
     if (!orgId || !employeeIntId) {
+      console.log('❌ [getAssetsForUsageRecording] Missing required fields: orgId or employeeIntId');
       return res.status(400).json({
         message: "User is not linked to an employee or organization.",
       });
     }
 
+    // Note: dept_id is optional - assets can be assigned directly to employee or to department
+
     const assetTypeIds = await assetUsageModel.getUsageEligibleAssetTypeIds(orgId);
+    console.log('🔍 [getAssetsForUsageRecording] Eligible asset types found:', assetTypeIds.length, assetTypeIds);
 
     if (!assetTypeIds.length) {
+      console.log('⚠️ [getAssetsForUsageRecording] No eligible asset types found for org:', orgId);
+      console.log('⚠️ [getAssetsForUsageRecording] Check tblOrgSettings for entries where key matches pattern ^AT[0-9]+$ or key = \'at_id_usage_based\'');
       return res.json({
         assetTypes: [],
         assets: [],
@@ -24,6 +39,8 @@ const getAssetsForUsageRecording = async (req, res) => {
       assetTypeIds,
       deptId
     );
+
+    console.log('🔍 [getAssetsForUsageRecording] Assigned assets found:', assets.length);
 
     return res.json({
       assetTypes: assetTypeIds,
@@ -662,6 +679,129 @@ const exportUsageReportPDF = async (req, res) => {
   }
 };
 
+const diagnoseAssetUsageData = async (req, res) => {
+  try {
+    const { org_id: orgId, emp_int_id: employeeIntId, dept_id: deptId } = req.user || {};
+
+    if (!orgId || !employeeIntId) {
+      return res.status(400).json({
+        message: "User is not linked to an employee or organization.",
+      });
+    }
+
+    const dbPool = req.db || require("../config/db");
+    const diagnostics = {
+      userInfo: {
+        orgId,
+        employeeIntId,
+        deptId,
+      },
+      orgSettings: [],
+      assetTypes: [],
+      userAssignments: [],
+      allAssetTypeAssignments: [],
+      recommendations: []
+    };
+
+    // Check tblOrgSettings
+    const orgSettingsQuery = `
+      SELECT key, value 
+      FROM "tblOrgSettings" 
+      WHERE org_id = $1
+        AND (key ~* '^AT[0-9]+$' OR key = 'at_id_usage_based')
+      ORDER BY key
+    `;
+    const orgSettingsResult = await dbPool.query(orgSettingsQuery, [orgId]);
+    diagnostics.orgSettings = orgSettingsResult.rows;
+
+    // Check available asset types
+    const assetTypesQuery = `
+      SELECT asset_type_id, text, org_id
+      FROM "tblAssetTypes"
+      WHERE org_id = $1
+      ORDER BY asset_type_id
+      LIMIT 50
+    `;
+    const assetTypesResult = await dbPool.query(assetTypesQuery, [orgId]);
+    diagnostics.assetTypes = assetTypesResult.rows;
+
+    // Check user assignments
+    const assignmentsQuery = `
+      SELECT 
+        aa.asset_id,
+        a.asset_type_id,
+        at.text as asset_type_name,
+        a.description,
+        aa.employee_int_id,
+        aa.dept_id
+      FROM "tblAssetAssignments" aa
+      INNER JOIN "tblAssets" a ON aa.asset_id = a.asset_id
+      LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+      WHERE a.org_id = $1
+        AND aa.action = 'A'
+        AND aa.latest_assignment_flag = true
+        AND a.current_status != 'SCRAPPED'
+        AND (
+          aa.employee_int_id = $2
+          OR ($3::text IS NOT NULL AND aa.dept_id = $3::text)
+        )
+      ORDER BY aa.asset_id
+      LIMIT 50
+    `;
+    const assignmentsResult = await dbPool.query(assignmentsQuery, [orgId, employeeIntId, deptId]);
+    diagnostics.userAssignments = assignmentsResult.rows;
+
+    // Check all asset type assignments in org
+    const allAssignmentsQuery = `
+      SELECT 
+        a.asset_type_id,
+        at.text as asset_type_name,
+        COUNT(DISTINCT aa.asset_id) as asset_count
+      FROM "tblAssetAssignments" aa
+      INNER JOIN "tblAssets" a ON aa.asset_id = a.asset_id
+      LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+      WHERE a.org_id = $1
+        AND aa.action = 'A'
+        AND aa.latest_assignment_flag = true
+        AND a.current_status != 'SCRAPPED'
+      GROUP BY a.asset_type_id, at.text
+      ORDER BY asset_count DESC
+      LIMIT 20
+    `;
+    const allAssignmentsResult = await dbPool.query(allAssignmentsQuery, [orgId]);
+    diagnostics.allAssetTypeAssignments = allAssignmentsResult.rows;
+
+    // Generate recommendations
+    if (diagnostics.orgSettings.length === 0 && diagnostics.assetTypes.length > 0) {
+      diagnostics.recommendations.push({
+        issue: 'No eligible asset types configured in tblOrgSettings',
+        solution: 'Add asset types to tblOrgSettings. Example:',
+        sql: diagnostics.assetTypes.slice(0, 5).map(at => 
+          `INSERT INTO "tblOrgSettings" (org_id, key, value) VALUES ('${orgId}', '${at.asset_type_id}', '') ON CONFLICT DO NOTHING;`
+        )
+      });
+    }
+
+    if (diagnostics.userAssignments.length === 0 && diagnostics.allAssetTypeAssignments.length > 0) {
+      diagnostics.recommendations.push({
+        issue: 'No assets assigned to this user/department',
+        solution: 'Assets exist in the organization but are not assigned to this user or department'
+      });
+    }
+
+    return res.json({
+      success: true,
+      diagnostics
+    });
+  } catch (error) {
+    console.error("Error diagnosing asset usage data:", error);
+    return res.status(500).json({
+      message: "Failed to diagnose asset usage data.",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAssetsForUsageRecording,
   getUsageHistory,
@@ -670,5 +810,6 @@ module.exports = {
   getUsageReportFilterOptions,
   exportUsageReportCSV,
   exportUsageReportPDF,
+  diagnoseAssetUsageData,
 };
 

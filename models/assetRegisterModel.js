@@ -25,9 +25,14 @@ const getAssetRegisterData = async (filters = {}) => {
     cost,
     status,
     advancedConditions,
+    orgId,
+    org_id,
     limit = 1000,
     offset = 0
   } = filters;
+  
+  // Store orgId for use in property filters
+  filters.orgId = orgId || org_id;
 
   let whereConditions = [];
   let queryParams = [];
@@ -140,6 +145,50 @@ const getAssetRegisterData = async (filters = {}) => {
     advancedConditions.forEach(condition => {
       if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
         const { field, op, val } = condition;
+        
+        // Handle property-value filter separately
+        if (field === 'property' && val && typeof val === 'object' && val.property && val.value) {
+          const propertyName = val.property;
+          const propertyValue = val.value;
+          
+          paramCount++;
+          const orgIdParam = paramCount;
+          queryParams.push(filters.orgId || filters.org_id || 'ORG001'); // Get orgId from filters
+          
+          paramCount++;
+          const propertyNameParam = paramCount;
+          queryParams.push(propertyName);
+          
+          paramCount++;
+          const propertyValueParam = paramCount;
+          queryParams.push(propertyValue);
+          
+          // Add EXISTS clause for property-value match
+          // Try direct join first (matching getAssetProperties pattern)
+          // If that doesn't work, also try join through tblAssetTypeProps
+          const propertyCondition = `(EXISTS (
+            SELECT 1 FROM "tblAssetPropValues" apv
+            LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+            WHERE apv.asset_id = a.asset_id
+            AND a.org_id = $${orgIdParam}
+            AND LOWER(COALESCE(p.property, '')) = LOWER($${propertyNameParam})
+            AND LOWER(apv.value) = LOWER($${propertyValueParam})
+            AND p.property IS NOT NULL
+          ) OR EXISTS (
+            SELECT 1 FROM "tblAssetPropValues" apv
+            INNER JOIN "tblAssetTypeProps" atp ON apv.asset_type_prop_id = atp.asset_type_prop_id
+            INNER JOIN "tblProps" p ON atp.prop_id = p.prop_id
+            WHERE apv.asset_id = a.asset_id
+            AND a.org_id = $${orgIdParam}
+            AND LOWER(p.property) = LOWER($${propertyNameParam})
+            AND LOWER(apv.value) = LOWER($${propertyValueParam})
+          ))`;
+          
+          whereConditions.push(propertyCondition);
+          console.log(`✅ [AssetRegisterModel] Added property filter: ${propertyName} = ${propertyValue} (params: ${orgIdParam}, ${propertyNameParam}, ${propertyValueParam})`);
+          console.log(`✅ [AssetRegisterModel] Added property filter: ${propertyName} = ${propertyValue}`);
+          return;
+        }
         
         // Map field keys to database columns
         const fieldMapping = {
@@ -257,7 +306,7 @@ const getAssetRegisterData = async (filters = {}) => {
       CAST(a.purchased_cost AS DECIMAL) as "Cost",
       a.current_status as "Status",
       a.serial_number,
-      a.description,
+      a.description as "description",
       a.asset_type_id,
       a.branch_id,
       a.purchase_vendor_id,
@@ -265,7 +314,24 @@ const getAssetRegisterData = async (filters = {}) => {
       a.expiry_date,
       a.warranty_period,
       a.created_on,
-      a.changed_on
+      a.changed_on,
+      COALESCE(
+        (
+          SELECT json_agg(
+            json_build_object(
+              'property', p.property,
+              'value', apv.value
+            )
+          )
+          FROM "tblAssetPropValues" apv
+          LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+          WHERE apv.asset_id = a.asset_id
+          AND apv.value IS NOT NULL
+          AND apv.value != ''
+          AND p.property IS NOT NULL
+        ),
+        '[]'::json
+      ) as "Properties"
     FROM "tblAssets" a
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
@@ -551,9 +617,163 @@ const getAssetRegisterFilterOptions = async () => {
   return result.rows[0];
 };
 
+// Get distinct values for a property from tblAssetPropValues
+// Following the pattern from assetModel.getAssetProperties (direct join)
+const getPropertyValues = async (propertyName, orgId, assetId = null) => {
+  console.log('🔍 [getPropertyValues] Query params:', { propertyName, orgId, assetId });
+  const dbPool = getDb();
+  let query;
+  let params;
+  let result;
+
+  // Use direct join (asset_type_prop_id = prop_id) matching the pattern in assetModel
+  if (assetId) {
+    query = `
+      SELECT DISTINCT apv.value
+      FROM "tblAssetPropValues" apv
+      LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+      INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+      WHERE a.asset_id = $1
+      AND a.org_id = $2
+      AND LOWER(p.property) = LOWER($3)
+      AND (p.org_id = $2 OR p.org_id IS NULL)
+      AND (p.int_status = 1 OR p.int_status IS NULL)
+      AND apv.value IS NOT NULL
+      AND apv.value != ''
+      ORDER BY apv.value
+    `;
+    params = [assetId, orgId, propertyName];
+  } else {
+    query = `
+      SELECT DISTINCT apv.value
+      FROM "tblAssetPropValues" apv
+      LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+      INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+      WHERE LOWER(p.property) = LOWER($1)
+      AND p.org_id = $2
+      AND a.org_id = $2
+      AND p.int_status = 1
+      AND apv.value IS NOT NULL
+      AND apv.value != ''
+      ORDER BY apv.value
+    `;
+    params = [propertyName, orgId];
+  }
+
+  result = await dbPool.query(query, params);
+
+  // If no results, try joining through tblAssetTypeProps
+  if (result.rows.length === 0) {
+    console.log('⚠️ [getPropertyValues] No results with direct join, trying through tblAssetTypeProps');
+    if (assetId) {
+      query = `
+        SELECT DISTINCT apv.value
+        FROM "tblAssetPropValues" apv
+        INNER JOIN "tblAssetTypeProps" atp ON apv.asset_type_prop_id = atp.asset_type_prop_id
+        INNER JOIN "tblProps" p ON atp.prop_id = p.prop_id
+        INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+        WHERE a.asset_id = $1
+        AND a.org_id = $2
+        AND LOWER(p.property) = LOWER($3)
+        AND p.org_id = $2
+        AND p.int_status = 1
+        AND apv.value IS NOT NULL
+        AND apv.value != ''
+        ORDER BY apv.value
+      `;
+      params = [assetId, orgId, propertyName];
+    } else {
+      query = `
+        SELECT DISTINCT apv.value
+        FROM "tblAssetPropValues" apv
+        INNER JOIN "tblAssetTypeProps" atp ON apv.asset_type_prop_id = atp.asset_type_prop_id
+        INNER JOIN "tblProps" p ON atp.prop_id = p.prop_id
+        INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+        WHERE LOWER(p.property) = LOWER($1)
+        AND p.org_id = $2
+        AND a.org_id = $2
+        AND p.int_status = 1
+        AND apv.value IS NOT NULL
+        AND apv.value != ''
+        ORDER BY apv.value
+      `;
+      params = [propertyName, orgId];
+    }
+    result = await dbPool.query(query, params);
+  }
+
+  console.log('✅ [getPropertyValues] Found values:', result.rows.length);
+  if (result.rows.length > 0) {
+    console.log('📋 Sample values:', result.rows.slice(0, 3).map(r => r.value));
+  }
+  return result.rows.map(row => row.value);
+};
+
+// Get properties for a specific asset
+// Following the pattern from assetModel.getAssetProperties
+// Uses: tblAssetPropValues -> tblProps (direct join on asset_type_prop_id = prop_id)
+const getAssetProperties = async (assetId, orgId) => {
+  // First check if asset has any property values
+  const debugQuery = `SELECT COUNT(*) as count FROM "tblAssetPropValues" WHERE asset_id = $1`;
+  const dbPool = getDb();
+  const debugResult = await dbPool.query(debugQuery, [assetId]);
+  console.log('🔍 [getAssetProperties] Asset has', debugResult.rows[0].count, 'property value entries');
+
+  const query = `
+    SELECT DISTINCT
+      p.prop_id,
+      p.property
+    FROM "tblAssetPropValues" apv
+    LEFT JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+    INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+    WHERE a.asset_id = $1
+    AND a.org_id = $2
+    AND (p.org_id = $2 OR p.org_id IS NULL)
+    AND (p.int_status = 1 OR p.int_status IS NULL)
+    AND apv.value IS NOT NULL
+    AND apv.value != ''
+    AND p.property IS NOT NULL
+    ORDER BY p.property
+  `;
+
+  console.log('🔍 [getAssetProperties] Query params:', { assetId, orgId });
+  const result = await dbPool.query(query, [assetId, orgId]);
+  
+  console.log('✅ [getAssetProperties] Query result:', result.rows.length, 'properties');
+  if (result.rows.length > 0) {
+    console.log('📋 Sample properties:', result.rows.slice(0, 3));
+  } else {
+    // Try alternative join if no results
+    console.log('⚠️ [getAssetProperties] No results, trying alternative join through tblAssetTypeProps');
+    const altQuery = `
+      SELECT DISTINCT
+        p.prop_id,
+        p.property
+      FROM "tblAssetPropValues" apv
+      INNER JOIN "tblAssetTypeProps" atp ON apv.asset_type_prop_id = atp.asset_type_prop_id
+      INNER JOIN "tblProps" p ON atp.prop_id = p.prop_id
+      INNER JOIN "tblAssets" a ON apv.asset_id = a.asset_id
+      WHERE a.asset_id = $1
+      AND a.org_id = $2
+      AND p.org_id = $2
+      AND p.int_status = 1
+      AND apv.value IS NOT NULL
+      AND apv.value != ''
+      ORDER BY p.property
+    `;
+    const altResult = await dbPool.query(altQuery, [assetId, orgId]);
+    console.log('✅ [getAssetProperties] Alternative query result:', altResult.rows.length, 'properties');
+    return altResult.rows;
+  }
+  
+  return result.rows;
+};
+
 module.exports = {
   getAssetRegisterData,
   getAssetRegisterCount,
-  getAssetRegisterFilterOptions
+  getAssetRegisterFilterOptions,
+  getPropertyValues,
+  getAssetProperties
 };
     

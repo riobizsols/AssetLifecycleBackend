@@ -53,7 +53,7 @@ const getUsageEligibleAssetTypeIds = async (orgId) => {
   return Array.from(assetTypeIds);
 };
 
-const getAssignedAssetsForUser = async (employeeIntId, orgId, assetTypeIds, deptId = null) => {
+const getAssignedAssetsForUser = async (employeeIntId, orgId, assetTypeIds, deptId) => {
   if (!assetTypeIds || assetTypeIds.length === 0) {
     return [];
   }
