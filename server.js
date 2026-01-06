@@ -87,32 +87,34 @@ app.set('query parser', (str) => {
   });
 });
 
-// Log every incoming API request and response
-app.use((req, res, next) => {
-  const startTime = Date.now();
-  const timestamp = new Date().toISOString();
-  
-  // Log incoming request
-  console.log(`[API REQUEST] [${timestamp}] ${req.method} ${req.originalUrl}`);
-  
-  // Store original res.json to intercept responses
-  const originalJson = res.json;
-  res.json = function(body) {
-    const duration = Date.now() - startTime;
-    console.log(`[API RESPONSE] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
-    return originalJson.call(this, body);
-  };
-  
-  // Handle response finish for status codes
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    if (res.statusCode >= 400) {
-      console.log(`[API ERROR] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
-    }
+// Log every incoming API request and response (disabled in production)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    const timestamp = new Date().toISOString();
+    
+    // Log incoming request
+    console.log(`[API REQUEST] [${timestamp}] ${req.method} ${req.originalUrl}`);
+    
+    // Store original res.json to intercept responses
+    const originalJson = res.json;
+    res.json = function(body) {
+      const duration = Date.now() - startTime;
+      console.log(`[API RESPONSE] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+      return originalJson.call(this, body);
+    };
+    
+    // Handle response finish for status codes
+    res.on('finish', () => {
+      const duration = Date.now() - startTime;
+      if (res.statusCode >= 400) {
+        console.log(`[API ERROR] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+      }
+    });
+    
+    next();
   });
-  
-  next();
-});
+}
 
 // Enhanced CORS configuration to support subdomain-based multi-tenancy
 app.use(

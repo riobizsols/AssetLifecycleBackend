@@ -60,11 +60,19 @@ class EventLogger {
      * @returns {Promise<boolean>} Whether to log this event
      */
     async shouldLog(appId, eventLevel) {
+        // Disable all event logging in production
+        if (process.env.NODE_ENV === 'production') {
+            return false;
+        }
+        
         try {
             const requiredLevel = TechnicalLogConfigModel.getLogLevelCode(eventLevel);
             return await TechnicalLogConfigModel.shouldLog(appId, requiredLevel);
         } catch (error) {
-            console.error('Error checking if should log:', error);
+            // Only log errors in non-production environments
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('Error checking if should log:', error);
+            }
             return false;
         }
     }
@@ -122,7 +130,10 @@ class EventLogger {
             fs.appendFileSync(logFile, csvRow, 'utf8');
 
         } catch (error) {
-            console.error('Error logging event:', error);
+            // Only log errors in non-production environments
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('Error logging event:', error);
+            }
             // Don't throw error to avoid affecting main application flow
         }
     }
@@ -299,12 +310,18 @@ class EventLogger {
                     
                     if (stats.mtime < cutoffDate) {
                         fs.unlinkSync(filePath);
-                        console.log(`Deleted old log file: ${file}`);
+                        // Only log in non-production environments
+                        if (process.env.NODE_ENV !== 'production') {
+                            console.log(`Deleted old log file: ${file}`);
+                        }
                     }
                 }
             });
         } catch (error) {
-            console.error('Error cleaning up log files:', error);
+            // Only log errors in non-production environments
+            if (process.env.NODE_ENV !== 'production') {
+                console.error('Error cleaning up log files:', error);
+            }
         }
     }
 }
