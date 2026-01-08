@@ -77,10 +77,10 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
         -- To see who actually approved, check tblWFAssetMaintHist.action_by
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
@@ -886,8 +886,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
               wfh.branch_code,
               wfh.pl_sch_date,
               v.vendor_name,
-              v.contract_start_date,
-              v.contract_end_date,
+              NULL as contract_start_date,
+              NULL as contract_end_date,
               wfh.created_by
             FROM "tblWFAssetMaintSch_H" wfh
             LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
@@ -2118,8 +2118,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         v.pincode,
         v.gst_number,
         v.cin_number,
-        v.contract_start_date,
-        v.contract_end_date,
+        NULL as contract_start_date,
+        NULL as contract_end_date,
         at.maint_lead_type,
         CASE 
           WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
@@ -2127,9 +2127,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         END as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Group asset maintenance information
         ag.text as group_name,

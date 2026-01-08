@@ -84,7 +84,17 @@ const getApprovalDetail = async (req, res) => {
       });
     }
 
-    const approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
+    // Detect if assetId is a WFAMSH ID (starts with 'WFAMSH_')
+    const isWfamshId = String(assetId || '').startsWith('WFAMSH_');
+    
+    let approvalDetail;
+    if (isWfamshId) {
+      // Use the workflow-specific endpoint for WFAMSH IDs
+      approvalDetail = await getApprovalDetailByWfamshId(assetId, orgId);
+    } else {
+      // Use asset-based endpoint for asset IDs
+      approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
+    }
 
     if (!approvalDetail) {
       if (context === 'SUPERVISORAPPROVAL') {
