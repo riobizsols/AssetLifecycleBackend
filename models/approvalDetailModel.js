@@ -77,10 +77,10 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
         -- To see who actually approved, check tblWFAssetMaintHist.action_by
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
@@ -847,10 +847,19 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
      if (parseInt(approved_users) === parseInt(total_users)) {
        console.log(`All users approved! Total: ${total_users}, Approved: ${approved_users}`);
        
-       // Get workflow type to check if it's vendor contract renewal (MT005)
-       const workflowTypeQuery = `SELECT maint_type_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`;
+       // Get workflow type and vendor_id to check if it's vendor contract renewal (MT005) or vendor workflow
+       // Check both workflow header vendor_id and asset's service_vendor_id
+       const workflowTypeQuery = `
+         SELECT 
+           wfh.maint_type_id, 
+           COALESCE(wfh.vendor_id, a.service_vendor_id) as vendor_id
+         FROM "tblWFAssetMaintSch_H" wfh
+         LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+       `;
        const workflowTypeResult = await getDb().query(workflowTypeQuery, [wfamshId, orgId]);
        const maintTypeId = workflowTypeResult.rows.length > 0 ? workflowTypeResult.rows[0].maint_type_id : null;
+       const vendorId = workflowTypeResult.rows.length > 0 ? workflowTypeResult.rows[0].vendor_id : null;
        const isVendorContractRenewal = maintTypeId === 'MT005';
        
        await getDb().query(
@@ -862,6 +871,27 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          [wfamshId, orgId]
        );
        console.log('Workflow completed - Status set to CO');
+       
+       // Update vendor int_status to 3 (CRApproved) when workflow is completed
+       // Only update if vendor exists and is not already blocked (int_status != 4)
+       if (vendorId) {
+         try {
+           await getDb().query(
+             `UPDATE "tblVendors" 
+              SET int_status = 3, 
+                  changed_by = 'SYSTEM', 
+                  changed_on = CURRENT_TIMESTAMP
+              WHERE vendor_id = $1 
+                AND org_id = $2
+                AND int_status != 4`,
+             [vendorId, orgId]
+           );
+           console.log(`✅ Vendor ${vendorId} status updated to 3 (CRApproved) after workflow completion`);
+         } catch (vendorUpdateError) {
+           console.error(`Error updating vendor status for ${vendorId}:`, vendorUpdateError);
+           // Don't throw error - allow workflow to complete even if vendor update fails
+         }
+       }
        
       // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
       if (!isVendorContractRenewal) {
@@ -886,8 +916,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
               wfh.branch_code,
               wfh.pl_sch_date,
               v.vendor_name,
-              v.contract_start_date,
-              v.contract_end_date,
+              NULL as contract_start_date,
+              NULL as contract_end_date,
               wfh.created_by
             FROM "tblWFAssetMaintSch_H" wfh
             LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
@@ -1070,6 +1100,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
+         AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
        ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
      `;
      params.push(userRoleIds);
@@ -1086,11 +1117,113 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        detail: error.detail,
        hint: error.hint,
        position: error.position,
-       where: error.where
      });
      throw error;
    }
  };
+
+// Get vendor renewal approvals (MT005 only)
+const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false) => {
+  try {
+    console.log('=== getVendorRenewalApprovals model (ROLE-BASED with branch_code) ===');
+    console.log('empIntId:', empIntId);
+    console.log('orgId:', orgId);
+    console.log('userBranchCode:', userBranchCode);
+    console.log('hasSuperAccess:', hasSuperAccess);
+    
+    // Handle empty string or null empIntId
+    if (!empIntId || empIntId === '') {
+      console.log('empIntId is empty or null, returning empty array');
+      return [];
+    }
+    
+    // ROLE-BASED: Get user's roles first
+    const userQuery = `SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`;
+    const userResult = await getDb().query(userQuery, [empIntId]);
+    
+    if (userResult.rows.length === 0) {
+      console.log('User not found with emp_int_id:', empIntId);
+      return [];
+    }
+    
+    const userId = userResult.rows[0].user_id;
+    
+    const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
+    const rolesResult = await getDb().query(rolesQuery, [userId]);
+    const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
+    
+    if (userRoleIds.length === 0) {
+      console.log('User has no assigned roles');
+      return [];
+    }
+    
+    console.log('User roles:', userRoleIds);
+    
+    // Build parameters array dynamically
+    const params = [orgId];
+    let paramIndex = 2;
+    
+    // ROLE-BASED: Query workflows where user's roles match workflow steps AND maint_type_id = 'MT005'
+    let query = `
+      SELECT DISTINCT
+        wfh.wfamsh_id,
+        wfh.vendor_id,
+        wfh.pl_sch_date as scheduled_date,
+        wfh.act_sch_date,
+        wfh.status as header_status,
+        wfh.created_on as maintenance_created_on,
+        wfh.changed_on as maintenance_changed_on,
+        wfh.branch_code,
+        v.vendor_name,
+        v.vendor_name as vendor,
+        v.company_name,
+        v.contact_person_name,
+        v.contact_person_email,
+        mt.text as maintenance_type_name,
+        mt.text as maintenance_type,
+        -- Calculate days until due
+        EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+        -- Calculate days until cutoff (10 days before for vendor renewals)
+        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE)) as days_until_cutoff
+      FROM "tblWFAssetMaintSch_H" wfh
+      INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+      LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
+      LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
+      WHERE wfd.org_id = $1 
+        AND wfh.maint_type_id = 'MT005'
+    `;
+    
+    // Apply branch_code filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchCode) {
+      query += ` AND wfh.branch_code = $${paramIndex}`;
+      params.push(userBranchCode);
+      paramIndex++;
+    }
+    
+    query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
+        AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
+        AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
+      ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
+    `;
+    params.push(userRoleIds);
+
+    const result = await getDb().query(query, params);
+    console.log('Query executed successfully, found rows:', result.rows.length);
+    console.log('Sample row (if any):', result.rows[0] || 'No rows found');
+    return result.rows;
+  } catch (error) {
+    console.error('Error in getVendorRenewalApprovals:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      position: error.position
+    });
+    throw error;
+  }
+};
 
   // Helper function to notify maintenance supervisors after record creation
   const notifyMaintenanceSupervisors = async (amsId, assetId, wfamshId, orgId) => {
@@ -2118,8 +2251,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         v.pincode,
         v.gst_number,
         v.cin_number,
-        v.contract_start_date,
-        v.contract_end_date,
+        NULL as contract_start_date,
+        NULL as contract_end_date,
         at.maint_lead_type,
         CASE 
           WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
@@ -2127,9 +2260,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         END as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Group asset maintenance information
         ag.text as group_name,
@@ -2455,6 +2588,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
    getWorkflowHistory,
    getWorkflowHistoryByWfamshId,
    getMaintenanceApprovals,
+   getVendorRenewalApprovals,
    createMaintenanceRecord,
    getAllMaintenanceWorkflowsByAssetId
  }; 
