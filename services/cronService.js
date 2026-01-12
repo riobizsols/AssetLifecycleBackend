@@ -53,7 +53,7 @@ class CronService {
             startVendorContractRenewalCron();
             console.log('📅 [CRON] Vendor Contract Renewal: Scheduled for every day at 8:00 AM (IST)');
             console.log('   → Checks vendor contract end dates and creates renewal workflows 10 days before expiry');
-            console.log('   → Deactivates vendors with expired contracts that haven\'t been renewed');
+            console.log('   → Blocks vendors with expired contracts (workflow not approved before contract_end_date)');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule vendor contract renewal:', error.message);
         }
@@ -307,7 +307,7 @@ class CronService {
             vendorContractRenewal: {
                 name: 'Vendor Contract Renewal',
                 schedule: '0 8 * * *', // Every day at 8:00 AM
-                description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Deactivates vendors with expired contracts that haven\'t been renewed.',
+                description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Blocks vendors with expired contracts (workflow not approved before contract_end_date).',
                 timezone: 'Asia/Kolkata',
                 nextRun: 'Daily at 8:00 AM IST',
                 status: 'ACTIVE',

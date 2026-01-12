@@ -414,14 +414,14 @@ exports.updateVendor = async (req, res) => {
       changed_on,
     } = req.body;
 
-    // Validate int_status: 0 = Inactive, 1 = Active, 4 = Blacklist
+    // Validate int_status: 0 = Inactive, 1 = Active, 3 = CRApproved, 4 = Blocked
     if (int_status !== undefined && int_status !== null) {
-      const validStatuses = [0, 1, 4];
+      const validStatuses = [0, 1, 3, 4];
       if (!validStatuses.includes(parseInt(int_status))) {
         return res.status(400).json({
           success: false,
           error: "Invalid status",
-          message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 4 (Blacklist)`
+          message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 3 (CRApproved), 4 (Blocked)`
         });
       }
     }

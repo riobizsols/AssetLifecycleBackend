@@ -1,4 +1,4 @@
-const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
+const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
 const {
     // Generic helpers
     logApiCall,
@@ -813,6 +813,129 @@ const getMaintenanceApprovalsController = async (req, res) => {
   }
 };
 
+// Get vendor renewal approvals controller
+const getVendorRenewalApprovalsController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
+  try {
+    const empIntId = req.user.emp_int_id; // Get from auth middleware
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    
+    // Get user's branch information to get branch_code
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log('=== Vendor Renewal Approval Controller Debug ===');
+    console.log('User org_id:', orgId);
+    console.log('User branch_id:', userBranchId);
+    
+    // Get branch_code from tblBranches
+    let userBranchCode = null;
+    if (userBranchId) {
+      const dbPool = req.db || require("../config/db");
+      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+
+      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
+      if (branchResult.rows.length > 0) {
+        userBranchCode = branchResult.rows[0].branch_code;
+        console.log('User branch_code:', userBranchCode);
+      } else {
+        console.log('Branch not found for branch_id:', userBranchId);
+      }
+    }
+
+    // Log API called
+    await logApiCall({
+      operation: 'Get Vendor Renewal Approvals',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { emp_int_id: empIntId, org_id: orgId, branch_code: userBranchCode },
+      userId
+    });
+
+    if (!empIntId || empIntId === '') {
+      // WARNING: No employee ID
+      await logNoApprovalsForEmployee({
+        empIntId: 'NOT_PROVIDED',
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.json({
+        success: true,
+        message: 'No vendor renewal approvals found - Employee ID not available',
+        data: [],
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+
+    // Format the data for frontend
+    const formattedData = vendorRenewalApprovals.map(record => ({
+      wfamsh_id: record.wfamsh_id,
+      vendor_id: record.vendor_id,
+      vendor_name: record.vendor_name || '-',
+      company_name: record.company_name || '-',
+      contact_person_name: record.contact_person_name || '-',
+      contact_person_email: record.contact_person_email || '-',
+      scheduled_date: record.scheduled_date,
+      actual_date: record.act_sch_date,
+      maintenance_type: record.maintenance_type_name || 'Vendor Contract Renewal',
+      status: record.header_status,
+      days_until_due: record.days_until_due,
+      days_until_cutoff: record.days_until_cutoff,
+      maintenance_created_on: record.maintenance_created_on,
+      maintenance_changed_on: record.maintenance_changed_on,
+      branch_code: record.branch_code,
+      org_id: orgId
+    }));
+
+    // Log success
+    await logApprovalsRetrieved({
+      empIntId,
+      count: formattedData.length,
+      orgId,
+      userId,
+      duration: Date.now() - startTime
+    });
+
+    res.json({
+      success: true,
+      message: 'Vendor renewal approvals retrieved successfully',
+      data: formattedData,
+      count: formattedData.length,
+      user_context: {
+        org_id: orgId,
+        branch_id: userBranchId,
+        branch_code: userBranchCode
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error in getVendorRenewalApprovals:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Vendor Renewal Approvals',
+      params: { emp_int_id: req.user?.emp_int_id, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve vendor renewal approvals',
+      error: error.message
+    });
+  }
+};
+
 // Helper function to get action text
 const getActionText = (status) => {
   switch (status) {
@@ -1145,5 +1268,6 @@ module.exports = {
   getWorkflowHistory: getWorkflowHistoryController,
   getWorkflowHistoryByWfamshId: getWorkflowHistoryByWfamshIdController,
   getMaintenanceApprovals: getMaintenanceApprovalsController,
+  getVendorRenewalApprovals: getVendorRenewalApprovalsController,
   getAllMaintenanceWorkflows
 }; 

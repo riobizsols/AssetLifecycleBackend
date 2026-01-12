@@ -11,13 +11,13 @@ const { deactivateExpiredVendors } = require('../models/vendorContractRenewalMod
  * PURPOSE:
  * Automatically checks vendor contract end dates and:
  * 1. Creates renewal notifications for contracts ending within 10 days (0-10 days)
- * 2. Deactivates vendors (int_status = 0) if contract expired and not renewed
+ * 2. Blocks vendors (int_status = 4) if contract expired and workflow not approved
  * 
  * HOW IT WORKS:
  * 1. Checks vendors with contract_end_date within 10 days (today to 10 days from today)
  * 2. Creates workflow notifications for admin users
  * 3. Checks vendors with contract_end_date < today (expired)
- * 4. Deactivates vendors that haven't been renewed
+ * 4. Blocks vendors that haven't been renewed (workflow not approved before contract_end_date)
  * 
  * SCHEDULE: 
  * - Default: Every day at 8:00 AM IST
@@ -101,7 +101,7 @@ const startVendorContractRenewalCron = () => {
           }
         }
         
-    // Step 2: Deactivate vendors with expired contracts
+    // Step 2: Block vendors with expired contracts (workflow not approved before contract_end_date)
     console.log('\n📅 Step 2: Checking vendors with expired contracts...');
     const todayDateStr = todayDate.toISOString().split('T')[0];
     
@@ -115,7 +115,7 @@ const startVendorContractRenewalCron = () => {
         console.log(`✅ Process completed in ${duration}ms`);
         console.log(`📊 Summary:`);
         console.log(`   - Renewal workflows created: ${vendorsDueResult.rows.length}`);
-        console.log(`   - Vendors deactivated: ${expiredVendorsResult.deactivated}`);
+        console.log(`   - Vendors blocked: ${expiredVendorsResult.deactivated}`);
         console.log('───────────────────────────────────────────────────────────────────\n');
         
       } catch (error) {
@@ -207,7 +207,7 @@ const triggerVendorContractRenewal = async () => {
       }
     }
     
-    // Step 2: Deactivate vendors with expired contracts
+    // Step 2: Block vendors with expired contracts (workflow not approved before contract_end_date)
     console.log('\n📅 Step 2: Checking vendors with expired contracts...');
     const todayDateStr = todayDate.toISOString().split('T')[0];
     
@@ -221,7 +221,7 @@ const triggerVendorContractRenewal = async () => {
     console.log(`✅ Process completed in ${duration}ms`);
     console.log(`📊 Summary:`);
     console.log(`   - Renewal workflows created: ${vendorsDueResult.rows.length}`);
-    console.log(`   - Vendors deactivated: ${expiredVendorsResult.deactivated}`);
+    console.log(`   - Vendors blocked: ${expiredVendorsResult.deactivated}`);
     console.log('───────────────────────────────────────────────────────────────────\n');
     
     return {
