@@ -1,4 +1,4 @@
-const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
+const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const {
     // Generic helpers
     logApiCall,
@@ -219,7 +219,7 @@ const approveMaintenanceAction = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const { empIntId, note } = req.body;
+    const { empIntId, note, vendorId, maintenanceDate } = req.body;
     const orgId = req.query.orgId || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
@@ -300,7 +300,37 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 5: Execute approval
-    const result = await approveMaintenance(assetId, empIntId, note, orgId);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate);
+
+    // Step 5.5: Check if approval failed due to vendor status
+    if (!result.success) {
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logSupervisorApprovalCompleted({
+          wfamshId: assetId,
+          action: 'approve',
+          empIntId,
+          userId,
+          duration: Date.now() - startTime,
+          error: result.message
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logMaintenanceApproved({
+          assetId,
+          empIntId,
+          note,
+          resultMessage: result.message,
+          userId,
+          duration: Date.now() - startTime,
+          error: result.message
+        }).catch(err => console.error('Logging error:', err));
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+        vendorStatus: result.vendorStatus
+      });
+    }
 
     // Step 6: Log success (context-aware)
     if (context === 'SUPERVISORAPPROVAL') {
@@ -1260,6 +1290,39 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
   }
 };
 
+// Update workflow header (vendor and/or maintenance date) independently
+const updateWorkflowHeaderAction = async (req, res) => {
+  try {
+    const { wfamshId } = req.params;
+    const { vendorId, maintenanceDate } = req.body;
+    const userId = req.user?.user_id;
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    
+    if (!wfamshId) {
+      return res.status(400).json({ success: false, message: 'Workflow ID is required' });
+    }
+    
+    if (vendorId === undefined && maintenanceDate === undefined) {
+      return res.status(400).json({ success: false, message: 'At least one field (vendorId or maintenanceDate) must be provided' });
+    }
+    
+    const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, userId, orgId);
+    
+    if (result.success) {
+      return res.json(result);
+    } else {
+      return res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('Error updating workflow header:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update workflow header',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getApprovalDetail,
   getApprovalDetailByWfamshId: getApprovalDetailByWfamshIdController,
@@ -1269,5 +1332,6 @@ module.exports = {
   getWorkflowHistoryByWfamshId: getWorkflowHistoryByWfamshIdController,
   getMaintenanceApprovals: getMaintenanceApprovalsController,
   getVendorRenewalApprovals: getVendorRenewalApprovalsController,
-  getAllMaintenanceWorkflows
+  getAllMaintenanceWorkflows,
+  updateWorkflowHeaderAction
 }; 

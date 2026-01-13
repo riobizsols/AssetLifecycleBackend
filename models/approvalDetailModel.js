@@ -6,6 +6,58 @@ const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
 
+// Update workflow header (vendor_id and/or maintenance date) independently
+const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, userId, orgId = 'ORG001') => {
+  try {
+    const updateFields = [];
+    const updateValues = [];
+    let paramIndex = 1;
+    
+    if (vendorId !== null && vendorId !== undefined) {
+      updateFields.push(`vendor_id = $${paramIndex++}`);
+      updateValues.push(vendorId);
+    }
+    
+    if (maintenanceDate !== null && maintenanceDate !== undefined) {
+      updateFields.push(`pl_sch_date = $${paramIndex++}`);
+      updateValues.push(maintenanceDate);
+    }
+    
+    if (updateFields.length === 0) {
+      return { success: false, message: 'No fields to update' };
+    }
+    
+    // Add changed_by and changed_on
+    updateFields.push(`changed_by = $${paramIndex++}`);
+    updateValues.push(userId ? userId.substring(0, 20) : 'system');
+    
+    // Add WHERE clause parameters
+    updateValues.push(wfamshId, orgId);
+    
+    const updateQuery = `
+      UPDATE "tblWFAssetMaintSch_H" 
+      SET ${updateFields.join(', ')}, changed_on = NOW()::timestamp without time zone
+      WHERE wfamsh_id = $${paramIndex++} AND org_id = $${paramIndex++}
+      RETURNING vendor_id, pl_sch_date
+    `;
+    
+    const result = await getDb().query(updateQuery, updateValues);
+    
+    if (result.rows.length === 0) {
+      return { success: false, message: 'Workflow header not found' };
+    }
+    
+    return {
+      success: true,
+      message: 'Workflow header updated successfully',
+      data: result.rows[0]
+    };
+  } catch (error) {
+    console.error('Error updating workflow header:', error);
+    throw error;
+  }
+};
+
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
   const result = await getDb().query(
@@ -240,12 +292,65 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001') => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null) => {
   try {
     // Convert emp_int_id to user_id
     const userId = await getUserIdByEmpIntId(empIntId);
     if (!userId) {
       throw new Error('User not found with the provided employee ID');
+    }
+    
+    // Detect whether the identifier is a wfamsh_id or asset_id (needed for vendor check)
+    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    
+    // If vendor_id is provided, validate it's active (int_status = 1)
+    // Also check the current vendor from workflow if no new vendor is provided
+    let vendorToCheck = vendorId;
+    if (!vendorToCheck) {
+      if (isWfamshId) {
+        // Get current vendor from workflow header
+        const currentVendorQuery = `SELECT vendor_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`;
+        const currentVendorResult = await getDb().query(currentVendorQuery, [assetOrWfamshId, orgId]);
+        if (currentVendorResult.rows.length > 0 && currentVendorResult.rows[0].vendor_id) {
+          vendorToCheck = currentVendorResult.rows[0].vendor_id;
+        } else {
+          // Try to get from asset's service_vendor_id
+          const assetVendorQuery = `
+            SELECT a.service_vendor_id 
+            FROM "tblWFAssetMaintSch_H" wfh
+            INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+            WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+          `;
+          const assetVendorResult = await getDb().query(assetVendorQuery, [assetOrWfamshId, orgId]);
+          if (assetVendorResult.rows.length > 0 && assetVendorResult.rows[0].service_vendor_id) {
+            vendorToCheck = assetVendorResult.rows[0].service_vendor_id;
+          }
+        }
+      } else {
+        // For asset_id, get service_vendor_id from asset
+        const assetVendorQuery = `SELECT service_vendor_id FROM "tblAssets" WHERE asset_id = $1 AND org_id = $2`;
+        const assetVendorResult = await getDb().query(assetVendorQuery, [assetOrWfamshId, orgId]);
+        if (assetVendorResult.rows.length > 0 && assetVendorResult.rows[0].service_vendor_id) {
+          vendorToCheck = assetVendorResult.rows[0].service_vendor_id;
+        }
+      }
+    }
+    
+    if (vendorToCheck) {
+      const vendorCheckQuery = `SELECT int_status FROM "tblVendors" WHERE vendor_id = $1 AND org_id = $2`;
+      const vendorResult = await getDb().query(vendorCheckQuery, [vendorToCheck, orgId]);
+      if (vendorResult.rows.length === 0) {
+        throw new Error('Vendor not found');
+      }
+      const vendorStatus = vendorResult.rows[0].int_status;
+      if (vendorStatus !== 1) {
+        // Return error response instead of throwing - this is a validation message, not an error
+        return {
+          success: false,
+          message: 'The specified Service Vendor is Inactive or CR Approved. Please choose another vendor for service.',
+          vendorStatus: vendorStatus
+        };
+      }
     }
     
     // ROLE-BASED WORKFLOW: Get user's roles
@@ -259,8 +364,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       throw new Error('User has no assigned roles');
     }
     
-    // Detect whether the identifier is a wfamsh_id or asset_id
-    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    // isWfamshId is already declared above for vendor check
 
     let currentResult;
     if (isWfamshId) {
@@ -295,6 +399,42 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     let currentUserStep = workflowDetails.find(w => w.status === 'AP');
     if (!currentUserStep) {
       throw new Error('No pending approval step found for your role');
+    }
+    
+    // Update vendor_id and maintenance date in header if provided
+    // Always update if values are provided (even if same as current) to ensure changes are saved
+    if (vendorId !== null && vendorId !== undefined || maintenanceDate !== null && maintenanceDate !== undefined) {
+      const updateFields = [];
+      const updateValues = [];
+      let paramIndex = 1;
+      
+      if (vendorId !== null && vendorId !== undefined) {
+        updateFields.push(`vendor_id = $${paramIndex++}`);
+        updateValues.push(vendorId);
+        console.log(`Updating vendor_id to: ${vendorId}`);
+      }
+      
+      if (maintenanceDate !== null && maintenanceDate !== undefined) {
+        updateFields.push(`pl_sch_date = $${paramIndex++}`);
+        updateValues.push(maintenanceDate);
+        console.log(`Updating pl_sch_date to: ${maintenanceDate}`);
+      }
+      
+      if (updateFields.length > 0) {
+        updateFields.push(`changed_by = $${paramIndex++}`);
+        updateValues.push(userId.substring(0, 20));
+        
+        updateValues.push(currentUserStep.wfamsh_id, orgId);
+        
+        const updateHeaderQuery = `
+          UPDATE "tblWFAssetMaintSch_H" 
+          SET ${updateFields.join(', ')}, changed_on = NOW()::timestamp without time zone
+          WHERE wfamsh_id = $${paramIndex++} AND org_id = $${paramIndex++}
+        `;
+        
+        await getDb().query(updateHeaderQuery, updateValues);
+        console.log(`✅ Updated workflow header: ${updateFields.join(', ')}`);
+      }
     }
     
     // ROLE-BASED: Update workflow step status to UA (User Approved)
@@ -425,8 +565,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User has no assigned roles');
     }
     
-    // Detect whether the identifier is a wfamsh_id or asset_id
-    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    // isWfamshId is already declared above for vendor check
 
     let currentResult;
     if (isWfamshId) {
@@ -2251,6 +2390,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         v.pincode,
         v.gst_number,
         v.cin_number,
+        v.int_status as vendor_status,
         NULL as contract_start_date,
         NULL as contract_end_date,
         at.maint_lead_type,
@@ -2538,7 +2678,10 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         isOverdue: (firstRecord.days_until_due || 0) < 0,
         notes: firstRecord.notes || null,
         checklist: checklistItems,
-        vendorDetails: vendorDetails || {
+        vendorDetails: vendorDetails ? {
+          ...vendorDetails,
+          vendor_status: vendorDetails.int_status
+        } : {
           vendorName: firstRecord.vendor_name,
           vendorId: firstRecord.vendor_id,
           vendor_name: firstRecord.vendor_name,
@@ -2556,7 +2699,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           cin_number: firstRecord.cin_number,
           contract_start_date: vendorDetails?.contract_start_date || firstRecord.contract_start_date,
           contract_end_date: vendorDetails?.contract_end_date || firstRecord.contract_end_date,
-          rating: vendorDetails?.rating || null
+          rating: vendorDetails?.rating || null,
+          vendor_status: firstRecord.vendor_status || null
         },
         workflowSteps: workflowSteps,
         workflowDetails: approvalDetails,
@@ -2590,5 +2734,6 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
    getMaintenanceApprovals,
    getVendorRenewalApprovals,
    createMaintenanceRecord,
-   getAllMaintenanceWorkflowsByAssetId
+   getAllMaintenanceWorkflowsByAssetId,
+   updateWorkflowHeader
  }; 

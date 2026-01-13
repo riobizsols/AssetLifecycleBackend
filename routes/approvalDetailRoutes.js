@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { getApprovalDetail, getApprovalDetailByWfamshId, approveMaintenanceAction, rejectMaintenanceAction, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflows } = require('../controllers/approvalDetailController');
+const { getApprovalDetail, getApprovalDetailByWfamshId, approveMaintenanceAction, rejectMaintenanceAction, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflows, updateWorkflowHeaderAction } = require('../controllers/approvalDetailController');
 const { protect } = require('../middlewares/authMiddleware');
 
 // Apply authentication middleware to all routes
@@ -39,5 +39,9 @@ router.post('/:assetId/approve', approveMaintenanceAction);
 // Reject maintenance
 // POST /api/approval-detail/:assetId/reject
 router.post('/:assetId/reject', rejectMaintenanceAction);
+
+// Update workflow header (vendor and/or maintenance date) independently
+// PUT /api/approval-detail/workflow-header/:wfamshId
+router.put('/workflow-header/:wfamshId', updateWorkflowHeaderAction);
 
 module.exports = router; 
