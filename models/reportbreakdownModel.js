@@ -475,6 +475,15 @@ const createBreakdownReport = async (breakdownData) => {
     };
   } catch (err) {
     await client.query('ROLLBACK');
+    console.error('Error in createBreakdownReport:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table,
+      column: err.column,
+      stack: err.stack
+    });
     throw err;
   } finally {
     client.release();

@@ -357,6 +357,15 @@ const createBreakdownReport = async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating breakdown report:', err);
+    console.error('Error stack:', err.stack);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table,
+      column: err.column
+    });
     
     // Determine error level
     const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
@@ -389,7 +398,22 @@ const createBreakdownReport = async (req, res) => {
       });
     }
     
-    res.status(500).json({ error: 'Failed to create breakdown report' });
+    // Return more detailed error message in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? `Failed to create breakdown report: ${err.message}${err.detail ? ` - ${err.detail}` : ''}`
+      : 'Failed to create breakdown report';
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && {
+        details: {
+          code: err.code,
+          constraint: err.constraint,
+          table: err.table,
+          column: err.column
+        }
+      })
+    });
   }
 };
 

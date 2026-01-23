@@ -1359,10 +1359,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       detail: error.detail,
       hint: error.hint,
       position: error.position
-    });
-    throw error;
-  }
-};
+     });
+     throw error;
+   }
+ };
 
   // Helper function to notify maintenance supervisors after record creation
   const notifyMaintenanceSupervisors = async (amsId, assetId, wfamshId, orgId) => {
