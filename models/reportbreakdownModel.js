@@ -388,9 +388,20 @@ const createBreakdownReport = async (breakdownData) => {
       atbrrc_id,
       reported_by,
       description,
-      decision_code, // BF01 | BF02 | BF03
+      decision_code, // BF01 | BF02 | BF03 (optional on create, can be set later)
       org_id
     } = breakdownData;
+
+    // Validate decision code value if provided
+    const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
+      throw new Error('Invalid decision code. Must be BF01, BF02, or BF03');
+    }
+
+    // Use a placeholder value if decision_code is not provided (to satisfy NOT NULL constraint)
+    // This allows decision_code to be set later via update endpoint
+    // Note: If the database column should be nullable, a migration should be created
+    const finalDecisionCode = decision_code || 'BF03'; // Default to BF03 (Postpone) if not provided
 
     // Generate a unique sequential abr_id
     const getNextAbrId = async () => {
@@ -420,7 +431,7 @@ const createBreakdownReport = async (breakdownData) => {
       atbrrc_id,
       reported_by,
       false,
-      decision_code,
+      finalDecisionCode,
       'CR',
       description,
       org_id
@@ -452,12 +463,13 @@ const createBreakdownReport = async (breakdownData) => {
     );
     const existingSchedule = existingSchRes.rows[0] || null;
 
-    // Trigger workflow if decision_code is provided
+    // Trigger workflow only if decision_code was explicitly provided by the user
+    // If not provided, it defaults to BF03 but workflow is not triggered (can be set later via update)
     let maintenanceResult = null;
     if (decision_code) {
       maintenanceResult = await triggerBreakdownWorkflow(client, {
         asset_id,
-        decision_code,
+        decision_code: finalDecisionCode,
         reported_by,
         org_id,
         abr_id,
@@ -547,10 +559,16 @@ const updateBreakdownReport = async (abrId, updateData) => {
     const result = await client.query(updateQuery, updateValues);
     const updatedBreakdown = result.rows[0];
 
-    // Check if decision_code is being set for the first time (null -> BF01/BF02/BF03)
+    // Check if decision_code is being set or changed
+    // Trigger workflow if:
+    // 1. decision_code is being set for the first time (null/empty -> BF01/BF02/BF03), OR
+    // 2. decision_code is being changed to a different value
     const isDecisionCodeSet = !currentBreakdown.decision_code && decision_code;
+    const isDecisionCodeChanged = currentBreakdown.decision_code && 
+                                   decision_code && 
+                                   currentBreakdown.decision_code !== decision_code;
 
-    if (isDecisionCodeSet) {
+    if (isDecisionCodeSet || isDecisionCodeChanged) {
       console.log(`Decision code set for breakdown ${abrId}: ${decision_code} - Triggering workflow`);
       
       // Fetch asset details for workflow processing
