@@ -1,0 +1,291 @@
+====================================================================================================
+DATABASE KEY SYNCHRONIZATION COMPREHENSIVE REPORT
+====================================================================================================
+Generated: 2026-01-22T13:39:05.932Z
+Source Database: GENERIC_URL
+Target Database: DATABASE_URL
+====================================================================================================
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Total Missing Primary Keys Found: 0
+Total Missing Foreign Keys Found: 16
+Foreign Keys with Orphaned Records: 11
+Validation Errors (Cannot be Applied): 0
+
+APPLICATION RESULTS:
+  ✅ Primary Keys Applied Successfully: 0
+  ❌ Primary Keys Failed: 0
+  ✅ Foreign Keys Applied Successfully: 0
+  ❌ Foreign Keys Failed: 16
+  📊 Total Relationships Set: 0
+  ⚠️  Total Relationships Not Set: 16
+
+====================================================================================================
+
+SECTION 2: MISSING FOREIGN KEYS
+----------------------------------------------------------------------------------------------------
+Total: 16
+
+1. Table: tblATMaintCheckList
+   Column: at_main_freq_id
+   References: tblATMaintFreq.at_main_freq_id
+   Status: ❌ FAILED: insert or update on table "tblATMaintCheckList" violates foreign key constraint "tblATMaintFreq_FK" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "at_main_freq_id" of relation "tblATMaintCheckList" violates not-null constraint
+
+2. Table: tblApps
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED: insert or update on table "tblApps" violates foreign key constraint "fk_tblapps_org_id" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "org_id" of relation "tblApps" violates not-null constraint
+
+3. Table: tblAssetGroup_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ❌ FAILED: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+4. Table: tblAssetMaintSch
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ❌ FAILED: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+5. Table: tblAssetTypeProps
+   Column: asset_type_id
+   References: tblAssetTypes.asset_type_id
+   Status: ❌ FAILED: insert or update on table "tblAssetTypeProps" violates foreign key constraint "tbl_AssetType_FK" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "asset_type_id" of relation "tblAssetTypeProps" violates not-null constraint
+
+6. Table: tblAssets
+   Column: changed_by
+   References: tblUsers.user_id
+   Status: ❌ FAILED: insert or update on table "tblAssets" violates foreign key constraint "tblAssets_changed_by_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "changed_by" of relation "tblAssets" violates not-null constraint
+
+7. Table: tblBranches
+   Column: created_by
+   References: tblUsers.user_id
+   Status: ❌ FAILED: insert or update on table "tblBranches" violates foreign key constraint "tblBranches_created_by_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "created_by" of relation "tblBranches" violates not-null constraint
+
+8. Table: tblDeptAssetTypes
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED: insert or update on table "tblDeptAssetTypes" violates foreign key constraint "tblOrgs_FKEY" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "org_id" of relation "tblDeptAssetTypes" violates not-null constraint
+
+9. Table: tblEmployees
+   Column: dept_id
+   References: tblDepartments.dept_id
+   Status: ❌ FAILED: insert or update on table "tblEmployees" violates foreign key constraint "tblDept_FK" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "dept_id" of relation "tblEmployees" violates not-null constraint
+
+10. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+11. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+12. Table: tblJobRoleNav
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblOrgs_FK" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "org_id" of relation "tblJobRoleNav" violates not-null constraint
+
+13. Table: tblScrapSales_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ❌ FAILED: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+14. Table: tblVendors
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ❌ FAILED: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+15. Table: tblWFAssetMaintSch_D
+   Column: wfamsh_id
+   References: tblWFAssetMaintSch_H.wfamsh_id
+   Status: ❌ FAILED: insert or update on table "tblWFAssetMaintSch_D" violates foreign key constraint "fk_tblwfassetmaintsch_d_wfamsh_id" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "wfamsh_id" of relation "tblWFAssetMaintSch_D" violates not-null constraint
+
+16. Table: tblWFAssetMaintSch_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ❌ FAILED: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+
+SECTION 3: ORPHANED RECORDS FIXED
+----------------------------------------------------------------------------------------------------
+Total Foreign Keys with Orphaned Records: 11
+
+✅ Successfully Fixed: 0 foreign key(s)
+   Total Records Fixed: 0
+❌ Failed to Fix: 11 foreign key(s)
+
+1. Table: tblATMaintCheckList
+   Column: at_main_freq_id
+   References: tblATMaintFreq.at_main_freq_id
+   Status: ❌ FAILED
+   Error: null value in column "at_main_freq_id" of relation "tblATMaintCheckList" violates not-null constraint
+
+2. Table: tblApps
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED
+   Error: null value in column "org_id" of relation "tblApps" violates not-null constraint
+
+3. Table: tblAssetTypeProps
+   Column: asset_type_id
+   References: tblAssetTypes.asset_type_id
+   Status: ❌ FAILED
+   Error: null value in column "asset_type_id" of relation "tblAssetTypeProps" violates not-null constraint
+
+4. Table: tblAssets
+   Column: changed_by
+   References: tblUsers.user_id
+   Status: ❌ FAILED
+   Error: null value in column "changed_by" of relation "tblAssets" violates not-null constraint
+
+5. Table: tblBranches
+   Column: created_by
+   References: tblUsers.user_id
+   Status: ❌ FAILED
+   Error: null value in column "created_by" of relation "tblBranches" violates not-null constraint
+
+6. Table: tblDeptAssetTypes
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED
+   Error: null value in column "org_id" of relation "tblDeptAssetTypes" violates not-null constraint
+
+7. Table: tblEmployees
+   Column: dept_id
+   References: tblDepartments.dept_id
+   Status: ❌ FAILED
+   Error: null value in column "dept_id" of relation "tblEmployees" violates not-null constraint
+
+8. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED
+   Error: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+9. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED
+   Error: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+10. Table: tblJobRoleNav
+   Column: org_id
+   References: tblOrgs.org_id
+   Status: ❌ FAILED
+   Error: null value in column "org_id" of relation "tblJobRoleNav" violates not-null constraint
+
+11. Table: tblWFAssetMaintSch_D
+   Column: wfamsh_id
+   References: tblWFAssetMaintSch_H.wfamsh_id
+   Status: ❌ FAILED
+   Error: null value in column "wfamsh_id" of relation "tblWFAssetMaintSch_D" violates not-null constraint
+
+
+SECTION 5: DETAILED APPLICATION RESULTS
+----------------------------------------------------------------------------------------------------
+Total Constraints Attempted: 16
+
+❌ FAILED TO APPLY CONSTRAINTS:
+   Total: 16
+
+   1. FOREIGN KEY: tblATMaintCheckList.at_main_freq_id -> tblATMaintFreq.at_main_freq_id
+      Error: insert or update on table "tblATMaintCheckList" violates foreign key constraint "tblATMaintFreq_FK"
+
+   2. FOREIGN KEY: tblApps.org_id -> tblOrgs.org_id
+      Error: insert or update on table "tblApps" violates foreign key constraint "fk_tblapps_org_id"
+
+   3. FOREIGN KEY: tblAssetGroup_H.branch_code -> tblBranches.branch_code
+      Error: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+   4. FOREIGN KEY: tblAssetMaintSch.branch_code -> tblBranches.branch_code
+      Error: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+   5. FOREIGN KEY: tblAssetTypeProps.asset_type_id -> tblAssetTypes.asset_type_id
+      Error: insert or update on table "tblAssetTypeProps" violates foreign key constraint "tbl_AssetType_FK"
+
+   6. FOREIGN KEY: tblAssets.changed_by -> tblUsers.user_id
+      Error: insert or update on table "tblAssets" violates foreign key constraint "tblAssets_changed_by_fkey"
+
+   7. FOREIGN KEY: tblBranches.created_by -> tblUsers.user_id
+      Error: insert or update on table "tblBranches" violates foreign key constraint "tblBranches_created_by_fkey"
+
+   8. FOREIGN KEY: tblDeptAssetTypes.org_id -> tblOrgs.org_id
+      Error: insert or update on table "tblDeptAssetTypes" violates foreign key constraint "tblOrgs_FKEY"
+
+   9. FOREIGN KEY: tblEmployees.dept_id -> tblDepartments.dept_id
+      Error: insert or update on table "tblEmployees" violates foreign key constraint "tblDept_FK"
+
+   10. FOREIGN KEY: tblJobRoleNav.app_id -> tblApps.app_id
+      Error: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey"
+
+   11. FOREIGN KEY: tblJobRoleNav.app_id -> tblApps.app_id
+      Error: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey1"
+
+   12. FOREIGN KEY: tblJobRoleNav.org_id -> tblOrgs.org_id
+      Error: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblOrgs_FK"
+
+   13. FOREIGN KEY: tblScrapSales_H.branch_code -> tblBranches.branch_code
+      Error: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+   14. FOREIGN KEY: tblVendors.branch_code -> tblBranches.branch_code
+      Error: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+   15. FOREIGN KEY: tblWFAssetMaintSch_D.wfamsh_id -> tblWFAssetMaintSch_H.wfamsh_id
+      Error: insert or update on table "tblWFAssetMaintSch_D" violates foreign key constraint "fk_tblwfassetmaintsch_d_wfamsh_id"
+
+   16. FOREIGN KEY: tblWFAssetMaintSch_H.branch_code -> tblBranches.branch_code
+      Error: there is no unique constraint matching given keys for referenced table "tblBranches"
+
+
+SECTION 6: STATISTICS
+----------------------------------------------------------------------------------------------------
+Primary Keys:
+  - Found Missing: 0
+  - Successfully Applied: 0
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Foreign Keys:
+  - Found Missing: 16
+  - With Orphaned Records: 11
+  - Successfully Applied: 0
+  - Failed to Apply: 16
+  - Cannot Apply (Validation Errors): 0
+
+Orphaned Records:
+  - Foreign Keys with Orphaned Records: 11
+  - Successfully Fixed: 0
+  - Failed to Fix: 11
+  - Total Records Fixed: 0
+
+Overall:
+  - Total Relationships Set: 0
+  - Total Relationships Not Set: 16
+  - Success Rate: 0.00%
+
+SECTION 7: RECOMMENDATIONS
+----------------------------------------------------------------------------------------------------
+⚠️  ACTION REQUIRED:
+   Some constraints failed to apply. Review Section 5 for details.
+   Common causes:
+     - Insufficient database permissions
+     - Constraint already exists with different name
+     - Data type mismatches
+   Fix the issues and re-run the script.
+
+====================================================================================================
+END OF REPORT
+====================================================================================================
