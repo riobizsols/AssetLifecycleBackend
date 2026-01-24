@@ -938,12 +938,24 @@ const getInactiveAssetsByAssetType = async (req, res) => {
         const userOrgId = req.user?.org_id || userWithBranch?.org_id;
         const userBranchId = userWithBranch?.branch_id;
         
+        // Determine assignment_type based on context
+        // For department assignments, filter by 'department' assignment_type
+        // For employee assignments, filter by 'user' assignment_type
+        let assignmentType = null;
+        if (context === 'DEPTASSIGNMENT') {
+            assignmentType = 'department';
+        } else if (context === 'EMPASSIGNMENT') {
+            assignmentType = 'user';
+        }
+        
         console.log('=== Inactive Assets Controller Debug ===');
         console.log('asset_type_id:', asset_type_id);
         console.log('User org_id:', userOrgId);
         console.log('User branch_id:', userBranchId);
+        console.log('Context:', context);
+        console.log('Assignment Type Filter:', assignmentType);
         
-        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId);
+        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId, assignmentType);
         
         const count = result.rows.length;
         const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";

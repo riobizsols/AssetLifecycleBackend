@@ -258,32 +258,52 @@ const getAssetsByOrg = async (org_id) => {
   return await dbPool.query(query, [org_id]);
 };
 
-const getInactiveAssetsByAssetType = async (asset_type_id, orgId, branchId) => {
+const getInactiveAssetsByAssetType = async (asset_type_id, orgId, branchId, assignmentType = null) => {
   console.log('=== Inactive Assets Model Debug ===');
   console.log('asset_type_id:', asset_type_id);
   console.log('orgId:', orgId);
   console.log('branchId:', branchId);
+  console.log('assignmentType:', assignmentType);
   
-  const query = `
+  let query = `
         SELECT 
             a.asset_type_id, a.asset_id, a.text, a.serial_number, a.description,
             a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, a.purchased_cost,
             a.purchased_on, a.purchased_by, a.expiry_date, a.current_status, a.warranty_period,
             a.parent_asset_id, a.group_id, a.org_id, a.created_by, a.created_on, a.changed_by, a.changed_on
         FROM "tblAssets" a
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         WHERE a.asset_type_id = $1
         AND a.org_id = $2
-        AND a.branch_id = $3
+        AND a.current_status = 'Active'
         AND a.asset_id NOT IN (
             SELECT DISTINCT aa.asset_id 
             FROM "tblAssetAssignments" aa
             WHERE aa.action = 'A' AND aa.latest_assignment_flag = true
         )
-        ORDER BY a.created_on DESC
     `;
 
+  const params = [asset_type_id, orgId];
+  let paramIndex = 3;
+
+  // Filter by assignment_type if provided (for department vs employee assignments)
+  if (assignmentType) {
+    query += ` AND at.assignment_type = $${paramIndex}`;
+    params.push(assignmentType);
+    paramIndex++;
+  }
+
+  // Filter by branch_id if provided (handle null case)
+  if (branchId) {
+    query += ` AND a.branch_id = $${paramIndex}`;
+    params.push(branchId);
+    paramIndex++;
+  }
+
+  query += ` ORDER BY a.created_on DESC`;
+
   const dbPool = getDb();
-  const result = await dbPool.query(query, [asset_type_id, orgId, branchId]);
+  const result = await dbPool.query(query, params);
   console.log('Query executed successfully, found inactive assets:', result.rows.length);
   return result;
 };
