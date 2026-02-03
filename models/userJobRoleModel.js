@@ -77,13 +77,20 @@ const checkEmployeeInUsers = async (emp_int_id) => {
     return result.rows[0] || null;
 };
 
-// Create user in tblUsers for employee
+// Check if user exists in tblUsers by email
+const checkUserByEmail = async (email) => {
+    if (!email) return null;
+    const dbPool = getDb();
+    const result = await dbPool.query(
+        `SELECT user_id, emp_int_id, email FROM "tblUsers" WHERE email = $1 AND int_status = 1`,
+        [email]
+    );
+    return result.rows[0] || null;
+};
+
+// Create user in tblUsers for employee or link existing user by email
 const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id) => {
     try {
-        // Generate user_id using ID generator
-        const user_id = await generateCustomId('user', 3);
-        console.log(`Generated user_id: ${user_id}`);
-        
         const dbPool = getDb();
         // Fetch employee data including all necessary fields for user creation
         const employeeResult = await dbPool.query(
@@ -109,6 +116,38 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         
         // Use employee's org_id if provided, otherwise use the passed org_id
         const finalOrgId = employee.org_id || org_id;
+        
+        // Check if a user with this email already exists
+        let existingUserByEmail = null;
+        if (employee.email_id) {
+            existingUserByEmail = await checkUserByEmail(employee.email_id);
+        }
+        
+        // If user exists by email, link the emp_int_id to that user
+        if (existingUserByEmail) {
+            console.log(`User with email ${employee.email_id} already exists. Linking emp_int_id ${emp_int_id} to user_id ${existingUserByEmail.user_id}`);
+            
+            // Update the existing user to link the emp_int_id
+            const updateResult = await dbPool.query(
+                `UPDATE "tblUsers" 
+                 SET emp_int_id = $1, 
+                     changed_by = $2, 
+                     changed_on = CURRENT_TIMESTAMP
+                 WHERE user_id = $3
+                 RETURNING user_id, emp_int_id, full_name, email, phone, dept_id, branch_id, language_code, org_id, int_status`,
+                [emp_int_id, created_by, existingUserByEmail.user_id]
+            );
+            
+            console.log(`Linked employee ${emp_int_id} to existing user ${existingUserByEmail.user_id}`);
+            return {
+                ...updateResult.rows[0],
+                generatedPassword: null // No password generated since user already exists
+            };
+        }
+        
+        // Generate user_id using ID generator
+        const user_id = await generateCustomId('user', 3);
+        console.log(`Generated user_id: ${user_id}`);
         
         // Get initial password from org settings (defaults to "Initial1" if not configured)
         const { getInitialPassword } = require('../utils/orgSettingsUtils');
@@ -393,6 +432,7 @@ module.exports = {
     updateUserJobRole,
     getAllUsersWithJobRoles,
     checkEmployeeInUsers,
+    checkUserByEmail,
     createUserForEmployee,
     assignJobRole,
     getEmployeeJobRoles,

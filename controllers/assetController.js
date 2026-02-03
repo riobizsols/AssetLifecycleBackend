@@ -1030,7 +1030,8 @@ const getAssetsWithFilters = async (req, res) => {
             vendor_id, 
             status, 
             org_id,
-            search 
+            search,
+            exclude_in_maintenance 
         } = req.query;
 
         // Get user's organization and branch information
@@ -1043,7 +1044,7 @@ const getAssetsWithFilters = async (req, res) => {
             userId,
             userOrgId,
             userBranchId,
-            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search }
+            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search, exclude_in_maintenance }
         });
 
         // Always apply user context filtering first, then apply additional filters
@@ -1051,12 +1052,13 @@ const getAssetsWithFilters = async (req, res) => {
             asset_type_id,
             status,
             vendor_id,
-            search
+            search,
+            exclude_in_maintenance: exclude_in_maintenance === 'true' || exclude_in_maintenance === true
         };
 
         // Remove null/undefined values
         Object.keys(additionalFilters).forEach(key => {
-            if (additionalFilters[key] === null || additionalFilters[key] === undefined) {
+            if (additionalFilters[key] === null || additionalFilters[key] === undefined || additionalFilters[key] === false) {
                 delete additionalFilters[key];
             }
         });

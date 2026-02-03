@@ -1546,10 +1546,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
   const createMaintenanceRecord = async (wfamshId, orgId = 'ORG001') => {
     try {
       console.log('=== createMaintenanceRecord called ===');
-      console.log('Creating maintenance record for wfamsh_id:', wfamshId);
+      console.log('Creating/updating maintenance record for wfamsh_id:', wfamshId);
       console.log('Org ID:', orgId);
       
-           // Get maintenance details from workflow header
+      // Get maintenance details from workflow header
       const workflowQuery = `
         SELECT 
           wfh.wfamsh_id,
@@ -1606,6 +1606,98 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Service vendor ID:', workflowData.vendor_id);
      console.log('BF01 notes:', workflowData.bf01_notes);
      console.log('Group ID:', workflowData.group_id);
+     
+     // Check if maintenance record already exists with status 'AP' (manual creation)
+     // This should be checked BEFORE group maintenance and BF01/BF03 logic
+     const existingRecordQuery = `
+       SELECT ams_id, status, asset_id
+       FROM "tblAssetMaintSch"
+       WHERE wfamsh_id = $1 AND org_id = $2 AND status = 'AP'
+     `;
+     const existingRecord = await getDb().query(existingRecordQuery, [wfamshId, orgId]);
+     
+     if (existingRecord.rows.length > 0) {
+       // Update existing record from 'AP' to 'IN' (manual maintenance creation)
+       console.log('Found existing maintenance record with status AP (manual creation), updating to IN');
+       const existingAmsId = existingRecord.rows[0].ams_id;
+       
+       // Generate work order ID if needed
+       const softwareAssetTypeQuery = `
+         SELECT value 
+         FROM "tblOrgSettings" 
+         WHERE key = 'software_at_id' 
+         AND org_id = $1
+         LIMIT 1
+       `;
+       const softwareAssetTypeResult = await getDb().query(softwareAssetTypeQuery, [orgId]);
+       const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
+       const originalMaintTypeId = workflowData.maint_type_id || 'MT002';
+       const isSoftwareAsset = (softwareAssetTypeId && workflowData.asset_type_id === softwareAssetTypeId) || originalMaintTypeId === 'MT001';
+       
+       // Decide maintenance type
+       const isBreakdown = !!workflowData.has_breakdown_note;
+       const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
+       
+       let workOrderId = null;
+       if (!isSoftwareAsset) {
+         if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
+           const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+           if (abrMatch && abrMatch[1]) {
+             workOrderId = `WO-${wfamshId}-${abrMatch[1]}`;
+           } else {
+             workOrderId = `WO-${wfamshId}`;
+           }
+         } else {
+           workOrderId = `WO-${wfamshId}`;
+         }
+       }
+       
+       // Update existing record from 'AP' to 'IN'
+       const updateQuery = `
+         UPDATE "tblAssetMaintSch"
+         SET 
+           wo_id = $1,
+           maint_type_id = $2,
+           vendor_id = $3,
+           at_main_freq_id = $4,
+           maintained_by = $5,
+           status = 'IN',
+           act_maint_st_date = $6,
+           changed_by = 'system',
+           changed_on = CURRENT_TIMESTAMP
+         WHERE ams_id = $7 AND org_id = $8
+         RETURNING ams_id
+       `;
+       
+       const updateParams = [
+         isSoftwareAsset ? null : workOrderId,
+         maintTypeId,
+         workflowData.vendor_id,
+         workflowData.at_main_freq_id,
+         workflowData.maintained_by,
+         workflowData.act_maint_st_date,
+         existingAmsId,
+         orgId
+       ];
+       
+       await getDb().query(updateQuery, updateParams);
+       console.log('Maintenance record updated from AP to IN successfully with ams_id:', existingAmsId);
+       
+       // Notify maintenance supervisors
+       console.log('=== About to notify maintenance supervisors (Manual Maintenance) ===');
+       try {
+         const notificationResult = await notifyMaintenanceSupervisors(existingAmsId, workflowData.asset_id, wfamshId, orgId);
+         console.log('Notification result:', JSON.stringify(notificationResult, null, 2));
+         if (!notificationResult.success) {
+           console.error('⚠️  Notification failed:', notificationResult.reason || notificationResult.error);
+         }
+       } catch (notifyErr) {
+         console.error('❌ CRITICAL: Failed to send notification to supervisors after manual maintenance update:', notifyErr);
+         console.error('Error stack:', notifyErr.stack);
+       }
+       
+       return existingAmsId;
+     }
      
      // Check if this is a group maintenance
      if (workflowData.group_id) {

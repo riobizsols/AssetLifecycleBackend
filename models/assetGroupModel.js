@@ -142,6 +142,37 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
     return result;
 };
 
+/**
+ * Get asset groups where ALL assets are of the given asset_type_id.
+ * Used by Scrap flow to show "Grouped assets" option.
+ */
+const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id) => {
+    const query = `
+        SELECT
+            h.assetgroup_h_id,
+            h.org_id,
+            h.branch_code,
+            h.text,
+            h.created_by,
+            h.created_on,
+            h.changed_by,
+            h.changed_on,
+            COUNT(d.asset_id) as asset_count
+        FROM "tblAssetGroup_H" h
+        INNER JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
+        INNER JOIN "tblAssets" a ON d.asset_id = a.asset_id
+        WHERE h.org_id = $1
+          AND h.branch_code = $2
+        GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
+        HAVING COUNT(DISTINCT a.asset_type_id) = 1
+           AND MAX(a.asset_type_id) = $3
+        ORDER BY h.created_on DESC
+    `;
+
+    const dbPool = getDb();
+    return await dbPool.query(query, [org_id, userBranchCode, asset_type_id]);
+};
+
 // Get asset group by ID with details
 const getAssetGroupById = async (assetgroup_h_id) => {
     const headerQuery = `
@@ -326,6 +357,7 @@ module.exports = {
     createAssetGroupDetail,
     createAssetGroup,
     getAllAssetGroups,
+    getAssetGroupsByAssetType,
     getAssetGroupById,
     updateAssetGroup,
     deleteAssetGroup,

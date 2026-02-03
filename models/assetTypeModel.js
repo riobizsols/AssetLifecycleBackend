@@ -8,20 +8,38 @@ const getDb = () => {
   return contextDb;
 };
 
-const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, depreciation_type = 'ND') => {
+const insertAssetType = async (
+    org_id,
+    asset_type_id,
+    int_status,
+    maint_required,
+    assignment_type,
+    inspection_required,
+    group_required,
+    require_scrap_approval,
+    created_by,
+    text,
+    is_child = false,
+    parent_asset_type_id = null,
+    maint_type_id = null,
+    maint_lead_type = null,
+    depreciation_type = 'ND'
+) => {
     const query = `
         INSERT INTO "tblAssetTypes" (
             org_id, asset_type_id, int_status, maint_required, 
-            assignment_type, inspection_required, group_required, created_by, 
+            assignment_type, inspection_required, group_required, require_scrap_approval, created_by, 
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, 0, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, $9, CURRENT_TIMESTAMP, $10, $11, $12, $13, $14, $15, 0, $16)
         RETURNING *
     `;
     
     const values = [
         org_id, asset_type_id, int_status, maint_required,
-        assignment_type, inspection_required, group_required, created_by, text,
+        assignment_type, inspection_required, group_required,
+        require_scrap_approval !== undefined ? require_scrap_approval : true,
+        created_by, text,
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type
     ];
     
@@ -36,7 +54,7 @@ const getAllAssetTypes = async (org_id = null) => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type
+            maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type, require_scrap_approval
         FROM "tblAssetTypes"
     `;
     
@@ -57,7 +75,7 @@ const getAssetTypeById = async (asset_type_id) => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type
+            maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type, require_scrap_approval
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
@@ -70,7 +88,7 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
         org_id, int_status, maint_required, assignment_type,
         inspection_required, group_required, text, is_child, parent_asset_type_id,
-        maint_type_id, maint_lead_type, depreciation_type
+        maint_type_id, maint_lead_type, depreciation_type, require_scrap_approval
     } = updateData;
     
     const query = `
@@ -78,16 +96,19 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
         SET 
             org_id = $1, int_status = $2, maint_required = $3,
             assignment_type = $4, inspection_required = $5, group_required = $6,
-            changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
-            is_child = $9, parent_asset_type_id = $10, maint_type_id = $11,
-            maint_lead_type = $12, depreciation_type = $13
-        WHERE asset_type_id = $14
+            require_scrap_approval = $7,
+            changed_by = $8, changed_on = CURRENT_TIMESTAMP, text = $9,
+            is_child = $10, parent_asset_type_id = $11, maint_type_id = $12,
+            maint_lead_type = $13, depreciation_type = $14
+        WHERE asset_type_id = $15
         RETURNING *
     `;
     
     const values = [
         org_id, int_status, maint_required, assignment_type,
-        inspection_required, group_required, changed_by, text,
+        inspection_required, group_required,
+        require_scrap_approval !== undefined ? require_scrap_approval : true,
+        changed_by, text,
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type, asset_type_id
     ];
     
@@ -128,20 +149,29 @@ const checkAssetTypeReferences = async (asset_type_id) => {
     }
 };
 
-const getParentAssetTypes = async () => {
-    const query = `
+const getParentAssetTypes = async (org_id = null) => {
+    const dbPool = getDb();
+    const params = [];
+    
+    let query = `
         SELECT 
             asset_type_id,
             text,
             int_status
         FROM "tblAssetTypes"
-        WHERE is_child = false
-        AND int_status = 1
-        ORDER BY text
+        WHERE int_status = 1
+          AND COALESCE(is_child, false) = false
+          AND (parent_asset_type_id IS NULL OR parent_asset_type_id = '')
     `;
     
-    const dbPool = getDb();
-    return await dbPool.query(query);
+    if (org_id) {
+        query += ` AND org_id = $1`;
+        params.push(org_id);
+    }
+    
+    query += ` ORDER BY text`;
+    
+    return await dbPool.query(query, params);
 };
 
 const getAssetTypesByAssignmentType = async (assignment_type) => {
@@ -150,7 +180,7 @@ const getAssetTypesByAssignmentType = async (assignment_type) => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, serial_num_format, depreciation_type
+            maint_type_id, maint_lead_type, serial_num_format, depreciation_type, require_scrap_approval
         FROM "tblAssetTypes"
         WHERE assignment_type = $1
         AND int_status = 1
@@ -167,7 +197,7 @@ const getAssetTypesByGroupRequired = async () => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, depreciation_type
+            maint_type_id, maint_lead_type, depreciation_type, require_scrap_approval
         FROM "tblAssetTypes"
         WHERE group_required = true
         AND int_status = 1
@@ -184,7 +214,7 @@ const getAssetTypesByMaintRequired = async () => {
             org_id, asset_type_id, int_status, maint_required,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_type_id, maint_lead_type, depreciation_type
+            maint_type_id, maint_lead_type, depreciation_type, require_scrap_approval
         FROM "tblAssetTypes"
         WHERE int_status = 1
         ORDER BY text

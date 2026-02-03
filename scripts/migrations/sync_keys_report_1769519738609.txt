@@ -1,0 +1,206 @@
+====================================================================================================
+DATABASE KEY SYNCHRONIZATION COMPREHENSIVE REPORT
+====================================================================================================
+Generated: 2026-01-27T13:15:38.608Z
+Source Database: GENERIC_URL
+Target Database: DATABASE_URL
+====================================================================================================
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Tables Created: 0
+Tables Failed to Create: 4
+
+Total Missing Primary Keys Found: 0
+Total Missing Foreign Keys Found: 6
+Foreign Keys with Orphaned Records: 2
+Validation Errors (Cannot be Applied): 5
+
+APPLICATION RESULTS:
+  ✅ Primary Keys Applied Successfully: 0
+  ❌ Primary Keys Failed: 0
+  ✅ Foreign Keys Applied Successfully: 4
+  ❌ Foreign Keys Failed: 2
+  📊 Total Relationships Set: 4
+  ⚠️  Total Relationships Not Set: 7
+
+====================================================================================================
+
+SECTION 0: TABLE CREATION
+----------------------------------------------------------------------------------------------------
+Failed to Create Tables: 4
+1. tblVendorSLAs
+2. tblvendorslarecs
+3. tblVendorSLAs
+4. tblvendorslarecs
+
+
+====================================================================================================
+
+SECTION 2: MISSING FOREIGN KEYS
+----------------------------------------------------------------------------------------------------
+Total: 6
+
+1. Table: tblAssets
+   Column: changed_by
+   References: tblUsers.user_id
+   Status: ✅ APPLIED
+
+2. Table: tblAssets
+   Column: created_by
+   References: tblUsers.user_id
+   Status: ✅ APPLIED
+
+3. Table: tblBranches
+   Column: created_by
+   References: tblUsers.user_id
+   Status: ✅ APPLIED
+
+4. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+5. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey" (Had orphaned records - fixed automatically)
+   ⚠️  Failed to fix orphaned records: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+6. Table: tblTechnicalLogConfig
+   Column: app_id
+   References: tblApps.app_id
+   Status: ✅ APPLIED
+
+
+SECTION 3: ORPHANED RECORDS FIXED
+----------------------------------------------------------------------------------------------------
+Total Foreign Keys with Orphaned Records: 2
+
+✅ Successfully Fixed: 0 foreign key(s)
+   Total Records Fixed: 0
+❌ Failed to Fix: 2 foreign key(s)
+
+1. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED
+   Error: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+2. Table: tblJobRoleNav
+   Column: app_id
+   References: tblApps.app_id
+   Status: ❌ FAILED
+   Error: null value in column "app_id" of relation "tblJobRoleNav" violates not-null constraint
+
+
+SECTION 4: VALIDATION ERRORS (CONSTRAINTS CANNOT BE APPLIED)
+----------------------------------------------------------------------------------------------------
+Total: 5
+
+These constraints cannot be applied due to data integrity issues.
+Please fix the data issues manually and re-run the script.
+
+1. Type: FOREIGN KEY
+   Table: tblAssetGroup_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Issues:
+     - Referenced table "tblBranches" does not have a primary key or unique constraint on column "branch_code"
+
+2. Type: FOREIGN KEY
+   Table: tblAssetMaintSch
+   Column: branch_code
+   References: tblBranches.branch_code
+   Issues:
+     - Referenced table "tblBranches" does not have a primary key or unique constraint on column "branch_code"
+
+3. Type: FOREIGN KEY
+   Table: tblScrapSales_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Issues:
+     - Referenced table "tblBranches" does not have a primary key or unique constraint on column "branch_code"
+
+4. Type: FOREIGN KEY
+   Table: tblVendors
+   Column: branch_code
+   References: tblBranches.branch_code
+   Issues:
+     - Referenced table "tblBranches" does not have a primary key or unique constraint on column "branch_code"
+
+5. Type: FOREIGN KEY
+   Table: tblWFAssetMaintSch_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Issues:
+     - Referenced table "tblBranches" does not have a primary key or unique constraint on column "branch_code"
+
+
+SECTION 5: DETAILED APPLICATION RESULTS
+----------------------------------------------------------------------------------------------------
+Total Constraints Attempted: 6
+
+✅ SUCCESSFULLY APPLIED CONSTRAINTS:
+   Total: 4
+
+   1. FOREIGN KEY: tblAssets.changed_by -> tblUsers.user_id
+   2. FOREIGN KEY: tblAssets.created_by -> tblUsers.user_id
+   3. FOREIGN KEY: tblBranches.created_by -> tblUsers.user_id
+   4. FOREIGN KEY: tblTechnicalLogConfig.app_id -> tblApps.app_id
+
+❌ FAILED TO APPLY CONSTRAINTS:
+   Total: 2
+
+   1. FOREIGN KEY: tblJobRoleNav.app_id -> tblApps.app_id
+      Error: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey"
+
+   2. FOREIGN KEY: tblJobRoleNav.app_id -> tblApps.app_id
+      Error: insert or update on table "tblJobRoleNav" violates foreign key constraint "tblJobRoleNav_app_id_fkey1"
+
+
+SECTION 6: STATISTICS
+----------------------------------------------------------------------------------------------------
+Primary Keys:
+  - Found Missing: 0
+  - Successfully Applied: 0
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Foreign Keys:
+  - Found Missing: 6
+  - With Orphaned Records: 2
+  - Successfully Applied: 4
+  - Failed to Apply: 2
+  - Cannot Apply (Validation Errors): 5
+
+Orphaned Records:
+  - Foreign Keys with Orphaned Records: 2
+  - Successfully Fixed: 0
+  - Failed to Fix: 2
+  - Total Records Fixed: 0
+
+Overall:
+  - Total Relationships Set: 4
+  - Total Relationships Not Set: 7
+  - Success Rate: 66.67%
+
+SECTION 7: RECOMMENDATIONS
+----------------------------------------------------------------------------------------------------
+⚠️  ACTION REQUIRED:
+   There are validation errors that prevent some constraints from being applied.
+   Please review Section 4 and fix the data issues manually.
+   After fixing the data, re-run this script to apply the remaining constraints.
+
+⚠️  ACTION REQUIRED:
+   Some constraints failed to apply. Review Section 5 for details.
+   Common causes:
+     - Insufficient database permissions
+     - Constraint already exists with different name
+     - Data type mismatches
+   Fix the issues and re-run the script.
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

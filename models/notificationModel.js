@@ -92,7 +92,9 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
 // Supports super access users who can view all branches
 const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId, hasSuperAccess = false) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
-  // Includes both asset-based maintenance and vendor contract renewal (MT005)
+  // Includes:
+  // - asset-based maintenance + vendor contract renewal (MT005)
+  // - scrap maintenance workflow approvals (tblWFScrap_*)
   
   // Build parameters array dynamically
   const params = [orgId];
@@ -100,7 +102,9 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   
   // Add branch filter condition if user doesn't have super access
   let branchFilter = '';
+  let branchIdParamIndex = null;
   if (!hasSuperAccess && branchId) {
+    branchIdParamIndex = paramIndex;
     params.push(branchId);
     branchFilter = ` AND a.branch_id = $${paramIndex}`;
     paramIndex++;
@@ -110,7 +114,13 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   const empIntIdParamIndex = paramIndex;
   params.push(empIntId);
   
+  const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
+    ? ` AND agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex})`
+    : '';
+
   const query = `
+    SELECT *
+    FROM (
     SELECT DISTINCT
       wfh.wfamsh_id,
       wfh.pl_sch_date,
@@ -207,7 +217,63 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
           AND u.int_status = 1
           AND wfd.status IN ('IN', 'IP', 'AP')
       )
-    ORDER BY wfh.pl_sch_date ASC
+      
+      UNION ALL
+      
+      -- Scrap Maintenance workflow notifications
+      SELECT DISTINCT
+        wh.id_d as wfamsh_id,
+        wh.created_on as pl_sch_date,
+        NULL::varchar as asset_id,
+        wh.assetgroup_id as group_id,
+        NULL::varchar as vendor_id,
+        wh.status as header_status,
+        seq.asset_type_id as asset_type_id,
+        agh.text as group_name,
+        (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wh.assetgroup_id) as group_asset_count,
+        '0'::text as maint_lead_type,
+        COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+        'SCRAP'::varchar as maint_type_id,
+        'Scrap Maintenance'::text as maint_type_name,
+        COALESCE(current_scrap_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
+        current_scrap_action_role.job_role_id as current_action_role_id,
+        NULL::timestamp as cutoff_date,
+        999::int as days_until_due,
+        999::int as days_until_cutoff
+      FROM "tblWFScrap_H" wh
+      INNER JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
+      INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
+      LEFT JOIN LATERAL (
+        SELECT d.job_role_id, jr.text as job_role_name
+        FROM "tblWFScrap_D" d
+        LEFT JOIN "tblJobRoles" jr ON d.job_role_id = jr.job_role_id
+        WHERE d.wfscrap_h_id = wh.id_d
+          AND d.status IN ('AP','IN')
+        ORDER BY d.seq ASC, d.created_on ASC
+        LIMIT 1
+      ) current_scrap_action_role ON true
+      WHERE agh.org_id = $1
+        ${scrapBranchFilter}
+        AND wh.status IN ('IN','IP')
+        AND EXISTS (
+          SELECT 1
+          FROM "tblWFScrap_D" d2
+          WHERE d2.wfscrap_h_id = wh.id_d
+            AND d2.status IN ('IN','AP')
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM "tblWFScrap_D" d3
+          INNER JOIN "tblUserJobRoles" ujr3 ON d3.job_role_id = ujr3.job_role_id
+          INNER JOIN "tblUsers" u3 ON ujr3.user_id = u3.user_id
+          WHERE d3.wfscrap_h_id = wh.id_d
+            AND u3.emp_int_id = $${empIntIdParamIndex}
+            AND u3.int_status = 1
+            AND d3.status IN ('IN','AP')
+        )
+    ) n
+    ORDER BY n.pl_sch_date ASC NULLS LAST
   `;
   
   try {

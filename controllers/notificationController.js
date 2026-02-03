@@ -75,22 +75,36 @@ const getUserNotifications = async (req, res) => {
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
-      id: notification.wfamsh_id, // Use wfamsh_id as unique identifier
-      wfamshId: notification.wfamsh_id,
-      userId: notification.current_action_role_id, // ROLE-BASED: Use role ID instead of user ID
-      status: 'AP', // Current action user always has AP status
+      // Common fields
+      id: notification.wfamsh_id, // Unique workflow identifier (maintenance wfamsh_id OR scrap wfscrap_h_id)
+      wfamshId: notification.wfamsh_id, // Backward compatibility (will be wfscrap_h_id for scrap)
+      workflowId: notification.wfamsh_id,
+      workflowType: notification.maint_type_id === 'SCRAP' ? 'SCRAP' : 'MAINTENANCE',
+      route:
+        notification.maint_type_id === 'SCRAP'
+          ? `/scrap-approval-detail/${notification.wfamsh_id}?context=SCRAPMAINTENANCEAPPROVAL`
+          : `/approval-detail/${notification.wfamsh_id}`,
+
+      // ROLE-BASED: Use role ID/name instead of a specific user
+      userId: notification.current_action_role_id,
+      userName: notification.current_action_role_name || 'Unassigned',
+      userEmail: null,
+      status: 'AP',
+
+      // Dates / urgency
       dueDate: notification.pl_sch_date,
-      assetId: notification.asset_id,
-      assetTypeName: notification.asset_type_name,
-      userName: notification.current_action_role_name || 'Unassigned', // ROLE-BASED: Show role name
-      userEmail: null, // Roles don't have emails
       cutoffDate: notification.cutoff_date,
       daysUntilDue: Math.floor(notification.days_until_due || 0),
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
-      isUrgent: notification.days_until_cutoff <= 2, // Show urgent when 2 days or less until cutoff
-      isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance', // Use actual maintenance type name from database
-      // Group asset maintenance information
+      isUrgent: Math.floor(notification.days_until_cutoff || 0) <= 2,
+      isOverdue: Math.floor(notification.days_until_due || 0) <= 0,
+
+      // Display labels
+      maintenanceType: notification.maint_type_name || 'Regular Maintenance',
+      assetId: notification.asset_id,
+      assetTypeName: notification.asset_type_name,
+
+      // Group info (also used for scrap group requests)
       groupId: notification.group_id || null,
       groupName: notification.group_name || null,
       groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,

@@ -8,7 +8,8 @@ const {
     getMaintenanceFrequencyForAssetType,
     getAllMaintenanceSchedules,
     getMaintenanceScheduleById,
-    updateMaintenanceSchedule
+    updateMaintenanceSchedule,
+    createManualMaintenanceSchedule
 } = require('../controllers/maintenanceScheduleController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -35,6 +36,9 @@ router.get('/frequency/:asset_type_id', protect, getMaintenanceFrequencyForAsset
 
 // Get maintenance schedules for specific asset (protected)
 router.get('/asset/:asset_id', protect, getMaintenanceSchedulesForAsset);
+
+// Create manual maintenance schedule (protected)
+router.post('/create-manual', protect, createManualMaintenanceSchedule);
 
 // Update maintenance schedule by ID (protected)
 router.put('/:id', protect, updateMaintenanceSchedule);

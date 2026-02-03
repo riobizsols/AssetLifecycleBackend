@@ -1263,6 +1263,48 @@ const updateMaintenanceSchedule = async (req, res) => {
     }
 };
 
+// Create manual maintenance schedule
+const createManualMaintenanceSchedule = async (req, res) => {
+    try {
+        const { asset_id, asset_type_id } = req.body;
+        const orgId = req.user?.org_id || req.body.org_id;
+        const userId = req.user?.user_id;
+
+        if (!asset_id || !asset_type_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'asset_id and asset_type_id are required'
+            });
+        }
+
+        if (!orgId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Organization ID is required'
+            });
+        }
+
+        const result = await model.createManualMaintenanceSchedule({
+            asset_id,
+            asset_type_id,
+            org_id: orgId,
+            created_by: userId || 'system',
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Manual maintenance schedule created successfully',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error creating manual maintenance schedule:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to create manual maintenance schedule'
+        });
+    }
+};
+
 module.exports = {
     generateMaintenanceSchedules,
     generateMaintenanceSchedulesWithWorkflowBypass,
@@ -1271,5 +1313,6 @@ module.exports = {
     getMaintenanceFrequencyForAssetType,
     getAllMaintenanceSchedules,
     getMaintenanceScheduleById,
-    updateMaintenanceSchedule
+    updateMaintenanceSchedule,
+    createManualMaintenanceSchedule
 }; 

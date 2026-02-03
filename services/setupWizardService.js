@@ -329,17 +329,32 @@ const generateDynamicSchemaSql = async () => {
         }
       }
       
-      // Store FK statements for later
+      // Store FK statements for later (with validation)
       for (const [constraintName, fk] of Object.entries(fkConstraints)) {
         if (fk.columns.length === 0) continue; // Skip if no columns (shouldn't happen)
         
+        // Validate that referenced table has primary key or unique constraint
+        // Check if the referenced table is in our tables list
+        if (!tables.includes(fk.foreignTable)) {
+          console.warn(`[SetupWizard] ⚠️ Skipping FK ${constraintName}: Referenced table "${fk.foreignTable}" not found in tables list`);
+          continue;
+        }
+        
+        // Check if referenced table has primary key on the referenced column(s)
+        // We'll validate this when applying, but for now we'll include it
+        // The actual validation will happen during application
+        
         const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
         const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
-        foreignKeyStatements.push(
-          `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
-          `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
-          `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`
-        );
+        foreignKeyStatements.push({
+          sql: `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
+               `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
+               `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`,
+          tableName: fk.tableName,
+          foreignTable: fk.foreignTable,
+          foreignColumns: fk.foreignColumns,
+          constraintName: constraintName
+        });
       }
       
       // Add CHECK constraints
@@ -380,8 +395,55 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Add all foreign key constraints AFTER all tables are created
-    console.log(`[SetupWizard] 📎 Adding ${foreignKeyStatements.length} foreign key constraints`);
-    schemaParts.push(...foreignKeyStatements);
+    // But first, validate that referenced tables have primary keys
+    console.log(`[SetupWizard] 📎 Validating ${foreignKeyStatements.length} foreign key constraints...`);
+    
+    // Get primary keys for all tables to validate foreign key references
+    const tablePrimaryKeys = {};
+    for (const tableName of tables) {
+      const pkResult = await db.query(`
+        SELECT kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema = 'public'
+          AND tc.table_name = $1
+        ORDER BY kcu.ordinal_position
+      `, [tableName]);
+      tablePrimaryKeys[tableName] = pkResult.rows.map(r => r.column_name);
+    }
+    
+    const validForeignKeyStatements = [];
+    const skippedForeignKeyStatements = [];
+    
+    for (const fk of foreignKeyStatements) {
+      // Check if referenced table exists in our tables list
+      if (!tables.includes(fk.foreignTable)) {
+        console.warn(`[SetupWizard] ⚠️ Skipping FK ${fk.constraintName}: Referenced table "${fk.foreignTable}" not found`);
+        skippedForeignKeyStatements.push(fk);
+        continue;
+      }
+      
+      // Check if referenced table has primary key on the referenced columns
+      const refTablePKs = tablePrimaryKeys[fk.foreignTable] || [];
+      const hasMatchingPK = fk.foreignColumns.every(col => refTablePKs.includes(col));
+      
+      if (!hasMatchingPK) {
+        console.warn(`[SetupWizard] ⚠️ Skipping FK ${fk.constraintName}: Referenced table "${fk.foreignTable}" does not have primary key on columns [${fk.foreignColumns.join(', ')}] (has PKs: [${refTablePKs.join(', ')}])`);
+        skippedForeignKeyStatements.push(fk);
+        continue;
+      }
+      
+      validForeignKeyStatements.push(fk.sql);
+    }
+    
+    console.log(`[SetupWizard] 📎 Adding ${validForeignKeyStatements.length} valid foreign key constraints (${skippedForeignKeyStatements.length} skipped)`);
+    if (skippedForeignKeyStatements.length > 0) {
+      console.warn(`[SetupWizard] ⚠️ Skipped foreign keys: ${skippedForeignKeyStatements.map(fk => fk.constraintName).join(', ')}`);
+    }
+    schemaParts.push(...validForeignKeyStatements);
     
     const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
     
@@ -395,7 +457,7 @@ const generateDynamicSchemaSql = async () => {
     console.log(`[SetupWizard]   - CREATE TABLE statements: ${tableCount}`);
     console.log(`[SetupWizard]   - Indexes: ${indexesResult.rows.length}`);
     console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
-    console.log(`[SetupWizard]   - Foreign keys: ${foreignKeyStatements.length}`);
+    console.log(`[SetupWizard]   - Foreign keys: ${validForeignKeyStatements.length} valid, ${skippedForeignKeyStatements.length} skipped (out of ${foreignKeyStatements.length} total)`);
     console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
     
     if (tableCount !== tables.length) {
@@ -1132,7 +1194,7 @@ const seedAuditConfig = async (client, orgId, selectedIds = [], fallbackEmail, l
   return count;
 };
 
-const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
+const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId = null) => {
   const inputBranches =
     Array.isArray(org.branches) && org.branches.length
       ? org.branches
@@ -1158,14 +1220,14 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
         INSERT INTO "tblBranches"
           (branch_id, org_id, int_status, text, city, branch_code, created_by, created_on, changed_by, changed_on)
         VALUES
-          ($1, $2, 1, $3, $4, $5, 'SETUP', CURRENT_TIMESTAMP, 'SETUP', CURRENT_TIMESTAMP)
+          ($1, $2, 1, $3, $4, $5, $6, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP)
         ON CONFLICT (branch_id) DO UPDATE
         SET text = EXCLUDED.text,
             city = EXCLUDED.city,
             branch_code = EXCLUDED.branch_code,
             org_id = EXCLUDED.org_id
       `,
-      [branchId, orgId, branchName, branchCity, branchCode]
+      [branchId, orgId, branchName, branchCity, branchCode, adminUserId]
     );
 
     branchMappings.push({ tempId: branch.tempId || null, branchId });
@@ -1187,13 +1249,13 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
           INSERT INTO "tblDepartments"
             (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by, branch_id)
           VALUES
-            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, 'SETUP', 'SETUP', $4)
+            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4, $5)
           ON CONFLICT (dept_id) DO UPDATE
           SET text = EXCLUDED.text,
               branch_id = EXCLUDED.branch_id,
               org_id = EXCLUDED.org_id
         `,
-        [orgId, deptId, `${deptName} (${deptCode})`, branchId]
+        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId, branchId]
       );
 
       deptMappings.push({
@@ -1216,7 +1278,7 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
   return { branchMappings, deptMappings };
 };
 
-const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => {
+const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, existingUserId = null) => {
   if (!adminUser.email) {
     throw new Error("Admin user email is required.");
   }
@@ -1239,71 +1301,125 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
   const initialPassword = await getInitialPassword(orgId, client);
   const passwordHash = await bcrypt.hash(initialPassword, 10);
 
-  // Generate user_id for RioAdmin in USR format (USR001, USR002, etc.)
-  // Query tblIDSequences directly using the client connection
-  let idResult = await client.query(
-    'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
-    ['user']
-  );
-
-  // Auto-create entry if it doesn't exist
-  if (idResult.rows.length === 0) {
-    await client.query(
-      'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
-      ['user', 'USR', 0]
-    );
-    idResult = await client.query(
+  // Use existing user ID if provided, otherwise generate new one
+  let rioAdminUserId;
+  if (existingUserId) {
+    rioAdminUserId = existingUserId;
+  } else {
+    // Generate user_id for RioAdmin in USR format (USR001, USR002, etc.)
+    // Query tblIDSequences directly using the client connection
+    let idResult = await client.query(
       'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
       ['user']
     );
+
+    // Auto-create entry if it doesn't exist
+    if (idResult.rows.length === 0) {
+      await client.query(
+        'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+        ['user', 'USR', 0]
+      );
+      idResult = await client.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        ['user']
+      );
+    }
+
+    const { prefix, last_number } = idResult.rows[0];
+    const next = last_number + 1;
+    
+    // Update the last number
+    await client.query(
+      'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
+      [next, 'user']
+    );
+
+    // Generate the ID in format USR001, USR002, etc.
+    rioAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
   }
-
-  const { prefix, last_number } = idResult.rows[0];
-  const next = last_number + 1;
-  
-  // Update the last number
-  await client.query(
-    'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
-    [next, 'user']
-  );
-
-  // Generate the ID in format USR001, USR002, etc.
-  const rioAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
   const rioAdminUsername = "rioadmin";
 
   // Create admin user in tblRioAdmin instead of tblUsers and tblEmployees
-  await client.query(
-    `
-      INSERT INTO "tblRioAdmin"
-        (org_id, user_id, full_name, username, email, phone, job_role_id, password,
-         created_by, created_on, changed_by, changed_on, time_zone, dept_id,
-         branch_id, int_status, language_code)
-      VALUES
-        ($1, $2, $3, $4, $5, $6, 'JR001', $7,
-         'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 'IST', $8,
-         $9, 1, 'en')
-      ON CONFLICT (user_id) DO UPDATE
-      SET full_name = EXCLUDED.full_name,
-          username = EXCLUDED.username,
-          email = EXCLUDED.email,
-          phone = EXCLUDED.phone,
-          password = EXCLUDED.password,
-          dept_id = EXCLUDED.dept_id,
-          branch_id = EXCLUDED.branch_id,
-          org_id = EXCLUDED.org_id
-    `,
-    [
-      orgId,
-      rioAdminUserId,
-      adminUser.fullName,
-      rioAdminUsername,
-      adminUser.email,
-      adminUser.phone || null,
-      passwordHash,
-      deptId,
-      branchId,
-    ]
-  );
+  // Note: int_status column may not exist in all database schemas, so we'll try without it first
+  try {
+    await client.query(
+      `
+        INSERT INTO "tblRioAdmin"
+          (org_id, user_id, full_name, username, email, phone, job_role_id, password,
+           created_by, created_on, changed_by, changed_on, time_zone, dept_id,
+           branch_id, language_code)
+        VALUES
+          ($1, $2, $3, $4, $5, $6, 'JR001', $7,
+           $2, CURRENT_DATE, $2, CURRENT_DATE, 'IST', $8,
+           $9, 'en')
+        ON CONFLICT (user_id) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            username = EXCLUDED.username,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            password = EXCLUDED.password,
+            dept_id = EXCLUDED.dept_id,
+            branch_id = EXCLUDED.branch_id,
+            org_id = EXCLUDED.org_id
+      `,
+      [
+        orgId,
+        rioAdminUserId,
+        adminUser.fullName,
+        rioAdminUsername,
+        adminUser.email,
+        adminUser.phone || null,
+        passwordHash,
+        deptId,
+        branchId,
+      ]
+    );
+  } catch (insertError) {
+    // If the insert fails, try with int_status (in case the column exists)
+    if (insertError.message && insertError.message.includes('column') && insertError.message.includes('does not exist')) {
+      // Try alternative column set - maybe int_status exists but another doesn't
+      // For now, just log and rethrow - the error message will help identify the issue
+      console.warn(`[SetupWizard] Failed to insert into tblRioAdmin: ${insertError.message}`);
+      throw insertError;
+    }
+    throw insertError;
+  }
+
+  // Also create admin user in tblUsers for foreign key constraints (created_by/changed_by)
+  // This is needed because tblBranches and other tables have foreign keys referencing tblUsers.user_id
+  try {
+    await client.query(
+      `
+        INSERT INTO "tblUsers"
+          (org_id, user_id, full_name, email, phone, job_role_id, password,
+           created_by, created_on, changed_by, changed_on, int_status, time_zone, dept_id)
+        VALUES
+          ($1, $2, $3, $4, $5, 'JR001', $6,
+           $2, CURRENT_DATE, $2, CURRENT_DATE, 1, 'IST', $7)
+        ON CONFLICT (user_id) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            password = EXCLUDED.password,
+            dept_id = EXCLUDED.dept_id,
+            org_id = EXCLUDED.org_id
+      `,
+      [
+        orgId,
+        rioAdminUserId,
+        adminUser.fullName,
+        adminUser.email,
+        adminUser.phone || null,
+        passwordHash,
+        deptId,
+      ]
+    );
+    logs.push({ message: `Admin user ${rioAdminUserId} also created in tblUsers for foreign key constraints`, scope: "admin" });
+  } catch (userError) {
+    // If tblUsers doesn't exist or has different structure, log warning but continue
+    console.warn(`[SetupWizard] Could not create admin user in tblUsers: ${userError.message}`);
+    logs.push({ message: `Note: Admin user not created in tblUsers: ${userError.message}`, scope: "admin", level: "warning" });
+  }
 
   // Add super_access_users entry in tblOrgSettings
   await client.query(
@@ -1541,12 +1657,84 @@ const runSetup = async (payload = {}) => {
         );
       }
 
-      const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs);
-      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs);
-      
-      // Get initial password for email (same as used in seedEmployeeAndUser)
+      // Create a temporary admin user in tblUsers first (before branches) for foreign key constraints
+      // We'll update it with full details after branches/departments are created
       const { getInitialPassword } = require('../utils/orgSettingsUtils');
-      const initialPassword = await getInitialPassword(orgId, client);
+      let initialPassword = await getInitialPassword(orgId, client);
+      const passwordHash = await bcrypt.hash(initialPassword, 10);
+      
+      // Generate user_id early
+      let idResult = await client.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        ['user']
+      );
+      if (idResult.rows.length === 0) {
+        await client.query(
+          'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+          ['user', 'USR', 0]
+        );
+        idResult = await client.query(
+          'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+          ['user']
+        );
+      }
+      const { prefix, last_number } = idResult.rows[0];
+      const next = last_number + 1;
+      await client.query(
+        'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
+        [next, 'user']
+      );
+      const tempAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
+      
+      // Create minimal admin user in tblUsers first (for foreign key constraints)
+      try {
+        await client.query(
+          `
+            INSERT INTO "tblUsers"
+              (org_id, user_id, full_name, email, phone, job_role_id, password,
+               created_by, created_on, changed_by, changed_on, int_status, time_zone)
+            VALUES
+              ($1, $2, $3, $4, $5, 'JR001', $6,
+               $2, CURRENT_DATE, $2, CURRENT_DATE, 1, 'IST')
+            ON CONFLICT (user_id) DO UPDATE
+            SET full_name = EXCLUDED.full_name,
+                email = EXCLUDED.email
+          `,
+          [
+            orgId,
+            tempAdminUserId,
+            adminUser.fullName || 'System Administrator',
+            adminUser.email,
+            adminUser.phone || null,
+            passwordHash,
+          ]
+        );
+        logs.push({ message: `Temporary admin user ${tempAdminUserId} created in tblUsers for foreign key constraints`, scope: "admin" });
+      } catch (userError) {
+        console.warn(`[SetupWizard] Could not create temporary admin user in tblUsers: ${userError.message}`);
+        // Continue - we'll try to use NULL instead
+      }
+      
+      const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs, tempAdminUserId);
+      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs, tempAdminUserId);
+      
+      // Update admin user in tblUsers with full details (dept_id, etc.)
+      try {
+        await client.query(
+          `
+            UPDATE "tblUsers"
+            SET dept_id = $1,
+                changed_by = $2,
+                changed_on = CURRENT_DATE
+            WHERE user_id = $2
+          `,
+          [adminResult.deptId, adminResult.userId]
+        );
+      } catch (updateError) {
+        console.warn(`[SetupWizard] Could not update admin user in tblUsers: ${updateError.message}`);
+      }
+      
+      // initialPassword is already available from above (used when creating temporary admin user)
 
       await client.query("COMMIT");
 

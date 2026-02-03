@@ -1346,6 +1346,21 @@ const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additi
     paramIndex++;
   }
   
+  // Exclude assets that are already in maintenance (if exclude_in_maintenance is true)
+  if (additionalFilters.exclude_in_maintenance) {
+    query += ` AND NOT EXISTS (
+      SELECT 1 FROM "tblAssetMaintSch" ams
+      WHERE ams.asset_id = a.asset_id 
+        AND ams.org_id = a.org_id
+        AND ams.status NOT IN ('CO', 'CA')
+    ) AND NOT EXISTS (
+      SELECT 1 FROM "tblWFAssetMaintSch_H" wfh
+      WHERE wfh.asset_id = a.asset_id 
+        AND wfh.org_id = a.org_id
+        AND wfh.status NOT IN ('CO', 'CA')
+    )`;
+  }
+  
   query += ` ORDER BY a.created_on DESC`;
   
   return await dbPool.query(query, params);

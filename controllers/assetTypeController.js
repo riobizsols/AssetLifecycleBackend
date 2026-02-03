@@ -35,6 +35,7 @@ const addAssetType = async (req, res) => {
             group_required,        // from frontend
             inspection_required,    // from frontend
             maint_required,        // from frontend (1 or 0)
+            require_scrap_approval = true, // from frontend (default true)
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
             maint_type_id = null,  // from frontend
@@ -93,6 +94,7 @@ const addAssetType = async (req, res) => {
                     assignment_type,
                     inspection_required,
                     group_required,
+                    require_scrap_approval,
                     created_by,
                     text,
                     is_child,
@@ -168,7 +170,8 @@ const getAllAssetTypes = async (req, res) => {
 // GET /api/asset-types/parents - Get all parent asset types
 const getParentAssetTypes = async (req, res) => {
     try {
-        const result = await model.getParentAssetTypes();
+        const org_id = req.user?.org_id;
+        const result = await model.getParentAssetTypes(org_id);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching parent asset types:", err);
@@ -263,6 +266,7 @@ const updateAssetType = async (req, res) => {
             assignment_type,
             inspection_required,
             group_required,
+            require_scrap_approval,
             text,
             is_child,
             parent_asset_type_id,
@@ -314,6 +318,7 @@ const updateAssetType = async (req, res) => {
             assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
+            require_scrap_approval: require_scrap_approval !== undefined ? require_scrap_approval : existingAsset.rows[0].require_scrap_approval,
             text: text !== undefined && text !== null ? text : existingAsset.rows[0].text,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),

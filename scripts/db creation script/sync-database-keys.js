@@ -313,6 +313,47 @@ async function constraintExists(pool, constraintName) {
   return result.rows[0].exists;
 }
 
+// Helper function to check if referenced table has primary key or unique constraint on the referenced column
+async function referencedColumnHasConstraint(pool, tableName, columnName) {
+  // Check for primary key
+  const pkQuery = `
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      WHERE tc.constraint_type = 'PRIMARY KEY'
+        AND tc.table_schema = 'public'
+        AND tc.table_name = $1
+        AND kcu.column_name = $2
+    );
+  `;
+  const pkResult = await pool.query(pkQuery, [tableName, columnName]);
+  
+  if (pkResult.rows[0].exists) {
+    return true;
+  }
+  
+  // Check for unique constraint
+  const uniqueQuery = `
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema
+      WHERE tc.constraint_type = 'UNIQUE'
+        AND tc.table_schema = 'public'
+        AND tc.table_name = $1
+        AND kcu.column_name = $2
+    );
+  `;
+  const uniqueResult = await pool.query(uniqueQuery, [tableName, columnName]);
+  
+  return uniqueResult.rows[0].exists;
+}
+
 // Validate data before adding primary key
 async function validatePrimaryKey(pool, tableName, columns) {
   const issues = [];
@@ -1133,6 +1174,40 @@ async function syncDatabaseKeys() {
             continue; // Skip this foreign key
           }
           
+          // Check if referenced table exists
+          const refTableExists = await tableExists(targetPool, sourceFK.referencedTable);
+          if (!refTableExists) {
+            log(`    ⚠️  Skipping FK: Referenced table "${sourceFK.referencedTable}" does not exist in target database`, 'WARN');
+            validationErrors.push({
+              type: 'FOREIGN KEY',
+              table: tableName,
+              column: sourceFK.column,
+              referencedTable: sourceFK.referencedTable,
+              referencedColumn: sourceFK.referencedColumn,
+              issues: [`Referenced table "${sourceFK.referencedTable}" does not exist`]
+            });
+            continue;
+          }
+          
+          // Check if referenced column has primary key or unique constraint
+          const refHasConstraint = await referencedColumnHasConstraint(
+            targetPool,
+            sourceFK.referencedTable,
+            sourceFK.referencedColumn
+          );
+          if (!refHasConstraint) {
+            log(`    ⚠️  Skipping FK: Referenced table "${sourceFK.referencedTable}" does not have primary key or unique constraint on column "${sourceFK.referencedColumn}"`, 'WARN');
+            validationErrors.push({
+              type: 'FOREIGN KEY',
+              table: tableName,
+              column: sourceFK.column,
+              referencedTable: sourceFK.referencedTable,
+              referencedColumn: sourceFK.referencedColumn,
+              issues: [`Referenced table "${sourceFK.referencedTable}" does not have a primary key or unique constraint on column "${sourceFK.referencedColumn}"`]
+            });
+            continue;
+          }
+          
           // Validate data before adding
           log(`    Checking FK: ${sourceFK.column} -> ${sourceFK.referencedTable}.${sourceFK.referencedColumn}`, 'DEBUG');
           const validationResult = await validateForeignKey(
@@ -1402,17 +1477,49 @@ WHERE "${fkFix.fk.column}" IS NOT NULL
         const pkStatements = sqlStatements.filter(s => s.columns);
         const fkStatements = sqlStatements.filter(s => !s.columns);
         
+        // Track which tables successfully got primary keys
+        const tablesWithPKs = new Set();
+        
         for (const sqlObj of pkStatements) {
           const description = `PRIMARY KEY on ${sqlObj.tableName} (${sqlObj.columns.join(', ')})`;
           const result = await applySQL(targetPool, sqlObj.sql, description);
           appliedResults.push({ ...sqlObj, ...result });
+          
+          if (result.success) {
+            tablesWithPKs.add(sqlObj.tableName.toLowerCase());
+            log(`✅ Primary key applied successfully for ${sqlObj.tableName}`, 'SUCCESS');
+          } else {
+            log(`❌ Failed to apply primary key for ${sqlObj.tableName}: ${result.error}`, 'ERROR');
+          }
         }
         
-        // Then apply foreign keys
+        // Then apply foreign keys (with validation)
         for (const sqlObj of fkStatements) {
+          // Check if referenced table has primary key or unique constraint
+          const hasConstraint = await referencedColumnHasConstraint(
+            targetPool,
+            sqlObj.referencedTable,
+            sqlObj.referencedColumn
+          );
+          
+          if (!hasConstraint) {
+            const errorMsg = `Referenced table "${sqlObj.referencedTable}" does not have a primary key or unique constraint on column "${sqlObj.referencedColumn}"`;
+            log(`⚠️  Skipping FK: ${errorMsg}`, 'WARN');
+            appliedResults.push({
+              ...sqlObj,
+              success: false,
+              error: errorMsg
+            });
+            continue;
+          }
+          
           const description = `FOREIGN KEY ${sqlObj.tableName}.${sqlObj.column} -> ${sqlObj.referencedTable}.${sqlObj.referencedColumn}`;
           const result = await applySQL(targetPool, sqlObj.sql, description);
           appliedResults.push({ ...sqlObj, ...result });
+          
+          if (!result.success && result.error && result.error.includes('no unique constraint matching')) {
+            log(`⚠️  Foreign key failed - referenced table may need primary key first: ${result.error}`, 'WARN');
+          }
         }
 
         // Print fix results

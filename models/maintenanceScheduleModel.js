@@ -837,6 +837,329 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
     return await dbPool.query(query, values);
 };
 
+// Create manual maintenance schedule (with workflow)
+const createManualMaintenanceSchedule = async (scheduleData) => {
+    const {
+        asset_id,
+        asset_type_id,
+        org_id,
+        created_by,
+    } = scheduleData;
+
+    const dbPool = getDb();
+    const client = await dbPool.connect();
+    
+    try {
+        await client.query('BEGIN');
+
+        // Get asset details
+        const assetQuery = `
+            SELECT 
+                a.asset_id,
+                a.asset_type_id,
+                a.service_vendor_id,
+                a.org_id,
+                a.branch_id,
+                b.branch_code,
+                a.purchased_on
+            FROM "tblAssets" a
+            LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+            WHERE a.asset_id = $1 AND a.org_id = $2
+        `;
+        const assetResult = await client.query(assetQuery, [asset_id, org_id]);
+        
+        if (assetResult.rows.length === 0) {
+            throw new Error('Asset not found');
+        }
+        
+        const asset = assetResult.rows[0];
+
+        // Check for workflow sequences
+        const sequencesResult = await client.query(
+            `SELECT wf_at_seqs_id, asset_type_id, wf_steps_id, seqs_no, org_id
+             FROM "tblWFATSeqs"
+             WHERE asset_type_id = $1 AND org_id = $2
+             ORDER BY CAST(seqs_no AS INTEGER) ASC`,
+            [asset_type_id, org_id]
+        );
+
+        if (sequencesResult.rows.length === 0) {
+            throw new Error('No workflow sequences configured for this asset type');
+        }
+
+        const sequences = sequencesResult.rows;
+
+        // Generate IDs within transaction
+        // Generate WFAMSH ID - use a more reliable query
+        const wfamshQuery = `
+            SELECT "wfamsh_id" 
+            FROM "tblWFAssetMaintSch_H" 
+            WHERE "wfamsh_id" ~ '^WFAMSH_[0-9]+$'
+            ORDER BY CAST(SUBSTRING("wfamsh_id" FROM 8) AS INTEGER) DESC 
+            LIMIT 1
+        `;
+        const wfamshResult = await client.query(wfamshQuery);
+        let wfamshId;
+        if (wfamshResult.rows.length === 0) {
+            // Check if any records exist at all (might have different format)
+            const checkQuery = `SELECT "wfamsh_id" FROM "tblWFAssetMaintSch_H" ORDER BY "wfamsh_id" DESC LIMIT 1`;
+            const checkResult = await client.query(checkQuery);
+            if (checkResult.rows.length === 0) {
+                wfamshId = 'WFAMSH_01';
+            } else {
+                const lastId = checkResult.rows[0].wfamsh_id;
+                const match = lastId.match(/\d+/);
+                if (match) {
+                    const nextNum = parseInt(match[0]) + 1;
+                    wfamshId = `WFAMSH_${String(nextNum).padStart(2, '0')}`;
+                } else {
+                    wfamshId = 'WFAMSH_01';
+                }
+            }
+        } else {
+            const lastId = wfamshResult.rows[0].wfamsh_id;
+            const match = lastId.match(/\d+/);
+            if (match) {
+                const nextNum = parseInt(match[0]) + 1;
+                wfamshId = `WFAMSH_${String(nextNum).padStart(2, '0')}`;
+            } else {
+                wfamshId = 'WFAMSH_01';
+            }
+        }
+
+        // Generate AMS ID
+        const amsQuery = `
+            SELECT MAX(
+                CASE 
+                    WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
+                    WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
+                    ELSE 0
+                END
+            ) as max_num 
+            FROM "tblAssetMaintSch"
+        `;
+        const amsResult = await client.query(amsQuery);
+        const nextId = (amsResult.rows[0].max_num || 0) + 1;
+        const amsId = `ams${nextId.toString().padStart(3, '0')}`;
+
+        // Get maintenance type (default to MT002 - Scheduled Maintenance)
+        const maintTypeId = 'MT002';
+        
+        // Get at_main_freq_id (use first frequency if available, or null)
+        const freqQuery = `
+            SELECT at_main_freq_id
+            FROM "tblATMaintFreq"
+            WHERE asset_type_id = $1 AND org_id = $2
+            ORDER BY at_main_freq_id ASC
+            LIMIT 1
+        `;
+        const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
+        const atMainFreqId = freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
+
+        // Determine maintained_by
+        const maintainedBy = asset.service_vendor_id ? 'Vendor' : 'Inhouse';
+
+        // Verify the generated ID doesn't already exist (handle race conditions)
+        let idExists = true;
+        let attempts = 0;
+        while (idExists && attempts < 10) {
+            const checkIdQuery = `SELECT "wfamsh_id" FROM "tblWFAssetMaintSch_H" WHERE "wfamsh_id" = $1`;
+            const checkResult = await client.query(checkIdQuery, [wfamshId]);
+            if (checkResult.rows.length === 0) {
+                idExists = false;
+            } else {
+                // ID exists, generate next one
+                const match = wfamshId.match(/\d+/);
+                if (match) {
+                    const nextNum = parseInt(match[0]) + 1;
+                    wfamshId = `WFAMSH_${String(nextNum).padStart(2, '0')}`;
+                } else {
+                    wfamshId = 'WFAMSH_01';
+                }
+                attempts++;
+            }
+        }
+        
+        if (idExists) {
+            throw new Error('Unable to generate unique WFAMSH ID after multiple attempts');
+        }
+
+        // Create workflow header (using client for transaction)
+        const headerQuery = `
+            INSERT INTO "tblWFAssetMaintSch_H" (
+                "wfamsh_id",
+                at_main_freq_id,
+                maint_type_id,
+                asset_id,
+                group_id,
+                vendor_id,
+                pl_sch_date,
+                act_sch_date,
+                status,
+                created_by,
+                created_on,
+                changed_by,
+                changed_on,
+                org_id,
+                branch_code
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12)
+            RETURNING *
+        `;
+        
+        await client.query(headerQuery, [
+            wfamshId,
+            atMainFreqId,
+            maintTypeId,
+            asset_id,
+            null, // group_id
+            asset.service_vendor_id,
+            new Date().toISOString().split('T')[0], // pl_sch_date
+            null, // act_sch_date
+            'IN', // status
+            created_by,
+            org_id,
+            asset.branch_code,
+        ]);
+
+        // Create workflow details
+        const minSeq = Math.min(...sequences.map(s => Number(s.seqs_no)));
+        let detailCreated = 0;
+
+        for (const seq of sequences) {
+            const jobRolesResult = await client.query(
+                `SELECT wf_job_role_id, wf_steps_id, job_role_id, dept_id, emp_int_id
+                 FROM "tblWFJobRole"
+                 WHERE wf_steps_id = $1
+                 ORDER BY wf_job_role_id ASC`,
+                [seq.wf_steps_id]
+            );
+
+            if (jobRolesResult.rows.length === 0) continue;
+
+            for (const jr of jobRolesResult.rows) {
+                // Generate WFAMSD ID within transaction
+                const wfamsdQuery = `
+                    SELECT wfamsd_id 
+                    FROM "tblWFAssetMaintSch_D" 
+                    ORDER BY CAST(SUBSTRING(wfamsd_id FROM '\\d+$') AS INTEGER) DESC 
+                    LIMIT 1
+                `;
+                const wfamsdResult = await client.query(wfamsdQuery);
+                let wfamsdId;
+                if (wfamsdResult.rows.length === 0) {
+                    wfamsdId = 'WFAMSD_01';
+                } else {
+                    const lastId = wfamsdResult.rows[0].wfamsd_id;
+                    const match = lastId.match(/\d+/);
+                    if (match) {
+                        const nextNum = parseInt(match[0]) + 1;
+                        wfamsdId = `WFAMSD_${String(nextNum).padStart(2, '0')}`;
+                    } else {
+                        wfamsdId = 'WFAMSD_01';
+                    }
+                }
+
+                const status = Number(seq.seqs_no) === minSeq ? 'AP' : 'IN';
+
+                // Insert workflow detail (using client for transaction)
+                const detailQuery = `
+                    INSERT INTO "tblWFAssetMaintSch_D" (
+                        wfamsd_id,
+                        wfamsh_id,
+                        job_role_id,
+                        user_id,
+                        dept_id,
+                        sequence,
+                        status,
+                        notes,
+                        created_by,
+                        created_on,
+                        changed_by,
+                        changed_on,
+                        org_id
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP, NULL, NULL, $10)
+                    RETURNING *
+                `;
+
+                await client.query(detailQuery, [
+                    wfamsdId,
+                    wfamshId,
+                    jr.job_role_id,
+                    null, // user_id
+                    jr.dept_id,
+                    Number(seq.seqs_no),
+                    status,
+                    null, // notes
+                    created_by,
+                    org_id,
+                ]);
+
+                detailCreated++;
+            }
+        }
+
+        // Create maintenance record in tblAssetMaintSch with status 'AP'
+        const insertMaintSchQuery = `
+            INSERT INTO "tblAssetMaintSch" (
+                ams_id,
+                wfamsh_id,
+                wo_id,
+                asset_id,
+                maint_type_id,
+                vendor_id,
+                at_main_freq_id,
+                maintained_by,
+                notes,
+                status,
+                act_maint_st_date,
+                created_by,
+                created_on,
+                org_id,
+                branch_code
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+            ON CONFLICT (ams_id) DO UPDATE SET
+                wfamsh_id = EXCLUDED.wfamsh_id,
+                status = EXCLUDED.status,
+                changed_by = EXCLUDED.created_by,
+                changed_on = CURRENT_TIMESTAMP
+            RETURNING *
+        `;
+
+        const maintSchParams = [
+            amsId,
+            wfamshId,
+            null, // wo_id - will be generated after approval
+            asset_id,
+            maintTypeId,
+            asset.service_vendor_id,
+            atMainFreqId,
+            maintainedBy,
+            null, // notes
+            'AP', // Status: Approval Pending
+            new Date().toISOString().split('T')[0], // act_maint_st_date
+            created_by,
+            org_id,
+            asset.branch_code,
+        ];
+
+        const maintSchResult = await client.query(insertMaintSchQuery, maintSchParams);
+
+        await client.query('COMMIT');
+
+        return {
+            success: true,
+            ams_id: amsId,
+            wfamsh_id: wfamshId,
+            detailsCreated: detailCreated,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     getAssetTypesRequiringMaintenance,
     getUsageBasedMaintenanceSettings,
@@ -865,5 +1188,6 @@ module.exports = {
     checkAssetTypeWorkflow,
     getNextAMSId,
     generateWorkOrderId,
-    insertDirectMaintenanceSchedule
+    insertDirectMaintenanceSchedule,
+    createManualMaintenanceSchedule
 }; 

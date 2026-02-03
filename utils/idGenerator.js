@@ -28,15 +28,40 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'atbrrc': 'ATBRRC',
             'atmcl': 'ATMCL',
             'job_role_nav': 'JRN',
-            'job_role': 'JR'
+            'job_role': 'JR',
+            // Scrap workflow tables
+            'wfscrapseq': 'WFSCQ',
+            'wfscrap_h': 'WFSCH',
+            'wfscrap_d': 'WFSCD',
+            'asset_scrap': 'ASCP',
+            // Existing scrap details table (legacy, used by reports/UI)
+            'asset_scrap_det': 'ASD'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
         
-        // Insert new entry with last_number = 0
+        // Insert new entry with last_number = 0 (or seed from existing table if needed)
+        let initialLastNumber = 0;
+        if (tableKey === 'asset_scrap_det') {
+            // tblAssetScrapDet already has data in most DBs (ASD0001, ASD0002, ...).
+            // Seed tblIDSequences to avoid generating duplicates and doing many retries.
+            try {
+                const r = await dbPool.query(
+                    `
+                      SELECT COALESCE(MAX(CAST(SUBSTRING(asd_id FROM 4) AS INTEGER)), 0) AS max_seq
+                      FROM "tblAssetScrapDet"
+                      WHERE asd_id LIKE 'ASD%'
+                    `
+                );
+                initialLastNumber = Number(r.rows?.[0]?.max_seq || 0);
+            } catch (e) {
+                initialLastNumber = 0;
+            }
+        }
+
         await dbPool.query(
             'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
-            [tableKey, prefix, 0]
+            [tableKey, prefix, initialLastNumber]
         );
         
         console.log(`✅ Created new ID sequence entry: ${tableKey} with prefix ${prefix}`);
@@ -102,7 +127,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'atbrrc': 'tblATBRReasonCodes',
         'atmcl': 'tblATMaintCheckList',
         'job_role_nav': 'tblJobRoleNav',
-        'job_role': 'tblJobRoles'
+        'job_role': 'tblJobRoles',
+        // Scrap workflow tables
+        'wfscrapseq': 'tblWFScrapSeq',
+        'wfscrap_h': 'tblWFScrap_H',
+        'wfscrap_d': 'tblWFScrap_D',
+        'asset_scrap': 'tblAssetScrap',
+        // Existing scrap details table (legacy)
+        'asset_scrap_det': 'tblAssetScrapDet'
     };
 
     const targetTable = tableMap[tableKey];
@@ -140,7 +172,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'atbrrc': 'atbrrc_id',
             'atmcl': 'at_main_checklist_id',
             'job_role_nav': 'job_role_nav_id',
-            'job_role': 'job_role_id'
+            'job_role': 'job_role_id',
+            // Scrap workflow tables
+            'wfscrapseq': 'id',
+            'wfscrap_h': 'id_d',
+            'wfscrap_d': 'id',
+            'asset_scrap': 'id',
+            // Existing scrap details table (legacy)
+            'asset_scrap_det': 'asd_id'
         };
 
         const columnName = columnMap[tableKey];

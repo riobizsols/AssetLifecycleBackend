@@ -1,9 +1,12 @@
 const model = require("../models/employeeModel");
 const userJobRoleModel = require("../models/userJobRoleModel");
 const { sendWelcomeEmail, sendRoleAssignmentEmail } = require("../utils/mailer");
+const { getDbFromContext } = require("../utils/dbContext");
+
 // Helper function to get organization name from employee's department
 const getOrganizationNameFromEmployee = async (emp_int_id) => {
     try {
+        const dbPool = getDbFromContext();
         const result = await dbPool.query(`
             SELECT o.text as org_name 
             FROM "tblEmployees" e
@@ -130,7 +133,7 @@ const assignRoleToEmployee = async (req, res) => {
         }
 
         // Get role details for email
-        const dbPool = req.db || require("../config/db");
+        const dbPool = getDbFromContext();
 
         const roleDetails = await dbPool.query(
             `SELECT job_role_id, text as job_role_name 
@@ -198,9 +201,11 @@ const assignRoleToEmployee = async (req, res) => {
 
     } catch (err) {
         console.error("Error assigning role to employee:", err);
+        console.error("Error stack:", err.stack);
         res.status(500).json({ 
             success: false,
-            error: "Failed to assign role to employee" 
+            error: "Failed to assign role to employee",
+            details: err.message || "Internal server error"
         });
     }
 };
