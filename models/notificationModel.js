@@ -94,7 +94,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
   // Includes:
   // - asset-based maintenance + vendor contract renewal (MT005)
-  // - scrap maintenance workflow approvals (tblWFScrap_*)
+  // - scrap maintenance workflow approvals (tblWFScrap_*) - if tables exist
   
   // Build parameters array dynamically
   const params = [orgId];
@@ -118,7 +118,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     ? ` AND agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex})`
     : '';
 
-  const query = `
+  const maintenanceQuery = `
     SELECT *
     FROM (
     SELECT DISTINCT
@@ -217,10 +217,10 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
           AND u.int_status = 1
           AND wfd.status IN ('IN', 'IP', 'AP')
       )
-      
-      UNION ALL
-      
-      -- Scrap Maintenance workflow notifications
+    ) n
+  `;
+
+  const scrapQuery = `
       SELECT DISTINCT
         wh.id_d as wfamsh_id,
         wh.created_on as pl_sch_date,
@@ -272,16 +272,42 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
             AND u3.int_status = 1
             AND d3.status IN ('IN','AP')
         )
-    ) n
-    ORDER BY n.pl_sch_date ASC NULLS LAST
   `;
-  
+
   try {
-    const result = await getDb().query(query, params);
-    return result.rows;
+    // Run maintenance query (core tables always exist)
+    const maintenanceResult = await getDb().query(maintenanceQuery, params);
+    let allRows = maintenanceResult.rows || [];
+
+    // Try scrap query - scrap tables may not exist in all DBs (e.g. hospitality)
+    try {
+      const scrapResult = await getDb().query(
+        `SELECT * FROM (${scrapQuery}) s ORDER BY s.pl_sch_date ASC NULLS LAST`,
+        params
+      );
+      if (scrapResult.rows && scrapResult.rows.length > 0) {
+        allRows = [...allRows, ...scrapResult.rows];
+      }
+    } catch (scrapErr) {
+      // 42P01 = relation does not exist; scrap tables not yet migrated
+      if (scrapErr.code === '42P01') {
+        console.warn('Scrap workflow tables not found, skipping scrap notifications:', scrapErr.message);
+      } else {
+        console.warn('Error fetching scrap notifications:', scrapErr.message);
+      }
+    }
+
+    // Sort combined results by pl_sch_date
+    allRows.sort((a, b) => {
+      const dA = a.pl_sch_date ? new Date(a.pl_sch_date) : new Date(0);
+      const dB = b.pl_sch_date ? new Date(b.pl_sch_date) : new Date(0);
+      return dA - dB;
+    });
+
+    return allRows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
-    console.error('Failed SQL Query:', query);
+    console.error('Failed SQL Query (maintenance):', maintenanceQuery);
     console.error('Query Parameters:', params);
     throw error;
   }
