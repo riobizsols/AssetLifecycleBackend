@@ -115,7 +115,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   params.push(empIntId);
   
   const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
-    ? ` AND agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex})`
+    ? ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex}))`
     : '';
 
   const maintenanceQuery = `
@@ -229,19 +229,33 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         NULL::varchar as vendor_id,
         wh.status as header_status,
         seq.asset_type_id as asset_type_id,
-        agh.text as group_name,
-        (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wh.assetgroup_id) as group_asset_count,
+        CASE
+          WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' THEN 'Individual Asset'
+          WHEN wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN 'Scrap Sales'
+          ELSE COALESCE(agh.text, 'Unknown Group')
+        END as group_name,
+        CASE
+          WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
+            SELECT COUNT(*)::int FROM "tblAssetScrap" WHERE asset_group_id = wh.assetgroup_id
+          )
+          ELSE (
+            SELECT COUNT(*)::int FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wh.assetgroup_id
+          )
+        END as group_asset_count,
         '0'::text as maint_lead_type,
         COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
         'SCRAP'::varchar as maint_type_id,
-        'Scrap Maintenance'::text as maint_type_name,
+        CASE
+          WHEN wh.is_scrap_sales = 'Y' THEN 'Scrap Sales'
+          ELSE 'Scrap Maintenance'
+        END as maint_type_name,
         COALESCE(current_scrap_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
         current_scrap_action_role.job_role_id as current_action_role_id,
         NULL::timestamp as cutoff_date,
         999::int as days_until_due,
         999::int as days_until_cutoff
       FROM "tblWFScrap_H" wh
-      INNER JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
+      LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
       INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
       LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
       LEFT JOIN LATERAL (
@@ -253,7 +267,10 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         ORDER BY d.seq ASC, d.created_on ASC
         LIMIT 1
       ) current_scrap_action_role ON true
-      WHERE agh.org_id = $1
+      WHERE (
+          (wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') AND seq.org_id = $1
+          OR (agh.org_id = $1)
+        )
         ${scrapBranchFilter}
         AND wh.status IN ('IN','IP')
         AND EXISTS (

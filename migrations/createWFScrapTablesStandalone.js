@@ -55,7 +55,7 @@ const runMigration = async () => {
         id_d VARCHAR(50) PRIMARY KEY,
         assetgroup_id VARCHAR(50) NOT NULL,
         wfscrapseq_id VARCHAR(50) NOT NULL,
-        status VARCHAR(10) NOT NULL DEFAULT 'IN' CHECK (status IN ('IN','IP','CO','CA')),
+        status VARCHAR(10) NOT NULL DEFAULT 'IN' CHECK (status IN ('IN','IP','CO','CA','AP')),
         created_by VARCHAR(50),
         created_on TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         changed_by VARCHAR(50),
@@ -179,7 +179,7 @@ const runMigration = async () => {
       );
     };
 
-    await ensureStatusVarchar('tblWFScrap_H', 'status', ['IN', 'IP', 'CO', 'CA'], 'IN');
+    await ensureStatusVarchar('tblWFScrap_H', 'status', ['IN', 'IP', 'CO', 'CA', 'AP'], 'IN');
     await ensureStatusVarchar('tblWFScrap_D', 'status', ['IN', 'AP', 'UA', 'UR'], 'IN');
 
     console.log('Creating indexes...');
