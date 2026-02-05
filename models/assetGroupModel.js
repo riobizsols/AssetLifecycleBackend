@@ -188,9 +188,11 @@ const getAssetGroupById = async (assetgroup_h_id) => {
             a.text as asset_name,
             a.description,
             a.purchased_on,
-            a.asset_type_id
+            a.asset_type_id,
+            at.text as asset_type_name
         FROM "tblAssetGroup_D" d
         LEFT JOIN "tblAssets" a ON d.asset_id = a.asset_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         WHERE d.assetgroup_h_id = $1
     `;
     

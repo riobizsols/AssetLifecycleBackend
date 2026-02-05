@@ -56,7 +56,7 @@ function generateInternalGroupId() {
  * Check if a group ID is an internal (virtual) group ID for individual assets
  */
 function isInternalGroupId(groupId) {
-  return groupId && groupId.startsWith('SCRAP_INDIVIDUAL_');
+  return groupId && (groupId.startsWith('SCRAP_INDIVIDUAL_') || groupId.startsWith('SCRAP_SALES_'));
 }
 
 async function getAssetGroupById(assetgroupId) {
@@ -109,14 +109,22 @@ async function getScrapSequences(assetTypeId, orgId) {
 async function isScrapApprovalRequired(assetTypeId, orgId) {
   try {
     const r = await getDb().query(
-      `SELECT require_scrap_approval FROM "tblAssetTypes" WHERE asset_type_id = $1 AND org_id = $2`,
+      `SELECT maint_required FROM "tblAssetTypes" WHERE asset_type_id = $1 AND org_id = $2`,
       [assetTypeId, orgId]
     );
     // Default: require approval
     if (!r.rows.length) return true;
-    return r.rows[0].require_scrap_approval !== false;
+    
+    const row = r.rows[0];
+    // If maint_required is false, no approval needed (bypass workflow)
+    if (row.maint_required === false || row.maint_required === 0 || row.maint_required === 'false' || row.maint_required === '0') {
+      return false;
+    }
+    
+    // Otherwise workflow is mandatory for all scrap operations
+    return true;
   } catch (e) {
-    // Defensive: if column isn't present in some DB, default to approval
+    // Defensive: default to requiring approval
     return true;
   }
 }
@@ -370,7 +378,11 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
       seq.asset_type_id,
       at.text AS asset_type_name,
       CASE
-        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' THEN 1
+        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
+          SELECT COUNT(*)::int
+          FROM "tblAssetScrap" a
+          WHERE a.asset_group_id = wh.assetgroup_id
+        )
         ELSE (
           SELECT COUNT(*)::int
           FROM "tblAssetGroup_D" d
@@ -389,7 +401,7 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
     INNER JOIN "tblWFScrap_D" wd ON wd.wfscrap_h_id = wh.id_d
     WHERE (
-        (wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' AND seq.org_id = $1)
+        ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') AND seq.org_id = $1)
         OR (agh.org_id = $1)
       )
       AND wh.status IN ('IN','IP')
@@ -397,7 +409,7 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
   `;
 
   if (!hasSuperAccess && userBranchCode) {
-    query += ` AND (wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR agh.branch_code = $${idx})`;
+    query += ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = $${idx})`;
     params.push(userBranchCode);
     idx += 1;
   }
@@ -451,43 +463,71 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
 
   const headerRow = headerCheckResult.rows[0];
   const isInternal = isInternalGroupId(headerRow.assetgroup_id);
+  const isScrapSales = headerRow.is_scrap_sales === 'Y';
 
   let headerResult;
   let assetsResult;
 
   if (isInternal) {
-    // For internal group IDs, fetch asset directly from tblAssets
-    // Query assets that match the asset_type_id, org_id, are not in any real group, and are not scrapped
-    // Also check if there's a matching workflow for this asset
-    assetsResult = await getDb().query(
-      `
-        SELECT DISTINCT
-          a.asset_id,
-          a.asset_type_id,
-          a.serial_number,
-          a.text AS asset_name,
-          a.current_status
-        FROM "tblAssets" a
-        INNER JOIN "tblWFScrap_H" wh2 ON wh2.assetgroup_id = $3
-        WHERE a.asset_type_id = $1
-          AND a.org_id = $2
-          AND (a.group_id IS NULL OR a.group_id = $3)
-          AND UPPER(COALESCE(a.current_status, '')) != 'SCRAPPED'
-          AND wh2.id_d = $4
-        ORDER BY a.asset_id ASC
-        LIMIT 10
-      `,
-      [headerRow.asset_type_id, orgId, headerRow.assetgroup_id, wfscrap_h_id]
-    );
+    if (isScrapSales) {
+      // For scrap sales, fetch assets from tblAssetScrap
+      assetsResult = await getDb().query(
+        `
+          SELECT DISTINCT
+            a.asset_id,
+            a.asset_type_id,
+            a.serial_number,
+            a.text AS asset_name,
+            a.current_status
+          FROM "tblAssetScrap" asset_scrap
+          INNER JOIN "tblAssets" a ON a.asset_id = asset_scrap.asset_id
+          WHERE asset_scrap.asset_group_id = $1
+            AND a.org_id = $2
+          ORDER BY a.asset_id ASC
+        `,
+        [headerRow.assetgroup_id, orgId]
+      );
 
-    headerResult = {
-      rows: [{
-        ...headerRow,
-        asset_group_name: 'Individual Asset',
-        org_id: orgId,
-        branch_code: null,
-      }],
-    };
+      headerResult = {
+        rows: [{
+          ...headerRow,
+          asset_group_name: 'Scrap Sales',
+          org_id: orgId,
+          branch_code: null,
+        }],
+      };
+    } else {
+      // For individual asset scrap (SCRAP_INDIVIDUAL_*), fetch asset directly from tblAssets
+      assetsResult = await getDb().query(
+        `
+          SELECT DISTINCT
+            a.asset_id,
+            a.asset_type_id,
+            a.serial_number,
+            a.text AS asset_name,
+            a.current_status
+          FROM "tblAssets" a
+          INNER JOIN "tblWFScrap_H" wh2 ON wh2.assetgroup_id = $3
+          WHERE a.asset_type_id = $1
+            AND a.org_id = $2
+            AND (a.group_id IS NULL OR a.group_id = $3)
+            AND UPPER(COALESCE(a.current_status, '')) != 'SCRAPPED'
+            AND wh2.id_d = $4
+          ORDER BY a.asset_id ASC
+          LIMIT 10
+        `,
+        [headerRow.asset_type_id, orgId, headerRow.assetgroup_id, wfscrap_h_id]
+      );
+
+      headerResult = {
+        rows: [{
+          ...headerRow,
+          asset_group_name: 'Individual Asset',
+          org_id: orgId,
+          branch_code: null,
+        }],
+      };
+    }
   } else {
     // Real group - use original query
     const headerQuery = `
@@ -501,16 +541,16 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         wh.changed_by,
         wh.changed_on,
         wh.is_scrap_sales,
-        agh.text AS asset_group_name,
-        agh.org_id,
+        COALESCE(agh.text, 'Unknown Group') AS asset_group_name,
+        COALESCE(agh.org_id, seq.org_id) AS org_id,
         agh.branch_code,
         seq.asset_type_id,
         at.text AS asset_type_name
       FROM "tblWFScrap_H" wh
-      INNER JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
+      LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
       INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
       INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
-      WHERE wh.id_d = $1 AND agh.org_id = $2
+      WHERE wh.id_d = $1 AND (agh.org_id = $2 OR (agh.org_id IS NULL AND seq.org_id = $2))
     `;
 
     headerResult = await getDb().query(headerQuery, [wfscrap_h_id, orgId]);
@@ -584,8 +624,9 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
     // Lock header row - handle both internal and real group IDs
     const headerRes = await client.query(
       `
-        SELECT wh.id_d, wh.assetgroup_id, wh.status
+        SELECT wh.id_d, wh.assetgroup_id, wh.status, wh.is_scrap_sales, seq.org_id
         FROM "tblWFScrap_H" wh
+        INNER JOIN "tblWFScrapSeq" seq ON wh.wfscrapseq_id = seq.id
         WHERE wh.id_d = $1
         FOR UPDATE
       `,
@@ -711,6 +752,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
 
     // No next step: complete workflow and scrap assets
     let assetIds = [];
+    let inserted = 0; // Track number of assets scrapped
     if (isInternalGroupId(header.assetgroup_id)) {
       // For internal group IDs, we need to find the asset differently
       // Query assets that match the workflow's asset_type_id and org_id, and are not in any real group
@@ -754,33 +796,6 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
       assetIds = assetsRes.rows.map((r) => r.asset_id);
     }
 
-    const inserted = await insertAssetScrapRows(client, {
-      asset_group_id: header.assetgroup_id,
-      asset_ids: assetIds,
-      scrap_gen_by: empIntId,
-      notes: note || null,
-    });
-
-    // Also write to the legacy scrap details table (same as existing Scrap Assets flow)
-    await insertAssetScrapDetRows(client, {
-      asset_ids: assetIds,
-      org_id: orgId,
-      scrapped_by: empIntId,
-      notes: note || null,
-      location: null,
-    });
-
-    // IMPORTANT: tblAssets.changed_by has FK to tblUsers.user_id.
-    // Use resolved userId (not empIntId) to avoid FK violations.
-    await markAssetsScrapped(client, {
-      asset_ids: assetIds,
-      changed_by: userId,
-      scraped_by: empIntId,
-      scrap_notes: note || null,
-      scraped_on: null,
-    });
-    await cleanupGroupAfterScrap(client, { assetgroup_id: header.assetgroup_id, asset_ids: assetIds, changed_by: userId });
-
     await client.query(
       `
         UPDATE "tblWFScrap_H"
@@ -789,6 +804,103 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
       `,
       [userId.substring(0, 20), wfscrap_h_id]
     );
+
+    // If this is a scrap sales workflow, update tblScrapSales_H status to 'CO' (Completed)
+    if (header.is_scrap_sales === 'Y') {
+      console.log(`[Scrap Sales Approval] Workflow ${wfscrap_h_id} is a scrap sales workflow. Updating tblScrapSales_H status to CO.`);
+      
+      // Get asset IDs from tblAssetScrap for this workflow
+      const assetScrapRes = await client.query(
+        `SELECT DISTINCT asset_id FROM "tblAssetScrap" WHERE asset_group_id = $1`,
+        [header.assetgroup_id]
+      );
+      const workflowAssetIds = assetScrapRes.rows.map(r => r.asset_id);
+      
+      console.log(`[Scrap Sales Approval] Found ${workflowAssetIds.length} assets in tblAssetScrap for group ${header.assetgroup_id}:`, workflowAssetIds);
+      
+      if (workflowAssetIds.length > 0) {
+        // Find scrap sales header that has these assets in its details
+        // Match by finding scrap sales with same assets via tblScrapSales_D -> tblAssetScrapDet
+        // Also match by org_id to ensure we get the correct record
+        // Use a more flexible matching: find the record with the most matching assets
+        const scrapSalesQuery = `
+          SELECT 
+            ssh.ssh_id,
+            COUNT(DISTINCT asd.asset_id) as matching_assets
+          FROM "tblScrapSales_H" ssh
+          INNER JOIN "tblScrapSales_D" ssd ON ssh.ssh_id = ssd.ssh_id
+          INNER JOIN "tblAssetScrapDet" asd ON ssd.asd_id = asd.asd_id
+          WHERE ssh.status = 'AP'
+            AND ssh.org_id = $1
+            AND asd.asset_id = ANY($2::varchar[])
+          GROUP BY ssh.ssh_id
+          ORDER BY matching_assets DESC, ssh.created_on DESC
+          LIMIT 1
+        `;
+        const scrapSalesResult = await client.query(scrapSalesQuery, [header.org_id, workflowAssetIds]);
+        
+        console.log(`[Scrap Sales Approval] Found ${scrapSalesResult.rows.length} matching scrap sales record(s)`);
+        
+        if (scrapSalesResult.rows.length > 0) {
+          const ssh_id = scrapSalesResult.rows[0].ssh_id;
+          const matchingCount = scrapSalesResult.rows[0].matching_assets;
+          console.log(`[Scrap Sales Approval] Found scrap sales record ssh_id: ${ssh_id} with ${matchingCount} matching assets (out of ${workflowAssetIds.length} total)`);
+          
+          // Only update if we have a reasonable match (at least 50% of assets match, or exact match)
+          if (matchingCount >= Math.ceil(workflowAssetIds.length / 2) || matchingCount === workflowAssetIds.length) {
+            console.log(`[Scrap Sales Approval] Updating tblScrapSales_H (ssh_id: ${ssh_id}) status from AP to CO`);
+            
+            const updateResult = await client.query(
+              `UPDATE "tblScrapSales_H" 
+               SET status = 'CO', changed_by = $1, changed_on = CURRENT_TIMESTAMP 
+               WHERE ssh_id = $2
+               RETURNING ssh_id, status`,
+              [userId.substring(0, 20), ssh_id]
+            );
+            
+            console.log(`[Scrap Sales Approval] Update result:`, updateResult.rows[0]);
+          } else {
+            console.warn(`[Scrap Sales Approval] Match quality too low (${matchingCount}/${workflowAssetIds.length}). Skipping update.`);
+          }
+        } else {
+          console.warn(`[Scrap Sales Approval] No matching scrap sales record found with status AP for org_id ${header.org_id} and assets:`, workflowAssetIds);
+        }
+      } else {
+        console.warn(`[Scrap Sales Approval] No assets found in tblAssetScrap for group ${header.assetgroup_id}`);
+      }
+      // For scrap sales, assets are already scrapped (in tblAssetScrapDet), so we don't need to mark them again
+      inserted = workflowAssetIds.length;
+      await client.query('COMMIT');
+      return { success: true, message: 'Approved. Scrap sales workflow completed.', scrappedCount: inserted };
+    } else {
+      // For regular scrap assets, mark assets as scrapped
+      inserted = await insertAssetScrapRows(client, {
+        asset_group_id: header.assetgroup_id,
+        asset_ids: assetIds,
+        scrap_gen_by: empIntId,
+        notes: note || null,
+      });
+
+      // Also write to the legacy scrap details table (same as existing Scrap Assets flow)
+      await insertAssetScrapDetRows(client, {
+        asset_ids: assetIds,
+        org_id: orgId,
+        scrapped_by: empIntId,
+        notes: note || null,
+        location: null,
+      });
+
+      // IMPORTANT: tblAssets.changed_by has FK to tblUsers.user_id.
+      // Use resolved userId (not empIntId) to avoid FK violations.
+      await markAssetsScrapped(client, {
+        asset_ids: assetIds,
+        changed_by: userId,
+        scraped_by: empIntId,
+        scrap_notes: note || null,
+        scraped_on: null,
+      });
+      await cleanupGroupAfterScrap(client, { assetgroup_id: header.assetgroup_id, asset_ids: assetIds, changed_by: userId });
+    }
 
     await client.query('COMMIT');
     return { success: true, message: 'Approved. Workflow completed and assets scrapped.', scrappedCount: inserted };

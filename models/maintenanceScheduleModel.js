@@ -852,7 +852,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     try {
         await client.query('BEGIN');
 
-        // Get asset details
+        // Get asset details with asset type's maint_required flag
         const assetQuery = `
             SELECT 
                 a.asset_id,
@@ -861,9 +861,11 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 a.org_id,
                 a.branch_id,
                 b.branch_code,
-                a.purchased_on
+                a.purchased_on,
+                COALESCE(at.maint_required, false) as maint_required
             FROM "tblAssets" a
             LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+            LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
             WHERE a.asset_id = $1 AND a.org_id = $2
         `;
         const assetResult = await client.query(assetQuery, [asset_id, org_id]);
@@ -873,7 +875,80 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         }
         
         const asset = assetResult.rows[0];
+        const maintRequired = asset.maint_required === true || asset.maint_required === 1 || asset.maint_required === 'true' || asset.maint_required === '1';
 
+        // If maint_required is false: insert directly into tblAssetMaintSch with status 'IN', no workflow
+        if (!maintRequired) {
+            const amsQuery = `
+                SELECT MAX(
+                    CASE 
+                        WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
+                        WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
+                        ELSE 0
+                    END
+                ) as max_num 
+                FROM "tblAssetMaintSch"
+            `;
+            const amsResult = await client.query(amsQuery);
+            const nextId = (amsResult.rows[0].max_num || 0) + 1;
+            const amsId = `ams${nextId.toString().padStart(3, '0')}`;
+
+            const maintTypeId = 'MT002';
+            const freqQuery = `
+                SELECT at_main_freq_id
+                FROM "tblATMaintFreq"
+                WHERE asset_type_id = $1 AND org_id = $2
+                ORDER BY at_main_freq_id ASC
+                LIMIT 1
+            `;
+            const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
+            const atMainFreqId = freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
+            const maintainedBy = asset.service_vendor_id ? 'Vendor' : 'Inhouse';
+
+            const directInsertQuery = `
+                INSERT INTO "tblAssetMaintSch" (
+                    ams_id,
+                    wfamsh_id,
+                    wo_id,
+                    asset_id,
+                    maint_type_id,
+                    vendor_id,
+                    at_main_freq_id,
+                    maintained_by,
+                    notes,
+                    status,
+                    act_maint_st_date,
+                    created_by,
+                    created_on,
+                    org_id,
+                    branch_code
+                ) VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, NULL, 'IN', $7, $8, CURRENT_TIMESTAMP, $9, $10)
+                RETURNING *
+            `;
+            await client.query(directInsertQuery, [
+                amsId,
+                asset_id,
+                maintTypeId,
+                asset.service_vendor_id,
+                atMainFreqId,
+                maintainedBy,
+                new Date().toISOString().split('T')[0],
+                created_by,
+                org_id,
+                asset.branch_code,
+            ]);
+
+            await client.query('COMMIT');
+            return {
+                success: true,
+                ams_id: amsId,
+                wfamsh_id: null,
+                detailsCreated: 0,
+                directInsert: true,
+            };
+        }
+
+        // maint_required is true: use workflow
         // Check for workflow sequences
         const sequencesResult = await client.query(
             `SELECT wf_at_seqs_id, asset_type_id, wf_steps_id, seqs_no, org_id

@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const crypto = require('crypto');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -79,12 +80,14 @@ const createScrapSalesHeader = async (client, headerData) => {
             sale_date,
             collection_date,
             invoice_no,
-            po_no
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_DATE, $9, CURRENT_DATE, $10, $11, $12, $13)
+            po_no,
+            status
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_DATE, $9, CURRENT_DATE, $10, $11, $12, $13, $14)
         RETURNING *
     `;
 
     // Ensure all values are properly formatted (not arrays)
+    const status = headerData.status || 'AP'; // Default to AP (Action Pending) for workflow
     const values = [
         ssh_id,
         org_id,
@@ -98,7 +101,8 @@ const createScrapSalesHeader = async (client, headerData) => {
         sale_date,
         collection_date,
         invoice_no,
-        po_no
+        po_no,
+        status
     ];
 
     // Handle total_sale_value - check if column is ARRAY or NUMERIC
@@ -245,6 +249,7 @@ const getAllScrapSales = async (org_id, userBranchCode, hasSuperAccess = false) 
             ssh.collection_date,
             ssh.invoice_no,
             ssh.po_no,
+            ssh.status,
             COUNT(ssd.ssd_id) as total_assets
         FROM "tblScrapSales_H" ssh
         LEFT JOIN "tblScrapSales_D" ssd ON ssh.ssh_id = ssd.ssh_id
@@ -262,7 +267,7 @@ const getAllScrapSales = async (org_id, userBranchCode, hasSuperAccess = false) 
         GROUP BY ssh.ssh_id, ssh.org_id, ssh.branch_code, ssh.text, ssh.total_sale_value, 
                  ssh.buyer_name, ssh.buyer_company, ssh.buyer_phone, 
                  ssh.created_by, ssh.created_on, ssh.sale_date, 
-                 ssh.collection_date, ssh.invoice_no, ssh.po_no
+                 ssh.collection_date, ssh.invoice_no, ssh.po_no, ssh.status
         ORDER BY ssh.created_on DESC
     `;
     
@@ -516,8 +521,214 @@ const deleteScrapSale = async (ssh_id) => {
     }
 };
 
+// Create scrap sale with workflow (for approval process)
+const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
+    const dbPool = getDb();
+    const client = await dbPool.connect();
+    const { generateCustomId } = require('../utils/idGenerator');
+    const crypto = require('crypto');
+    
+    // Helper functions from scrapMaintenanceModel pattern
+    const isScrapApprovalRequired = async (assetTypeId, orgId) => {
+        try {
+            const r = await dbPool.query(
+                `SELECT maint_required FROM "tblAssetTypes" WHERE asset_type_id = $1 AND org_id = $2`,
+                [assetTypeId, orgId]
+            );
+            if (!r.rows.length) return true;
+            
+            const row = r.rows[0];
+            // If maint_required is false, no approval needed (bypass workflow)
+            if (row.maint_required === false || row.maint_required === 0 || row.maint_required === 'false' || row.maint_required === '0') {
+                return false;
+            }
+            
+            // Otherwise workflow is mandatory for all scrap operations
+            return true;
+        } catch (e) {
+            return true;
+        }
+    };
+
+    const getScrapSequences = async (assetTypeId, orgId) => {
+        const r = await dbPool.query(
+            `SELECT id, asset_type_id, wf_steps_id, seq_no, org_id
+             FROM "tblWFScrapSeq"
+             WHERE asset_type_id = $1 AND org_id = $2
+             ORDER BY seq_no ASC`,
+            [assetTypeId, orgId]
+        );
+        return r.rows;
+    };
+
+    const getWorkflowJobRoles = async (wfStepsId) => {
+        const r = await dbPool.query(
+            `SELECT wf_job_role_id, wf_steps_id, job_role_id, dept_id, emp_int_id
+             FROM "tblWFJobRole"
+             WHERE wf_steps_id = $1
+             ORDER BY wf_job_role_id ASC`,
+            [wfStepsId]
+        );
+        return r.rows;
+    };
+
+    const createScrapWorkflowHeader = async (assetgroup_id, wfscrapseq_id, created_by, is_scrap_sales) => {
+        const id_d = await generateCustomId('wfscrap_h', 3);
+        // Set status to 'IN' for both scrap sales and regular scrap workflows
+        // Status will change to 'IP' after first approval, then 'CO' after all approvals
+        const status = 'IN';
+        const r = await client.query(
+            `INSERT INTO "tblWFScrap_H" (
+                id_d, assetgroup_id, wfscrapseq_id,
+                status, created_by, created_on, changed_by, changed_on,
+                is_scrap_sales
+            ) VALUES ($1, $2, $3, $6, $4, CURRENT_TIMESTAMP, NULL, NULL, $5)
+            RETURNING *`,
+            [id_d, assetgroup_id, wfscrapseq_id, created_by, is_scrap_sales, status]
+        );
+        return r.rows[0];
+    };
+
+    const createScrapWorkflowDetails = async (wfscrap_h_id, sequences, created_by, initialNotes) => {
+        if (!Array.isArray(sequences) || sequences.length === 0) {
+            return { created: 0 };
+        }
+
+        const minSeq = Math.min(...sequences.map((s) => Number(s.seq_no)));
+        let created = 0;
+
+        for (const seq of sequences) {
+            const jobRoles = await getWorkflowJobRoles(seq.wf_steps_id);
+            if (!jobRoles || jobRoles.length === 0) continue;
+
+            for (const jr of jobRoles) {
+                const id = await generateCustomId('wfscrap_d', 3);
+                const status = Number(seq.seq_no) === minSeq ? 'AP' : 'IN';
+                const notes = status === 'AP' ? (initialNotes || null) : null;
+
+                await client.query(
+                    `INSERT INTO "tblWFScrap_D" (
+                        id, wfscrap_h_id, job_role_id, dept_id, seq,
+                        status, notes, created_by, created_on, changed_by, changed_on
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, NULL, NULL)`,
+                    [id, wfscrap_h_id, jr.job_role_id, jr.dept_id, Number(seq.seq_no), status, notes, created_by]
+                );
+                created += 1;
+            }
+        }
+
+        return { created };
+    };
+    
+    try {
+        await client.query('BEGIN');
+
+        // Get asset IDs from scrapAssets (asd_id -> asset_id mapping)
+        const asdIds = saleData.scrapAssets.map(asset => asset.asd_id);
+        
+        // Get asset IDs from tblAssetScrapDet
+        const assetIdsQuery = `
+            SELECT DISTINCT asset_id 
+            FROM "tblAssetScrapDet" 
+            WHERE asd_id = ANY($1::varchar[])
+        `;
+        const assetIdsResult = await client.query(assetIdsQuery, [asdIds]);
+        const assetIds = assetIdsResult.rows.map(r => r.asset_id);
+        
+        if (assetIds.length === 0) {
+            throw new Error('No assets found for the provided scrap asset IDs');
+        }
+
+        // Get asset type ID from first asset (all should have same type for workflow)
+        const assetTypeQuery = `SELECT asset_type_id FROM "tblAssets" WHERE asset_id = $1`;
+        const assetTypeResult = await client.query(assetTypeQuery, [assetIds[0]]);
+        const assetTypeId = assetTypeResult.rows[0]?.asset_type_id;
+        
+        if (!assetTypeId) {
+            throw new Error('Asset type not found');
+        }
+
+        // Check if approval is required
+        const approvalRequired = await isScrapApprovalRequired(assetTypeId, orgId);
+        let sequences = [];
+        
+        if (approvalRequired) {
+            sequences = await getScrapSequences(assetTypeId, orgId);
+            if (!sequences.length) {
+                throw new Error(`Scrap approval is required but workflow sequence is not configured for asset type ${assetTypeId}`);
+            }
+        }
+
+        // Generate internal group ID for scrap sales (not a real group)
+        const generateInternalGroupId = () => {
+            return `SCRAP_SALES_${crypto.randomUUID().substring(0, 8).toUpperCase()}`;
+        };
+        const assetGroupId = generateInternalGroupId();
+
+        // Determine status: Always AP (Action Pending)
+        const scrapSalesStatus = 'AP';
+
+        // Create workflow if approval required
+        let wfscrap_h_id = null;
+        if (approvalRequired && sequences.length > 0) {
+            const workflowHeader = await createScrapWorkflowHeader(
+                assetGroupId,
+                sequences[0].id,
+                userId,
+                'Y'
+            );
+
+            await createScrapWorkflowDetails(
+                workflowHeader.id_d,
+                sequences,
+                userId,
+                saleData.header.text || null
+            );
+
+            wfscrap_h_id = workflowHeader.id_d;
+        }
+
+        // Create scrap sales header with status AP (Action Pending)
+        const headerDataWithStatus = {
+            ...saleData.header,
+            status: scrapSalesStatus,
+        };
+        const headerResult = await createScrapSalesHeader(client, headerDataWithStatus);
+        const ssh_id = headerResult.rows[0].ssh_id;
+
+        // Create scrap sales details
+        const detailResults = await createScrapSalesDetails(client, ssh_id, saleData.scrapAssets);
+
+        // Create tblAssetScrap records (always create, workflow tracks status)
+        for (const assetId of assetIds) {
+            const assetScrapId = await generateCustomId('asset_scrap', 3);
+            await client.query(
+                `INSERT INTO "tblAssetScrap" (id, asset_group_id, asset_id, scrap_gen_by, scrap_gen_at, notes)
+                 VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5)`,
+                [assetScrapId, assetGroupId, assetId, userId, saleData.header.text || null]
+            );
+        }
+
+        await client.query('COMMIT');
+
+        return {
+            header: headerResult.rows[0],
+            details: detailResults.map(result => result.rows[0]),
+            workflowCreated: approvalRequired && wfscrap_h_id ? true : false,
+            wfscrap_h_id,
+            assetGroupId,
+        };
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
+    }
+};
+
 module.exports = {
     createScrapSale,
+    createScrapSaleWithWorkflow,
     createScrapSalesHeader,
     createScrapSalesDetails,
     getAllScrapSales,
