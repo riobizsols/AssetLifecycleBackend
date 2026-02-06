@@ -703,7 +703,86 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     ];
     const dbPool = getDb();
 
-    return await dbPool.query(query, values);
+    const result = await dbPool.query(query, values);
+
+    // If status is being updated to 'CO' (Completed), update related breakdown record
+    if (status === 'CO' && result.rows.length > 0) {
+        const maintenanceRecord = result.rows[0];
+        console.log(`[Breakdown Sync] Maintenance ${amsId} marked as CO. Notes: "${maintenanceRecord.notes}"`);
+        
+        // Check if this maintenance is linked to a breakdown (either from notes or by querying)
+        let breakdownId = null;
+        
+        // Try to extract breakdown ID from notes first
+        if (maintenanceRecord.notes) {
+            // Match patterns like:
+            // "BF01-Breakdown-ABR001" or "BF02-Breakdown-ABR001" or "BF03-Breakdown-ABR001"
+            // "Breakdown Maintenance - ABR001"
+            // "Breakdown-ABR001"
+            // "breakdown maintenance abr001"
+            
+            let breakdownMatch = maintenanceRecord.notes.match(/(?:BF0[1-3]-)?Breakdown-([A-Z0-9]+)/i);
+            if (!breakdownMatch) {
+                // Try alternate pattern with spaces: "Breakdown Maintenance - ABR001"
+                breakdownMatch = maintenanceRecord.notes.match(/Breakdown\s+Maintenance\s+-\s+([A-Z0-9]+)/i);
+            }
+            if (!breakdownMatch) {
+                // Try simpler pattern: just "Breakdown" followed by ID
+                breakdownMatch = maintenanceRecord.notes.match(/[Bb]reakdown[^A-Z0-9]*([A-Z0-9]+)/);
+            }
+            if (breakdownMatch && breakdownMatch[1]) {
+                breakdownId = breakdownMatch[1];
+                console.log(`[Breakdown Sync] Extracted breakdown ID ${breakdownId} from notes`);
+            }
+        }
+        
+        // If no breakdown ID found in notes, try to query by checking wo_id or other identifiers
+        if (!breakdownId && maintenanceRecord.wo_id) {
+            console.log(`[Breakdown Sync] No breakdown ID in notes, trying to find from wo_id: ${maintenanceRecord.wo_id}`);
+            try {
+                const woQuery = `
+                    SELECT DISTINCT abr_id 
+                    FROM "tblAssetBRDet" 
+                    WHERE org_id = $1 
+                    AND asset_id = $2
+                    AND status != 'CO'
+                    ORDER BY created_on DESC
+                    LIMIT 1
+                `;
+                const woResult = await dbPool.query(woQuery, [orgId, maintenanceRecord.asset_id]);
+                if (woResult.rows.length > 0) {
+                    breakdownId = woResult.rows[0].abr_id;
+                    console.log(`[Breakdown Sync] Found breakdown ${breakdownId} for asset ${maintenanceRecord.asset_id}`);
+                }
+            } catch (err) {
+                console.warn(`[Breakdown Sync] Error querying breakdown by asset:`, err.message);
+            }
+        }
+        
+        // If breakdown ID found, update the breakdown record status to "CO"
+        if (breakdownId) {
+            try {
+                const updateBreakdownQuery = `
+                    UPDATE "tblAssetBRDet"
+                    SET
+                        status = 'CO',
+                        changed_on = CURRENT_TIMESTAMP
+                    WHERE abr_id = $1 AND org_id = $2
+                    RETURNING *
+                `;
+                
+                const updateResult = await dbPool.query(updateBreakdownQuery, [breakdownId, orgId]);
+                console.log(`[Breakdown Sync] ✅ Breakdown ${breakdownId} status updated to CO. Updated rows: ${updateResult.rows.length}`);
+            } catch (err) {
+                console.error(`[Breakdown Sync] ❌ Error updating breakdown ${breakdownId} status:`, err.message);
+                // Don't throw - log the error but continue with the maintenance update response
+            }
+        } else {
+            console.log(`[Breakdown Sync] No breakdown ID found for maintenance ${amsId}`);
+        }
+    }
+
+    return result;
 };
 
 // Check if asset type requires workflow

@@ -1010,6 +1010,36 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          [wfamshId, orgId]
        );
        console.log('Workflow completed - Status set to CO');
+
+       // Update tblAssetBRDet status to CO if this workflow is for a breakdown
+       try {
+         // Try to find if any workflow step has a breakdown ID in notes
+         const breakdownIdQuery = `
+           SELECT notes FROM "tblWFAssetMaintSch_D" 
+           WHERE wfamsh_id = $1 AND org_id = $2 
+           AND (notes ILIKE '%BF01-Breakdown%' OR notes ILIKE '%BF03-Breakdown%' OR notes ILIKE '%Breakdown%')
+           LIMIT 1
+         `;
+         const breakdownIdResult = await getDb().query(breakdownIdQuery, [wfamshId, orgId]);
+         
+         if (breakdownIdResult.rows.length > 0) {
+           const notes = breakdownIdResult.rows[0].notes;
+           // Extract breakdown ID (ABR-XXX)
+           const abrMatch = notes.match(/ABR-[A-Z0-9]+/i);
+           const breakdownId = abrMatch ? abrMatch[0].toUpperCase() : null;
+           
+           if (breakdownId) {
+             await getDb().query(
+               `UPDATE "tblAssetBRDet" SET status = 'CO' WHERE abr_id = $1 AND org_id = $2`,
+               [breakdownId, orgId]
+             );
+             console.log(`✅ Linked breakdown report ${breakdownId} status updated to CO`);
+           }
+         }
+       } catch (brErr) {
+         console.error('Error updating breakdown report status on workflow completion:', brErr);
+         // Don't throw - continue with maintenance record creation
+       }
        
        // Update vendor int_status to 3 (CRApproved) when workflow is completed
        // Only update if vendor exists and is not already blocked (int_status != 4)
@@ -1120,6 +1150,32 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          [wfamshId, orgId]
        );
        console.log('Workflow cancelled - All users rejected, Status set to CA');
+
+       // Update tblAssetBRDet status to CA if this workflow is for a breakdown
+       try {
+         const breakdownIdQuery = `
+           SELECT notes FROM "tblWFAssetMaintSch_D" 
+           WHERE wfamsh_id = $1 AND org_id = $2 
+           AND (notes ILIKE '%BF01-Breakdown%' OR notes ILIKE '%BF03-Breakdown%' OR notes ILIKE '%Breakdown%')
+           LIMIT 1
+         `;
+         const breakdownIdResult = await getDb().query(breakdownIdQuery, [wfamshId, orgId]);
+         if (breakdownIdResult.rows.length > 0) {
+           const notes = breakdownIdResult.rows[0].notes;
+           const abrMatch = notes.match(/ABR-[A-Z0-9]+/i);
+           const breakdownId = abrMatch ? abrMatch[0].toUpperCase() : null;
+           if (breakdownId) {
+             await getDb().query(
+               `UPDATE "tblAssetBRDet" SET status = 'CA' WHERE abr_id = $1 AND org_id = $2`,
+               [breakdownId, orgId]
+             );
+             console.log(`❌ Linked breakdown report ${breakdownId} status updated to CA`);
+           }
+         }
+       } catch (brErr) {
+         console.error('Error updating breakdown report status on rejection:', brErr);
+       }
+
        return 'CA';
      }
      

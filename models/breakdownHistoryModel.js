@@ -93,7 +93,7 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
-        WHERE brd.org_id = $1
+        WHERE brd.org_id = $1 AND brd.status != 'CO'
     `;
     
     const queryParams = [orgId];
@@ -376,7 +376,7 @@ const getBreakdownHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
         LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
             AND ams.status IN ('IN', 'AP', 'IP', 'CO')
-        WHERE brd.org_id = $1
+        WHERE brd.org_id = $1 AND brd.status != 'CO'
     `;
     
     const queryParams = [orgId];
@@ -572,7 +572,6 @@ const getBreakdownHistorySummary = async (orgId = 'ORG001') => {
             COUNT(DISTINCT brd.abr_id) as total_breakdown_records,
             COUNT(CASE WHEN brd.status = 'CR' THEN 1 END) as created_breakdowns,
             COUNT(CASE WHEN brd.status = 'IN' THEN 1 END) as in_progress_breakdowns,
-            COUNT(CASE WHEN brd.status = 'CO' THEN 1 END) as completed_breakdowns,
             COUNT(CASE WHEN brd.decision_code = 'BF01' THEN 1 END) as breakdowns_with_maintenance,
             COUNT(CASE WHEN brd.decision_code = 'BF02' THEN 1 END) as breakdowns_without_maintenance,
             COUNT(CASE WHEN brd.decision_code = 'BF03' THEN 1 END) as breakdowns_cancelled,
@@ -635,7 +634,7 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
     const breakdownStatusQuery = `
         SELECT DISTINCT brd.status as breakdown_status
         FROM "tblAssetBRDet" brd 
-        WHERE brd.org_id = $1 AND brd.status IS NOT NULL
+        WHERE brd.org_id = $1 AND brd.status IS NOT NULL AND brd.status != 'CO'
         ORDER BY brd.status
     `;
     
