@@ -1269,10 +1269,12 @@ const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = nul
       a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
       a.created_by, a.created_on, a.changed_by, a.changed_on,
       b.text as branch_name,
-      at.text as asset_type_name
+      at.text as asset_type_name,
+      ag.text as group_name
     FROM "tblAssets" a
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
     WHERE a.org_id = $1
   `;
   
@@ -1303,10 +1305,12 @@ const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additi
       a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
       a.created_by, a.created_on, a.changed_by, a.changed_on,
       b.text as branch_name,
-      at.text as asset_type_name
+      at.text as asset_type_name,
+      ag.text as group_name
     FROM "tblAssets" a
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
     WHERE a.org_id = $1
   `;
   
