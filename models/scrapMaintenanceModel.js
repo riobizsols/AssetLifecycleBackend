@@ -258,6 +258,21 @@ async function insertAssetScrapRows(client, { asset_group_id, asset_ids, scrap_g
   return inserted;
 }
 
+/**
+ * Insert a history record for scrap workflow actions into tblScrapAssetHist
+ * Similar to tblWFAssetMaintHist structure
+ */
+async function insertScrapAssetHistory(client, { wfscrap_h_id, wfscrap_d_id, asset_id = null, action_by, action, notes, orgId }) {
+  const historyId = await generateCustomId('scrap_asset_hist', 3);
+  await client.query(
+    `INSERT INTO "tblScrapAssetHist" (
+      scraphis_id, wfscrap_h_id, wfscrap_d_id, asset_id, action_by, action_on, action, notes, org_id, created_by, created_on
+    ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $6, $7, $8, $5, CURRENT_TIMESTAMP)`,
+    [historyId, wfscrap_h_id, wfscrap_d_id, asset_id, action_by, action, notes, orgId]
+  );
+  return historyId;
+}
+
 // Insert into existing legacy scrap details table (used by Scrap Assets UI / reports)
 async function insertAssetScrapDetRows(client, { asset_ids, org_id, scrapped_by, notes, location = null }) {
   let inserted = 0;
@@ -389,6 +404,20 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
           WHERE d.assetgroup_h_id = wh.assetgroup_id
         )
       END AS asset_count,
+      CASE
+        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
+          SELECT STRING_AGG(a.description, ', ' ORDER BY a.asset_id)
+          FROM "tblAssetScrap" asset_scrap
+          INNER JOIN "tblAssets" a ON a.asset_id = asset_scrap.asset_id
+          WHERE asset_scrap.asset_group_id = wh.assetgroup_id
+        )
+        ELSE (
+          SELECT STRING_AGG(a.description, ', ' ORDER BY d.assetgroup_d_id)
+          FROM "tblAssetGroup_D" d
+          INNER JOIN "tblAssets" a ON a.asset_id = d.asset_id
+          WHERE d.assetgroup_h_id = wh.assetgroup_id
+        )
+      END AS asset_names,
       (
         SELECT MIN(d2.seq)
         FROM "tblWFScrap_D" d2
@@ -445,6 +474,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
       wh.assetgroup_id,
       wh.wfscrapseq_id,
       wh.status AS header_status,
+      COALESCE(sc.text, wh.status) AS header_status_text,
       wh.created_by,
       wh.created_on,
       wh.changed_by,
@@ -455,6 +485,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
     FROM "tblWFScrap_H" wh
     INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
+    LEFT JOIN "tblStatusCodes" sc ON sc.status_code = wh.status
     WHERE wh.id_d = $1
   `;
 
@@ -477,8 +508,9 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
             a.asset_id,
             a.asset_type_id,
             a.serial_number,
-            a.text AS asset_name,
-            a.current_status
+            a.description AS asset_name,
+            a.current_status,
+            a.branch_id
           FROM "tblAssetScrap" asset_scrap
           INNER JOIN "tblAssets" a ON a.asset_id = asset_scrap.asset_id
           WHERE asset_scrap.asset_group_id = $1
@@ -488,12 +520,16 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         [headerRow.assetgroup_id, orgId]
       );
 
+      // Get branch_code from first asset's branch_id
+      const firstAssetBranchId = assetsResult.rows[0]?.branch_id;
+      const branchCodeForSales = firstAssetBranchId ? await getBranchCodeByBranchId(firstAssetBranchId) : null;
+
       headerResult = {
         rows: [{
           ...headerRow,
           asset_group_name: 'Scrap Sales',
           org_id: orgId,
-          branch_code: null,
+          branch_code: branchCodeForSales,
         }],
       };
     } else {
@@ -504,8 +540,9 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
             a.asset_id,
             a.asset_type_id,
             a.serial_number,
-            a.text AS asset_name,
-            a.current_status
+            a.description AS asset_name,
+            a.current_status,
+            a.branch_id
           FROM "tblAssets" a
           INNER JOIN "tblWFScrap_H" wh2 ON wh2.assetgroup_id = $3
           WHERE a.asset_type_id = $1
@@ -519,12 +556,16 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         [headerRow.asset_type_id, orgId, headerRow.assetgroup_id, wfscrap_h_id]
       );
 
+      // Get branch_code from first asset's branch_id
+      const firstAssetBranchId = assetsResult.rows[0]?.branch_id;
+      const branchCodeForIndividual = firstAssetBranchId ? await getBranchCodeByBranchId(firstAssetBranchId) : null;
+
       headerResult = {
         rows: [{
           ...headerRow,
           asset_group_name: 'Individual Asset',
           org_id: orgId,
-          branch_code: null,
+          branch_code: branchCodeForIndividual,
         }],
       };
     }
@@ -536,6 +577,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         wh.assetgroup_id,
         wh.wfscrapseq_id,
         wh.status AS header_status,
+        COALESCE(sc.text, wh.status) AS header_status_text,
         wh.created_by,
         wh.created_on,
         wh.changed_by,
@@ -550,6 +592,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
       LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
       INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
       INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
+      LEFT JOIN "tblStatusCodes" sc ON sc.status_code = wh.status
       WHERE wh.id_d = $1 AND (agh.org_id = $2 OR (agh.org_id IS NULL AND seq.org_id = $2))
     `;
 
@@ -562,7 +605,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
           d.asset_id,
           a.asset_type_id,
           a.serial_number,
-          a.text AS asset_name,
+          a.description AS asset_name,
           a.current_status
         FROM "tblAssetGroup_D" d
         INNER JOIN "tblAssets" a ON a.asset_id = d.asset_id
@@ -690,6 +733,45 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
       [note || null, userId.substring(0, 20), current.id]
     );
 
+    // Get asset IDs for this workflow to log approval history
+    let assetIdsForHistory = [];
+    if (isInternalGroupId(header.assetgroup_id)) {
+      const assetTypeRes = await client.query(
+        `SELECT seq.asset_type_id FROM "tblWFScrapSeq" seq
+         INNER JOIN "tblWFScrap_H" wh ON wh.wfscrapseq_id = seq.id
+         WHERE wh.id_d = $1`,
+        [wfscrap_h_id]
+      );
+      const assetTypeId = assetTypeRes.rows[0]?.asset_type_id;
+      if (assetTypeId) {
+        const assetsRes = await client.query(
+          `SELECT a.asset_id FROM "tblAssets" a
+           WHERE a.asset_type_id = $1 AND a.org_id = $2
+           AND (a.group_id IS NULL OR a.group_id = $3)
+           LIMIT 1`,
+          [assetTypeId, orgId, header.assetgroup_id]
+        );
+        assetIdsForHistory = assetsRes.rows.map(r => r.asset_id);
+      }
+    } else {
+      const assetsRes = await client.query(
+        `SELECT asset_id FROM "tblAssetGroup_D" WHERE assetgroup_h_id = $1`,
+        [header.assetgroup_id]
+      );
+      assetIdsForHistory = assetsRes.rows.map(r => r.asset_id);
+    }
+
+    // Insert history record for approval (UA = User Approved)
+    await insertScrapAssetHistory(client, {
+      wfscrap_h_id,
+      wfscrap_d_id: current.id,
+      asset_id: assetIdsForHistory.length > 0 ? assetIdsForHistory[0] : null,
+      action_by: empIntId,
+      action: 'UA',
+      notes: note || null,
+      orgId,
+    });
+
     // If any other AP rows exist at the same seq, we don't advance yet.
     const remainingAtSeq = await client.query(
       `
@@ -735,6 +817,18 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
 
     const nextSeq = nextSeqRes.rows[0]?.next_seq;
     if (nextSeq) {
+      // Get the next workflow detail records that will be set to AP
+      const nextDetailsRes = await client.query(
+        `
+          SELECT id
+          FROM "tblWFScrap_D"
+          WHERE wfscrap_h_id = $1
+            AND seq = $2
+            AND status = 'IN'
+        `,
+        [wfscrap_h_id, Number(nextSeq)]
+      );
+
       await client.query(
         `
           UPDATE "tblWFScrap_D"
@@ -745,6 +839,20 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
         `,
         [userId.substring(0, 20), wfscrap_h_id, Number(nextSeq)]
       );
+
+      // Insert history record for each next workflow detail (AP = Approval Pending)
+      // This matches the maintenance approval implementation
+      for (const nextDetail of nextDetailsRes.rows) {
+        await insertScrapAssetHistory(client, {
+          wfscrap_h_id,
+          wfscrap_d_id: nextDetail.id,
+          asset_id: assetIdsForHistory.length > 0 ? assetIdsForHistory[0] : null,
+          action_by: empIntId,
+          action: 'AP',
+          notes: null,
+          orgId,
+        });
+      }
 
       await client.query('COMMIT');
       return { success: true, message: 'Approved and moved to next step.' };
@@ -870,6 +978,18 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
       }
       // For scrap sales, assets are already scrapped (in tblAssetScrapDet), so we don't need to mark them again
       inserted = workflowAssetIds.length;
+      
+      // Insert history record for completion (CO = Completed)
+      await insertScrapAssetHistory(client, {
+        wfscrap_h_id,
+        wfscrap_d_id: current.id,
+        asset_id: workflowAssetIds.length > 0 ? workflowAssetIds[0] : null,
+        action_by: empIntId,
+        action: 'CO',
+        notes: note || 'Scrap sales workflow completed',
+        orgId,
+      });
+      
       await client.query('COMMIT');
       return { success: true, message: 'Approved. Scrap sales workflow completed.', scrappedCount: inserted };
     } else {
@@ -899,6 +1019,18 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
         scrap_notes: note || null,
         scraped_on: null,
       });
+      
+      // Insert history record for completion (CO = Completed)
+      await insertScrapAssetHistory(client, {
+        wfscrap_h_id,
+        wfscrap_d_id: current.id,
+        asset_id: assetIds.length > 0 ? assetIds[0] : null,
+        action_by: empIntId,
+        action: 'CO',
+        notes: note || 'Asset scrapped via workflow',
+        orgId,
+      });
+      
       await cleanupGroupAfterScrap(client, { assetgroup_id: header.assetgroup_id, asset_ids: assetIds, changed_by: userId });
     }
 
@@ -996,6 +1128,52 @@ async function rejectScrapWorkflow({ wfscrap_h_id, empIntId, reason, orgId }) {
       `,
       [reason || null, userId.substring(0, 20), current.id]
     );
+
+    // Get asset IDs for this workflow to log rejection history
+    let assetIdsForHistory = [];
+    if (isInternalGroupId(assetgroupId)) {
+      const assetTypeRes = await client.query(
+        `SELECT seq.asset_type_id FROM "tblWFScrapSeq" seq
+         INNER JOIN "tblWFScrap_H" wh ON wh.wfscrapseq_id = seq.id
+         WHERE wh.id_d = $1`,
+        [wfscrap_h_id]
+      );
+      const assetTypeId = assetTypeRes.rows[0]?.asset_type_id;
+      if (assetTypeId) {
+        const assetsRes = await client.query(
+          `SELECT a.asset_id FROM "tblAssets" a
+           WHERE a.asset_type_id = $1 AND a.org_id = $2
+           AND (a.group_id IS NULL OR a.group_id = $3)
+           LIMIT 1`,
+          [assetTypeId, orgId, assetgroupId]
+        );
+        assetIdsForHistory = assetsRes.rows.map(r => r.asset_id);
+      }
+    } else {
+      const assetsRes = await client.query(
+        `SELECT asset_id FROM "tblAssetGroup_D" WHERE assetgroup_h_id = $1`,
+        [assetgroupId]
+      );
+      assetIdsForHistory = assetsRes.rows.map(r => r.asset_id);
+    }
+
+    // Get scrap type from header
+    const headerTypeRes = await client.query(
+      `SELECT is_scrap_sales FROM "tblWFScrap_H" WHERE id_d = $1`,
+      [wfscrap_h_id]
+    );
+    const isSales = headerTypeRes.rows[0]?.is_scrap_sales === 'Y';
+
+    // Insert history record for rejection (UR = User Rejected)
+    await insertScrapAssetHistory(client, {
+      wfscrap_h_id,
+      wfscrap_d_id: current.id,
+      asset_id: assetIdsForHistory.length > 0 ? assetIdsForHistory[0] : null,
+      action_by: empIntId,
+      action: 'UR',
+      notes: reason || null,
+      orgId,
+    });
 
     // Reset everything after current seq back to IN, and previous approvals back to AP
     await client.query(
@@ -1217,6 +1395,57 @@ async function createScrapRequest({
     initialNotes: request_notes || null,
   });
 
+  // Insert history record for workflow initiation (IN = Initiated)
+  // Get the first workflow detail ID
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+    
+    let firstAssetId = null;
+    if (isInternalGroupId(groupId)) {
+      // For individual assets, use the individualAssetId
+      if (individualAssetId) {
+        firstAssetId = individualAssetId;
+      }
+    } else {
+      // For real groups, get first asset in the group
+      const assetsInGroup = await client.query(
+        `SELECT asset_id FROM "tblAssetGroup_D" WHERE assetgroup_h_id = $1 LIMIT 1`,
+        [groupId]
+      );
+      firstAssetId = assetsInGroup.rows[0]?.asset_id;
+    }
+
+    // Get first workflow detail for this header
+    const firstDetail = await client.query(
+      `SELECT id FROM "tblWFScrap_D" WHERE wfscrap_h_id = $1 ORDER BY seq ASC, created_on ASC LIMIT 1`,
+      [header.id_d]
+    );
+    
+    const firstDetailId = firstDetail.rows[0]?.id;
+    
+    // Insert single history record for workflow initiation
+    const empIntId = await getEmpIntIdByUserId(userId);
+    await insertScrapAssetHistory(client, {
+      wfscrap_h_id: header.id_d,
+      wfscrap_d_id: firstDetailId,
+      asset_id: firstAssetId,
+      action_by: empIntId || userId,
+      action: 'IN',
+      notes: request_notes || `Scrap ${is_scrap_sales === 'Y' ? 'sales' : 'asset'} workflow initiated`,
+      orgId,
+    });
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error inserting scrap asset history on workflow creation:', error);
+    // Don't fail the whole operation if history logging fails
+  } finally {
+    client.release();
+  }
+
   return {
     success: true,
     workflowCreated: true,
@@ -1224,6 +1453,215 @@ async function createScrapRequest({
     detailsCreated: details.created,
     assetgroup_id: groupId,
   };
+}
+
+/**
+ * Get workflow history by wfscrap_h_id (specific workflow)
+ * Matches the implementation of maintenance approval history
+ */
+async function getWorkflowHistoryByWfscrapHId(wfscrap_h_id, orgId = 'ORG001') {
+  try {
+    // Get history from tblScrapAssetHist table for specific workflow
+    const historyQuery = `
+      SELECT 
+        wh.scraphis_id,
+        wh.wfscrap_h_id,
+        wh.wfscrap_d_id,
+        wh.action_by,
+        wh.action_on,
+        wh.action,
+        wh.notes,
+        CASE 
+          WHEN u.full_name IS NOT NULL THEN u.full_name
+          WHEN wh.action_by LIKE 'EMP_INT_%' THEN u_emp.full_name
+          ELSE 'System'
+        END as user_name,
+        jr.text as job_role_name,
+        d.text as dept_name,
+        wfd.seq as sequence
+      FROM "tblScrapAssetHist" wh
+      INNER JOIN "tblWFScrap_D" wfd ON wh.wfscrap_d_id = wfd.id
+      INNER JOIN "tblWFScrap_H" wfh ON wfd.wfscrap_h_id = wfh.id_d
+      LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+      LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+      LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+      WHERE wfh.id_d = $1 AND wh.org_id = $2
+      ORDER BY wh.action_on ASC
+    `;
+    
+    console.log(`Querying history for scrap workflow ${wfscrap_h_id} and org ${orgId}`);
+    
+    const result = await getDb().query(historyQuery, [wfscrap_h_id, orgId]);
+    console.log(`Found ${result.rows.length} history records for scrap workflow ${wfscrap_h_id}`);
+    
+    if (result.rows.length > 0) {
+      console.log('Sample history record:', result.rows[0]);
+    }
+    
+    // Transform the data to match frontend expectations (same as maintenance approval)
+    const transformedHistory = result.rows.map(record => {
+      // Convert action codes to full text
+      let actionText = record.action;
+      let actionColor = 'text-gray-600'; // default color
+      
+      switch (record.action) {
+        case 'UA':
+          actionText = 'User Approved';
+          actionColor = 'text-green-600';
+          break;
+        case 'UR':
+          actionText = 'User Rejected';
+          actionColor = 'text-red-600';
+          break;
+        case 'AP':
+          actionText = 'Approval Pending';
+          actionColor = 'text-orange-600';
+          break;
+        case 'IN':
+          actionText = 'Initiated';
+          actionColor = 'text-blue-600';
+          break;
+        case 'IP':
+          actionText = 'In Progress';
+          actionColor = 'text-yellow-600';
+          break;
+        case 'CO':
+          actionText = 'Completed';
+          actionColor = 'text-green-600';
+          break;
+        case 'CA':
+          actionText = 'Cancelled';
+          actionColor = 'text-red-600';
+          break;
+        default:
+          actionText = record.action;
+          actionColor = 'text-gray-600';
+      }
+      
+      return {
+        id: record.scraphis_id,
+        date: record.action_on ? new Date(record.action_on).toLocaleDateString() : '-',
+        action: actionText,
+        actionCode: record.action, // Keep original code for reference
+        actionColor: actionColor,
+        user: record.user_name || '-',
+        jobRole: record.job_role_name || '-',
+        department: record.dept_name || '-',
+        notes: record.notes || '-',
+        actionType: record.action,
+        sequence: record.sequence
+      };
+    });
+    
+    console.log('Transformed history records:', transformedHistory);
+    return transformedHistory;
+  } catch (error) {
+    console.error('Error in getWorkflowHistoryByWfscrapHId:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get scrap asset history for a specific asset or workflow
+ */
+async function getScrapAssetHistory({ asset_id = null, ssh_id = null, scrap_type = null, orgId = 'ORG001' }) {
+  try {
+    let whereConditions = ['sah.org_id = $1'];
+    let params = [orgId];
+    let paramIndex = 2;
+
+    if (asset_id) {
+      whereConditions.push(`sah.asset_id = $${paramIndex++}`);
+      params.push(asset_id);
+    }
+
+    if (ssh_id) {
+      whereConditions.push(`sah.ssh_id = $${paramIndex++}`);
+      params.push(ssh_id);
+    }
+
+    if (scrap_type) {
+      whereConditions.push(`sah.scrap_type = $${paramIndex++}`);
+      params.push(scrap_type);
+    }
+
+    const historyQuery = `
+      SELECT 
+        sah.scraphis_id,
+        sah.asset_id,
+        sah.action_by,
+        sah.action_on,
+        sah.action,
+        sah.notes,
+        sah.scrap_type,
+        sah.ssh_id,
+        a.text as asset_name,
+        a.serial_number,
+        CASE 
+          WHEN u.full_name IS NOT NULL THEN u.full_name
+          WHEN sah.action_by LIKE 'EMP_INT_%' THEN u_emp.full_name
+          ELSE 'System'
+        END as user_name
+      FROM "tblScrapAssetHist" sah
+      LEFT JOIN "tblAssets" a ON sah.asset_id = a.asset_id
+      LEFT JOIN "tblUsers" u ON sah.action_by = u.user_id
+      LEFT JOIN "tblUsers" u_emp ON sah.action_by = u_emp.emp_int_id
+      WHERE ${whereConditions.join(' AND ')}
+      ORDER BY sah.action_on DESC
+    `;
+    
+    const result = await getDb().query(historyQuery, params);
+    
+    // Transform the data
+    const transformedHistory = result.rows.map(record => {
+      let actionText = record.action;
+      let actionColor = 'text-gray-600';
+      
+      switch (record.action) {
+        case 'SCRAP_INITIATED':
+          actionText = 'Scrap Initiated';
+          actionColor = 'text-blue-600';
+          break;
+        case 'SCRAP_COMPLETED':
+          actionText = 'Scrap Completed';
+          actionColor = 'text-green-600';
+          break;
+        case 'SALES_INITIATED':
+          actionText = 'Sales Initiated';
+          actionColor = 'text-blue-600';
+          break;
+        case 'SALES_COMPLETED':
+          actionText = 'Sales Completed';
+          actionColor = 'text-green-600';
+          break;
+        default:
+          actionText = record.action;
+          actionColor = 'text-gray-600';
+      }
+      
+      return {
+        id: record.scraphis_id,
+        assetId: record.asset_id,
+        assetName: record.asset_name || '-',
+        serialNumber: record.serial_number || '-',
+        date: record.action_on ? new Date(record.action_on).toLocaleDateString() : '-',
+        time: record.action_on ? new Date(record.action_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
+        action: actionText,
+        actionCode: record.action,
+        actionColor: actionColor,
+        user: record.user_name || '-',
+        notes: record.notes || '-',
+        scrapType: record.scrap_type,
+        sshId: record.ssh_id
+      };
+    });
+    
+    return transformedHistory;
+  } catch (error) {
+    console.error('Error in getScrapAssetHistory:', error);
+    throw error;
+  }
 }
 
 module.exports = {
@@ -1439,5 +1877,7 @@ module.exports = {
   getScrapApprovalDetailByHeaderId,
   approveScrapWorkflow,
   rejectScrapWorkflow,
+  getWorkflowHistoryByWfscrapHId,
+  getScrapAssetHistory,
 };
 
