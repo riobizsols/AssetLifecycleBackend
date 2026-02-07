@@ -1,3 +1,80 @@
+// Allowed status values (add new ones)
+const ALLOWED_STATUSES = [
+  "CR", // Created
+  "IN", // Initiated
+  "CO", // Completed
+  "CF", // Confirmed
+  "RE", // Reopened
+  "AP", "IP", "CA" // others if used
+];
+
+// Confirm Employee Report Breakdown (final state)
+const confirmEmployeeReportBreakdown = async (abrId, orgId, userId) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    // Only update if not already Confirmed
+    const res = await client.query(
+      `SELECT status FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
+      [abrId, orgId]
+    );
+    if (!res.rows.length) throw new Error("Breakdown not found");
+    if (res.rows[0].status === "CF") throw new Error("Already confirmed");
+    await client.query(
+      `UPDATE "tblAssetBRDet" SET status = 'CF', changed_on = CURRENT_TIMESTAMP, changed_by = $1 WHERE abr_id = $2 AND org_id = $3`,
+      [userId, abrId, orgId]
+    );
+    await client.query("COMMIT");
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+// Reopen Employee Report Breakdown (cycle restart)
+const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
+  if (!notes || !notes.trim()) throw new Error("Notes are required to reopen");
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query("BEGIN");
+    // Only allow if not already Confirmed
+    const res = await client.query(
+      `SELECT status FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
+      [abrId, orgId]
+    );
+    if (!res.rows.length) throw new Error("Breakdown not found");
+    if (res.rows[0].status === "CF") throw new Error("Cannot reopen a confirmed breakdown");
+    // 1. Employee Report Breakdown → RE
+    await client.query(
+      `UPDATE "tblAssetBRDet" SET status = 'RE', notes = $1, changed_on = CURRENT_TIMESTAMP, changed_by = $2 WHERE abr_id = $3 AND org_id = $4`,
+      [notes, userId, abrId, orgId]
+    );
+    // 2. Report Breakdown → RE
+    // (Assuming same table, if not, adjust accordingly)
+    // 3. Maintenance List → RE (tblAssetMaintSch)
+    // Find linked maintenance by asset_id and breakdown in notes
+    const breakdown = await client.query(`SELECT asset_id FROM "tblAssetBRDet" WHERE abr_id = $1`, [abrId]);
+    const assetId = breakdown.rows[0]?.asset_id;
+    if (assetId) {
+      await client.query(
+        `UPDATE "tblAssetMaintSch" SET status = 'RE', changed_on = CURRENT_TIMESTAMP WHERE asset_id = $1 AND status = 'CO'`,
+        [assetId]
+      );
+    }
+    await client.query("COMMIT");
+    return { success: true };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
 const { getDb } = require("../utils/dbContext");
 const { peekNextId } = require("../utils/idGenerator");
 const msModel = require("./maintenanceScheduleModel");
@@ -15,7 +92,7 @@ const getAllReports = async (
       a.asset_type_id
     FROM "tblAssetBRDet" brd
     LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
-    WHERE brd.org_id = $1 AND brd.status != 'CO'
+    WHERE brd.org_id = $1 AND brd.status NOT IN ('CO', 'CF')
   `;
 
   const params = [orgId];
@@ -72,7 +149,7 @@ const getUpcomingMaintenanceDate = async (assetId) => {
     SELECT act_maint_st_date
     FROM "tblAssetMaintSch"
     WHERE asset_id = $1 
-      AND status IN ('IN', 'AP')
+      AND status IN ('IN', 'AP', 'RE')
     ORDER BY act_maint_st_date ASC
     LIMIT 1
   `;
@@ -88,7 +165,7 @@ const getUpcomingMaintenanceDate = async (assetId) => {
     SELECT act_sch_date
     FROM "tblWFAssetMaintSch_H"
     WHERE asset_id = $1 
-      AND status IN ('IN', 'AP', 'IP')
+      AND status IN ('IN', 'AP', 'IP', 'RE')
     ORDER BY act_sch_date ASC
     LIMIT 1
   `;
@@ -659,4 +736,6 @@ module.exports = {
   getUpcomingMaintenanceDate,
   createBreakdownReport,
   updateBreakdownReport,
+  confirmEmployeeReportBreakdown,
+  reopenEmployeeReportBreakdown,
 };
