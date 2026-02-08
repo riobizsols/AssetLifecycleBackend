@@ -22,8 +22,8 @@ const confirmEmployeeReportBreakdown = async (abrId, orgId, userId) => {
     if (!res.rows.length) throw new Error("Breakdown not found");
     if (res.rows[0].status === "CF") throw new Error("Already confirmed");
     await client.query(
-      `UPDATE "tblAssetBRDet" SET status = 'CF', changed_on = CURRENT_TIMESTAMP, changed_by = $1 WHERE abr_id = $2 AND org_id = $3`,
-      [userId, abrId, orgId]
+      `UPDATE "tblAssetBRDet" SET status = 'CF' WHERE abr_id = $1 AND org_id = $2`,
+      [abrId, orgId]
     );
     await client.query("COMMIT");
     return { success: true };
@@ -49,23 +49,62 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
     );
     if (!res.rows.length) throw new Error("Breakdown not found");
     if (res.rows[0].status === "CF") throw new Error("Cannot reopen a confirmed breakdown");
-    // 1. Employee Report Breakdown → RE
+
+    // 1. Employee Report Breakdown → IN (reset back to Initiated as requested)
+    // and store reopen_notes and also update description so it's visible in reports
     await client.query(
-      `UPDATE "tblAssetBRDet" SET status = 'RE', notes = $1, changed_on = CURRENT_TIMESTAMP, changed_by = $2 WHERE abr_id = $3 AND org_id = $4`,
-      [notes, userId, abrId, orgId]
+      `UPDATE "tblAssetBRDet" 
+       SET status = 'IN', 
+           reopen_notes = $1,
+           description = COALESCE(description, '') || ' [Reopened: ' || $1 || ']',
+           changed_on = CURRENT_TIMESTAMP
+       WHERE abr_id = $2 AND org_id = $3`,
+      [notes, abrId, orgId]
     );
-    // 2. Report Breakdown → RE
-    // (Assuming same table, if not, adjust accordingly)
-    // 3. Maintenance List → RE (tblAssetMaintSch)
-    // Find linked maintenance by asset_id and breakdown in notes
-    const breakdown = await client.query(`SELECT asset_id FROM "tblAssetBRDet" WHERE abr_id = $1`, [abrId]);
-    const assetId = breakdown.rows[0]?.asset_id;
-    if (assetId) {
+
+    // 2. Restart maintenance workflow
+    // The user wants a clean restart requiring re-approval/assignment.
+    // We cancel the old maintenance and re-trigger the workflow.
+    
+    // Fetch breakdown and asset details for workflow re-triggering
+    const breakdownResult = await client.query(
+      `SELECT brd.*, a.asset_type_id, a.service_vendor_id, b.branch_code
+       FROM "tblAssetBRDet" brd
+       LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
+       LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+       WHERE brd.abr_id = $1`,
+      [abrId]
+    );
+    
+    const breakdownData = breakdownResult.rows[0];
+    if (breakdownData) {
+      const { asset_id, decision_code, reported_by } = breakdownData;
+      
+      // Cancel previous completed maintenance linked to this breakdown
       await client.query(
-        `UPDATE "tblAssetMaintSch" SET status = 'RE', changed_on = CURRENT_TIMESTAMP WHERE asset_id = $1 AND status = 'CO'`,
-        [assetId]
+        `UPDATE "tblAssetMaintSch" 
+         SET status = 'CA', changed_on = CURRENT_TIMESTAMP 
+         WHERE asset_id = $1 AND status = 'CO' AND notes ILIKE $2`,
+        [asset_id, `%${abrId}%`]
       );
+
+      // Re-trigger the workflow using existing decision code
+      // This will create new workflow entries requiring re-approval
+      await triggerBreakdownWorkflow(client, {
+        asset_id,
+        decision_code: decision_code || 'BF01', // Use BF01 (Prepone) as default for re-trigger
+        reported_by: userId, // The person who reopened it
+        org_id: orgId,
+        abr_id: abrId,
+        assetRow: {
+          asset_type_id: breakdownData.asset_type_id,
+          service_vendor_id: breakdownData.service_vendor_id,
+          branch_code: breakdownData.branch_code
+        },
+        existingSchedule: null // Treat as new request
+      });
     }
+
     await client.query("COMMIT");
     return { success: true };
   } catch (err) {
@@ -92,7 +131,7 @@ const getAllReports = async (
       a.asset_type_id
     FROM "tblAssetBRDet" brd
     LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
-    WHERE brd.org_id = $1 AND brd.status NOT IN ('CO', 'CF')
+    WHERE brd.org_id = $1
   `;
 
   const params = [orgId];

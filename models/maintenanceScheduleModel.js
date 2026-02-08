@@ -714,45 +714,90 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   const result = await dbPool.query(query, values);
 
-
-  // Helper: update linked breakdown status
-  async function updateLinkedBreakdownStatus(breakdownId, newStatus) {
+  // Sync breakdown status if applicable (Status CO = Completed)
+  if (status === "CO" && result.rows.length > 0) {
     try {
-      const updateBreakdownQuery = `
-        UPDATE "tblAssetBRDet"
-        SET status = $1, changed_on = CURRENT_TIMESTAMP
-        WHERE abr_id = $2 AND org_id = $3
-        RETURNING *
-      `;
-      await dbPool.query(updateBreakdownQuery, [newStatus, breakdownId, orgId]);
-      console.log(`Breakdown ${breakdownId} status updated to ${newStatus} when maintenance ${amsId} updated`);
+      await syncBreakdownStatus(result.rows[0], orgId);
     } catch (err) {
-      console.error(`Error updating breakdown ${breakdownId} status:`, err);
-    }
-  }
-
-  if ((status === "CO" || status === "RE") && result.rows.length > 0) {
-    const maintenanceRecord = result.rows[0];
-    let breakdownId = null;
-    if (maintenanceRecord.notes) {
-      const breakdownMatch = maintenanceRecord.notes.match(
-        /(?:BF0[1-3]-)?Breakdown-([A-Z0-9]+)/,
-      );
-      if (breakdownMatch && breakdownMatch[1]) {
-        breakdownId = breakdownMatch[1];
-      }
-    }
-    if (breakdownId) {
-      // Sync Report Breakdown status
-      if (status === "CO") {
-        await updateLinkedBreakdownStatus(breakdownId, "CO");
-      } else if (status === "RE") {
-        await updateLinkedBreakdownStatus(breakdownId, "RE");
-      }
+      console.error("Error in automatic breakdown sync:", err);
     }
   }
 
   return result;
+};
+
+// Sync breakdown status from a maintenance record
+const syncBreakdownStatus = async (maintenanceRecord, orgId) => {
+  const dbPool = getDb();
+  let breakdownId = null;
+
+  // 1. Try to find in notes
+  if (maintenanceRecord.notes) {
+    const match = maintenanceRecord.notes.match(
+      /(?:Breakdown(?:\s+Maintenance)?\s*[–\-\s:]*|BF0[1-3]-Breakdown-)([A-Z0-9]+)/i,
+    );
+    if (match && match[1]) {
+      breakdownId = match[1].toUpperCase();
+    }
+  }
+
+  // 2. Try to find in wo_id (format: WO-WFAMSH_01-ABR001)
+  if (!breakdownId && maintenanceRecord.wo_id) {
+    const match = maintenanceRecord.wo_id.match(/ABR[0-9]+/i);
+    if (match) {
+      breakdownId = match[0].toUpperCase();
+    }
+  }
+
+  // 3. Try to find via workflow details if wfamsh_id is present
+  if (!breakdownId && maintenanceRecord.wfamsh_id) {
+    const wfQuery = `
+      SELECT notes 
+      FROM "tblWFAssetMaintSch_D" 
+      WHERE wfamsh_id = $1 AND org_id = $2 
+      AND (notes ILIKE '%Breakdown%' OR notes ILIKE '%ABR%')
+      LIMIT 1
+    `;
+    const wfRes = await dbPool.query(wfQuery, [
+      maintenanceRecord.wfamsh_id,
+      orgId,
+    ]);
+    if (wfRes.rows.length > 0) {
+      const match = wfRes.rows[0].notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+      if (match) {
+        breakdownId = `ABR${match[1].toUpperCase()}`;
+      }
+    }
+  }
+
+  // 4. FALLBACK: Search for the most recent non-completed breakdown for this asset
+  // Highly effective if the notes were overwritten during the approval process.
+  if (!breakdownId && maintenanceRecord.asset_id && (maintenanceRecord.maint_type_id === 'MT004' || maintenanceRecord.wo_id?.includes('ABR'))) {
+    console.log(`[SYNC] Fallback search for breakdown ID for asset ${maintenanceRecord.asset_id}...`);
+    const fbRes = await dbPool.query(
+      `SELECT abr_id FROM "tblAssetBRDet" 
+       WHERE asset_id = $1 AND org_id = $2 AND status NOT IN ('CO', 'CA', 'CF')
+       ORDER BY created_on DESC LIMIT 1`,
+      [maintenanceRecord.asset_id, orgId]
+    );
+    if (fbRes.rows.length > 0) {
+      breakdownId = fbRes.rows[0].abr_id;
+      console.log(`[SYNC] Fallback found breakdown ID: ${breakdownId}`);
+    }
+  }
+
+  if (breakdownId) {
+    console.log(`Found linked Breakdown ID ${breakdownId} for maintenance ${maintenanceRecord.ams_id}. Syncing status to CO...`);
+    const updateBreakdownQuery = `
+      UPDATE "tblAssetBRDet"
+      SET status = 'CO', changed_on = CURRENT_TIMESTAMP
+      WHERE abr_id = $1 AND org_id = $2
+      RETURNING *
+    `;
+    await dbPool.query(updateBreakdownQuery, [breakdownId, orgId]);
+    return true;
+  }
+  return false;
 };
 
 // Check if asset type requires workflow
@@ -1322,4 +1367,5 @@ module.exports = {
   generateWorkOrderId,
   insertDirectMaintenanceSchedule,
   createManualMaintenanceSchedule,
+  syncBreakdownStatus,
 };

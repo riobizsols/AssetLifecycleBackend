@@ -93,7 +93,7 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
-        WHERE brd.org_id = $1 AND brd.status != 'CO'
+        WHERE brd.org_id = $1
     `;
     
     const queryParams = [orgId];
@@ -376,7 +376,7 @@ const getBreakdownHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
         LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
             AND ams.status IN ('IN', 'AP', 'IP', 'CO')
-        WHERE brd.org_id = $1 AND brd.status != 'CO'
+        WHERE brd.org_id = $1
     `;
     
     const queryParams = [orgId];
@@ -634,7 +634,7 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
     const breakdownStatusQuery = `
         SELECT DISTINCT brd.status as breakdown_status
         FROM "tblAssetBRDet" brd 
-        WHERE brd.org_id = $1 AND brd.status IS NOT NULL AND brd.status != 'CO'
+        WHERE brd.org_id = $1 AND brd.status IS NOT NULL
         ORDER BY brd.status
     `;
     

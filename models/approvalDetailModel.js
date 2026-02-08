@@ -359,6 +359,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     `;
     const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
+    const isSystemAdmin = userRoleIds.includes('JR001');
     
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
@@ -367,39 +368,117 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     // isWfamshId is already declared above for vendor check
 
     let currentResult;
-    if (isWfamshId) {
-      // ROLE-BASED: Find workflow step where user has the required role
-      const byHeaderQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+    if (isSystemAdmin) {
+      // SYSTEM ADMIN: Find the current pending step (AP) regardless of role assignment
+      console.log(`[SYSTEM ADMIN APPROVAL] User ${userId} is System Admin. Overriding role check.`);
+      console.log(`[SYSTEM ADMIN APPROVAL] isWfamshId=${isWfamshId}, assetOrWfamshId=${assetOrWfamshId}, orgId=${orgId}`);
+      if (isWfamshId) {
+        const adminHeaderQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
+          ORDER BY wfd.sequence ASC
+        `;
+        console.log(`[SYSTEM ADMIN APPROVAL] Executing WFAMSH header query with params:`, [assetOrWfamshId, orgId]);
+        currentResult = await getDb().query(adminHeaderQuery, [assetOrWfamshId, orgId]);
+        console.log(`[SYSTEM ADMIN APPROVAL] WFAMSH query returned ${currentResult.rows.length} rows`);
+      } else {
+        const adminAssetQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+          WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
+          ORDER BY wfd.sequence ASC
+        `;
+        console.log(`[SYSTEM ADMIN APPROVAL] Executing asset query with params:`, [assetOrWfamshId, orgId]);
+        currentResult = await getDb().query(adminAssetQuery, [assetOrWfamshId, orgId]);
+        console.log(`[SYSTEM ADMIN APPROVAL] Asset query returned ${currentResult.rows.length} rows`);
+      }
     } else {
-      // ROLE-BASED: Find workflow step where user has the required role
-      const currentQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      if (isWfamshId) {
+        // ROLE-BASED: Find workflow step where user has the required role
+        const byHeaderQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+            AND wfd.job_role_id = ANY($3::varchar[])
+          ORDER BY wfd.sequence ASC
+        `;
+        currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      } else {
+        // ROLE-BASED: Find workflow step where user has the required role
+        const currentQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+          WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+            AND wfd.job_role_id = ANY($3::varchar[])
+          ORDER BY wfd.sequence ASC
+        `;
+        currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      }
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      throw new Error('No workflow found for this asset or user does not have required role');
+      // For System Admin, if no AP step found, try to find ANY step that's in process (not yet complete)
+      if (isSystemAdmin) {
+        console.log(`[SYSTEM ADMIN] No AP step found. Looking for any incomplete step...`);
+        let fallbackResult;
+        if (isWfamshId) {
+          const fallbackQuery = `
+            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+            FROM "tblWFAssetMaintSch_D" wfd
+            WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
+            ORDER BY wfd.sequence ASC
+            LIMIT 1
+          `;
+          console.log(`[SYSTEM ADMIN FALLBACK] Executing WFAMSH query with params:`, [assetOrWfamshId, orgId]);
+          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
+        } else {
+          const fallbackQuery = `
+            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+            FROM "tblWFAssetMaintSch_D" wfd
+            INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+            WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
+            ORDER BY wfd.sequence ASC
+            LIMIT 1
+          `;
+          console.log(`[SYSTEM ADMIN FALLBACK] Executing Asset query with params:`, [assetOrWfamshId, orgId]);
+          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
+        }
+        
+        console.log(`[SYSTEM ADMIN FALLBACK] Query returned ${fallbackResult.rows.length} rows`);
+        
+        if (fallbackResult.rows.length === 0) {
+          console.error(`[SYSTEM ADMIN FALLBACK] No workflow steps found. Asset/ID: ${assetOrWfamshId}, Org: ${orgId}`);
+          throw new Error('No pending or incomplete workflow step found for approval');
+        }
+        console.log(`[SYSTEM ADMIN FALLBACK SUCCESS] Found step:`, fallbackResult.rows[0]);
+        currentResult.rows = fallbackResult.rows;
+      } else {
+        throw new Error('No workflow found for this asset or user does not have required role');
+      }
     }
     
-    // ROLE-BASED: Find the current step that needs approval (status AP)
-    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
-    if (!currentUserStep) {
-      throw new Error('No pending approval step found for your role');
+    const workflowDetails2 = currentResult.rows;
+    
+    // ROLE-BASED: Find the current step that needs approval (status AP), or first IN step for System Admin
+    let currentUserStep = workflowDetails2.find(w => w.status === 'AP');
+    console.log(`[APPROVAL STEP SELECTION] Looking for AP step. Found:`, currentUserStep ? 'YES' : 'NO');
+    
+    if (!currentUserStep && isSystemAdmin) {
+      // System Admin can approve the first IN step if no AP step exists
+      currentUserStep = workflowDetails2.find(w => w.status === 'IN');
+      console.log(`[APPROVAL STEP SELECTION] System Admin mode. Looking for IN step. Found:`, currentUserStep ? 'YES' : 'NO');
     }
+    
+    if (!currentUserStep) {
+      console.error(`[APPROVAL ERROR] No approval step found. Available steps:`, workflowDetails2);
+      throw new Error(`No pending approval step found. Found ${workflowDetails2.length} steps with statuses: ${workflowDetails2.map(s => s.status).join(', ')}`);
+    }
+    
+    console.log(`[APPROVAL] Using workflow step:`, { wfamsd_id: currentUserStep.wfamsd_id, status: currentUserStep.status, sequence: currentUserStep.sequence});
     
     // Update vendor_id and maintenance date in header if provided
     // Always update if values are provided (even if same as current) to ensure changes are saved
@@ -439,9 +518,18 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     
     // ROLE-BASED: Update workflow step status to UA (User Approved)
     // user_id remains NULL - only job_role_id is used
+    // We preserve existing notes if they contain breakdown info
     await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
-       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       SET status = $1, 
+           notes = CASE 
+             WHEN notes ILIKE '%Breakdown%' AND $2::text IS NOT NULL AND $2::text != '' 
+             THEN notes || ' (Note: ' || $2::text || ')'
+             WHEN $2::text IS NOT NULL AND $2::text != '' THEN $2::text
+             ELSE notes
+           END,
+           changed_by = $3, 
+           changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
       ['UA', note, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
@@ -560,53 +648,131 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     `;
     const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
+    const isSystemAdmin = userRoleIds.includes('JR001');
     
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
     }
     
-    // isWfamshId is already declared above for vendor check
+    // Detect whether the identifier is a wfamsh_id or asset_id
+    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
     let currentResult;
-    if (isWfamshId) {
-      // ROLE-BASED: Find workflow step where user has the required role
-      const byHeaderQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+    if (isSystemAdmin) {
+      // SYSTEM ADMIN: Find the current pending step (AP) regardless of role assignment
+      console.log(`[SYSTEM ADMIN REJECTION] User ${userId} is System Admin. Overriding role check.`);
+      console.log(`[SYSTEM ADMIN REJECTION] isWfamshId=${isWfamshId}, assetOrWfamshId=${assetOrWfamshId}, orgId=${orgId}`);
+      if (isWfamshId) {
+        const adminHeaderQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
+          ORDER BY wfd.sequence ASC
+        `;
+        console.log(`[SYSTEM ADMIN REJECTION] Executing WFAMSH header query with params:`, [assetOrWfamshId, orgId]);
+        currentResult = await getDb().query(adminHeaderQuery, [assetOrWfamshId, orgId]);
+        console.log(`[SYSTEM ADMIN REJECTION] WFAMSH query returned ${currentResult.rows.length} rows`);
+      } else {
+        const adminAssetQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+          WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
+          ORDER BY wfd.sequence ASC
+        `;
+        console.log(`[SYSTEM ADMIN REJECTION] Executing asset query with params:`, [assetOrWfamshId, orgId]);
+        currentResult = await getDb().query(adminAssetQuery, [assetOrWfamshId, orgId]);
+        console.log(`[SYSTEM ADMIN REJECTION] Asset query returned ${currentResult.rows.length} rows`);
+      }
     } else {
-      // ROLE-BASED: Find workflow step where user has the required role
-      const currentQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      if (isWfamshId) {
+        // ROLE-BASED: Find workflow step where user has the required role
+        const byHeaderQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+            AND wfd.job_role_id = ANY($3::varchar[])
+          ORDER BY wfd.sequence ASC
+        `;
+        currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      } else {
+        // ROLE-BASED: Find workflow step where user has the required role
+        const currentQuery = `
+          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+          WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+            AND wfd.job_role_id = ANY($3::varchar[])
+          ORDER BY wfd.sequence ASC
+        `;
+        currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
+      }
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      throw new Error('No workflow found for this asset or user does not have required role');
+      // For System Admin, if no AP step found, try to find ANY step that's in process (not yet complete)
+      if (isSystemAdmin) {
+        console.log(`[SYSTEM ADMIN REJECTION] No AP step found. Looking for any incomplete step...`);
+        let fallbackResult;
+        if (isWfamshId) {
+          const fallbackQuery = `
+            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+            FROM "tblWFAssetMaintSch_D" wfd
+            WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
+            ORDER BY wfd.sequence ASC
+            LIMIT 1
+          `;
+          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
+        } else {
+          const fallbackQuery = `
+            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+            FROM "tblWFAssetMaintSch_D" wfd
+            INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+            WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
+            ORDER BY wfd.sequence ASC
+            LIMIT 1
+          `;
+          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
+        }
+        
+        if (fallbackResult.rows.length === 0) {
+          throw new Error('No pending or incomplete workflow step found for rejection');
+        }
+        currentResult.rows = fallbackResult.rows;
+      } else {
+        throw new Error('No workflow found for this asset or user does not have required role');
+      }
     }
     
-    // ROLE-BASED: Find the current step that needs approval (status AP)
-    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
-    if (!currentUserStep) {
-      throw new Error('No pending approval step found for your role');
+    const workflowDetails2 = currentResult.rows;
+    
+    // ROLE-BASED: Find the current step that needs approval (status AP), or first IN step for System Admin
+    let currentUserStep = workflowDetails2.find(w => w.status === 'AP');
+    if (!currentUserStep && isSystemAdmin) {
+      // System Admin can reject the first IN step if no AP step exists
+      currentUserStep = workflowDetails2.find(w => w.status === 'IN');
     }
+    if (!currentUserStep) {
+      console.error(`[REJECTION ERROR] No rejection step found. Available steps:`, workflowDetails2);
+      throw new Error(`No pending approval step found for rejection. Found ${workflowDetails2.length} steps with statuses: ${workflowDetails2.map(s => s.status).join(', ')}`);
+    }
+    
+    console.log(`[REJECTION STEP SELECTED] Step ID: ${currentUserStep.wfamsd_id}, Current Status: ${currentUserStep.status}, Sequence: ${currentUserStep.sequence}`);
     
     // ROLE-BASED: Update workflow step status to UR (User Rejected)
-    // user_id remains NULL - only job_role_id is used
+    // Preserve existing breakdown notes if present
     await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
-       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       SET status = $1, 
+           notes = CASE 
+             WHEN notes ILIKE '%Breakdown%' AND $2::text IS NOT NULL AND $2::text != '' 
+             THEN notes || ' (Rejection Reason: ' || $2::text || ')'
+             WHEN $2::text IS NOT NULL AND $2::text != '' THEN $2::text
+             ELSE notes
+           END,
+           changed_by = $3, 
+           changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
       ['UR', reason, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
@@ -1024,9 +1190,9 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          
          if (breakdownIdResult.rows.length > 0) {
            const notes = breakdownIdResult.rows[0].notes;
-           // Extract breakdown ID (ABR-XXX)
-           const abrMatch = notes.match(/ABR-[A-Z0-9]+/i);
-           const breakdownId = abrMatch ? abrMatch[0].toUpperCase() : null;
+           // Extract breakdown ID (ABR-XXX or ABRXXX)
+           const abrMatch = notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+           const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
            
            if (breakdownId) {
              await getDb().query(
@@ -1162,8 +1328,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          const breakdownIdResult = await getDb().query(breakdownIdQuery, [wfamshId, orgId]);
          if (breakdownIdResult.rows.length > 0) {
            const notes = breakdownIdResult.rows[0].notes;
-           const abrMatch = notes.match(/ABR-[A-Z0-9]+/i);
-           const breakdownId = abrMatch ? abrMatch[0].toUpperCase() : null;
+           const abrMatch = notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+           const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
            if (breakdownId) {
              await getDb().query(
                `UPDATE "tblAssetBRDet" SET status = 'CA' WHERE abr_id = $1 AND org_id = $2`,
@@ -1695,14 +1861,30 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
        
        let workOrderId = null;
+       let breakdownId = null;
        if (!isSoftwareAsset) {
-         if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
-           const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+         if (workflowData.bf01_notes) {
+           const abrMatch = workflowData.bf01_notes.match(/(?:BF0[1-3]-Breakdown-|Breakdown\s+Maintenance\s*-\s*|Breakdown[-\s]*)([A-Z0-9]+)/i);
            if (abrMatch && abrMatch[1]) {
-             workOrderId = `WO-${wfamshId}-${abrMatch[1]}`;
-           } else {
-             workOrderId = `WO-${wfamshId}`;
+             breakdownId = abrMatch[1].toUpperCase();
            }
+         }
+
+         // FALLBACK: If it's a breakdown but we lost the ID in notes, find most recent non-completed breakdown for this asset
+         if (!breakdownId && maintTypeId === 'MT004') {
+           const fallbackBrRes = await getDb().query(
+             `SELECT abr_id FROM "tblAssetBRDet" 
+              WHERE asset_id = $1 AND org_id = $2 AND status NOT IN ('CO', 'CA', 'CF')
+              ORDER BY created_on DESC LIMIT 1`,
+             [workflowData.asset_id, orgId]
+           );
+           if (fallbackBrRes.rows.length > 0) {
+             breakdownId = fallbackBrRes.rows[0].abr_id;
+           }
+         }
+
+         if (breakdownId) {
+           workOrderId = `WO-${wfamshId}-${breakdownId}`;
          } else {
            workOrderId = `WO-${wfamshId}`;
          }
@@ -1719,11 +1901,18 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            maintained_by = $5,
            status = 'IN',
            act_maint_st_date = $6,
+           notes = CASE 
+             WHEN notes IS NULL OR notes = '' THEN $9
+             WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+             ELSE notes
+           END,
            changed_by = 'system',
            changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $7 AND org_id = $8
          RETURNING ams_id
        `;
+       
+       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
        
        const updateParams = [
          isSoftwareAsset ? null : workOrderId,
@@ -1733,7 +1922,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          workflowData.maintained_by,
          workflowData.act_maint_st_date,
          existingAmsId,
-         orgId
+         orgId,
+         amsNotes
        ];
        
        await getDb().query(updateQuery, updateParams);
@@ -1902,7 +2092,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      // Check for BF01 breakdown
      if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
        // Extract breakdown ID from notes: BF01-Breakdown-{ABR_ID}
-       const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+       const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown[-\s]*([A-Z0-9]+)/);
        if (abrMatch && abrMatch[1]) {
          breakdownId = abrMatch[1];
          console.log('Found BF01 breakdown ID:', breakdownId);
@@ -1937,7 +2127,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        console.log('Found BF03 postpone breakdown - will update wo_id only');
        
        // Extract breakdown ID for work order tracking
-       const abrMatch = workflowData.bf01_notes.match(/BF03-Breakdown-([A-Z0-9]+)/);
+       const abrMatch = workflowData.bf01_notes.match(/BF03-Breakdown[-\s]*([A-Z0-9]+)/);
        if (abrMatch && abrMatch[1]) {
          breakdownId = abrMatch[1];
          console.log('BF03 breakdown ID:', breakdownId);
@@ -1979,8 +2169,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          console.log('Found BF02 breakdown (or generic breakdown note)');
          
          // Try to extract breakdown ID from "Breakdown {ABR_ID}" format
-         // Pattern matches: "Breakdown ABR001" or "Breakdown-ABR001" or "BreakdownABR001"
-         const bf02Match = workflowData.bf01_notes.match(/Breakdown[\s-]*([A-Z0-9]+)/i);
+         // Pattern matches: "Breakdown ABR001" or "Breakdown-ABR001" or "Breakdown Maintenance - ABR001"
+         const bf02Match = workflowData.bf01_notes.match(/Breakdown(?:\s+Maintenance)?[\s-]*([A-Z0-9]+)/i);
          if (bf02Match && bf02Match[1]) {
            breakdownId = bf02Match[1];
            console.log('BF02 breakdown ID extracted:', breakdownId);
@@ -2006,6 +2196,27 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        }
      }
      
+     // FALLBACK: If this is a breakdown (MT004 or has_breakdown_note) but we haven't found a breakdownId yet,
+     // it might be because the notes were overwritten during approval.
+     // Search for the most recent non-completed breakdown for this asset.
+     const isBreakdown = !!workflowData.has_breakdown_note || workflowData.maint_type_id === 'MT004';
+     if (isBreakdown && !breakdownId) {
+       console.log(`[SYNC] Breakdown detected but ID lost for workflow ${wfamshId}. Running fallback search for asset ${workflowData.asset_id}...`);
+       const fallbackBrRes = await getDb().query(
+         `SELECT brd.abr_id, brd.atbrrc_id, brd.description, brc.text as breakdown_reason
+          FROM "tblAssetBRDet" brd
+          LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+          WHERE brd.asset_id = $1 AND brd.org_id = $2 AND brd.status NOT IN ('CO', 'CA', 'CF')
+          ORDER BY brd.created_on DESC LIMIT 1`,
+         [workflowData.asset_id, orgId]
+       );
+       if (fallbackBrRes.rows.length > 0) {
+         breakdownId = fallbackBrRes.rows[0].abr_id;
+         breakdownReasonCode = fallbackBrRes.rows[0].breakdown_reason || fallbackBrRes.rows[0].atbrrc_id;
+         console.log(`[SYNC] Fallback found breakdown ID: ${breakdownId} with reason: ${breakdownReasonCode}`);
+       }
+     }
+
      // Check if this is a software asset (Subscription Renewal - MT001) BEFORE deciding maintenance type
      // Get software asset type ID from orgSettings
      const softwareAssetTypeQuery = `
@@ -2031,7 +2242,6 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      
      // Decide maintenance type
      // If any detail note contains 'breakdown', force MT004; otherwise use header value or default to MT002
-     const isBreakdown = !!workflowData.has_breakdown_note;
      const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
      
      // Generate work order ID
@@ -2120,11 +2330,19 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
              at_main_freq_id = $4,
              maintained_by = $5,
              branch_code = COALESCE($6, branch_code),
+             notes = CASE 
+               WHEN notes IS NULL OR notes = '' THEN $9
+               WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+               ELSE notes
+             END,
+             wo_id = COALESCE($10, wo_id),
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $7 AND org_id = $8
          RETURNING ams_id, wo_id
        `;
+       
+       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
        
        const updateParams = [
          workflowData.wfamsh_id,
@@ -2134,7 +2352,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          workflowData.maintained_by,
          workflowData.branch_code,
          existingAmsId,
-         orgId
+         orgId,
+         amsNotes,
+         isSoftwareAsset ? null : workOrderId
        ];
        
        console.log('BF01 update query params:', updateParams);
@@ -2212,6 +2432,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
       `;
       
+      const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
+
       const insertParams = [
         amsId,
         workflowData.wfamsh_id,
@@ -2221,7 +2443,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         workflowData.vendor_id,
         workflowData.at_main_freq_id,
         workflowData.maintained_by, // Set based on service_vendor_id
-        null, // notes - will be set when maintenance is performed
+        amsNotes, // notes - ensures the breakdown link is preserved for syncing
         'IN', // Initial status
         workflowData.act_maint_st_date,
         'system', // created_by

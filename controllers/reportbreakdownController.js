@@ -1,3 +1,19 @@
+const model = require('../models/reportbreakdownModel');
+const {
+    logReportApiCall,
+    logReportGenerationSuccess,
+    logReportDataRetrieval,
+    logReportDataRetrieved,
+    logNoDataFound,
+    logUnauthorizedReportAccess,
+    logLargeResultSet,
+    logMissingParameters,
+    logInvalidFilters, 
+    logReportGenerationError,
+    logDatabaseQueryError,
+    logDatabaseConnectionFailure
+} = require('../eventLoggers/reportsEventLogger');
+
 // POST /api/reportbreakdown/:id/confirm
 const confirmEmployeeReportBreakdown = async (req, res) => {
   const userId = req.user?.user_id;
@@ -24,21 +40,6 @@ const reopenEmployeeReportBreakdown = async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 };
-const model = require('../models/reportbreakdownModel');
-const {
-    logReportApiCall,
-    logReportGenerationSuccess,
-    logReportDataRetrieval,
-    logReportDataRetrieved,
-    logNoDataFound,
-    logUnauthorizedReportAccess,
-    logLargeResultSet,
-    logMissingParameters,
-    logInvalidFilters, 
-    logReportGenerationError,
-    logDatabaseQueryError,
-    logDatabaseConnectionFailure
-} = require('../eventLoggers/reportsEventLogger');
 
 // GET /api/reportbreakdown/reports
 const getAllReports = async (req, res) => {

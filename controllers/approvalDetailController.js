@@ -360,11 +360,15 @@ const approveMaintenanceAction = async (req, res) => {
 
   } catch (error) {
     console.error('Error in approveMaintenanceAction:', error);
+    console.error('Error stack:', error.stack);
     
     const { context } = req.query;
     
     // Determine if it's a critical error or just an error
     const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    // Build detailed error message for user
+    const detailedErrorMsg = error.message || 'Failed to approve maintenance';
     
     if (isDbError) {
       if (error.code === 'ECONNREFUSED') {
@@ -426,8 +430,8 @@ const approveMaintenanceAction = async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Failed to approve maintenance',
-      error: error.message
+      message: detailedErrorMsg,
+      error: detailedErrorMsg
     });
   }
 };
@@ -624,10 +628,13 @@ const rejectMaintenanceAction = async (req, res) => {
       }
     }
     
+    // Build detailed error message for user
+    const detailedErrorMsg = error.message || 'Failed to reject maintenance';
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to reject maintenance',
-      error: error.message
+      message: detailedErrorMsg,
+      error: detailedErrorMsg
     });
   }
 };
