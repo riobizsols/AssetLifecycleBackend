@@ -419,22 +419,22 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
         )
       END AS asset_names,
       (
-        SELECT MIN(d2.seq)
+        SELECT MIN(d2.seq)::int
         FROM "tblWFScrap_D" d2
-        WHERE d2.wfscrap_h_id = wh.id_d
-          AND d2.status = 'AP'
+        WHERE d2.wfscrap_h_id::varchar = wh.id_d::varchar
+          AND d2.status::varchar = 'AP'
       ) AS current_seq
     FROM "tblWFScrap_H" wh
     LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
-    INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
+    INNER JOIN "tblWFScrapSeq" seq ON seq.id::varchar = wh.wfscrapseq_id::varchar
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
-    INNER JOIN "tblWFScrap_D" wd ON wd.wfscrap_h_id = wh.id_d
+    INNER JOIN "tblWFScrap_D" wd ON wd.wfscrap_h_id::varchar = wh.id_d::varchar
     WHERE (
         ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') AND seq.org_id = $1)
         OR (agh.org_id = $1)
       )
-      AND wh.status IN ('IN','IP')
-      AND wd.status = 'AP'
+      AND wh.status::varchar IN ('IN','IP')
+      AND wd.status::varchar = 'AP'
   `;
 
   if (!hasSuperAccess && userBranchCode) {
@@ -705,7 +705,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
         SELECT id, seq, status, job_role_id
         FROM "tblWFScrap_D"
         WHERE wfscrap_h_id = $1
-          AND status = 'AP'
+          AND status::varchar = 'AP'
           AND job_role_id = ANY($2::varchar[])
         ORDER BY seq ASC, created_on ASC
         LIMIT 1
@@ -779,7 +779,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
         FROM "tblWFScrap_D"
         WHERE wfscrap_h_id = $1
           AND seq = $2
-          AND status = 'AP'
+          AND status::varchar = 'AP'
       `,
       [wfscrap_h_id, current.seq]
     );
@@ -810,7 +810,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
         FROM "tblWFScrap_D"
         WHERE wfscrap_h_id = $1
           AND seq > $2
-          AND status = 'IN'
+          AND status::varchar = 'IN'
       `,
       [wfscrap_h_id, current.seq]
     );
@@ -824,7 +824,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
           FROM "tblWFScrap_D"
           WHERE wfscrap_h_id = $1
             AND seq = $2
-            AND status = 'IN'
+            AND status::varchar = 'IN'
         `,
         [wfscrap_h_id, Number(nextSeq)]
       );
@@ -835,7 +835,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
           SET status = 'AP', changed_by = $1, changed_on = CURRENT_TIMESTAMP
           WHERE wfscrap_h_id = $2
             AND seq = $3
-            AND status = 'IN'
+            AND status::varchar = 'IN'
         `,
         [userId.substring(0, 20), wfscrap_h_id, Number(nextSeq)]
       );
@@ -938,7 +938,7 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
           FROM "tblScrapSales_H" ssh
           INNER JOIN "tblScrapSales_D" ssd ON ssh.ssh_id = ssd.ssh_id
           INNER JOIN "tblAssetScrapDet" asd ON ssd.asd_id = asd.asd_id
-          WHERE ssh.status = 'AP'
+          WHERE ssh.status::varchar = 'AP'
             AND ssh.org_id = $1
             AND asd.asset_id = ANY($2::varchar[])
           GROUP BY ssh.ssh_id
@@ -1100,7 +1100,7 @@ async function rejectScrapWorkflow({ wfscrap_h_id, empIntId, reason, orgId }) {
         SELECT id, seq, status, job_role_id
         FROM "tblWFScrap_D"
         WHERE wfscrap_h_id = $1
-          AND status = 'AP'
+          AND status::varchar = 'AP'
           AND job_role_id = ANY($2::varchar[])
         ORDER BY seq ASC, created_on ASC
         LIMIT 1
@@ -1189,7 +1189,7 @@ async function rejectScrapWorkflow({ wfscrap_h_id, empIntId, reason, orgId }) {
       `
         UPDATE "tblWFScrap_D"
         SET status = 'AP', changed_by = $1, changed_on = CURRENT_TIMESTAMP
-        WHERE wfscrap_h_id = $2 AND seq < $3 AND status = 'UA'
+        WHERE wfscrap_h_id = $2 AND seq < $3 AND status::varchar = 'UA'
       `,
       [userId.substring(0, 20), wfscrap_h_id, current.seq]
     );
@@ -1357,7 +1357,7 @@ async function createScrapRequest({
 
   // If there's already an active scrap workflow for this group, return it instead of creating a duplicate
   const existingWorkflow = await getDb().query(
-    `SELECT id_d FROM "tblWFScrap_H" WHERE assetgroup_id = $1 AND status IN ('IN','IP') ORDER BY created_on DESC LIMIT 1`,
+    `SELECT id_d FROM "tblWFScrap_H" WHERE assetgroup_id = $1 AND status::varchar IN ('IN','IP') ORDER BY created_on DESC LIMIT 1`,
     [groupId]
   );
   if (existingWorkflow.rows.length > 0) {

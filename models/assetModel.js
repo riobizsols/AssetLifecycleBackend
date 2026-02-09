@@ -1111,15 +1111,12 @@ const createAsset = async (assetData) => {
     }
 
     // Use the serial number as provided and increment the sequence in database
-    let finalSerialNumber = serial_number;
+    // Normalize empty strings to null for database storage
+    let finalSerialNumber = serial_number && serial_number.trim() !== '' ? serial_number : null;
     
-    console.log(`🔢 Using provided serial number: ${finalSerialNumber}`);
+    console.log(`🔢 Using provided serial number: ${finalSerialNumber || 'None (optional)'}`);
     
-    // Validate that serial number is provided
-    if (!finalSerialNumber || finalSerialNumber === '') {
-      throw new Error('Serial number is required. Please generate a serial number first.');
-    }
-    
+    // Serial number is optional - only update sequence if provided
     // Extract the last 5 digits from the serial number to update last_gen_seq_no
     if (finalSerialNumber && finalSerialNumber.length >= 5) {
       const last5Digits = finalSerialNumber.slice(-5);

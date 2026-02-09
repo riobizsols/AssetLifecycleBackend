@@ -616,10 +616,129 @@ const updateBreakdownReport = async (abrId, updateData) => {
   }
 };
 
+// Delete breakdown report and associated workflow/schedule records
+const deleteBreakdownReport = async (abrId, orgId) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Get breakdown details first
+    const breakdownQuery = `SELECT * FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`;
+    const breakdownResult = await client.query(breakdownQuery, [abrId, orgId]);
+    
+    if (!breakdownResult.rows.length) {
+      throw new Error('Breakdown report not found or access denied');
+    }
+
+    const breakdown = breakdownResult.rows[0];
+    const asset_id = breakdown.asset_id;
+
+    // Find and delete associated workflow records
+    // Check for workflow maintenance schedules created for this breakdown
+    // Notes are stored in the detail table (tblWFAssetMaintSch_D), not header
+    const workflowQuery = `
+      SELECT DISTINCT h.wfamsh_id 
+      FROM "tblWFAssetMaintSch_H" h
+      INNER JOIN "tblWFAssetMaintSch_D" d ON h.wfamsh_id = d.wfamsh_id
+      WHERE h.asset_id = $1 
+        AND (d.notes LIKE $2 OR d.notes LIKE $3 OR d.notes LIKE $4)
+    `;
+    const workflowResult = await client.query(workflowQuery, [
+      asset_id,
+      `%${abrId}%`,
+      `%Breakdown ${abrId}%`,
+      `%Breakdown-${abrId}%`
+    ]);
+
+    // Delete workflow details first (foreign key constraint)
+    for (const wfRow of workflowResult.rows) {
+      await client.query(
+        `DELETE FROM "tblWFAssetMaintSch_D" WHERE wfamsh_id = $1`,
+        [wfRow.wfamsh_id]
+      );
+    }
+
+    // Delete workflow headers
+    for (const wfRow of workflowResult.rows) {
+      await client.query(
+        `DELETE FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1`,
+        [wfRow.wfamsh_id]
+      );
+    }
+
+    // Find and delete associated maintenance schedules
+    // Search by wfamsh_id (linked to workflows we already found) or wo_id pattern
+    const wfamshIds = workflowResult.rows.map(r => r.wfamsh_id);
+    let scheduleResult = { rows: [] };
+    
+    if (wfamshIds.length > 0) {
+      const scheduleQuery = `
+        SELECT ams_id 
+        FROM "tblAssetMaintSch" 
+        WHERE asset_id = $1 
+          AND (wfamsh_id = ANY($2::varchar[]) OR wo_id LIKE $3)
+      `;
+      scheduleResult = await client.query(scheduleQuery, [
+        asset_id,
+        wfamshIds,
+        `%${abrId}%`
+      ]);
+    } else {
+      // If no workflows found, just search by wo_id pattern
+      const scheduleQuery = `
+        SELECT ams_id 
+        FROM "tblAssetMaintSch" 
+        WHERE asset_id = $1 AND wo_id LIKE $2
+      `;
+      scheduleResult = await client.query(scheduleQuery, [
+        asset_id,
+        `%${abrId}%`
+      ]);
+    }
+
+    // Delete maintenance schedules
+    for (const schedRow of scheduleResult.rows) {
+      await client.query(
+        `DELETE FROM "tblAssetMaintSch" WHERE ams_id = $1`,
+        [schedRow.ams_id]
+      );
+    }
+
+    // Finally, delete the breakdown record itself
+    const deleteQuery = `DELETE FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`;
+    await client.query(deleteQuery, [abrId, orgId]);
+
+    await client.query('COMMIT');
+
+    return {
+      success: true,
+      message: 'Breakdown report deleted successfully',
+      deleted: {
+        breakdown_id: abrId,
+        workflows_deleted: workflowResult.rows.length,
+        schedules_deleted: scheduleResult.rows.length
+      }
+    };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('Error in deleteBreakdownReport:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      stack: err.stack
+    });
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getBreakdownReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
   createBreakdownReport,
-  updateBreakdownReport
+  updateBreakdownReport,
+  deleteBreakdownReport
 };
