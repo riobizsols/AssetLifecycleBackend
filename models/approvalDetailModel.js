@@ -1195,11 +1195,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
            const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
            
            if (breakdownId) {
+             // Strict Status Workflow: Status stays as 'IN' (Initiated) during approval closure.
+             // It will only change to 'CO' (Completed) when the technician finishes work in the Maintenance List.
              await getDb().query(
-               `UPDATE "tblAssetBRDet" SET status = 'CO' WHERE abr_id = $1 AND org_id = $2`,
+               `UPDATE "tblAssetBRDet" SET status = 'IN' WHERE abr_id = $1 AND org_id = $2`,
                [breakdownId, orgId]
              );
-             console.log(`✅ Linked breakdown report ${breakdownId} status updated to CO`);
+             console.log(`✅ Linked breakdown report ${breakdownId} status set to IN (Approval Cycle Complete)`);
            }
          }
        } catch (brErr) {
@@ -1462,7 +1464,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
          AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
-       ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
+       ORDER BY wfh.created_on DESC
      `;
      params.push(userRoleIds);
 
@@ -1565,7 +1567,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
     query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
-      ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
+      ORDER BY wfh.created_on DESC
     `;
     params.push(userRoleIds);
 

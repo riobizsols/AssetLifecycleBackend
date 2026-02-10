@@ -142,7 +142,7 @@ const getAllReports = async (
     params.push(branchId);
   }
 
-  query += ` ORDER BY brd.reported_by DESC`;
+  query += ` ORDER BY brd.created_on DESC`;
 
   const result = await getDb().query(query, params);
   return result.rows;
