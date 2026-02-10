@@ -542,6 +542,7 @@ const getAllMaintenanceSchedules = async (
             a.description as asset_description,
             at.text as asset_type_name,
             mt.text as maintenance_type_name,
+            mt.hours_required,
             v.vendor_name,
             -- Calculate days until due (if act_maint_st_date is in the future)
             CASE 
@@ -590,12 +591,14 @@ const getMaintenanceScheduleById = async (
             -- Get group name if this is a group maintenance
             ag.text as group_name,
             -- Get group asset count
-            (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count
+            (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
+            mt.hours_required
         FROM "tblAssetMaintSch" ams
         LEFT JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblWFAssetMaintSch_H" wfh ON ams.wfamsh_id = wfh.wfamsh_id AND wfh.org_id = ams.org_id
         LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
+        LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2
     `;
 
@@ -670,6 +673,8 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     technician_email,
     technician_phno,
     cost,
+    hours_spent,
+    maint_notes,
     changed_by,
     changed_on,
   } = updateData;
@@ -689,9 +694,11 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
             technician_email = COALESCE($8, technician_email),
             technician_phno = COALESCE($9, technician_phno),
             cost = COALESCE($10, cost),
-            changed_by = $11,
-            changed_on = $12
-        WHERE ams_id = $1 AND org_id = $13
+            hours_spent = COALESCE($11, hours_spent),
+            maint_notes = COALESCE($12, maint_notes),
+            changed_by = $13,
+            changed_on = $14
+        WHERE ams_id = $1 AND org_id = $15
         RETURNING *
     `;
 
@@ -706,6 +713,8 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     technician_email,
     technician_phno,
     cost,
+    hours_spent,
+    maint_notes,
     changed_by,
     changed_on,
     orgId,
