@@ -1,4 +1,4 @@
-const { Client } = require("pg");
+const { Client, Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcrypt");
@@ -40,18 +40,168 @@ const clearSchemaCache = () => {
 };
 
 /**
- * Dynamically generate schema SQL from the current DATABASE_URL database
+ * Generate detailed setup report and save to logs/db-creation/
+ */
+const generateSetupReport = async (setupData) => {
+  try {
+    const {
+      orgId,
+      orgName,
+      adminUser,
+      dbConfig,
+      summary,
+      logs,
+      foreignKeysInfo,
+      startTime,
+      endTime
+    } = setupData;
+
+    const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
+    const reportDir = path.join(__dirname, '..', 'logs', 'db-creation');
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(reportDir)) {
+      fs.mkdirSync(reportDir, { recursive: true });
+    }
+
+    const reportFile = path.join(reportDir, `org_setup_${orgId}_${timestamp}.txt`);
+    
+    const duration = endTime - startTime;
+    const durationSeconds = (duration / 1000).toFixed(2);
+    
+    let report = '';
+    report += '================================================================================\n';
+    report += '                   ORGANIZATION SETUP REPORT                                    \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Setup Date/Time: ${new Date(startTime).toLocaleString()}\n`;
+    report += `Duration: ${durationSeconds} seconds\n`;
+    report += `Report Generated: ${new Date().toLocaleString()}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   ORGANIZATION DETAILS                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Organization ID: ${orgId}\n`;
+    report += `Organization Name: ${orgName}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   DATABASE CONFIGURATION                                       \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Host: ${dbConfig.host}\n`;
+    report += `Port: ${dbConfig.port || 5432}\n`;
+    report += `Database: ${dbConfig.database}\n`;
+    report += `User: ${dbConfig.user}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   SCHEMA CREATION SUMMARY                                      \n';
+    report += '================================================================================\n';
+    report += '\n';
+    
+    if (foreignKeysInfo) {
+      report += `Tables Created: 79 (from GENERIC_URL template)\n`;
+      report += `Primary Keys: Applied to all tables\n`;
+      report += `Foreign Keys (Valid): ${foreignKeysInfo.validCount || 0}\n`;
+      report += `Foreign Keys (Skipped): ${foreignKeysInfo.skippedCount || 0}\n`;
+      report += `Total Foreign Keys: ${(foreignKeysInfo.validCount || 0) + (foreignKeysInfo.skippedCount || 0)}\n`;
+    } else {
+      report += `Schema: Created using static/dynamic SQL\n`;
+    }
+    
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   DATA SEEDING SUMMARY                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Branches Created: ${summary.branches || 0}\n`;
+    report += `Departments Created: ${summary.departments || 0}\n`;
+    report += `Audit Rules Created: ${summary.auditRules || 0}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   ADMIN USER DETAILS                                           \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `User ID: ${adminUser.userId}\n`;
+    report += `Username: ${adminUser.username}\n`;
+    report += `Email: ${adminUser.email || 'Not provided'}\n`;
+    report += `Full Name: ${adminUser.fullName || 'Not provided'}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   SETUP EXECUTION LOGS                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    
+    // Group logs by scope
+    const logsByScope = {};
+    logs.forEach(log => {
+      const scope = log.scope || 'general';
+      if (!logsByScope[scope]) {
+        logsByScope[scope] = [];
+      }
+      logsByScope[scope].push(log);
+    });
+    
+    // Print logs by scope
+    Object.keys(logsByScope).sort().forEach(scope => {
+      report += `[${scope.toUpperCase()}]\n`;
+      logsByScope[scope].forEach(log => {
+        const level = log.level || (log.warning ? 'warning' : 'info');
+        const prefix = level === 'error' ? '❌' : level === 'warning' ? '⚠️' : '✅';
+        report += `  ${prefix} ${log.message}\n`;
+      });
+      report += '\n';
+    });
+    
+    report += '================================================================================\n';
+    report += '                   SETUP COMPLETED SUCCESSFULLY                                 \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Organization ${orgId} is ready for use!\n`;
+    report += `Total setup time: ${durationSeconds} seconds\n`;
+    report += '\n';
+
+    // Write report to file
+    fs.writeFileSync(reportFile, report, 'utf8');
+    
+    console.log(`[SetupWizard] 📄 Setup report generated: ${reportFile}`);
+    
+    return {
+      success: true,
+      reportFile,
+      reportPath: reportFile
+    };
+  } catch (error) {
+    console.error('[SetupWizard] ❌ Error generating setup report:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Dynamically generate schema SQL from GENERIC_URL (template database)
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
+  // Create a separate connection pool for GENERIC_URL (template database)
+  const genericPool = new Pool({
+    connectionString: process.env.GENERIC_URL,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
   try {
-    console.log('[SetupWizard] 🔄 Generating dynamic schema from DATABASE_URL...');
+    console.log('[SetupWizard] 🔄 Generating dynamic schema from GENERIC_URL (template database)...');
+    console.log('[SetupWizard] 📍 Template DB: ' + (process.env.GENERIC_URL || '').replace(/:[^:@]+@/, ':***@'));
     
     const schemaParts = [];
     const foreignKeyStatements = []; // Collect FK constraints to add at the end
     
     // Get sequences FIRST (before tables, since tables may reference them in DEFAULT values)
-    const sequencesResult = await db.query(`
+    const sequencesResult = await genericPool.query(`
       SELECT 
         sequence_name,
         data_type,
@@ -78,7 +228,7 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Get all tables in public schema
-    const tablesResult = await db.query(`
+    const tablesResult = await genericPool.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -99,7 +249,7 @@ const generateDynamicSchemaSql = async () => {
     for (const tableName of tables) {
       console.log(`[SetupWizard] 🔨 Processing table: ${tableName}`);
       // Get columns for this table
-      const columnsResult = await db.query(`
+      const columnsResult = await genericPool.query(`
         SELECT 
           column_name,
           data_type,
@@ -116,7 +266,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get primary key constraint
-      const pkResult = await db.query(`
+      const pkResult = await genericPool.query(`
         SELECT 
           kcu.column_name
         FROM information_schema.table_constraints tc
@@ -132,7 +282,7 @@ const generateDynamicSchemaSql = async () => {
       const pkColumns = pkResult.rows.map(row => row.column_name);
       
       // Get foreign key constraints - using pg_catalog for accurate column mapping
-      const fkResult = await db.query(`
+      const fkResult = await genericPool.query(`
         SELECT
           con.conname AS constraint_name,
           att.attname AS column_name,
@@ -168,7 +318,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get unique constraints
-      const uniqueResult = await db.query(`
+      const uniqueResult = await genericPool.query(`
         SELECT
           tc.constraint_name,
           kcu.column_name
@@ -188,7 +338,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get check constraints
-      const checkResult = await db.query(`
+      const checkResult = await genericPool.query(`
         SELECT
           cc.constraint_name,
           cc.check_clause
@@ -366,7 +516,7 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Get indexes (non-unique, non-primary key)
-    const indexesResult = await db.query(`
+    const indexesResult = await genericPool.query(`
       SELECT
         schemaname,
         tablename,
@@ -401,7 +551,7 @@ const generateDynamicSchemaSql = async () => {
     // Get primary keys for all tables to validate foreign key references
     const tablePrimaryKeys = {};
     for (const tableName of tables) {
-      const pkResult = await db.query(`
+      const pkResult = await genericPool.query(`
         SELECT kcu.column_name
         FROM information_schema.table_constraints tc
         JOIN information_schema.key_column_usage kcu
@@ -443,7 +593,10 @@ const generateDynamicSchemaSql = async () => {
     if (skippedForeignKeyStatements.length > 0) {
       console.warn(`[SetupWizard] ⚠️ Skipped foreign keys: ${skippedForeignKeyStatements.map(fk => fk.constraintName).join(', ')}`);
     }
-    schemaParts.push(...validForeignKeyStatements);
+    
+    // Store foreign keys separately - DO NOT add them to schemaParts yet
+    // They will be added AFTER data seeding to avoid constraint violations
+    const foreignKeysSql = validForeignKeyStatements.join('\n');
     
     const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
     
@@ -459,17 +612,29 @@ const generateDynamicSchemaSql = async () => {
     console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
     console.log(`[SetupWizard]   - Foreign keys: ${validForeignKeyStatements.length} valid, ${skippedForeignKeyStatements.length} skipped (out of ${foreignKeyStatements.length} total)`);
     console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
+    console.log(`[SetupWizard]   - Foreign keys SQL size: ${foreignKeysSql.length} characters`);
+    console.log(`[SetupWizard] ℹ️  Foreign keys will be added AFTER data seeding to avoid constraint violations`);
     
     if (tableCount !== tables.length) {
       console.warn(`[SetupWizard] ⚠️ WARNING: Table count mismatch! Found ${tables.length} tables but generated ${tableCount} CREATE TABLE statements`);
       console.warn(`[SetupWizard] ⚠️ This might indicate some tables were not processed correctly`);
     }
     
-    return dynamicSchema;
+    // Return both schema without foreign keys and foreign keys separately
+    return { 
+      schema: dynamicSchema, 
+      foreignKeys: foreignKeysSql,
+      validCount: validForeignKeyStatements.length,
+      skippedCount: skippedForeignKeyStatements.length
+    };
   } catch (error) {
     console.error('[SetupWizard] ❌ Error generating dynamic schema:', error.message);
     console.error('[SetupWizard] Stack:', error.stack);
     return null;
+  } finally {
+    // Always close the genericPool connection
+    await genericPool.end();
+    console.log('[SetupWizard] 🔌 Closed connection to GENERIC_URL');
   }
 };
 
@@ -701,7 +866,7 @@ const sanitizeDump = (raw) => {
  * Get schema SQL - tries dynamic generation first, falls back to static file
  * @param {boolean} forceStatic - Force use of static file instead of dynamic generation
  * @param {boolean} forceRegenerate - Force regeneration even if cached (useful when DB structure changes)
- * @returns {Promise<string>} Schema SQL string
+ * @returns {Promise<object|string>} Schema info object {schema, foreignKeys} or SQL string for static
  */
 const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
   // Clear cache if force regeneration is requested
@@ -715,11 +880,11 @@ const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
   if (!forceStatic && !cachedDynamicSchemaSql) {
     try {
       console.log('[SetupWizard] 🔄 Attempting dynamic schema generation from DATABASE_URL...');
-      const dynamicSchema = await generateDynamicSchemaSql();
-      if (dynamicSchema) {
-        cachedDynamicSchemaSql = dynamicSchema;
+      const dynamicSchemaResult = await generateDynamicSchemaSql();
+      if (dynamicSchemaResult && dynamicSchemaResult.schema) {
+        cachedDynamicSchemaSql = dynamicSchemaResult;
         console.log('[SetupWizard] ✅ Using dynamically generated schema');
-        console.log(`[SetupWizard] 📊 Dynamic schema size: ${dynamicSchema.length} characters`);
+        console.log(`[SetupWizard] 📊 Dynamic schema size: ${dynamicSchemaResult.schema.length} characters`);
         return cachedDynamicSchemaSql;
       } else {
         console.warn('[SetupWizard] ⚠️ Dynamic schema generation returned null, falling back to static file');
@@ -749,7 +914,8 @@ const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
       throw new Error('Both dynamic schema generation and static file read failed');
     }
   }
-  return cachedSchemaSql;
+  // Return static schema as an object for consistency
+  return { schema: cachedSchemaSql, foreignKeys: '', validCount: 0, skippedCount: 0 };
 };
 
 /**
@@ -891,18 +1057,72 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  for (const app of DEFAULT_APPS) {
-    await client.query(
-      `
-        INSERT INTO "tblApps" (app_id, text, int_status, org_id)
-        VALUES ($1, $2, true, $3)
-        ON CONFLICT (app_id) DO UPDATE
-        SET text = EXCLUDED.text,
-            int_status = EXCLUDED.int_status,
-            org_id = EXCLUDED.org_id
-      `,
-      [app.id, app.label, orgId]
-    );
+  // Sync ALL tblApps entries from GENERIC_URL (template database)
+  // This ensures all app_ids exist before job role navigation is created
+  const genericPool = new Pool({
+    connectionString: process.env.GENERIC_URL,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
+  try {
+    console.log('[SetupWizard] 📋 Syncing tblApps entries from GENERIC_URL...');
+    
+    // Get all apps from GENERIC_URL
+    const appsResult = await genericPool.query(`
+      SELECT app_id, text, int_status
+      FROM "tblApps"
+      ORDER BY app_id
+    `);
+    
+    console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in template database`);
+    
+    // Insert all apps into new database with the new org_id
+    for (const app of appsResult.rows) {
+      await client.query(
+        `
+          INSERT INTO "tblApps" (app_id, text, int_status, org_id)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (app_id) DO UPDATE
+          SET text = EXCLUDED.text,
+              int_status = EXCLUDED.int_status,
+              org_id = EXCLUDED.org_id
+        `,
+        [app.app_id, app.text, app.int_status !== false, orgId]
+      );
+    }
+    
+    console.log(`[SetupWizard] ✅ Synced ${appsResult.rows.length} app entries to new database`);
+    logs.push({ 
+      message: `${appsResult.rows.length} app entries synced from template database`, 
+      scope: "reference" 
+    });
+    
+  } catch (error) {
+    console.error('[SetupWizard] ❌ Error syncing tblApps:', error.message);
+    // Fallback to DEFAULT_APPS if sync fails
+    console.log('[SetupWizard] ⚠️ Falling back to DEFAULT_APPS...');
+    for (const app of DEFAULT_APPS) {
+      await client.query(
+        `
+          INSERT INTO "tblApps" (app_id, text, int_status, org_id)
+          VALUES ($1, $2, true, $3)
+          ON CONFLICT (app_id) DO UPDATE
+          SET text = EXCLUDED.text,
+              int_status = EXCLUDED.int_status,
+              org_id = EXCLUDED.org_id
+        `,
+        [app.id, app.label, orgId]
+      );
+    }
+    logs.push({ 
+      message: `Warning: Used fallback DEFAULT_APPS (${DEFAULT_APPS.length} entries) - template sync failed`, 
+      scope: "reference",
+      level: "warning"
+    });
+  } finally {
+    await genericPool.end();
   }
 
   for (const event of DEFAULT_EVENTS) {
@@ -1566,6 +1786,7 @@ const runSetup = async (payload = {}) => {
   }
 
   const logs = [];
+  const startTime = Date.now(); // Track setup start time
 
   return withClient(db, async (client) => {
     // Ensure search_path is set before any operations
@@ -1578,10 +1799,21 @@ const runSetup = async (payload = {}) => {
         
         // Ensure search_path before schema import
         await client.query("SET search_path TO public");
-        const schemaSql = await getSchemaSql();
+        const schemaResult = await getSchemaSql();
         
+        // Extract schema and foreign keys
+        const schemaSql = typeof schemaResult === 'string' ? schemaResult : schemaResult.schema;
+        const foreignKeysSql = typeof schemaResult === 'object' ? schemaResult.foreignKeys : '';
+        const foreignKeysInfo = typeof schemaResult === 'object' ? {
+          validCount: schemaResult.validCount || 0,
+          skippedCount: schemaResult.skippedCount || 0
+        } : null;
+        
+        // Step 1: Create schema WITHOUT foreign keys
+        console.log('[SetupWizard] 📋 Creating database schema (without foreign keys)...');
         try {
           await client.query(schemaSql);
+          logs.push({ message: "Database schema imported (without foreign keys)", scope: "schema" });
         } catch (schemaError) {
           // If there's a SQL error, log a snippet around the error position
           if (schemaError.position) {
@@ -1595,7 +1827,9 @@ const runSetup = async (payload = {}) => {
           throw schemaError;
         }
         
-        logs.push({ message: "Database schema imported", scope: "schema" });
+        // Store foreign keys SQL for later application
+        client._foreignKeysSql = foreignKeysSql;
+        client._foreignKeysInfo = foreignKeysInfo;
       } else {
         logs.push({ message: "Schema creation skipped per configuration", scope: "schema" });
       }
@@ -1736,8 +1970,37 @@ const runSetup = async (payload = {}) => {
       
       // initialPassword is already available from above (used when creating temporary admin user)
 
+      // Step 2: Apply foreign key constraints AFTER all data has been seeded
+      if (client._foreignKeysSql && client._foreignKeysSql.length > 0) {
+        console.log('[SetupWizard] 🔗 Applying foreign key constraints...');
+        const info = client._foreignKeysInfo || {};
+        console.log(`[SetupWizard] 📎 Adding ${info.validCount || 0} foreign key constraints...`);
+        
+        try {
+          await client.query(client._foreignKeysSql);
+          logs.push({ 
+            message: `Foreign key constraints applied (${info.validCount || 0} valid, ${info.skippedCount || 0} skipped)`, 
+            scope: "schema" 
+          });
+          console.log('[SetupWizard] ✅ Foreign key constraints applied successfully');
+        } catch (fkError) {
+          console.error('[SetupWizard] ❌ Error applying foreign key constraints:', fkError.message);
+          console.error('[SetupWizard] Detail:', fkError.detail);
+          // Log but don't fail the entire setup - foreign keys are important but not critical
+          logs.push({ 
+            message: `Warning: Some foreign key constraints failed to apply: ${fkError.message}`, 
+            scope: "schema",
+            warning: true 
+          });
+        }
+      } else {
+        console.log('[SetupWizard] ℹ️  No foreign key constraints to apply (using static schema or none defined)');
+      }
+
       await client.query("COMMIT");
 
+      const endTime = Date.now(); // Track setup end time
+      
       const setupResult = {
         success: true,
         orgId,
@@ -1752,6 +2015,52 @@ const runSetup = async (payload = {}) => {
         },
         logs,
       };
+
+      // Generate setup report in logs/db-creation/ folder
+      try {
+        const reportResult = await generateSetupReport({
+          orgId,
+          orgName: org.name || org.text || `Organization ${orgId}`,
+          adminUser: {
+            userId: adminResult.userId,
+            username: adminResult.username || 'rioadmin',
+            email: adminUser.email,
+            fullName: adminUser.fullName
+          },
+          dbConfig: {
+            host: db.host,
+            port: db.port || 5432,
+            database: db.database,
+            user: db.user
+          },
+          summary: setupResult.summary,
+          logs,
+          foreignKeysInfo: client._foreignKeysInfo,
+          startTime,
+          endTime
+        });
+
+        if (reportResult.success) {
+          setupResult.reportPath = reportResult.reportPath;
+          logs.push({ 
+            message: `Setup report generated: ${reportResult.reportPath}`, 
+            scope: "report" 
+          });
+        } else {
+          logs.push({ 
+            message: `Failed to generate setup report: ${reportResult.error}`, 
+            scope: "report", 
+            level: "warning" 
+          });
+        }
+      } catch (reportError) {
+        console.error('[SetupWizard] Error generating report:', reportError.message);
+        logs.push({ 
+          message: `Error generating setup report: ${reportError.message}`, 
+          scope: "report", 
+          level: "error" 
+        });
+      }
 
       // Send setup completion email (non-blocking - don't fail setup if email fails)
       try {

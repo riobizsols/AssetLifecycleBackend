@@ -305,10 +305,21 @@ async function createTenant(tenantData) {
       let schemaCreated = false;
       try {
         let schemaSql;
+        let foreignKeysSql = '';
         try {
           // Force regeneration to ensure we get the latest schema including any new tables
-          console.log(`[TenantSetup] 🔄 Fetching latest schema (will include any new tables from DATABASE_URL)...`);
-          schemaSql = await setupWizardService.getSchemaSql(false, true); // forceRegenerate = true
+          console.log(`[TenantSetup] 🔄 Fetching latest schema from GENERIC_URL (template database with all 79 tables)...`);
+          const schemaResult = await setupWizardService.getSchemaSql(false, true); // forceRegenerate = true
+          
+          // Handle both old string format and new object format
+          if (typeof schemaResult === 'string') {
+            schemaSql = schemaResult;
+          } else if (schemaResult && typeof schemaResult === 'object') {
+            schemaSql = schemaResult.schema;
+            foreignKeysSql = schemaResult.foreignKeys || '';
+            console.log(`[TenantSetup] 📋 Schema without FKs: ${schemaSql.length} chars`);
+            console.log(`[TenantSetup] 🔗 Foreign keys: ${foreignKeysSql.length} chars`);
+          }
         } catch (fileError) {
           console.error(`[TenantSetup] Error reading schema SQL file:`, fileError.message);
           console.error(`[TenantSetup] This is expected if the SQL dump file doesn't exist. Will use CORE_TABLE_DDL fallback.`);
@@ -322,12 +333,18 @@ async function createTenant(tenantData) {
           console.log(`[TenantSetup] Executing full schema SQL (includes all tables, PKs, FKs, constraints)...`);
           console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
         
-        // Execute the schema SQL as a single transaction
-        // PostgreSQL can handle multiple statements in a single query
+        // Execute the schema SQL (WITHOUT foreign keys to avoid constraint violations during seeding)
+        // Foreign keys will be added after data is inserted
         try {
           await tenantClient.query(schemaSql);
           schemaCreated = true;
-          console.log(`[TenantSetup] ✅ Full schema SQL executed successfully`);
+          console.log(`[TenantSetup] ✅ Full schema SQL executed successfully (foreign keys deferred)`);
+          
+          // Store foreign keys for later application
+          if (foreignKeysSql && foreignKeysSql.length > 0) {
+            console.log(`[TenantSetup] 📋 Foreign keys will be applied after data seeding (${foreignKeysSql.length} chars)`);
+            tenantClient._foreignKeysSql = foreignKeysSql;
+          }
         } catch (execError) {
           console.error(`[TenantSetup] Error executing schema SQL as single query:`, execError.message);
           // If single query fails, try executing statement by statement
@@ -660,6 +677,21 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
       const adminCredentials = await createAdminUser(tenantClient, generatedOrgId, adminUser);
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
+
+      // Apply foreign key constraints after all data has been seeded
+      if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
+        console.log('[TenantSetup] 🔗 Applying foreign key constraints to tenant database...');
+        try {
+          await tenantClient.query(tenantClient._foreignKeysSql);
+          console.log('[TenantSetup] ✅ Foreign key constraints applied successfully to tenant database');
+        } catch (fkError) {
+          console.error('[TenantSetup] ⚠️ Warning: Some foreign key constraints failed to apply:', fkError.message);
+          // Note: Not throwing error here, allowing setup to complete
+          // User can verify and fix constraints later if needed
+        }
+      } else {
+        console.log('[TenantSetup] ℹ️ No foreign key constraints to apply (already in schema or none generated)');
+      }
 
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
       

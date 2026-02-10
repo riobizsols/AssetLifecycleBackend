@@ -86,7 +86,7 @@ class MaintenanceFrequencyController {
   // Create maintenance frequency
   static async createMaintenanceFrequency(req, res) {
     try {
-      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id } = req.body;
+      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
       const orgId = req.user.org_id;
 
       if (!asset_type_id) {
@@ -96,18 +96,24 @@ class MaintenanceFrequencyController {
         });
       }
 
-      if (!frequency || isNaN(frequency) || frequency <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Valid frequency is required'
-        });
-      }
+      // is_recurring defaults to true if not provided
+      const isRecurring = is_recurring !== undefined ? Boolean(is_recurring) : true;
 
-      if (!uom || !uom.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Unit of Measure (UOM) is required'
-        });
+      // Validate required fields for recurring maintenance
+      if (isRecurring) {
+        if (!frequency || isNaN(frequency) || frequency <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Valid frequency is required for recurring maintenance'
+          });
+        }
+
+        if (!uom || !uom.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Unit of Measure (UOM) is required for recurring maintenance'
+          });
+        }
       }
 
       if (!maintained_by) {
@@ -124,17 +130,18 @@ class MaintenanceFrequencyController {
         });
       }
 
-      console.log(`Creating maintenance frequency for asset type: ${asset_type_id}`);
+      console.log(`Creating ${isRecurring ? 'recurring' : 'on-demand'} maintenance frequency for asset type: ${asset_type_id}`);
       console.log(`UOM received:`, uom, `Type:`, typeof uom);
 
       const newFrequency = await MaintenanceFrequencyModel.createMaintenanceFrequency(
         asset_type_id,
-        parseInt(frequency),
-        uom ? uom.toString().trim() : '',
-        text?.trim(),
+        isRecurring ? parseInt(frequency) : null,
+        isRecurring && uom ? uom.toString().trim() : null,
+        text?.trim() || (isRecurring ? null : 'On Demand'),
         maintained_by,
         maint_type_id,
-        orgId
+        orgId,
+        isRecurring
       );
       
       console.log(`Successfully created maintenance frequency:`, newFrequency);
@@ -142,7 +149,7 @@ class MaintenanceFrequencyController {
       res.status(201).json({
         success: true,
         data: newFrequency,
-        message: 'Maintenance frequency created successfully'
+        message: `${isRecurring ? 'Recurring' : 'On-demand'} maintenance frequency created successfully`
       });
     } catch (error) {
       console.error('Error in createMaintenanceFrequency:', error);
@@ -158,21 +165,27 @@ class MaintenanceFrequencyController {
   static async updateMaintenanceFrequency(req, res) {
     try {
       const { id } = req.params;
-      const { frequency, uom, text, maintained_by, maint_type_id } = req.body;
+      const { frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
       const orgId = req.user.org_id;
 
-      if (!frequency || isNaN(frequency) || frequency <= 0) {
-        return res.status(400).json({
-          success: false,
-          message: 'Valid frequency is required'
-        });
-      }
+      // is_recurring defaults to true if not provided
+      const isRecurring = is_recurring !== undefined ? Boolean(is_recurring) : true;
 
-      if (!uom || !uom.trim()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Unit of Measure (UOM) is required'
-        });
+      // Validate required fields for recurring maintenance
+      if (isRecurring) {
+        if (!frequency || isNaN(frequency) || frequency <= 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Valid frequency is required for recurring maintenance'
+          });
+        }
+
+        if (!uom || !uom.trim()) {
+          return res.status(400).json({
+            success: false,
+            message: 'Unit of Measure (UOM) is required for recurring maintenance'
+          });
+        }
       }
 
       if (!maintained_by) {
@@ -189,16 +202,17 @@ class MaintenanceFrequencyController {
         });
       }
 
-      console.log(`Updating maintenance frequency ${id}`);
+      console.log(`Updating maintenance frequency ${id} (${isRecurring ? 'recurring' : 'on-demand'})`);
 
       const updatedFrequency = await MaintenanceFrequencyModel.updateMaintenanceFrequency(
         id,
-        parseInt(frequency),
-        uom.trim(),
-        text?.trim(),
+        isRecurring ? parseInt(frequency) : null,
+        isRecurring && uom ? uom.trim() : null,
+        text?.trim() || (isRecurring ? null : 'On Demand'),
         maintained_by,
         maint_type_id,
-        orgId
+        orgId,
+        isRecurring
       );
       
       if (!updatedFrequency) {
@@ -211,7 +225,7 @@ class MaintenanceFrequencyController {
       res.json({
         success: true,
         data: updatedFrequency,
-        message: 'Maintenance frequency updated successfully'
+        message: `${isRecurring ? 'Recurring' : 'On-demand'} maintenance frequency updated successfully`
       });
     } catch (error) {
       console.error('Error in updateMaintenanceFrequency:', error);
