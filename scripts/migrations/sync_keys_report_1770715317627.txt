@@ -1,0 +1,229 @@
+====================================================================================================
+DATABASE KEY SYNCHRONIZATION COMPREHENSIVE REPORT
+====================================================================================================
+Generated: 2026-02-10T09:21:57.627Z
+Source Database: GENERIC_URL
+Target Database: DATABASE_URL
+====================================================================================================
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Tables Created: 53
+Tables Failed to Create: 105
+
+Total Missing Primary Keys Found: 0
+Total Missing Foreign Keys Found: 0
+Foreign Keys with Orphaned Records: 0
+Validation Errors (Cannot be Applied): 0
+
+APPLICATION RESULTS:
+  ✅ Primary Keys Applied Successfully: 0
+  ❌ Primary Keys Failed: 0
+  ✅ Foreign Keys Applied Successfully: 0
+  ❌ Foreign Keys Failed: 0
+  📊 Total Relationships Set: 0
+  ⚠️  Total Relationships Not Set: 0
+
+====================================================================================================
+
+SECTION 0: TABLE CREATION
+----------------------------------------------------------------------------------------------------
+Successfully Created Tables: 53
+1. tblATBRReasonCodes
+2. tblATDocs
+3. tblATMaintCert
+4. tblATMaintCheckList
+5. tblApps
+6. tblAssetAssignments
+7. tblAssetBRDet
+8. tblAssetDocs
+9. tblAssetGroupDocs
+10. tblAssetGroup_D
+11. tblAssetGroup_H
+12. tblAssetMaintDocs
+13. tblAssetMaintSch
+14. tblAssetPropValues
+15. tblAssetScrap
+16. tblAssetScrapDet
+17. tblAssetTypeProps
+18. tblAuditLogConfig
+19. tblAuditLogs
+20. tblBranchCostCenter
+21. tblColumnAccessConfig
+22. tblCostCenter
+23. tblDeptAdmins
+24. tblDocTypeObjects
+25. tblEmpTechCert
+26. tblEvents
+27. tblFCMTokens
+28. tblMaintStatus
+29. tblMaintTypes
+30. tblNotificationHistory
+31. tblNotificationPreferences
+32. tblOrgSettings
+33. tblPrintSerialNoQueue
+34. tblProdServs
+35. tblProps
+36. tblRioAdmin
+37. tblScrapAssetHist
+38. tblScrapSalesDocs
+39. tblScrapSales_H
+40. tblTechCert
+41. tblUom
+42. tblUserJobRoles
+43. tblVendorDocs
+44. tblVendorProdService
+45. tblVendorRenewal
+46. tblWFATSeqs
+47. tblWFAssetMaintHist
+48. tblWFAssetMaintSch_H
+49. tblWFJobRole
+50. tblWFScrapHist
+51. tblWFScrap_H
+52. tblWFSteps
+53. tblsla_desc
+
+Failed to Create Tables: 105
+1. tblATMaintFreq
+2. tblAssetDepHist
+3. tblAssetPropListValues
+4. tblAssetTypes
+5. tblAssetUsageReg
+6. tblAssets
+7. tblBranches
+8. tblDepartments
+9. tblDepreciationSettings
+10. tblDeptAssetTypes
+11. tblEmployees
+12. tblIDSequences
+13. tblJobRoleNav
+14. tblJobRoles
+15. tblOrgs
+16. tblScrapSales_D
+17. tblStatusCodes
+18. tblTableFilterColumns
+19. tblTechnicalLogConfig
+20. tblUsers
+21. tblVendorSLAs
+22. tblVendors
+23. tblWFAssetMaintSch_D
+24. tblWFScrapSeq
+25. tblWFScrap_D
+26. tblvendorslarecs
+27. tblATBRReasonCodes
+28. tblATDocs
+29. tblATMaintCert
+30. tblATMaintCheckList
+31. tblATMaintFreq
+32. tblApps
+33. tblAssetAssignments
+34. tblAssetBRDet
+35. tblAssetDepHist
+36. tblAssetDocs
+37. tblAssetGroupDocs
+38. tblAssetGroup_D
+39. tblAssetGroup_H
+40. tblAssetMaintDocs
+41. tblAssetMaintSch
+42. tblAssetPropListValues
+43. tblAssetPropValues
+44. tblAssetScrap
+45. tblAssetScrapDet
+46. tblAssetTypeProps
+47. tblAssetTypes
+48. tblAssetUsageReg
+49. tblAssets
+50. tblAuditLogConfig
+51. tblAuditLogs
+52. tblBranchCostCenter
+53. tblBranches
+54. tblColumnAccessConfig
+55. tblCostCenter
+56. tblDepartments
+57. tblDepreciationSettings
+58. tblDeptAdmins
+59. tblDeptAssetTypes
+60. tblDocTypeObjects
+61. tblEmpTechCert
+62. tblEmployees
+63. tblEvents
+64. tblFCMTokens
+65. tblIDSequences
+66. tblJobRoleNav
+67. tblJobRoles
+68. tblMaintStatus
+69. tblMaintTypes
+70. tblNotificationHistory
+71. tblNotificationPreferences
+72. tblOrgSettings
+73. tblOrgs
+74. tblPrintSerialNoQueue
+75. tblProdServs
+76. tblProps
+77. tblRioAdmin
+78. tblScrapAssetHist
+79. tblScrapSalesDocs
+80. tblScrapSales_D
+81. tblScrapSales_H
+82. tblStatusCodes
+83. tblTableFilterColumns
+84. tblTechCert
+85. tblTechnicalLogConfig
+86. tblUom
+87. tblUserJobRoles
+88. tblUsers
+89. tblVendorDocs
+90. tblVendorProdService
+91. tblVendorRenewal
+92. tblVendorSLAs
+93. tblVendors
+94. tblWFATSeqs
+95. tblWFAssetMaintHist
+96. tblWFAssetMaintSch_D
+97. tblWFAssetMaintSch_H
+98. tblWFJobRole
+99. tblWFScrapHist
+100. tblWFScrapSeq
+101. tblWFScrap_D
+102. tblWFScrap_H
+103. tblWFSteps
+104. tblsla_desc
+105. tblvendorslarecs
+
+
+====================================================================================================
+
+SECTION 6: STATISTICS
+----------------------------------------------------------------------------------------------------
+Primary Keys:
+  - Found Missing: 0
+  - Successfully Applied: 0
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Foreign Keys:
+  - Found Missing: 0
+  - With Orphaned Records: 0
+  - Successfully Applied: 0
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Orphaned Records:
+  - Foreign Keys with Orphaned Records: 0
+  - Successfully Fixed: 0
+  - Failed to Fix: 0
+  - Total Records Fixed: 0
+
+Overall:
+  - Total Relationships Set: 0
+  - Total Relationships Not Set: 0
+  - Success Rate: 0%
+
+SECTION 7: RECOMMENDATIONS
+----------------------------------------------------------------------------------------------------
+✅ DATABASE IS IN SYNC:
+   No missing constraints found. Your database already has all required keys.
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

@@ -1111,15 +1111,12 @@ const createAsset = async (assetData) => {
     }
 
     // Use the serial number as provided and increment the sequence in database
-    let finalSerialNumber = serial_number;
+    // Normalize empty strings to null for database storage
+    let finalSerialNumber = serial_number && serial_number.trim() !== '' ? serial_number : null;
     
-    console.log(`🔢 Using provided serial number: ${finalSerialNumber}`);
+    console.log(`🔢 Using provided serial number: ${finalSerialNumber || 'None (optional)'}`);
     
-    // Validate that serial number is provided
-    if (!finalSerialNumber || finalSerialNumber === '') {
-      throw new Error('Serial number is required. Please generate a serial number first.');
-    }
-    
+    // Serial number is optional - only update sequence if provided
     // Extract the last 5 digits from the serial number to update last_gen_seq_no
     if (finalSerialNumber && finalSerialNumber.length >= 5) {
       const last5Digits = finalSerialNumber.slice(-5);
@@ -1269,10 +1266,12 @@ const getAssetsByUserContext = async (orgId, branchId = null, dbConnection = nul
       a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
       a.created_by, a.created_on, a.changed_by, a.changed_on,
       b.text as branch_name,
-      at.text as asset_type_name
+      at.text as asset_type_name,
+      ag.text as group_name
     FROM "tblAssets" a
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
     WHERE a.org_id = $1
   `;
   
@@ -1303,10 +1302,12 @@ const getAssetsByUserContextWithFilters = async (userOrgId, userBranchId, additi
       a.warranty_period, a.parent_asset_id, a.group_id, a.org_id, 
       a.created_by, a.created_on, a.changed_by, a.changed_on,
       b.text as branch_name,
-      at.text as asset_type_name
+      at.text as asset_type_name,
+      ag.text as group_name
     FROM "tblAssets" a
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
     WHERE a.org_id = $1
   `;
   

@@ -17,6 +17,12 @@ router.get('/approvals', controller.getScrapMaintenanceApprovals);
 // Get workflow detail
 router.get('/workflow/:id', controller.getScrapApprovalDetail);
 
+// Get workflow history
+router.get('/workflow-history/:wfscrapHId', controller.getWorkflowHistory);
+
+// Get scrap asset history (query params: asset_id, ssh_id, scrap_type)
+router.get('/asset-history', controller.getScrapAssetHistory);
+
 // Approve / Reject
 router.post('/:id/approve', controller.approveScrap);
 router.post('/:id/reject', controller.rejectScrap);
