@@ -1,4 +1,5 @@
 const MaintenanceFrequencyModel = require('../models/maintenanceFrequencyModel');
+const AssetTypeModel = require('../models/assetTypeModel');
 
 class MaintenanceFrequencyController {
   // Get all maintenance frequencies
@@ -86,8 +87,9 @@ class MaintenanceFrequencyController {
   // Create maintenance frequency
   static async createMaintenanceFrequency(req, res) {
     try {
-      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id } = req.body;
+      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type } = req.body;
       const orgId = req.user.org_id;
+      const changedBy = req.user.user_id;
 
       if (!asset_type_id) {
         return res.status(400).json({
@@ -136,6 +138,18 @@ class MaintenanceFrequencyController {
         maint_type_id,
         orgId
       );
+
+      try {
+        await AssetTypeModel.updateAssetTypeMaintenance(
+          asset_type_id,
+          maint_type_id,
+          maint_lead_type || null,
+          orgId,
+          changedBy
+        );
+      } catch (updateError) {
+        console.error('Failed to update asset type maintenance settings:', updateError);
+      }
       
       console.log(`Successfully created maintenance frequency:`, newFrequency);
 

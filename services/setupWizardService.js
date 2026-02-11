@@ -1466,6 +1466,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN020', orgId, 1, 'JR001', null, 'ADMINSETTINGS', 'Settings', null, 20, 'A', true, 'D'],
     ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
     ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
+    ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
     ['JRN022', orgId, 1, 'JR001', null, 'MASTERDATA', 'Master Data', null, 22, 'A', true, 'D'],
     ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
     ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
@@ -1482,6 +1483,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN035', orgId, 1, 'JR001', null, 'SCRAPSALES', 'Scrap Sales', null, 35, 'A', false, 'D'],
     ['JRN036', orgId, 1, 'JR001', null, 'SCRAPASSETS', 'Scrap Assets', null, 36, 'A', false, 'D'],
     ['JRN037', orgId, 1, 'JR001', null, 'GROUPASSET', 'Asset Groups', null, 37, 'A', false, 'D'],
+    ['JRN040', orgId, 1, 'JR001', null, 'EMPLOYEE TECH CERTIFICATION', 'Employee Tech Certification', null, 40, 'A', false, 'D'],
+    ['JRN041', orgId, 1, 'JR001', null, 'HR/MANAGERAPPROVAL', 'HR/Manager Approval', null, 41, 'A', false, 'D'],
   ];
 
   for (const entry of navEntries) {
