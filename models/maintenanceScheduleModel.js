@@ -272,7 +272,7 @@ const getNextWFAMSHId = async () => {
   const query = `
         SELECT "wfamsh_id" 
         FROM "tblWFAssetMaintSch_H" 
-        ORDER BY CAST(SUBSTRING("wfamsh_id" FROM '\\d+$') AS INTEGER) DESC 
+        ORDER BY CAST(SUBSTRING("wfamsh_id" FROM '[0-9]+$') AS INTEGER) DESC 
         LIMIT 1
     `;
 
@@ -285,9 +285,10 @@ const getNextWFAMSHId = async () => {
   }
 
   const lastId = result.rows[0].wfamsh_id;
-  const match = lastId.match(/\d+/);
+  const match = lastId.match(/[0-9]+/g);
   if (match) {
-    const nextNum = parseInt(match[0]) + 1;
+    const lastPart = match[match.length - 1];
+    const nextNum = parseInt(lastPart) + 1;
     return `WFAMSH_${String(nextNum).padStart(2, "0")}`;
   }
 
@@ -299,7 +300,7 @@ const getNextWFAMSDId = async () => {
   const query = `
         SELECT wfamsd_id 
         FROM "tblWFAssetMaintSch_D" 
-        ORDER BY CAST(SUBSTRING(wfamsd_id FROM '\\d+$') AS INTEGER) DESC 
+        ORDER BY CAST(SUBSTRING(wfamsd_id FROM '[0-9]+$') AS INTEGER) DESC 
         LIMIT 1
     `;
 
@@ -312,9 +313,10 @@ const getNextWFAMSDId = async () => {
   }
 
   const lastId = result.rows[0].wfamsd_id;
-  const match = lastId.match(/\d+/);
+  const match = lastId.match(/[0-9]+/g);
   if (match) {
-    const nextNum = parseInt(match[0]) + 1;
+    const lastPart = match[match.length - 1];
+    const nextNum = parseInt(lastPart) + 1;
     return `WFAMSD_${String(nextNum).padStart(2, "0")}`;
   }
 
@@ -565,7 +567,7 @@ const getAllMaintenanceSchedules = async (
     params.push(branchId);
   }
 
-  query += ` ORDER BY ams.created_on DESC`;
+  query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);

@@ -603,16 +603,13 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
         console.error('Failed to send notification to next approver:', notifyErr);
       }
     } else {
-      // No next user - check if all users have approved
+      // No next user - check if all workflow steps have been approved
+      // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
       const allUsersApprovedQuery = `
-        SELECT COUNT(*) as total_users,
-               COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users
-        FROM (
-          SELECT DISTINCT wfd.user_id, 
-                 FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1
-        ) latest_status
+        SELECT COUNT(DISTINCT wfd.sequence) as total_users,
+               COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1
       `;
       
       const approvalCheckResult = await getDb().query(allUsersApprovedQuery, [currentUserStep.wfamsh_id]);
@@ -897,17 +894,14 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       }
     }
     
-    // Check if all users have rejected
+    // Check if all workflow steps have been rejected
+    // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
     const rejectionCheckQuery = `
       SELECT 
-        COUNT(*) as total_users,
-        COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users
-      FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1
-      ) latest_status
+        COUNT(DISTINCT wfd.sequence) as total_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1
     `;
     
     const rejectionCheckResult = await getDb().query(rejectionCheckQuery, [currentUserStep.wfamsh_id]);
@@ -921,19 +915,16 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
     } else {
       // Check if this rejection creates a deadlock (no more path forward)
+      // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
       const deadlockCheckQuery = `
         SELECT 
-          COUNT(*) as total_users,
-          COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-          COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-          COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-        FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
+          COUNT(DISTINCT wfd.sequence) as total_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'AP' THEN wfd.sequence END) as pending_users
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1
-      ) latest_status
-    `;
+      `;
     
     const deadlockResult = await getDb().query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
     const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
@@ -1128,25 +1119,22 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
 // Helper function to check and update workflow status
 const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   try {
-    // Get current status of all users in the workflow
+    // Get current status of all workflow steps (sequences)
+    // For ROLE-BASED workflows where user_id is NULL, we count by sequence instead
     const statusQuery = `
       SELECT 
-        COUNT(*) as total_users,
-        COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-        COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-        COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-      FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1
-      ) latest_status
+        COUNT(DISTINCT wfd.sequence) as total_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'AP' THEN wfd.sequence END) as pending_users
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1
     `;
     
     const statusResult = await getDb().query(statusQuery, [wfamshId]);
     const { total_users, approved_users, rejected_users, pending_users } = statusResult.rows[0];
     
-    console.log(`Workflow status check - Total: ${total_users}, Approved: ${approved_users}, Rejected: ${rejected_users}, Pending: ${pending_users}`);
+    console.log(`Workflow status check (by sequence) - Total steps: ${total_users}, Approved: ${approved_users}, Rejected: ${rejected_users}, Pending: ${pending_users}`);
     
          // Check for completion (all users approved)
      if (parseInt(approved_users) === parseInt(total_users)) {
@@ -1196,12 +1184,18 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
            
            if (breakdownId) {
              // Strict Status Workflow: Status stays as 'IN' (Initiated) during approval closure.
+             // However, if the status is 'Reopened', we keep it as 'Reopened' to preserve history.
              // It will only change to 'CO' (Completed) when the technician finishes work in the Maintenance List.
              await getDb().query(
-               `UPDATE "tblAssetBRDet" SET status = 'IN' WHERE abr_id = $1 AND org_id = $2`,
+               `UPDATE "tblAssetBRDet" 
+                SET status = CASE 
+                  WHEN status = 'Reopened' THEN 'Reopened' 
+                  ELSE 'IN' 
+                END 
+                WHERE abr_id = $1 AND org_id = $2`,
                [breakdownId, orgId]
              );
-             console.log(`✅ Linked breakdown report ${breakdownId} status set to IN (Approval Cycle Complete)`);
+             console.log(`✅ Linked breakdown report ${breakdownId} status synced (IN or Reopened)`);
            }
          }
        } catch (brErr) {
@@ -1412,45 +1406,53 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      console.log('User roles:', userRoleIds);
      
+     // Check for System Administrator role (JR001) or other super access
+     const isSystemAdmin = userRoleIds.includes('JR001');
+     if (isSystemAdmin) {
+       console.log('User has System Administrator role (JR001) - granting super access for this query');
+       hasSuperAccess = true;
+     }
+     
      // Build parameters array dynamically
      const params = [orgId];
      let paramIndex = 2;
      
      // ROLE-BASED: Query workflows where user's roles match workflow steps AND maintenance belongs to user's org/branch_code
      let query = `
-       SELECT DISTINCT
-         wfh.wfamsh_id,
-         wfh.asset_id,
-         wfh.pl_sch_date as scheduled_date,
-         wfh.act_sch_date,
-         wfh.status as header_status,
-         wfh.created_on as maintenance_created_on,
-         wfh.changed_on as maintenance_changed_on,
-         wfh.branch_code,
-         a.asset_type_id,
-         at.text as asset_type_name,
-         a.serial_number,
-         a.description as asset_description,
-         v.vendor_name,
-         v.vendor_name as vendor,
-         d.text as department_name,
-         jr.text as job_role_name,
-         mt.text as maintenance_type_name,
-         mt.text as maintenance_type,
-         -- Calculate days until due
-         EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
-         -- Calculate days until cutoff
-         EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(NULLIF(at.maint_lead_type, '') AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
-       FROM "tblWFAssetMaintSch_H" wfh
-       INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
-       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
-       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
-       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-       LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
-       WHERE wfd.org_id = $1 
-         AND a.org_id = $1
+       SELECT * FROM (
+         SELECT DISTINCT ON (wfh.wfamsh_id)
+           wfh.wfamsh_id,
+           wfh.asset_id,
+           wfh.pl_sch_date as scheduled_date,
+           wfh.act_sch_date,
+           wfh.status as header_status,
+           wfh.created_on as maintenance_created_on,
+           wfh.changed_on as maintenance_changed_on,
+           wfh.branch_code,
+           a.asset_type_id,
+           at.text as asset_type_name,
+           a.serial_number,
+           a.description as asset_description,
+           v.vendor_name,
+           v.vendor_name as vendor,
+           d.text as department_name,
+           jr.text as job_role_name,
+           mt.text as maintenance_type_name,
+           mt.text as maintenance_type,
+           -- Calculate days until due
+           EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+           -- Calculate days until cutoff
+           EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(NULLIF(at.maint_lead_type, '') AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+         FROM "tblWFAssetMaintSch_H" wfh
+         INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
+         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+         LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
+         LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+         LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
+         WHERE wfd.org_id = $1 
+           AND a.org_id = $1
      `;
      
      // Apply branch_code filter only if user doesn't have super access
@@ -1460,13 +1462,23 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        paramIndex++;
      }
      
-     query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
-         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
+     // Only apply role filter if user doesn't have super access
+     if (!hasSuperAccess) {
+       query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])`;
+       params.push(userRoleIds);
+       paramIndex++;
+     }
+
+     query += ` AND (
+           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA')) OR 
+           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA'))
+         )
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
          AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
-       ORDER BY wfh.created_on DESC
+       ORDER BY wfh.wfamsh_id DESC, (CASE WHEN wfd.status = 'AP' THEN 0 ELSE 1 END), wfd.sequence DESC
+       ) sub
+       ORDER BY maintenance_created_on DESC, wfamsh_id DESC
      `;
-     params.push(userRoleIds);
 
      const result = await getDb().query(query, params);
      console.log('Query executed successfully, found rows:', result.rows.length);

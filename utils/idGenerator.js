@@ -207,16 +207,18 @@ exports.peekNextId = async (prefix, table, column, padding = 3) => {
     const dbPool = getDb();
     const result = await dbPool.query(
         `SELECT ${column} FROM ${table} 
-       ORDER BY CAST(SUBSTRING(${column} FROM '\\d+$') AS INTEGER) DESC 
+       ORDER BY CAST(SUBSTRING(${column} FROM '[0-9]+$') AS INTEGER) DESC 
        LIMIT 1`
     );
 
     let nextNum = 1;
     if (result.rows.length > 0) {
         const lastId = result.rows[0][column];
-        const match = lastId.match(/\d+/); // extract numeric part
+        const match = lastId.match(/[0-9]+/g); // extract all numeric parts
         if (match) {
-            nextNum = parseInt(match[0]) + 1;
+            // Pick the last numeric part for sequencing
+            const lastPart = match[match.length - 1];
+            nextNum = parseInt(lastPart) + 1;
         }
     }
 

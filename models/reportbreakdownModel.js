@@ -5,56 +5,122 @@ const ALLOWED_STATUSES = [
   "CO", // Completed
   "CF", // Confirmed
   "RE", // Reopened
+  "Reopened", // Full text Reopened
   "AP", "IP", "CA" // others if used
 ];
 
-// Confirm Employee Report Breakdown (final state)
+// Confirm Employee Report Breakdown (final state with Maintenance Sync)
 const confirmEmployeeReportBreakdown = async (abrId, orgId, userId) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
-    // Only update if not already Confirmed
+    
+    // 0. Fetch breakdown details to get asset_id and current status
     const res = await client.query(
-      `SELECT status FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
+      `SELECT status, asset_id FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
       [abrId, orgId]
     );
     if (!res.rows.length) throw new Error("Breakdown not found");
     if (res.rows[0].status === "CF") throw new Error("Already confirmed");
+    
+    const assetId = res.rows[0].asset_id;
+
+    // 1. Update Breakdown Table (tblAssetBRDet)
+    // Set status = 'CF' (Confirmed)
     await client.query(
-      `UPDATE "tblAssetBRDet" SET status = 'CF' WHERE abr_id = $1 AND org_id = $2`,
+      `UPDATE "tblAssetBRDet" SET status = 'CF', changed_on = CURRENT_TIMESTAMP WHERE abr_id = $1 AND org_id = $2`,
       [abrId, orgId]
     );
+
+    // 2. CRITICAL: Update Maintenance Table (tblAssetMaintSch) and Workflow Header
+    // We search for any maintenance or workflow linked to this breakdown ID
+    
+    // First, try to find wfamsh_id from workflow details
+    const wfRefRes = await client.query(
+      `SELECT wfamsh_id FROM "tblWFAssetMaintSch_D" 
+       WHERE org_id = $1 AND (notes ILIKE $2 OR notes ILIKE $3)
+       LIMIT 1`,
+      [orgId, `%${abrId}%`, `%Breakdown-${abrId}%`]
+    );
+    
+    let linkedWfamshId = null;
+    if (wfRefRes.rows.length > 0) {
+      linkedWfamshId = wfRefRes.rows[0].wfamsh_id;
+    }
+
+    // Update maintenance schedule record
+    const maintUpdate = await client.query(
+      `UPDATE "tblAssetMaintSch" 
+       SET status = 'CO', 
+           changed_on = CURRENT_TIMESTAMP,
+           notes = COALESCE(notes, '') || ' [Final Confirmation Received]'
+       WHERE org_id = $1 AND (
+         (asset_id = $2 AND status IN ('IN', 'IP', 'CO', 'AP') AND (notes ILIKE $3 OR wo_id ILIKE $3))
+         OR 
+         (wfamsh_id = $4 AND status IN ('IN', 'IP', 'CO', 'AP'))
+       )
+       RETURNING ams_id, wfamsh_id`,
+      [orgId, assetId, `%${abrId}%`, linkedWfamshId]
+    );
+
+    // Update Workflow Header (This is what shows in Maintenance Approval screen)
+    // We update it even if maintUpdate was empty, as long as we have linkedWfamshId or a match
+    if (linkedWfamshId) {
+      await client.query(
+        `UPDATE "tblWFAssetMaintSch_H" 
+         SET status = 'CO', changed_on = CURRENT_TIMESTAMP 
+         WHERE wfamsh_id = $1 AND org_id = $2`,
+        [linkedWfamshId, orgId]
+      );
+      console.log(`✅ Workflow Header ${linkedWfamshId} specifically synced to CO for Confirmed breakdown ${abrId}`);
+    } else if (maintUpdate.rows.length > 0 && maintUpdate.rows[0].wfamsh_id) {
+      await client.query(
+        `UPDATE "tblWFAssetMaintSch_H" 
+         SET status = 'CO', changed_on = CURRENT_TIMESTAMP 
+         WHERE wfamsh_id = $1 AND org_id = $2`,
+        [maintUpdate.rows[0].wfamsh_id, orgId]
+      );
+    }
+    
+    if (maintUpdate.rows.length > 0) {
+      console.log(`✅ Maintenance ${maintUpdate.rows[0].ams_id} synced to CO for Confirmed breakdown ${abrId}`);
+    }
+
     await client.query("COMMIT");
     return { success: true };
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("Error in confirmEmployeeReportBreakdown:", err);
     throw err;
   } finally {
     client.release();
   }
 };
 
-// Reopen Employee Report Breakdown (cycle restart)
+// Reopen Employee Report Breakdown (cycle restart with Approval Bypass)
 const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
   if (!notes || !notes.trim()) throw new Error("Notes are required to reopen");
   const dbPool = getDb();
   const client = await dbPool.connect();
   try {
     await client.query("BEGIN");
-    // Only allow if not already Confirmed
+    
+    // 0. Verify breakdown exists and is not already Confirmed
     const res = await client.query(
-      `SELECT status FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
+      `SELECT status, asset_id FROM "tblAssetBRDet" WHERE abr_id = $1 AND org_id = $2`,
       [abrId, orgId]
     );
     if (!res.rows.length) throw new Error("Breakdown not found");
     if (res.rows[0].status === "CF") throw new Error("Cannot reopen a confirmed breakdown");
+    
+    const assetId = res.rows[0].asset_id;
 
-    // 1. Employee Report Breakdown → IN (reset back to Initiated as requested)
-    // and store reopen_notes and also update description so it's visible in reports
+    // 1. Update Breakdown Table (tblAssetBRDet)
+    // Set status = 'Reopened' and save notes
     await client.query(
       `UPDATE "tblAssetBRDet" 
-       SET status = 'IN', 
+       SET status = 'Reopened', 
            reopen_notes = $1,
            description = COALESCE(description, '') || ' [Reopened: ' || $1 || ']',
            changed_on = CURRENT_TIMESTAMP
@@ -62,53 +128,54 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
       [notes, abrId, orgId]
     );
 
-    // 2. Restart maintenance workflow
-    // The user wants a clean restart requiring re-approval/assignment.
-    // We cancel the old maintenance and re-trigger the workflow.
+    // 2. Update Maintenance Table (tblAssetMaintSch) - THE APPROVAL BYPASS
+    // Reset status back to 'IP' (In Progress) for the technician
+    // This makes it reappear in the maintenance list without requiring a new approval cycle
     
-    // Fetch breakdown and asset details for workflow re-triggering
-    const breakdownResult = await client.query(
-      `SELECT brd.*, a.asset_type_id, a.service_vendor_id, b.branch_code
-       FROM "tblAssetBRDet" brd
-       LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
-       LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-       WHERE brd.abr_id = $1`,
-      [abrId]
+    // First, find wfamsh_id if possible by searching for the ABR ID in workflow notes
+    const wfRefRes = await client.query(
+      `SELECT wfamsh_id FROM "tblWFAssetMaintSch_D" 
+       WHERE org_id = $1 AND (notes ILIKE $2 OR notes ILIKE $3 OR notes ILIKE $4)
+       LIMIT 1`,
+      [orgId, `%${abrId}%`, `%Breakdown-${abrId}%`, `%${abrId.replace('ABR', 'ABR-')}%`]
     );
-    
-    const breakdownData = breakdownResult.rows[0];
-    if (breakdownData) {
-      const { asset_id, decision_code, reported_by } = breakdownData;
-      
-      // Cancel previous completed maintenance linked to this breakdown
-      await client.query(
-        `UPDATE "tblAssetMaintSch" 
-         SET status = 'CA', changed_on = CURRENT_TIMESTAMP 
-         WHERE asset_id = $1 AND status = 'CO' AND notes ILIKE $2`,
-        [asset_id, `%${abrId}%`]
-      );
+    let linkedWfamshId = wfRefRes.rows[0]?.wfamsh_id || null;
 
-      // Re-trigger the workflow using existing decision code
-      // This will create new workflow entries requiring re-approval
-      await triggerBreakdownWorkflow(client, {
-        asset_id,
-        decision_code: decision_code || 'BF01', // Use BF01 (Prepone) as default for re-trigger
-        reported_by: userId, // The person who reopened it
-        org_id: orgId,
-        abr_id: abrId,
-        assetRow: {
-          asset_type_id: breakdownData.asset_type_id,
-          service_vendor_id: breakdownData.service_vendor_id,
-          branch_code: breakdownData.branch_code
-        },
-        existingSchedule: null // Treat as new request
-      });
+    const maintUpdate = await client.query(
+      `UPDATE "tblAssetMaintSch" 
+       SET status = 'IP', 
+           notes = COALESCE(notes, '') || ' [Reopened: ' || $1 || ']',
+           changed_on = CURRENT_TIMESTAMP 
+       WHERE org_id = $2 AND (
+         (asset_id = $3 AND status IN ('CO', 'CF') AND (notes ILIKE $4 OR wo_id ILIKE $4 OR notes ILIKE $6 OR wo_id ILIKE $6))
+         OR 
+         (wfamsh_id = $5 AND status IN ('CO', 'CF'))
+       )
+       RETURNING ams_id, wfamsh_id`,
+      [notes, orgId, assetId, `%${abrId}%`, linkedWfamshId, `%${abrId.replace('ABR', 'ABR-')}%`]
+    );
+
+    // 3. Optional: If the maintenance had an associated workflow, keep it as 'CO' (Completed)
+    // When reopening a breakdown, the workflow should remain completed; only the breakdown status changes
+    const finalWfamshId = linkedWfamshId || (maintUpdate.rows.length > 0 ? maintUpdate.rows[0].wfamsh_id : null);
+
+    if (finalWfamshId) {
+      // Workflow status remains 'CO' (Completed) when reopening the breakdown
+      // No update needed to workflow header - it stays completed
+      console.log(`✅ Workflow Header ${finalWfamshId} status remains CO (Completed) for Reopened breakdown ${abrId}`);
+    }
+
+    if (maintUpdate.rows.length > 0) {
+      console.log(`✅ Maintenance ${maintUpdate.rows[0].ams_id} reset to IP (Approval Bypass)`);
+    } else {
+      console.warn(`⚠️ No maintenance schedule found to reset for breakdown ${abrId}`);
     }
 
     await client.query("COMMIT");
     return { success: true };
   } catch (err) {
     await client.query("ROLLBACK");
+    console.error("Error in reopenEmployeeReportBreakdown:", err);
     throw err;
   } finally {
     client.release();
@@ -142,7 +209,7 @@ const getAllReports = async (
     params.push(branchId);
   }
 
-  query += ` ORDER BY brd.created_on DESC`;
+  query += ` ORDER BY brd.created_on DESC, brd.abr_id DESC`;
 
   const result = await getDb().query(query, params);
   return result.rows;
@@ -692,9 +759,11 @@ const updateBreakdownReport = async (abrId, updateData) => {
       currentBreakdown.decision_code !== decision_code;
 
     // Determine new status: if decision_code is being set/changed, update status from CR to IN
-    // Do not update if status is already CO (Completed)
+    // Do not update if status is already CO (Completed) or Reopened
     let newStatus = null;
-    if ((isDecisionCodeSet || isDecisionCodeChanged) && currentBreakdown.status !== "CO") {
+    if ((isDecisionCodeSet || isDecisionCodeChanged) && 
+        currentBreakdown.status !== "CO" && 
+        currentBreakdown.status !== "Reopened") {
       newStatus = "IN"; // Initiated
       console.log(`Setting status to "IN" (Initiated) for breakdown ${abrId} as decision code is being set/changed`);
     }
