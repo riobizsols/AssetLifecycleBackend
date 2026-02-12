@@ -74,6 +74,40 @@ const getAllEmployeesWithJobRoles = async () => {
   return await dbPool.query(query);
 };
 
+// Update employee status (block/unblock)
+const updateEmployeeStatus = async (emp_int_id, int_status, changed_by) => {
+  const dbPool = getDb();
+
+  await dbPool.query('BEGIN');
+  try {
+    const updateEmployeeQuery = `
+      UPDATE "tblEmployees"
+      SET int_status = $1,
+          changed_by = $2,
+          changed_on = CURRENT_TIMESTAMP
+      WHERE emp_int_id = $3
+      RETURNING emp_int_id, int_status
+    `;
+    const employeeResult = await dbPool.query(updateEmployeeQuery, [int_status, changed_by, emp_int_id]);
+
+    const updateUserQuery = `
+      UPDATE "tblUsers"
+      SET int_status = $1,
+          changed_by = $2,
+          changed_on = CURRENT_TIMESTAMP
+      WHERE emp_int_id = $3
+      RETURNING user_id
+    `;
+    await dbPool.query(updateUserQuery, [int_status, changed_by, emp_int_id]);
+
+    await dbPool.query('COMMIT');
+    return employeeResult.rows[0];
+  } catch (error) {
+    await dbPool.query('ROLLBACK');
+    throw error;
+  }
+};
+
 // Check existing employee IDs
 const checkExistingEmployeeIds = async (employeeIds) => {
   if (!employeeIds || employeeIds.length === 0) return [];
@@ -361,6 +395,7 @@ module.exports = {
   getEmployeeById,
   getEmployeesByDepartment,
   getAllEmployeesWithJobRoles,
+  updateEmployeeStatus,
   checkExistingEmployeeIds,
   bulkUpsertEmployees,
   validateAndFormatDate,

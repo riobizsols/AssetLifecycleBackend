@@ -1154,6 +1154,7 @@ const createAsset = async (assetData) => {
     }
 
     // Use the serial number as provided and increment the sequence in database
+<<<<<<< HEAD
     let finalSerialNumber = serial_number;
 
     console.log(`🔢 Using provided serial number: ${finalSerialNumber}`);
@@ -1165,6 +1166,14 @@ const createAsset = async (assetData) => {
       );
     }
 
+=======
+    // Normalize empty strings to null for database storage
+    let finalSerialNumber = serial_number && serial_number.trim() !== '' ? serial_number : null;
+    
+    console.log(`🔢 Using provided serial number: ${finalSerialNumber || 'None (optional)'}`);
+    
+    // Serial number is optional - only update sequence if provided
+>>>>>>> origin/akash
     // Extract the last 5 digits from the serial number to update last_gen_seq_no
     if (finalSerialNumber && finalSerialNumber.length >= 5) {
       const last5Digits = finalSerialNumber.slice(-5);

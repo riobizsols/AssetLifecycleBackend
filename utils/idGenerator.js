@@ -35,7 +35,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfscrap_d': 'WFSCD',
             'asset_scrap': 'ASCP',
             // Existing scrap details table (legacy, used by reports/UI)
-            'asset_scrap_det': 'ASD'
+                'asset_scrap_det': 'ASD',
+                'etc': 'ETC'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
@@ -134,7 +135,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfscrap_d': 'tblWFScrap_D',
         'asset_scrap': 'tblAssetScrap',
         // Existing scrap details table (legacy)
-        'asset_scrap_det': 'tblAssetScrapDet'
+        'asset_scrap_det': 'tblAssetScrapDet',
+        'etc': 'tblEmpTechCert'
     };
 
     const targetTable = tableMap[tableKey];
@@ -179,7 +181,8 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfscrap_d': 'id',
             'asset_scrap': 'id',
             // Existing scrap details table (legacy)
-            'asset_scrap_det': 'asd_id'
+              'asset_scrap_det': 'asd_id',
+              'etc': 'etc_id'
         };
 
         const columnName = columnMap[tableKey];

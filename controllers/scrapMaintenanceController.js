@@ -179,6 +179,66 @@ const rejectScrap = async (req, res) => {
   }
 };
 
+// GET /api/scrap-maintenance/workflow-history/:wfscrapHId
+const getWorkflowHistory = async (req, res) => {
+  try {
+    const { wfscrapHId } = req.params;
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+
+    if (!wfscrapHId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Workflow ID (wfscrap_h_id) is required'
+      });
+    }
+
+    const history = await scrapMaintenanceModel.getWorkflowHistoryByWfscrapHId(wfscrapHId, orgId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Workflow history retrieved successfully',
+      data: history,
+      count: history.length
+    });
+  } catch (error) {
+    console.error('Error in getWorkflowHistory:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve workflow history',
+      error: error.message
+    });
+  }
+};
+
+// GET /api/scrap-maintenance/asset-history
+const getScrapAssetHistory = async (req, res) => {
+  try {
+    const { asset_id, ssh_id, scrap_type } = req.query;
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+
+    const history = await scrapMaintenanceModel.getScrapAssetHistory({
+      asset_id: asset_id || null,
+      ssh_id: ssh_id || null,
+      scrap_type: scrap_type || null,
+      orgId
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Scrap asset history retrieved successfully',
+      data: history,
+      count: history.length
+    });
+  } catch (error) {
+    console.error('Error in getScrapAssetHistory:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve scrap asset history',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createScrapRequest,
   createScrapRequestFromGroupSelection,
@@ -186,5 +246,7 @@ module.exports = {
   getScrapApprovalDetail,
   approveScrap,
   rejectScrap,
+  getWorkflowHistory,
+  getScrapAssetHistory,
 };
 

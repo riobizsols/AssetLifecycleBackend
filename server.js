@@ -68,6 +68,9 @@ const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
+const techCertRoutes = require("./routes/techCertRoutes");
+const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
+const costCenterTransferRoutes = require("./routes/costCenterTransferRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 
@@ -231,12 +234,15 @@ app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
+app.use("/api", techCertRoutes);
+app.use("/api", employeeTechCertRoutes);
 app.use("/api/asset-serial-print", assetSerialPrintRoutes);
 app.use("/api/app-events", appEventsRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/audit-log-configs", auditLogConfigRoutes);
 app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
+app.use("/api/cost-center-transfer", costCenterTransferRoutes);
 
 app.get("/", (req, res) => {
   res.send("Server is running!");

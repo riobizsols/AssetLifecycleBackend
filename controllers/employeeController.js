@@ -72,6 +72,50 @@ const getAllEmployeesWithJobRoles = async (req, res) => {
     }
 };
 
+// PUT /api/employees/:emp_int_id/status - Update employee status (block/unblock)
+const updateEmployeeStatus = async (req, res) => {
+    try {
+        const { emp_int_id } = req.params;
+        const { int_status } = req.body || {};
+        const changed_by = req.user?.user_id || 'SYSTEM';
+
+        if (!emp_int_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Employee ID is required'
+            });
+        }
+
+        if (int_status === undefined || int_status === null) {
+            return res.status(400).json({
+                success: false,
+                error: 'int_status is required'
+            });
+        }
+
+        const updated = await model.updateEmployeeStatus(emp_int_id, int_status, changed_by);
+
+        if (!updated) {
+            return res.status(404).json({
+                success: false,
+                error: 'Employee not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Employee status updated successfully',
+            data: updated
+        });
+    } catch (err) {
+        console.error('Error updating employee status:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update employee status'
+        });
+    }
+};
+
 // PUT /api/employees/:emp_int_id - Assign role to employee
 const assignRoleToEmployee = async (req, res) => {
     try {
@@ -385,6 +429,7 @@ module.exports = {
     getEmployeeById,
     getEmployeesByDepartment,
     getAllEmployeesWithJobRoles,
+    updateEmployeeStatus,
     assignRoleToEmployee,
     getUserRoles,
     deleteUserRole,

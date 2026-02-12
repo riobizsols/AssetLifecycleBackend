@@ -112,6 +112,22 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     return await dbPool.query(query, values);
 };
 
+const updateAssetTypeMaintenance = async (asset_type_id, maint_type_id, maint_lead_type, org_id, changed_by) => {
+    const query = `
+        UPDATE "tblAssetTypes"
+        SET maint_required = true,
+            maint_type_id = $1,
+            maint_lead_type = $2,
+            changed_by = $3,
+            changed_on = CURRENT_TIMESTAMP
+        WHERE asset_type_id = $4 AND org_id = $5
+        RETURNING *
+    `;
+
+    const dbPool = getDb();
+    return await dbPool.query(query, [maint_type_id, maint_lead_type, changed_by, asset_type_id, org_id]);
+};
+
 const checkAssetTypeExists = async (org_id, asset_type_id) => {
     const query = `
         SELECT asset_type_id FROM "tblAssetTypes"
@@ -572,6 +588,7 @@ module.exports = {
     getAllAssetTypes,
     getAssetTypeById,
     updateAssetType,
+    updateAssetTypeMaintenance,
     deleteAssetType,
     checkAssetTypeExists,
     checkAssetTypeReferences,

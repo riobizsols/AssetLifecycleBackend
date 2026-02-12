@@ -568,14 +568,139 @@ const updateBreakdownReport = async (req, res) => {
   }
 };
 
+// DELETE /api/reportbreakdown/:id
+const deleteBreakdownReport = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  const APP_ID = 'REPORTBREAKDOWN';
+  
+  try {
+    const { id } = req.params;
+
+    // Log API called
+    await logReportApiCall({
+      appId: APP_ID,
+      operation: 'Delete Breakdown Report',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { abr_id: id },
+      userId
+    });
+
+    // Validate required fields
+    if (!id) {
+      await logMissingParameters({
+        appId: APP_ID,
+        operation: 'Delete Breakdown Report',
+        missingParams: ['id'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing required parameter: breakdown report ID' 
+      });
+    }
+
+    // Get org_id from authenticated user
+    const org_id = req.user?.org_id;
+    if (!org_id) {
+      await logUnauthorizedReportAccess({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.status(401).json({ 
+        success: false,
+        error: 'Unauthorized - Missing organization ID' 
+      });
+    }
+
+    const result = await model.deleteBreakdownReport(id, org_id);
+    
+    // Log success
+    await logReportGenerationSuccess({
+      appId: APP_ID,
+      operation: 'Delete Breakdown Report',
+      requestData: { abr_id: id, org_id },
+      responseData: result,
+      duration: Date.now() - startTime,
+      userId
+    });
+    
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Error deleting breakdown report:', err);
+    console.error('Error stack:', err.stack);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table,
+      column: err.column
+    });
+    
+    // Determine error level
+    const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
+    
+    if (err.code === 'ECONNREFUSED') {
+      await logDatabaseConnectionFailure({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else if (isDbError) {
+      await logDatabaseQueryError({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        query: 'deleteBreakdownReport',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      await logReportGenerationError({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        error: err,
+        filters: { id: req.params.id },
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
+    // Return appropriate error message
+    const errorMessage = err.message === 'Breakdown report not found or access denied'
+      ? err.message
+      : 'Failed to delete breakdown report';
+    
+    res.status(err.message === 'Breakdown report not found or access denied' ? 404 : 500).json({ 
+      success: false,
+      error: errorMessage,
+      details: err.message
+    });
+  }
+};
+
 module.exports = {
   getReasonCodes,
   getAllReports,
   getUpcomingMaintenanceDate,
   createBreakdownReport,
+<<<<<<< HEAD
   updateBreakdownReport
   ,confirmEmployeeReportBreakdown
   ,reopenEmployeeReportBreakdown
+=======
+  updateBreakdownReport,
+  deleteBreakdownReport
+>>>>>>> origin/akash
 };
 
 
