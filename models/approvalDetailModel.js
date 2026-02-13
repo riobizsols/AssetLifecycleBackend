@@ -565,7 +565,8 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User has no assigned roles');
     }
     
-    // isWfamshId is already declared above for vendor check
+    // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
+    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
     let currentResult;
     if (isWfamshId) {
