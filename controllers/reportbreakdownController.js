@@ -693,14 +693,10 @@ module.exports = {
   getAllReports,
   getUpcomingMaintenanceDate,
   createBreakdownReport,
-<<<<<<< HEAD
-  updateBreakdownReport
-  ,confirmEmployeeReportBreakdown
-  ,reopenEmployeeReportBreakdown
-=======
   updateBreakdownReport,
-  deleteBreakdownReport
->>>>>>> origin/akash
+  deleteBreakdownReport,
+  confirmEmployeeReportBreakdown,
+  reopenEmployeeReportBreakdown
 };
 
 

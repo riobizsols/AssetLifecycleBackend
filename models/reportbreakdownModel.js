@@ -962,11 +962,7 @@ module.exports = {
   getUpcomingMaintenanceDate,
   createBreakdownReport,
   updateBreakdownReport,
-<<<<<<< HEAD
   confirmEmployeeReportBreakdown,
   reopenEmployeeReportBreakdown,
-};
-=======
   deleteBreakdownReport
 };
->>>>>>> origin/akash

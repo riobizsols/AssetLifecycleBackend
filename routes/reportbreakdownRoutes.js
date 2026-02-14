@@ -1,10 +1,6 @@
 const express = require('express');
 const router = express.Router();
-<<<<<<< HEAD
-const { getReasonCodes, getAllReports, getUpcomingMaintenanceDate, createBreakdownReport, updateBreakdownReport, confirmEmployeeReportBreakdown, reopenEmployeeReportBreakdown } = require('../controllers/reportbreakdownController');
-=======
-const { getReasonCodes, getAllReports, getUpcomingMaintenanceDate, createBreakdownReport, updateBreakdownReport, deleteBreakdownReport } = require('../controllers/reportbreakdownController');
->>>>>>> origin/akash
+const { getReasonCodes, getAllReports, getUpcomingMaintenanceDate, createBreakdownReport, updateBreakdownReport, deleteBreakdownReport, confirmEmployeeReportBreakdown, reopenEmployeeReportBreakdown } = require('../controllers/reportbreakdownController');
 const { protect } = require('../middlewares/authMiddleware');
 
 router.get('/reason-codes', protect, getReasonCodes);
