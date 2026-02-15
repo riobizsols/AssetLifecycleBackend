@@ -31,7 +31,11 @@ const getAllChecklists = async (orgId) => {
     
     // Using double quotes for case-sensitive table names
     const query = `
-      SELECT ic.*, rt."Name" as res_type_name
+      SELECT ic.*, 
+             CASE 
+               WHEN rt."Name" = 'QN' THEN 'Quantitative'
+               ELSE 'Qualitative'
+             END as res_type_name
       FROM "tblInspectionChecklist" ic
       LEFT JOIN "tblInspResTypeDet" rt ON ic.${cols.responseTypeId} = rt."IRTD_Id"
       WHERE ic.org_id = $1 OR ic.org_id = 'default'
@@ -177,16 +181,19 @@ const getResponseTypes = async () => {
     const dbPool = getDb();
     
     // Using double quotes for case-sensitive table and column names
+    // Filtering to get only one representative for Quantitative and one for Qualitative
+    // as requested by the user to show only 2 values.
     const query = `
       SELECT "IRTD_Id", "Name" 
       FROM "tblInspResTypeDet"
-      ORDER BY "Name" ASC
+      WHERE "IRTD_Id" IN ('IRTD_QN_001', 'IRTD_QL_YES_NO_001')
+      ORDER BY "Name" DESC
     `;
     
     const result = await dbPool.query(query);
     return result.rows.map(row => ({
       irtd_id: row.IRTD_Id,
-      name: row.Name
+      name: row.Name === 'QN' ? 'Quantitative' : 'Qualitative'
     }));
   } catch (error) {
     console.error('Error fetching response types:', error);
