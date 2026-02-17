@@ -47,6 +47,34 @@ const getResponseTypes = async (req, res) => {
   }
 };
 
+const getChecklistById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const orgId = req.user.org_id;
+    
+    const checklist = await InspectionChecklistModel.getChecklistById(id, orgId);
+    
+    if (!checklist) {
+      return res.status(404).json({
+        success: false,
+        message: 'Inspection checklist not found'
+      });
+    }
+    
+    return res.status(200).json({
+      success: true,
+      data: checklist
+    });
+  } catch (error) {
+    console.error('[InspectionChecklistController] Error fetching checklist:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch inspection checklist',
+      error: error.message
+    });
+  }
+};
+
 const createChecklist = async (req, res) => {
   try {
     const userId = req.user?.user_id || 'system';
@@ -74,8 +102,8 @@ const createChecklist = async (req, res) => {
       inspection_question: inspection_question.trim(),
       irtd_id,
       expected_value: expected_value || null,
-      min_range: min_range ? parseFloat(min_range) : null,
-      max_range: max_range ? parseFloat(max_range) : null,
+      min_range: (min_range !== null && min_range !== undefined && min_range !== "") ? parseFloat(min_range) : null,
+      max_range: (max_range !== null && max_range !== undefined && max_range !== "") ? parseFloat(max_range) : null,
       trigger_maintenance: trigger_maintenance || false,
       created_by: userId,
       org_id: orgId
@@ -193,6 +221,7 @@ const deleteChecklist = async (req, res) => {
 
 module.exports = {
   getAllChecklists,
+  getChecklistById,
   getResponseTypes,
   createChecklist,
   updateChecklist,

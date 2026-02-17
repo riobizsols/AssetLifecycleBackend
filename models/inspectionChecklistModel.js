@@ -5,23 +5,39 @@ const getDb = () => getDbFromContext();
 
 const getColumns = async () => {
   const dbPool = getDb();
-  const result = await dbPool.query(
-    `SELECT column_name FROM information_schema.columns 
-     WHERE table_schema = 'public' AND table_name = 'tblInspectionChecklist'`
-  );
-  
-  const columns = result.rows.map(row => row.column_name.toLowerCase());
-  return {
-    id: columns.includes('ic_id') ? 'ic_id' : 'id',
-    question: columns.includes('inspection_question') ? 'inspection_question' : 'question',
-    responseTypeId: columns.includes('irtd_id') ? 'irtd_id' : 'res_type_id',
-    expectedValue: columns.includes('expected_value') ? 'expected_value' : 'exp_value',
-    minRange: columns.includes('min_range') ? 'min_range' : 'min_val',
-    maxRange: columns.includes('max_range') ? 'max_range' : 'max_val',
-    triggerMaintenance: columns.includes('trigger_maintenance') ? 'trigger_maintenance' : 'trigger_maint',
-    createdBy: columns.includes('created_by') ? 'created_by' : 'createdby',
-    createdOn: columns.includes('created_on') ? 'created_on' : 'createdon'
-  };
+  try {
+    const result = await dbPool.query(
+      `SELECT column_name FROM information_schema.columns 
+       WHERE table_schema = 'public' AND table_name = 'tblInspCheckList'`
+    );
+    
+    const columns = result.rows.map(row => row.column_name.toLowerCase());
+    return {
+      id: columns.includes('insp_check_id') ? 'insp_check_id' : (columns.includes('ic_id') ? 'ic_id' : 'id'),
+      question: columns.includes('inspection_text') ? 'inspection_text' : (columns.includes('inspection_question') ? 'inspection_question' : 'question'),
+      responseTypeId: columns.includes('response_type') ? 'response_type' : (columns.includes('irtd_id') ? 'irtd_id' : 'res_type_id'),
+      expectedValue: columns.includes('expected_value') ? 'expected_value' : 'exp_value',
+      minRange: columns.includes('min_range') ? 'min_range' : 'min_val',
+      maxRange: columns.includes('max_range') ? 'max_range' : 'max_val',
+      triggerMaintenance: columns.includes('trigger_maintenance') ? 'trigger_maintenance' : 'trigger_maint',
+      createdBy: columns.includes('created_by') ? 'created_by' : 'createdby',
+      createdOn: columns.includes('created_on') ? 'created_on' : 'createdon'
+    };
+  } catch (err) {
+    console.error('Error getting columns for tblInspCheckList:', err);
+    // Return defaults as fallback
+    return {
+      id: 'insp_check_id',
+      question: 'inspection_text',
+      responseTypeId: 'response_type',
+      expectedValue: 'expected_value',
+      minRange: 'min_range',
+      maxRange: 'max_range',
+      triggerMaintenance: 'trigger_maintenance',
+      createdBy: 'created_by',
+      createdOn: 'created_on'
+    };
+  }
 };
 
 const getAllChecklists = async (orgId) => {
@@ -33,12 +49,15 @@ const getAllChecklists = async (orgId) => {
     const query = `
       SELECT ic.*, 
              CASE 
-               WHEN rt."Name" = 'QN' THEN 'Quantitative'
+               WHEN ic.${cols.responseTypeId} = 'QN' THEN 'Quantitative'
                ELSE 'Qualitative'
-             END as res_type_name
-      FROM "tblInspectionChecklist" ic
-      LEFT JOIN "tblInspResTypeDet" rt ON ic.${cols.responseTypeId} = rt."IRTD_Id"
-      WHERE ic.org_id = $1 OR ic.org_id = 'default'
+             END as res_type_name,
+             CASE 
+               WHEN ic.${cols.responseTypeId} = 'QN' THEN 'IRTD_QN_001'
+               ELSE 'IRTD_QL_YES_NO_001'
+             END as irtd_id
+      FROM "tblInspCheckList" ic
+      WHERE (ic.org_id = $1 OR ic.org_id = 'default')
       ORDER BY ic.${cols.question} ASC
     `;
     
@@ -47,7 +66,8 @@ const getAllChecklists = async (orgId) => {
     return result.rows.map(row => ({
       ic_id: row[cols.id],
       inspection_question: row[cols.question],
-      irtd_id: row[cols.responseTypeId],
+      response_type: row[cols.responseTypeId],
+      irtd_id: row.irtd_id, // Add this back
       res_type_name: row.res_type_name || '-',
       expected_value: row[cols.expectedValue],
       min_range: row[cols.minRange],
@@ -66,10 +86,18 @@ const createChecklist = async (data) => {
   try {
     const dbPool = getDb();
     const cols = await getColumns();
-    const id = generateCustomId('IC');
+    const id = await generateCustomId('IC');
+    
+    // Map the incoming irtd_id to QN or QL to satisfy tblInspCheckList check constraint
+    let dbResponseType = data.irtd_id;
+    if (data.irtd_id && data.irtd_id.startsWith('IRTD_QN')) {
+      dbResponseType = 'QN';
+    } else if (data.irtd_id && data.irtd_id.startsWith('IRTD_QL')) {
+      dbResponseType = 'QL';
+    }
     
     const query = `
-      INSERT INTO "tblInspectionChecklist" (
+      INSERT INTO "tblInspCheckList" (
         ${cols.id}, 
         ${cols.question}, 
         ${cols.responseTypeId}, 
@@ -86,7 +114,7 @@ const createChecklist = async (data) => {
     const result = await dbPool.query(query, [
       id,
       data.inspection_question,
-      data.irtd_id,
+      dbResponseType,
       data.expected_value || null,
       data.min_range || null,
       data.max_range || null,
@@ -116,8 +144,14 @@ const updateChecklist = async (id, data) => {
       values.push(data.inspection_question);
     }
     if (data.irtd_id !== undefined) {
+      let dbResponseType = data.irtd_id;
+      if (data.irtd_id && data.irtd_id.startsWith('IRTD_QN')) {
+        dbResponseType = 'QN';
+      } else if (data.irtd_id && data.irtd_id.startsWith('IRTD_QL')) {
+        dbResponseType = 'QL';
+      }
       updates.push(`${cols.responseTypeId} = $${paramCount++}`);
-      values.push(data.irtd_id);
+      values.push(dbResponseType);
     }
     if (data.expected_value !== undefined) {
       updates.push(`${cols.expectedValue} = $${paramCount++}`);
@@ -143,7 +177,7 @@ const updateChecklist = async (id, data) => {
     values.push(id);
     
     const query = `
-      UPDATE "tblInspectionChecklist" 
+      UPDATE "tblInspCheckList" 
       SET ${updates.join(', ')}
       WHERE ${cols.id} = $${paramCount}
       RETURNING *
@@ -163,7 +197,7 @@ const deleteChecklist = async (id) => {
     const cols = await getColumns();
     
     const query = `
-      DELETE FROM "tblInspectionChecklist" 
+      DELETE FROM "tblInspCheckList" 
       WHERE ${cols.id} = $1
       RETURNING ${cols.id}
     `;
@@ -184,16 +218,16 @@ const getResponseTypes = async () => {
     // Filtering to get only one representative for Quantitative and one for Qualitative
     // as requested by the user to show only 2 values.
     const query = `
-      SELECT "IRTD_Id", "Name" 
+      SELECT irtd_id, name 
       FROM "tblInspResTypeDet"
-      WHERE "IRTD_Id" IN ('IRTD_QN_001', 'IRTD_QL_YES_NO_001')
-      ORDER BY "Name" DESC
+      WHERE irtd_id IN ('IRTD_QN_001', 'IRTD_QL_YES_NO_001')
+      ORDER BY name DESC
     `;
     
     const result = await dbPool.query(query);
     return result.rows.map(row => ({
-      irtd_id: row.IRTD_Id,
-      name: row.Name === 'QN' ? 'Quantitative' : 'Qualitative'
+      irtd_id: row.irtd_id,
+      name: row.name === 'QN' ? 'Quantitative' : 'Qualitative'
     }));
   } catch (error) {
     console.error('Error fetching response types:', error);
@@ -201,8 +235,40 @@ const getResponseTypes = async () => {
   }
 };
 
+const getChecklistById = async (id, orgId) => {
+  try {
+    const dbPool = getDb();
+    const cols = await getColumns();
+    const result = await dbPool.query(
+      `SELECT * FROM "tblInspCheckList" WHERE ${cols.id} = $1 AND org_id = $2`,
+      [id, orgId]
+    );
+    
+    if (result.rows.length === 0) return null;
+    
+    const row = result.rows[0];
+    const colsInfo = await getColumns(); // Refresh to be safe
+    
+    // Map database columns back to camelCase for frontend consistency
+    return {
+      ic_id: row[colsInfo.id],
+      inspection_question: row[colsInfo.question],
+      response_type: row[colsInfo.responseTypeId],
+      irtd_id: row[colsInfo.responseTypeId] === 'QN' ? 'IRTD_QN_001' : 'IRTD_QL_YES_NO_001',
+      expected_value: row[colsInfo.expectedValue],
+      min_range: row[colsInfo.minRange],
+      max_range: row[colsInfo.maxRange],
+      trigger_maintenance: row[colsInfo.triggerMaintenance]
+    };
+  } catch (error) {
+    console.error('Error fetching checklist by ID:', error);
+    throw error;
+  }
+};
+
 module.exports = {
   getAllChecklists,
+  getChecklistById,
   createChecklist,
   updateChecklist,
   deleteChecklist,

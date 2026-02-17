@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { 
   getAllChecklists, 
+  getChecklistById,
   getResponseTypes,
   createChecklist, 
   updateChecklist, 
@@ -19,6 +20,10 @@ router.get('/', getAllChecklists);
 // Get response types
 // GET /api/inspection-checklists/response-types
 router.get('/response-types', getResponseTypes);
+
+// Get single checklist
+// GET /api/inspection-checklists/:id
+router.get('/:id', getChecklistById);
 
 // Create new checklist
 // POST /api/inspection-checklists

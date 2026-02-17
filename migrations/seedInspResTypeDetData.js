@@ -120,16 +120,16 @@ const seedInspResTypeDetData = async () => {
       try {
         await client.query(`
           INSERT INTO "tblInspResTypeDet" (
-            "IRTD_Id", 
-            "Name", 
-            "Expected_Value", 
-            "Option", 
+            irtd_id, 
+            name, 
+            expected_value, 
+            option, 
             org_id, 
             created_by, 
             created_on
           )
           VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
-          ON CONFLICT ("IRTD_Id") DO NOTHING
+          ON CONFLICT (irtd_id) DO NOTHING
         `, [
           data.id,
           data.name,
@@ -155,13 +155,13 @@ const seedInspResTypeDetData = async () => {
     console.log('\n=== VERIFICATION ===\n');
     const verification = await client.query(`
       SELECT 
-        "Name",
+        name,
         COUNT(*) as option_count,
-        STRING_AGG("Option", ', ' ORDER BY "Option") as options
+        STRING_AGG(option, ', ' ORDER BY option) as options
       FROM "tblInspResTypeDet"
       WHERE org_id = $1
-      GROUP BY "Name"
-      ORDER BY "Name"
+      GROUP BY name
+      ORDER BY name
     `, [orgId]);
     
     console.log('Response Types Summary:\n');

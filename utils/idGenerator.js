@@ -27,8 +27,10 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'prop': 'PROP',
             'atbrrc': 'ATBRRC',
             'atmcl': 'ATMCL',
+            'aat_insp_checklist': 'AATIC',
             'job_role_nav': 'JRN',
             'job_role': 'JR',
+            'aat_insp_checklist': 'AATIC',
             // Scrap workflow tables
             'wfscrapseq': 'WFSCQ',
             'wfscrap_h': 'WFSCH',
@@ -126,7 +128,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfjr': 'tblWFJobRole',
         'prop': 'tblProps',
         'atbrrc': 'tblATBRReasonCodes',
+        'aat_insp_checklist': 'tblAATInspCheckList',
         'atmcl': 'tblATMaintCheckList',
+        'IC': 'tblInspCheckList',
         'job_role_nav': 'tblJobRoleNav',
         'job_role': 'tblJobRoles',
         // Scrap workflow tables
@@ -172,7 +176,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfjr': 'wf_job_role_id',
             'prop': 'prop_id',
             'atbrrc': 'atbrrc_id',
+            'aat_insp_checklist': 'aatic_id',
             'atmcl': 'at_main_checklist_id',
+            'IC': 'insp_check_id',
             'job_role_nav': 'job_role_nav_id',
             'job_role': 'job_role_id',
             // Scrap workflow tables
