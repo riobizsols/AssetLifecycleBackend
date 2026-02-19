@@ -77,6 +77,24 @@ class CronController {
         }
     }
 
+    // Manual trigger for inspection generation (for testing)
+    async triggerInspection(req, res) {
+        try {
+            const orgId = req.body.org_id || 'ORG001';
+            const result = await this.cronService.triggerInspection(orgId);
+            res.status(200).json({
+                message: "Inspection generation triggered successfully",
+                result: result
+            });
+        } catch (error) {
+            console.error('Error triggering inspection generation:', error);
+            res.status(500).json({
+                error: "Failed to trigger inspection generation",
+                details: error.message
+            });
+        }
+    }
+
     // Get cron job status
     getCronStatus(req, res) {
         try {

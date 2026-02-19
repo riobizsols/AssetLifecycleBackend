@@ -60,29 +60,42 @@ const getUserNotifications = async (req, res) => {
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const branchId = req.user?.branch_id;
     
+    console.log('🐛 [getUserNotifications] Starting...');
+    console.log('🐛 [getUserNotifications] userId:', userId);
+    console.log('🐛 [getUserNotifications] orgId:', orgId);
+    console.log('🐛 [getUserNotifications] branchId:', branchId);
+    console.log('🐛 [getUserNotifications] req.user:', req.user);
+    
     if (!userId) {
+      console.log('🐛 [getUserNotifications] ERROR: No userId provided');
       return res.status(400).json({
         success: false,
         message: 'Employee ID is required'
       });
     }
 
-    console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
+    console.log(`🐛 [getUserNotifications] Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
     
     const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId, req.user?.hasSuperAccess || false);
     
-    console.log(`Found ${notifications.length} notifications for user ${userId}`);
+    console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);
+    console.log('🐛 [getUserNotifications] First 3 notifications:', notifications.slice(0, 3));
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
       // Common fields
-      id: notification.wfamsh_id, // Unique workflow identifier (maintenance wfamsh_id OR scrap wfscrap_h_id)
-      wfamshId: notification.wfamsh_id, // Backward compatibility (will be wfscrap_h_id for scrap)
+      id: notification.wfamsh_id, // Unique workflow identifier
+      wfamshId: notification.wfamsh_id,
       workflowId: notification.wfamsh_id,
-      workflowType: notification.maint_type_id === 'SCRAP' ? 'SCRAP' : 'MAINTENANCE',
+      workflowType: 
+        notification.maint_type_id === 'SCRAP' ? 'SCRAP' : 
+        notification.maint_type_id === 'INSPECTION' ? 'INSPECTION' : 
+        'MAINTENANCE',
       route:
         notification.maint_type_id === 'SCRAP'
           ? `/scrap-approval-detail/${notification.wfamsh_id}?context=SCRAPMAINTENANCEAPPROVAL`
+          : notification.maint_type_id === 'INSPECTION'
+          ? `/inspection-approval-detail/${notification.wfamsh_id}`
           : `/approval-detail/${notification.wfamsh_id}`,
 
       // ROLE-BASED: Use role ID/name instead of a specific user
@@ -111,6 +124,9 @@ const getUserNotifications = async (req, res) => {
       isGroupMaintenance: !!notification.group_id
     }));
 
+    console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);
+    console.log('🐛 [getUserNotifications] First 3 formatted notifications:', formattedNotifications.slice(0, 3));
+
     res.json({
       success: true,
       message: 'User maintenance notifications retrieved successfully',
@@ -120,7 +136,7 @@ const getUserNotifications = async (req, res) => {
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error in getUserNotifications:', error);
+    console.error('🐛 [getUserNotifications] ERROR in getUserNotifications:', error);
     console.error('Error details:', {
       message: error.message,
       stack: error.stack,

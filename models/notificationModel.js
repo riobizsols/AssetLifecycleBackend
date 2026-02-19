@@ -72,19 +72,89 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
       )
       AND wfd.job_role_id IS NOT NULL
       AND u.int_status = 1
-    ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
+
+  // Inspection Notifications Query
+  const inspectionQuery = `
+    SELECT 
+      wfd.wfaiisd_id as wfamsd_id,
+      wfd.wfaiish_id as wfamsh_id,
+      wfd.job_role_id,
+      wfd.sequence,
+      wfd.status as detail_status,
+      wfh.pl_sch_date,
+      wfh.asset_id,
+      NULL::varchar as group_id,
+      NULL::varchar as vendor_id,
+      wfh.status as header_status,
+      a.asset_type_id,
+      '0' as maint_lead_type, -- Default lead time 0
+      at.text as asset_type_name,
+      NULL::varchar as group_name,
+      0 as group_asset_count,
+      'INSPECTION' as maint_type_id,
+      'Inspection' as maint_type_name,
+      jr.text as job_role_name,
+      u.user_id,
+      u.emp_int_id,
+      u.full_name as user_name,
+      u.email,
+      -- Cutoff date is schedule date
+      wfh.pl_sch_date as cutoff_date,
+      -- Days until due
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+      -- Days until cutoff
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_cutoff
+    FROM "tblWFAATInspSch_D" wfd
+    INNER JOIN "tblWFAATInspSch_H" wfh ON wfd.wfaiish_id = wfh.wfaiish_id
+    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+    LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+    LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
+    
+    WHERE wfd.org_id = $1
+      AND wfh.org_id = $1
+      AND a.org_id = $1
+      ${!hasSuperAccess && branchId ? 'AND a.branch_id = $2' : ''}
+      AND wfd.status IN ('IN', 'IP', 'AP')
+      AND wfh.status IN ('IN', 'IP')
+      AND wfd.job_role_id IS NOT NULL
+      AND u.int_status = 1
+  `;
+
   try {
     const params = [orgId];
     if (!hasSuperAccess && branchId) {
       params.push(branchId);
     }
-    const result = await getDb().query(query, params);
-    return result.rows;
+    
+    // Execute Maintenance Query
+    const results = await getDb().query(query, params);
+    let allNotifications = results.rows || [];
+
+    // Execute Inspection Query
+    try {
+        const inspResults = await getDb().query(inspectionQuery, params);
+        if (inspResults.rows && inspResults.rows.length > 0) {
+            allNotifications = [...allNotifications, ...inspResults.rows];
+        }
+    } catch (inspError) {
+        console.warn('Error fetching inspection notifications (might be missing tables):', inspError.message);
+    }
+    
+    // Sort combined results
+    allNotifications.sort((a, b) => {
+        const dA = a.pl_sch_date ? new Date(a.pl_sch_date) : new Date(0);
+        const dB = b.pl_sch_date ? new Date(b.pl_sch_date) : new Date(0);
+        return dA - dB;
+    });
+
+    return allNotifications;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', params);
+    console.error('Query Parameters:', [orgId, branchId]);
     throw error;
   }
 };
@@ -95,6 +165,7 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   // Includes:
   // - asset-based maintenance + vendor contract renewal (MT005)
   // - scrap maintenance workflow approvals (tblWFScrap_*) - if tables exist
+  // - inspection approvals (tblWFAATInspSch_*)
   
   // Build parameters array dynamically
   const params = [orgId];
@@ -116,6 +187,11 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   
   const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
     ? ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex}))`
+    : '';
+
+  // Inspection branch filtering uses asset branch_id like maintenance
+  const inspectionBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
+    ? ` AND a.branch_id = $${branchIdParamIndex}`
     : '';
 
   const maintenanceQuery = `
@@ -291,10 +367,61 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
         )
   `;
 
+  // NEW: Inspection Query
+  const inspectionQuery = `
+    SELECT DISTINCT
+      wfh.wfaiish_id as wfamsh_id,
+      wfh.pl_sch_date,
+      wfh.asset_id,
+      NULL::varchar as group_id,
+      NULL::varchar as vendor_id,
+      wfh.status as header_status,
+      a.asset_type_id,
+      NULL::varchar as group_name,
+      0::int as group_asset_count,
+      '0'::text as maint_lead_type,
+      COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+      'INSPECTION'::varchar as maint_type_id,
+      'Inspection' as maint_type_name,
+      jr.text as current_action_role_name,
+      wfd.job_role_id as current_action_role_id,
+      wfh.pl_sch_date as cutoff_date,
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_cutoff
+    FROM "tblWFAATInspSch_H" wfh
+    INNER JOIN "tblWFAATInspSch_D" wfd ON wfh.wfaiish_id = wfd.wfaiish_id
+    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+    WHERE wfh.org_id = $1
+      ${inspectionBranchFilter}
+      AND wfh.status IN ('IN', 'AP', 'IP')
+      AND wfd.status = 'AP'
+      -- User must have this role assignemnt
+      AND EXISTS (
+        SELECT 1 
+        FROM "tblUserJobRoles" ujr
+        INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+        WHERE ujr.job_role_id = wfd.job_role_id
+          AND u.emp_int_id = $${empIntIdParamIndex}
+          AND u.int_status = 1
+      )
+  `;
+
   try {
     // Run maintenance query (core tables always exist)
     const maintenanceResult = await getDb().query(maintenanceQuery, params);
     let allRows = maintenanceResult.rows || [];
+
+    // Run inspection query (try/catch in case tables are missing)
+    try {
+      const inspectionResult = await getDb().query(inspectionQuery, params);
+      if (inspectionResult.rows && inspectionResult.rows.length > 0) {
+        allRows = [...allRows, ...inspectionResult.rows];
+      }
+    } catch (inspErr) {
+       console.warn('Error fetching inspection notifications:', inspErr.message);
+    }
 
     // Try scrap query - scrap tables may not exist in all DBs (e.g. hospitality)
     try {
