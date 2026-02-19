@@ -482,7 +482,8 @@ const createDirectInspection = async (
 const getInspections = async (req, res) => {
   try {
     const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
-    const result = await inspectionModel.getInspectionList(org_id);
+    const empIntId = req.user?.emp_int_id || null;
+    const result = await inspectionModel.getInspectionList(org_id, empIntId);
     return res.json({ success: true, count: result.rows.length, data: result.rows });
   } catch (error) {
     console.error('Error fetching inspections:', error);
