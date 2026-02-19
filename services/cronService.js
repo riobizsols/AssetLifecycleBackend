@@ -5,6 +5,7 @@ const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron'
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
+const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
 
 class CronService {
     constructor() {
@@ -286,6 +287,28 @@ class CronService {
     }
 
     // Get cron job status
+    // Trigger inspection generation
+    async triggerInspection(orgId) {
+        console.log(`[CRON SERVICE] Triggering inspection generation for org ${orgId}`);
+        // Mock request object for controller function
+        const req = {
+            body: { org_id: orgId },
+            user: { org_id: orgId, userId: 'SYSTEM' }
+        };
+        
+        let responseData = null;
+        const mockRes = {
+            status: (code) => mockRes, // chainable
+            json: (data) => {
+                responseData = data;
+                return mockRes;
+            }
+        };
+
+        await generateInspectionSchedules(req, mockRes);
+        return responseData || { message: "Generated inspection schedules" };
+    }
+
     getCronStatus() {
         return {
             maintenanceGeneration: {
