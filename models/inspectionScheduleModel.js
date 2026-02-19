@@ -40,7 +40,9 @@ const getInspectionFrequency = async (asset_type_id, org_id) => {
       COALESCE(uom.UOM, aif.uom) as uom,
       10 as insp_lead_time,
       aif.org_id,
-      aif.int_status
+      aif.int_status,
+      aif.emp_int_id,
+      aif.maintained_by
     FROM "tblAAT_Insp_Freq" aif
     INNER JOIN "tblAATInspCheckList" aaic ON aif.aatic_id = aaic.aatic_id
     LEFT JOIN "tblUom" uom ON aif.uom = uom.UOM_id
@@ -276,8 +278,9 @@ const createWorkflowInspectionHeader = async (data) => {
       created_by,
       created_on,
       org_id,
-      branch_code
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10)
+      branch_code,
+      emp_int_id
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10, $11)
     RETURNING *
   `;
   
@@ -291,7 +294,8 @@ const createWorkflowInspectionHeader = async (data) => {
     data.status || 'IN', // IN = Initiated
     data.created_by || 'SYSTEM',
     data.org_id,
-    data.branch_code
+    data.branch_code,
+    data.emp_int_id || null
   ]);
 };
 
@@ -338,6 +342,7 @@ const createDirectInspectionSchedule = async (data) => {
       aatif_id,
       asset_id,
       vendor_id,
+      emp_int_id,
       act_insp_st_date,
       status,
       created_by,
@@ -353,6 +358,7 @@ const createDirectInspectionSchedule = async (data) => {
     data.aatif_id,
     data.asset_id,
     data.vendor_id || null,
+    data.emp_int_id || null,
     data.act_insp_st_date,
     data.status || 'PN', // PN = Pending
     data.created_by || 'SYSTEM',
@@ -532,19 +538,19 @@ const saveInspectionRecord = async (recordData) => {
   const timestamp = Date.now().toString();
   const attirec_id = `ATTIREC_${timestamp}`;
   
-  // Check if record already exists
+  // Check if record already exists (use lowercase column names)
   const checkQuery = `
-    SELECT "ATTIRec_Id" FROM "tblAAT_Insp_Rec" 
-    WHERE "AATISch_Id" = $1 AND "Insp_Check_Id" = $2
+    SELECT attirec_id FROM "tblAAT_Insp_Rec"
+    WHERE aatisch_id = $1 AND insp_check_id = $2
   `;
   const existingRecord = await db.query(checkQuery, [ais_id, insp_check_id]);
   
   if (existingRecord.rows.length > 0) {
     // Update existing record
     const updateQuery = `
-      UPDATE "tblAAT_Insp_Rec" 
-      SET "Recorded_Value" = $1, created_by = $2, created_on = NOW()
-      WHERE "AATISch_Id" = $3 AND "Insp_Check_Id" = $4
+      UPDATE "tblAAT_Insp_Rec"
+      SET recorded_value = $1, created_by = $2, created_on = NOW()
+      WHERE aatisch_id = $3 AND insp_check_id = $4
       RETURNING *
     `;
     return await db.query(updateQuery, [recorded_value, created_by, ais_id, insp_check_id]);
@@ -552,10 +558,10 @@ const saveInspectionRecord = async (recordData) => {
     // Create new record
     const insertQuery = `
       INSERT INTO "tblAAT_Insp_Rec" (
-        "ATTIRec_Id",
-        "AATISch_Id",
-        "Insp_Check_Id",
-        "Recorded_Value",
+        attirec_id,
+        aatisch_id,
+        insp_check_id,
+        recorded_value,
         org_id,
         created_by,
         created_on

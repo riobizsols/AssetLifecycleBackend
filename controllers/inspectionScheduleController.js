@@ -408,7 +408,8 @@ const createWorkflowInspection = async (
     status: 'IN', // Initiated
     created_by: 'SYSTEM',
     org_id,
-    branch_code: asset.branch_code
+    branch_code: asset.branch_code,
+    emp_int_id: frequency.emp_int_id || null
   });
 
   // Create detail records for each approval level
@@ -526,6 +527,11 @@ const updateInspection = async (req, res) => {
         return res.status(400).json({ success: false, message: 'No valid fields to update' });
     }
 
+    // Ensure emp_int_id is stored as the current user's employee id when saving from inspection list
+    if (req.user?.emp_int_id) {
+      filteredUpdate.emp_int_id = req.user.emp_int_id;
+    }
+
     const result = await inspectionModel.updateInspectionRecord(id, org_id, filteredUpdate);
     
     if (result.rowCount === 0) {
@@ -567,20 +573,66 @@ const getInspectionRecords = async (req, res) => {
 
 const saveInspectionRecord = async (req, res) => {
   try {
-    const { ais_id, insp_check_id, recorded_value } = req.body;
     const org_id = req.user?.org_id || req.body.org_id || 'ORG001';
-    const created_by = req.user?.user_id || req.body.created_by || 'SYSTEM';
-    
-    const recordData = {
-      ais_id,
-      insp_check_id,
-      recorded_value,
-      created_by,
-      org_id
-    };
-    
-    const result = await inspectionModel.saveInspectionRecord(recordData);
-    return res.json({ success: true, data: result.rows[0] });
+    const callerUserId = req.user?.user_id || req.body.created_by || 'SYSTEM';
+    const callerEmpIntId = req.user?.emp_int_id || req.body.emp_int_id || null;
+
+    const { ais_id, records, insp_check_id, recorded_value, notes, inspector_name, inspector_email, inspector_phone, trigger_maintenance } = req.body;
+
+    if (!ais_id) return res.status(400).json({ success: false, message: 'ais_id is required' });
+
+    // Fetch inspection schedule to determine if inhouse or vendor and assigned emp
+    const inspRes = await inspectionModel.getInspectionDetailsById(ais_id, org_id);
+    if (!inspRes || inspRes.rows.length === 0) return res.status(404).json({ success: false, message: 'Inspection not found' });
+    const insp = inspRes.rows[0];
+
+    const isVendor = !!(insp.maintained_by && String(insp.maintained_by).toLowerCase() === 'vendor'); // vendor-maintained when maintained_by === 'vendor'
+    const assignedEmp = insp.inspected_by || insp.emp_int_id || null;
+
+    // Permission: if inhouse (no vendor), only assigned emp_int_id may save
+    if (!isVendor && assignedEmp) {
+      if (!callerEmpIntId || String(callerEmpIntId) !== String(assignedEmp)) {
+        return res.status(403).json({ success: false, message: 'Only assigned technician can record inspection values for inhouse maintenance.' });
+      }
+    }
+
+    // Prepare list of records to save
+    let recordsToSave = [];
+    if (Array.isArray(records) && records.length > 0) {
+      recordsToSave = records.map(r => ({ ais_id, insp_check_id: r.insp_check_id, recorded_value: r.recorded_value, created_by: callerUserId, org_id }));
+    } else if (insp_check_id && (recorded_value !== undefined)) {
+      recordsToSave = [{ ais_id, insp_check_id, recorded_value, created_by: callerUserId, org_id }];
+    } else {
+      // nothing to save
+      recordsToSave = [];
+    }
+
+    const saved = [];
+    for (const r of recordsToSave) {
+      const result = await inspectionModel.saveInspectionRecord(r);
+      if (result && result.rows && result.rows[0]) saved.push(result.rows[0]);
+    }
+
+    // Update inspection schedule notes and inspector info if provided
+    const updateData = {};
+    if (notes !== undefined) updateData.notes = notes;
+    if (trigger_maintenance !== undefined) updateData.trigger_maintenance = trigger_maintenance;
+
+    if (isVendor && inspector_name) {
+      // append inspector info to notes for record
+      const inspectorInfo = `Inspector: ${inspector_name}${inspector_email ? ' | ' + inspector_email : ''}${inspector_phone ? ' | ' + inspector_phone : ''}`;
+      updateData.notes = (updateData.notes ? updateData.notes + '\n' : '') + inspectorInfo;
+      // set changed_by to inspector name so table reflects who saved
+      updateData.changed_by = inspector_name;
+    }
+
+    let updatedSchedule = null;
+    if (Object.keys(updateData).length > 0) {
+      const updRes = await inspectionModel.updateInspectionRecord(ais_id, org_id, updateData);
+      if (updRes && updRes.rows && updRes.rows[0]) updatedSchedule = updRes.rows[0];
+    }
+
+    return res.json({ success: true, data: { savedRecords: saved, updatedSchedule } });
   } catch (error) {
     console.error('Error saving inspection record:', error);
     return res.status(500).json({ success: false, message: 'Failed to save inspection record' });

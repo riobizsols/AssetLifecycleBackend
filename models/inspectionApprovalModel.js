@@ -93,26 +93,41 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       h.created_by,
       h.created_on,
       h.branch_code,
+      h.emp_int_id,
       
       a.asset_type_id,
       a.asset_id as asset_code,
       a.serial_number,
       a.purchased_on,
+      a.purchase_vendor_id,
+      a.service_vendor_id,
+      h.vendor_id,
       
       ast.text as asset_type_name,
       ast.asset_type_id,
       
-      -- aif.freq as inspection_frequency,
-      -- aif.uom as inspection_uom,
-      'Monthly' as inspection_frequency,
-      'Month' as inspection_uom,
+      aif.freq as inspection_frequency,
+      aif.uom as inspection_uom,
+      aif.maintained_by,
 
-      b.text as branch_name
+      b.text as branch_name,
+
+      -- Vendor details (prefer header.vendor_id, fallback to asset.service_vendor_id)
+      v.vendor_id as vendor_id,
+      v.vendor_name as vendor_name,
+      v.contact_person_name as vendor_contact_person,
+      v.contact_person_email as vendor_contact_email,
+      v.contact_person_number as vendor_contact_number,
+      v.company_email as vendor_company_email,
+      v.address_line1 as vendor_address_line1,
+      v.contract_start_date as vendor_contract_start_date,
+      v.contract_end_date as vendor_contract_end_date
       
     FROM "tblWFAATInspSch_H" h
     INNER JOIN "tblAssets" a ON h.asset_id = a.asset_id
+    LEFT JOIN "tblVendors" v ON v.vendor_id = COALESCE(h.vendor_id, a.service_vendor_id)
     INNER JOIN "tblAssetTypes" ast ON a.asset_type_id = ast.asset_type_id
-    -- LEFT JOIN "tblAAT_Insp_Freq" aif ON h.aatif_id = aif.aatif_id
+    LEFT JOIN "tblAAT_Insp_Freq" aif ON h.aatif_id = aif.aatif_id
     LEFT JOIN "tblBranches" b ON h.branch_code = b.branch_code
     
     WHERE h.org_id = $1
@@ -466,24 +481,51 @@ async function getPreviousApprovedValues(orgId, wfaiishId, currentSequence) {
  * @param {string} userId
  */
 async function updateHeaderDetails(orgId, wfaiishId, updates, userId) {
-  const { pl_sch_date } = updates;
-  if (!pl_sch_date) return null; // Nothing to update
-  
+  const { pl_sch_date, vendorId, technicianId } = updates;
+  // Build dynamic SET clause
+  const sets = [];
+  const values = [orgId, wfaiishId];
+  let idx = 3;
+
+  if (pl_sch_date) {
+    sets.push(`pl_sch_date = $${idx}`);
+    values.push(pl_sch_date);
+    idx++;
+  }
+
+  if (vendorId) {
+    sets.push(`vendor_id = $${idx}`);
+    values.push(vendorId);
+    idx++;
+  }
+
+  if (technicianId) {
+    sets.push(`emp_int_id = $${idx}`);
+    values.push(technicianId);
+    idx++;
+  }
+
+  if (sets.length === 0) return null; // Nothing to update
+
+  // Always update changed_by and changed_on
+  sets.push(`changed_by = $${idx}`);
+  values.push(userId);
+  idx++;
+
   const query = `
     UPDATE "tblWFAATInspSch_H"
     SET 
-      pl_sch_date = $3,
-      changed_by = $4,
+      ${sets.join(',\n      ')},
       changed_on = NOW()
     WHERE org_id = $1 AND wfaiish_id = $2
     RETURNING *
   `;
+
   try {
-    const result = await pool.query(query, [orgId, wfaiishId, pl_sch_date, userId]);
+    const result = await pool.query(query, values);
     return result.rows[0];
   } catch (error) {
     console.error('Error updating header details:', error);
-    // Don't throw, just return null or log
     return null;
   }
 }
@@ -494,7 +536,7 @@ async function updateHeaderDetails(orgId, wfaiishId, updates, userId) {
  * @param {string} wfaiishId 
  * @param {string} userId - User completing the workflow
  */
-async function createCompletedInspectionRecord(orgId, wfaiishId, userId) {
+async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technicianId = null) {
   try {
     // 1. Get workflow header details along with branch_id
     const headerQuery = `
@@ -511,6 +553,9 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId) {
     
     const header = headerResult.rows[0];
     
+    // Use technicianId if provided (from vendor selection), otherwise use emp_int_id from header (inhouse)
+    const finalTechnicianId = technicianId || header.emp_int_id;
+    
     // 2. Generate new AIS ID (e.g. AIS_001)
     const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
     const idResult = await pool.query(idQuery);
@@ -525,6 +570,8 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId) {
         asset_id,
         vendor_id,
         aatif_id,
+        inspected_by,
+        emp_int_id,
         status,
         act_insp_st_date,
         act_insp_end_date,
@@ -533,26 +580,28 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId) {
         changed_by,
         changed_on,
         org_id,
-        branch_id
+        branch_code
       ) VALUES (
-        $1, $2, $3, $4, $5, 
-        'IN', $6, NOW(), 
-        $7, NOW(), $8, NOW(), $9, $10
+        $1, $2, $3, $4, $5, $6, $7,
+        'IN', $8, NOW(), 
+        $9, NOW(), $10, NOW(), $11, $12
       )
       RETURNING *
     `;
-    
+
     const values = [
       aisId,
       header.wfaiish_id,
       header.asset_id,
       header.vendor_id,
       header.aatif_id,
+      finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
+      finalTechnicianId, // emp_int_id - ensure emp_int_id column is set to technician id
       header.pl_sch_date || new Date(), // act_insp_st_date
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
       orgId,
-      header.branch_id
+      header.branch_code
     ];
     
     const result = await pool.query(insertQuery, values);
@@ -562,6 +611,69 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId) {
     console.error('Error creating completed inspection record:', error);
     // Don't throw to prevent rollback of workflow update (make it resilient)
     // Actually, throwing ensures consistency. Let's throw.
+    throw error;
+  }
+}
+
+/**
+ * Get certified technicians for a specific asset type
+ * @param {string} orgId - Organization ID
+ * @param {string} assetTypeId - Asset Type ID
+ * @returns {Array} List of certified technicians
+ */
+async function getCertifiedTechnicians(orgId, assetTypeId) {
+  const query = `
+    SELECT DISTINCT
+      e.emp_int_id,
+      e.full_name,
+      e.email_id,
+      e.phone_number,
+      tc.tc_id,
+      tc.certificate_name as cert_name,
+      tc.certificate_no as cert_number,
+      tc.expiry_date
+    FROM "tblATInspCerts" atic
+    INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
+    INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
+    INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id
+    INNER JOIN "tblAATInspCheckList" aatic ON atic.aatic_id = aatic.aatic_id
+    WHERE aatic.asset_type_id = $1
+      AND e.org_id = $2
+      AND e.int_status = 1
+      AND (tc.expiry_date IS NULL OR tc.expiry_date > CURRENT_DATE)
+    ORDER BY e.full_name;
+  `;
+  
+  try {
+    const result = await pool.query(query, [assetTypeId, orgId]);
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching certified technicians:', error);
+    throw error;
+  }
+}
+
+/**
+ * Get technician details by emp_int_id from workflow header
+ */
+async function getTechnicianFromWorkflowHeader(orgId, empIntId) {
+  const query = `
+    SELECT 
+      e.emp_int_id,
+      e.full_name,
+      e.email_id,
+      e.phone_number
+    FROM "tblEmployees" e
+    WHERE e.emp_int_id = $1
+      AND e.org_id = $2
+      AND e.int_status = 1;
+  `;
+  
+  try {
+    const result = await pool.query(query, [empIntId, orgId]);
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching technician from workflow header:', error);
     throw error;
   }
 }
@@ -578,5 +690,7 @@ module.exports = {
   getNextWorkflowStep,
   createWorkflowHistory,
   getPreviousApprovedValues,
-  createCompletedInspectionRecord
+  createCompletedInspectionRecord,
+  getCertifiedTechnicians,
+  getTechnicianFromWorkflowHeader
 };

@@ -25,6 +25,18 @@ router.get('/detail/:wfaiish_id', controller.getInspectionDetail);
 // GET /api/inspection-approval/history/:wfaiish_id
 router.get('/history/:wfaiish_id', controller.getInspectionHistory);
 
+// Get certified technicians for a specific asset type
+// GET /api/inspection-approval/technicians/:assetTypeId
+router.get('/technicians/:assetTypeId', controller.getCertifiedTechnicians);
+
+// Get technician details from workflow header (for inhouse maintained assets)
+// GET /api/inspection-approval/technician-header/:empIntId
+router.get('/technician-header/:empIntId', controller.getTechnicianFromHeader);
+
+// Update workflow header (vendor or planned date)
+// PUT /api/inspection-approval/workflow-header/:wfaiishId
+router.put('/workflow-header/:wfaiishId', controller.updateWorkflowHeader);
+
 
 // CHUNK 2.2: WRITE OPERATIONS (ACTIONS)
 

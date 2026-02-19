@@ -111,7 +111,7 @@ async function processApprovalAction(req, res) {
     
     // Ensure req.body exists
     const body = req.body || {};
-    const { action, wfaiisd_id, comments, plannedDate } = body;
+    const { action, wfaiisd_id, comments, plannedDate, technicianId } = body;
 
     // Validate inputs
     if (!action || !['APPROVE', 'REJECT'].includes(action.toUpperCase())) {
@@ -211,9 +211,10 @@ async function processApprovalAction(req, res) {
           await inspectionApprovalModel.createCompletedInspectionRecord(
             orgId,
             step.wfaiish_id,
-            userId
+            userId,
+            technicianId
           );
-          console.log('Created master inspection record for:', step.wfaiish_id);
+          console.log('Created master inspection record for:', step.wfaiish_id, 'with technician:', technicianId);
         } catch (masterErr) {
           console.error('Failed to create master inspection record:', masterErr);
           // Non-blocking error, but should be noted
@@ -334,9 +335,101 @@ async function processApprovalAction(req, res) {
   }
 }
 
+/**
+ * Get certified technicians for a specific asset type
+ */
+async function getCertifiedTechnicians(req, res) {
+  try {
+    const orgId = req.user?.org_id || 'ORG001';
+    const { assetTypeId } = req.params;
+    
+    if (!assetTypeId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Asset type ID is required.' 
+      });
+    }
+    
+    console.log('Getting certified technicians for asset type:', assetTypeId, 'Org:', orgId);
+    
+    const technicians = await inspectionApprovalModel.getCertifiedTechnicians(orgId, assetTypeId);
+    
+    console.log(`Found ${technicians.length} certified technicians for asset type:`, assetTypeId);
+    return res.json({ 
+      success: true, 
+      count: technicians.length, 
+      data: technicians 
+    });
+  } catch (error) {
+    console.error('Error getting certified technicians:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error.' 
+    });
+  }
+}
+
+/**
+ * Get technician details from workflow header (for inhouse maintained assets)
+ */
+async function getTechnicianFromHeader(req, res) {
+  try {
+    const orgId = req.user?.org_id || 'ORG001';
+    const { empIntId } = req.params;
+    
+    if (!empIntId) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Employee internal ID is required.' 
+      });
+    }
+    
+    console.log('Getting technician from workflow header:', empIntId, 'Org:', orgId);
+    
+    const technician = await inspectionApprovalModel.getTechnicianFromWorkflowHeader(orgId, empIntId);
+    
+    console.log(`Found technician for emp_int_id ${empIntId}:`, technician);
+    return res.json({ 
+      success: true, 
+      data: technician 
+    });
+  } catch (error) {
+    console.error('Error getting technician from workflow header:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Internal server error.' 
+    });
+  }
+}
+
+/**
+ * Update inspection workflow header fields (vendor_id, pl_sch_date)
+ */
+async function updateWorkflowHeader(req, res) {
+  try {
+    const orgId = req.user?.org_id || 'ORG001';
+    const userId = req.user?.user_id || req.user?.emp_int_id || 'SYSTEM';
+    const { wfaiishId } = req.params;
+    const { vendorId, pl_sch_date, technicianId } = req.body || {};
+
+    if (!wfaiishId) return res.status(400).json({ success: false, message: 'Workflow header ID is required.' });
+
+    const updated = await inspectionApprovalModel.updateHeaderDetails(orgId, wfaiishId, { vendorId, pl_sch_date, technicianId }, userId);
+    if (!updated) return res.status(400).json({ success: false, message: 'No changes applied or update failed.' });
+
+    return res.json({ success: true, data: updated, message: 'Workflow header updated.' });
+  } catch (error) {
+    console.error('Error updating workflow header:', error);
+    return res.status(500).json({ success: false, message: 'Failed to update workflow header.' });
+  }
+}
+
 module.exports = {
   getPendingApprovals,
   getInspectionDetail,
   getInspectionHistory,
-  processApprovalAction
+  processApprovalAction,
+  getCertifiedTechnicians,
+  getTechnicianFromHeader
+  , updateWorkflowHeader
 };
