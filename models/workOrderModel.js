@@ -189,7 +189,11 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
         params.push(userBranchId);
     }
     
-    query += ` AND ams.status = 'IN' 
+    query += ` AND (
+            (COALESCE(ams.maint_type_id, '') = 'MT004' AND ams.status IN ('IN', 'IP')) 
+            OR 
+            (COALESCE(ams.maint_type_id, '') != 'MT004' AND ams.status = 'IN')
+          )
           AND ams.wo_id IS NOT NULL
           AND (
             -- Include vendor-maintained work orders
@@ -203,11 +207,12 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
               SELECT 1 FROM "tblAssetBRDet" brd
               WHERE brd.asset_id = ams.asset_id
                 AND brd.org_id = ams.org_id
+                AND (brd.status = 'CF' OR brd.status = 'Reopened')
                 AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
                 AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
             ))
           )
-        ORDER BY ams.created_on DESC
+        ORDER BY ams.created_on DESC, ams.ams_id DESC
     `;
     
     const dbPool = getDb();

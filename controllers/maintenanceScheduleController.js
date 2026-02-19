@@ -1233,6 +1233,28 @@ const updateMaintenanceSchedule = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
         }
 
+        // --- CRITICAL WORKFLOW SYNC: Maintenance -> Breakdown ---
+        // If status is 'CO' (Completed), we must ensure the linked breakdown is also marked as 'CO'
+        // so that the employee can confirm/verify the work.
+        if (updateData.status === 'CO') {
+            try {
+                const maintenanceRecord = result.rows[0];
+                console.log(`[SYNC] Maintenance ${id} marked as Completed. Checking for linked breakdown...`);
+                
+                const synced = await model.syncBreakdownStatus(maintenanceRecord, orgId);
+                
+                if (synced) {
+                    console.log(`[SYNC] Successfully synced breakdown status to CO for maintenance ${id}`);
+                } else {
+                    console.log(`[SYNC] No linked breakdown found for maintenance ${id}`);
+                }
+            } catch (syncError) {
+                console.error(`[SYNC] Error syncing breakdown status for maintenance ${id}:`, syncError);
+                // We don't fail the whole request if sync fails, but we log it heavily
+            }
+        }
+        // -------------------------------------------------------
+
         // Log success (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
             supervisorApprovalLogger.logMaintenanceUpdated({

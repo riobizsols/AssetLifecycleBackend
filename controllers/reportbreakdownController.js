@@ -14,6 +14,33 @@ const {
     logDatabaseConnectionFailure
 } = require('../eventLoggers/reportsEventLogger');
 
+// POST /api/reportbreakdown/:id/confirm
+const confirmEmployeeReportBreakdown = async (req, res) => {
+  const userId = req.user?.user_id;
+  const orgId = req.user?.org_id || req.query.orgId;
+  const { id } = req.params;
+  try {
+    const result = await model.confirmEmployeeReportBreakdown(id, orgId, userId);
+    return res.status(200).json({ success: true, message: "Breakdown confirmed", data: result });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// POST /api/reportbreakdown/:id/reopen
+const reopenEmployeeReportBreakdown = async (req, res) => {
+  const userId = req.user?.user_id;
+  const orgId = req.user?.org_id || req.query.orgId;
+  const { id } = req.params;
+  const { notes } = req.body;
+  try {
+    const result = await model.reopenEmployeeReportBreakdown(id, orgId, userId, notes);
+    return res.status(200).json({ success: true, message: "Breakdown reopened", data: result });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
 // GET /api/reportbreakdown/reports
 const getAllReports = async (req, res) => {
   const startTime = Date.now();
@@ -667,7 +694,9 @@ module.exports = {
   getUpcomingMaintenanceDate,
   createBreakdownReport,
   updateBreakdownReport,
-  deleteBreakdownReport
+  deleteBreakdownReport,
+  confirmEmployeeReportBreakdown,
+  reopenEmployeeReportBreakdown
 };
 
 

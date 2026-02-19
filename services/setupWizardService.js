@@ -657,7 +657,7 @@ const CORE_TABLE_DDL = [
       os_id character varying(20) PRIMARY KEY,
       org_id character varying(20) NOT NULL,
       key character varying(50) NOT NULL,
-      value character varying(100) NOT NULL
+      value text NOT NULL
     );
   `,
   `

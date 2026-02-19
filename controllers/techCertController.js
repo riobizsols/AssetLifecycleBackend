@@ -3,18 +3,31 @@ const TechCertModel = require('../models/techCertModel');
 const getAllCertificates = async (req, res) => {
   try {
     const orgId = req.user.org_id;
+    console.log(`[TechCertController] Fetching certificates for org: ${orgId}`);
+    
     const certificates = await TechCertModel.getAllCertificates(orgId);
+    
+    console.log(`[TechCertController] Found ${certificates.length} certificates`);
+    console.log(`[TechCertController] Certificates:`, certificates);
 
     return res.status(200).json({
       success: true,
-      data: certificates
+      data: certificates,
+      count: certificates.length
     });
   } catch (error) {
-    console.error('Error fetching certificates:', error);
+    console.error('[TechCertController] Error fetching certificates:', error);
+    console.error('[TechCertController] Error details:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack
+    });
+    
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch certificates',
-      error: error.message
+      error: error.message,
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 };

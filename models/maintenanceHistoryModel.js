@@ -802,7 +802,6 @@ const getMaintenanceHistorySummary = async (orgId = 'ORG001') => {
     const query = `
         SELECT 
             COUNT(*) as total_maintenance_records,
-            COUNT(CASE WHEN status = 'CO' THEN 1 END) as completed_maintenance,
             COUNT(CASE WHEN status = 'IN' THEN 1 END) as in_progress_maintenance,
             COUNT(CASE WHEN status = 'CA' THEN 1 END) as cancelled_maintenance,
             COUNT(CASE WHEN act_maint_st_date >= CURRENT_DATE - INTERVAL '30 days' THEN 1 END) as maintenance_last_30_days,

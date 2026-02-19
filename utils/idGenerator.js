@@ -27,8 +27,10 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'prop': 'PROP',
             'atbrrc': 'ATBRRC',
             'atmcl': 'ATMCL',
+            'aat_insp_checklist': 'AATIC',
             'job_role_nav': 'JRN',
             'job_role': 'JR',
+            'aat_insp_checklist': 'AATIC',
             // Scrap workflow tables
             'wfscrapseq': 'WFSCQ',
             'wfscrap_h': 'WFSCH',
@@ -126,7 +128,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfjr': 'tblWFJobRole',
         'prop': 'tblProps',
         'atbrrc': 'tblATBRReasonCodes',
+        'aat_insp_checklist': 'tblAATInspCheckList',
         'atmcl': 'tblATMaintCheckList',
+        'IC': 'tblInspCheckList',
         'job_role_nav': 'tblJobRoleNav',
         'job_role': 'tblJobRoles',
         // Scrap workflow tables
@@ -172,7 +176,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfjr': 'wf_job_role_id',
             'prop': 'prop_id',
             'atbrrc': 'atbrrc_id',
+            'aat_insp_checklist': 'aatic_id',
             'atmcl': 'at_main_checklist_id',
+            'IC': 'insp_check_id',
             'job_role_nav': 'job_role_nav_id',
             'job_role': 'job_role_id',
             // Scrap workflow tables
@@ -210,16 +216,18 @@ exports.peekNextId = async (prefix, table, column, padding = 3) => {
     const dbPool = getDb();
     const result = await dbPool.query(
         `SELECT ${column} FROM ${table} 
-       ORDER BY CAST(SUBSTRING(${column} FROM '\\d+$') AS INTEGER) DESC 
+       ORDER BY CAST(SUBSTRING(${column} FROM '[0-9]+$') AS INTEGER) DESC 
        LIMIT 1`
     );
 
     let nextNum = 1;
     if (result.rows.length > 0) {
         const lastId = result.rows[0][column];
-        const match = lastId.match(/\d+/); // extract numeric part
+        const match = lastId.match(/[0-9]+/g); // extract all numeric parts
         if (match) {
-            nextNum = parseInt(match[0]) + 1;
+            // Pick the last numeric part for sequencing
+            const lastPart = match[match.length - 1];
+            nextNum = parseInt(lastPart) + 1;
         }
     }
 

@@ -572,7 +572,6 @@ const getBreakdownHistorySummary = async (orgId = 'ORG001') => {
             COUNT(DISTINCT brd.abr_id) as total_breakdown_records,
             COUNT(CASE WHEN brd.status = 'CR' THEN 1 END) as created_breakdowns,
             COUNT(CASE WHEN brd.status = 'IN' THEN 1 END) as in_progress_breakdowns,
-            COUNT(CASE WHEN brd.status = 'CO' THEN 1 END) as completed_breakdowns,
             COUNT(CASE WHEN brd.decision_code = 'BF01' THEN 1 END) as breakdowns_with_maintenance,
             COUNT(CASE WHEN brd.decision_code = 'BF02' THEN 1 END) as breakdowns_without_maintenance,
             COUNT(CASE WHEN brd.decision_code = 'BF03' THEN 1 END) as breakdowns_cancelled,
