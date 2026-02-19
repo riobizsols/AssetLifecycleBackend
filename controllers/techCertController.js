@@ -3,31 +3,18 @@ const TechCertModel = require('../models/techCertModel');
 const getAllCertificates = async (req, res) => {
   try {
     const orgId = req.user.org_id;
-    console.log(`[TechCertController] Fetching certificates for org: ${orgId}`);
-    
     const certificates = await TechCertModel.getAllCertificates(orgId);
-    
-    console.log(`[TechCertController] Found ${certificates.length} certificates`);
-    console.log(`[TechCertController] Certificates:`, certificates);
 
     return res.status(200).json({
       success: true,
-      data: certificates,
-      count: certificates.length
+      data: certificates
     });
   } catch (error) {
-    console.error('[TechCertController] Error fetching certificates:', error);
-    console.error('[TechCertController] Error details:', {
-      message: error.message,
-      code: error.code,
-      stack: error.stack
-    });
-    
+    console.error('Error fetching certificates:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to fetch certificates',
-      error: error.message,
-      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: error.message
     });
   }
 };
@@ -237,11 +224,142 @@ const saveMappedCertificates = async (req, res) => {
   }
 };
 
+const saveInspectionCertificates = async (req, res) => {
+  try {
+    const orgId = req.user.org_id;
+    const createdBy = req.user.user_id;
+    const { assetTypeId } = req.params;
+    const { certificate_ids = [] } = req.body;
+
+    if (!assetTypeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Asset type ID is required'
+      });
+    }
+
+    if (!Array.isArray(certificate_ids)) {
+      return res.status(400).json({
+        success: false,
+        message: 'certificate_ids must be an array'
+      });
+    }
+
+    try {
+      await TechCertModel.replaceAssetTypeInspectionCertificates(assetTypeId, certificate_ids, orgId, createdBy);
+      const refreshed = await TechCertModel.getInspectionCertificates(assetTypeId, orgId);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Inspection certificates saved successfully',
+        data: refreshed
+      });
+    } catch (dbError) {
+      // Check if it's a table not found error
+      if (dbError.message && dbError.message.includes('does not contain required columns')) {
+        return res.status(500).json({
+          success: false,
+          message: 'Database table for inspection certificates not found. Please run the migration script.',
+          error: 'tblATInspCert table does not exist or is missing required columns'
+        });
+      }
+      throw dbError;
+    }
+  } catch (error) {
+    console.error('Error saving inspection certificates:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to save inspection certificates',
+      error: error.message
+    });
+  }
+};
+
+const getInspectionCertificates = async (req, res) => {
+  try {
+    const orgId = req.user.org_id;
+    const { assetTypeId } = req.params;
+
+    if (!assetTypeId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Asset type ID is required'
+      });
+    }
+
+    const certificates = await TechCertModel.getInspectionCertificates(assetTypeId, orgId);
+
+    return res.status(200).json({
+      success: true,
+      data: certificates
+    });
+  } catch (error) {
+    console.error('Error fetching inspection certificates:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch inspection certificates',
+      error: error.message
+    });
+  }
+};
+
+const getAllInspectionCertificates = async (req, res) => {
+  try {
+    const orgId = req.user.org_id;
+
+    const certificates = await TechCertModel.getAllInspectionCertificates(orgId);
+
+    return res.status(200).json({
+      success: true,
+      data: certificates
+    });
+  } catch (error) {
+    console.error('Error fetching all inspection certificates:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to fetch inspection certificates',
+      error: error.message
+    });
+  }
+};
+
+const deleteInspectionCertificate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const orgId = req.user.org_id;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: 'Inspection certificate ID is required'
+      });
+    }
+
+    await TechCertModel.deleteInspectionCertificate(id, orgId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Inspection certificate removed successfully'
+    });
+  } catch (error) {
+    console.error('Error in deleteInspectionCertificate:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to remove inspection certificate',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getAllCertificates,
   createCertificate,
   updateCertificate,
   deleteCertificate,
   getMappedCertificates,
-  saveMappedCertificates
+  saveMappedCertificates,
+  getInspectionCertificates,
+  getAllInspectionCertificates,
+  saveInspectionCertificates,
+  deleteInspectionCertificate
 };

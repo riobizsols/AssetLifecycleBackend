@@ -26,14 +26,38 @@ const getAllMappings = async (orgId) => {
 const getMappedChecklistsByAssetTypeAndAsset = async (assetTypeId, assetId, orgId) => {
     const dbPool = getDb();
     
-    let query = `SELECT * FROM "tblAATInspCheckList" WHERE at_id = $1 AND org_id = $2`;
+    let query = `
+        SELECT 
+            m.aatic_id,
+            m.at_id,
+            m.asset_id,
+            m.insp_check_id,
+            m.expected_value,
+            m.min_range,
+            m.max_range,
+            m.trigger_maintenance,
+            m.org_id,
+            m.created_by,
+            m.created_on,
+            m.changed_by,
+            m.changed_on,
+            c.response_type,
+            CASE 
+                WHEN c.response_type = 'QN' THEN 'IRTD_QN_001'
+                ELSE 'IRTD_QL_YES_NO_001'
+            END as irtd_id,
+            c.inspection_text as question_text
+        FROM "tblAATInspCheckList" m
+        LEFT JOIN "tblInspCheckList" c ON m.insp_check_id = c.insp_check_id AND m.org_id = c.org_id
+        WHERE m.at_id = $1 AND m.org_id = $2
+    `;
     let params = [assetTypeId, orgId];
     
     if (assetId) {
-        query += ` AND asset_id = $3`;
+        query += ` AND m.asset_id = $3`;
         params.push(assetId);
     } else {
-        query += ` AND (asset_id IS NULL OR asset_id = '')`;
+        query += ` AND (m.asset_id IS NULL OR m.asset_id = '')`;
     }
     
     const result = await dbPool.query(query, params);
@@ -76,8 +100,8 @@ const saveMapping = async (assetTypeId, assetId, overrideData, orgId, userId) =>
                         orgId, 
                         assetTypeId, 
                         assetId || null, 
-                        item.insp_check_id, 
-                        item.expected_value, 
+                        item.insp_check_id || item.Insp_check_id, 
+                        item.expected_value || item.Expected_Value, 
                         (item.min_range === "" || item.min_range === null || item.min_range === undefined) ? null : item.min_range, 
                         (item.max_range === "" || item.max_range === null || item.max_range === undefined) ? null : item.max_range, 
                         !!item.trigger_maintenance, 

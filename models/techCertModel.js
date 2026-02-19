@@ -66,6 +66,27 @@ const getMappingColumns = async () => {
   };
 };
 
+const getInspectionMappingColumns = async () => {
+  try {
+    const columnMap = await getTableColumns('tblATInspCert');
+    
+    if (!columnMap || Object.keys(columnMap).length === 0) {
+      throw new Error('tblATInspCert table does not exist or is empty');
+    }
+
+    return {
+      id: pickColumn(columnMap, ['atic_id']),
+      assetTypeId: pickColumn(columnMap, ['asset_type_id', 'assettype_id']),
+      certId: pickColumn(columnMap, ['tc_id']),
+      org: pickColumn(columnMap, ['org_id', 'orgid']),
+      createdBy: pickColumn(columnMap, ['created_by', 'createdby']),
+      createdOn: pickColumn(columnMap, ['created_on', 'createdon'])
+    };
+  } catch (error) {
+    throw new Error(`Failed to get inspection mapping columns: ${error.message}`);
+  }
+};
+
 class TechCertModel {
   static async getAllCertificates(orgId) {
     const columns = await getTechCertColumns();
@@ -281,6 +302,189 @@ class TechCertModel {
       return inserted;
     } catch (error) {
       await dbPool.query('ROLLBACK');
+      throw error;
+    }
+  }
+
+  static async replaceAssetTypeInspectionCertificates(assetTypeId, certificateIds, orgId, createdBy) {
+    const mapColumns = await getInspectionMappingColumns();
+
+    if (!mapColumns.assetTypeId || !mapColumns.certId) {
+      throw new Error('tblATInspCert does not contain required columns');
+    }
+
+    const dbPool = getDb();
+    await dbPool.query('BEGIN');
+
+    try {
+      const deleteQuery = `
+        DELETE FROM "tblATInspCert"
+        WHERE ${mapColumns.assetTypeId} = $1
+        ${mapColumns.org ? `AND ${mapColumns.org} = $2` : ''}
+      `;
+      const deleteParams = mapColumns.org ? [assetTypeId, orgId] : [assetTypeId];
+      await dbPool.query(deleteQuery, deleteParams);
+
+      if (certificateIds.length === 0) {
+        await dbPool.query('COMMIT');
+        return [];
+      }
+
+      const inserted = [];
+
+      for (const certId of certificateIds) {
+        const insertColumns = [mapColumns.assetTypeId, mapColumns.certId];
+        const values = [assetTypeId, certId];
+
+        if (mapColumns.id) {
+          const mappingId = await generateCustomId('atic', 3);
+          insertColumns.unshift(mapColumns.id);
+          values.unshift(mappingId);
+        }
+
+        if (mapColumns.org) {
+          insertColumns.push(mapColumns.org);
+          values.push(orgId);
+        }
+
+        const valueTokens = values.map((_, idx) => `$${idx + 1}`);
+
+        if (mapColumns.createdBy) {
+          insertColumns.push(mapColumns.createdBy);
+          values.push(createdBy);
+          valueTokens.push(`$${values.length}`);
+        }
+
+        if (mapColumns.createdOn) {
+          insertColumns.push(mapColumns.createdOn);
+          valueTokens.push('NOW()');
+        }
+
+        const insertQuery = `
+          INSERT INTO "tblATInspCert" (${insertColumns.join(', ')})
+          VALUES (${valueTokens.join(', ')})
+          RETURNING ${mapColumns.certId} AS tech_cert_id
+        `;
+
+        const result = await dbPool.query(insertQuery, values);
+        inserted.push(result.rows[0]);
+      }
+
+      await dbPool.query('COMMIT');
+      return inserted;
+    } catch (error) {
+      await dbPool.query('ROLLBACK');
+      throw error;
+    }
+  }
+
+  static async getInspectionCertificates(assetTypeId, orgId) {
+    try {
+      const mapColumns = await getInspectionMappingColumns();
+      const certColumns = await getTechCertColumns();
+
+      if (!mapColumns.assetTypeId || !mapColumns.certId) {
+        throw new Error('tblATInspCert does not contain required columns');
+      }
+
+      const params = [assetTypeId];
+      const orgClause = mapColumns.org ? `AND m.${mapColumns.org} = $2` : '';
+      if (mapColumns.org) {
+        params.push(orgId);
+      }
+
+      const query = `
+        SELECT
+          m.${mapColumns.id} AS id,
+          m.${mapColumns.certId} AS tech_cert_id,
+          c.${certColumns.name} AS cert_name,
+          c.${certColumns.number} AS cert_number,
+          at.asset_type_id,
+          at.text AS asset_type_name
+        FROM "tblATInspCert" m
+        LEFT JOIN "tblTechCert" c
+          ON m.${mapColumns.certId} = c.${certColumns.id}
+        LEFT JOIN "tblAssetTypes" at
+          ON m.${mapColumns.assetTypeId} = at.asset_type_id
+        WHERE m.${mapColumns.assetTypeId} = $1
+          ${orgClause}
+        ORDER BY c.${certColumns.name}
+      `;
+
+      const dbPool = getDb();
+      const result = await dbPool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in getInspectionCertificates:', error);
+      // Return empty array if table doesn't exist yet
+      if (error.message && error.message.includes('does not exist')) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  static async getAllInspectionCertificates(orgId) {
+    try {
+      const mapColumns = await getInspectionMappingColumns();
+      const certColumns = await getTechCertColumns();
+
+      const params = [];
+      const orgClause = mapColumns.org ? `WHERE m.${mapColumns.org} = $1` : '';
+      if (mapColumns.org) {
+        params.push(orgId);
+      }
+
+      const query = `
+        SELECT
+          m.${mapColumns.id} AS id,
+          m.${mapColumns.assetTypeId} AS asset_type_id,
+          at.text AS asset_type_name,
+          m.${mapColumns.certId} AS tech_cert_id,
+          c.${certColumns.name} AS cert_name,
+          c.${certColumns.number} AS cert_number
+        FROM "tblATInspCert" m
+        LEFT JOIN "tblTechCert" c
+          ON m.${mapColumns.certId} = c.${certColumns.id}
+        LEFT JOIN "tblAssetTypes" at
+          ON m.${mapColumns.assetTypeId} = at.asset_type_id
+        ${orgClause}
+        ORDER BY at.text, c.${certColumns.name}
+      `;
+
+      const dbPool = getDb();
+      const result = await dbPool.query(query, params);
+      return result.rows;
+    } catch (error) {
+      console.error('Error in getAllInspectionCertificates:', error);
+      // Return empty array if table doesn't exist yet
+      if (error.message && error.message.includes('does not exist')) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  static async deleteInspectionCertificate(aticId, orgId) {
+    try {
+      const mapColumns = await getInspectionMappingColumns();
+      const params = [aticId];
+      const orgClause = mapColumns.org ? `AND ${mapColumns.org} = $2` : '';
+      if (mapColumns.org) {
+        params.push(orgId);
+      }
+
+      const query = `
+        DELETE FROM "tblATInspCert"
+        WHERE ${mapColumns.id} = $1
+          ${orgClause}
+      `;
+
+      const dbPool = getDb();
+      await dbPool.query(query, params);
+      return true;
+    } catch (error) {
+      console.error('Error in deleteInspectionCertificate:', error);
       throw error;
     }
   }
