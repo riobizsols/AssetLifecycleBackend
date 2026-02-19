@@ -191,6 +191,10 @@ app.use("/api/maintenance-details", require("./routes/maintenanceDetailsRoutes")
 app.use("/api/", vendorsRoutes);
 app.use("/api/", slaRoutes);
 app.use("/api/", prodServRoutes);
+
+app.use("/api", techCertRoutes);
+app.use("/api", employeeTechCertRoutes);
+
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
 app.use("/api/asset-assignments", assetAssignmentRoutes);
@@ -237,8 +241,7 @@ app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
-app.use("/api", techCertRoutes);
-app.use("/api", employeeTechCertRoutes);
+
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);
 app.use("/api/inspection-frequencies", inspectionFrequencyRoutes);
 app.use("/api/asset-type-checklist-mapping", assetTypeChecklistMappingRoutes);
@@ -249,8 +252,6 @@ app.use("/api/audit-log-configs", auditLogConfigRoutes);
 app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
 app.use("/api/cost-center-transfer", costCenterTransferRoutes);
-app.use("/api/asset-type-checklist-mapping", assetTypeChecklistMappingRoutes);
-
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });

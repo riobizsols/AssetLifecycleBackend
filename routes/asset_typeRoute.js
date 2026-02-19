@@ -19,8 +19,25 @@ const {
     commitBulkUpload
 } = require('../controllers/assetTypeController');
 
+const techCertController = require('../controllers/techCertController');
+
 // Apply authentication middleware to all routes
 router.use(protect);
+
+router.use((req, res, next) => {
+    console.log(`[AssetTypeRoute] Incoming request: ${req.method} ${req.url}`);
+    next();
+});
+
+// Tech mapping for Asset Types
+router.get('/:assetTypeId/maintenance-certificates', techCertController.getMappedCertificates);
+router.post('/:assetTypeId/maintenance-certificates', techCertController.saveMappedCertificates);
+
+// Inspection Certificates Routes (Move specific static routes before generic :id)
+router.get('/inspection-certificates', techCertController.getAllInspectionCertificates);
+router.get('/:assetTypeId/inspection-certificates', techCertController.getInspectionCertificates);
+router.post('/:assetTypeId/inspection-certificates', techCertController.saveInspectionCertificates);
+router.delete('/inspection-certificates/:id', techCertController.deleteInspectionCertificate);
 
 // Add new asset type
 router.post('/', addAssetType);

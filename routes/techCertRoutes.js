@@ -9,7 +9,5 @@ router.get('/tech-certificates', techCertController.getAllCertificates);
 router.post('/tech-certificates', techCertController.createCertificate);
 router.put('/tech-certificates/:id', techCertController.updateCertificate);
 router.delete('/tech-certificates/:id', techCertController.deleteCertificate);
-router.get('/asset-types/:assetTypeId/maintenance-certificates', techCertController.getMappedCertificates);
-router.post('/asset-types/:assetTypeId/maintenance-certificates', techCertController.saveMappedCertificates);
 
 module.exports = router;
