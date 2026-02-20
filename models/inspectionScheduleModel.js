@@ -408,36 +408,73 @@ const generateUniqueId = (prefix) => {
 /**
  * Get list of inspections for execution/viewing
  */
-const getInspectionList = async (org_id) => {
-  const query = `
-    SELECT 
-      sch.ais_id,
-      sch.asset_id,
-      sch.vendor_id,
-      sch.act_insp_st_date,
-      sch.act_insp_end_date,
-      sch.status,
-      NULL as insp_outcome,
-      sch.created_on,
-      sch.created_by,
-      
-      a.asset_id as asset_code,
-      a.serial_number,
-      if.text as asset_type_name,
-      v.vendor_name,
-      b.text as branch_name
-      
-    FROM "tblAAT_Insp_Sch" sch
-    INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
-    LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
-    LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
-    LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
-    
-    WHERE sch.org_id = $1
-    ORDER BY sch.act_insp_st_date DESC
-  `;
-  
-  return await db.query(query, [org_id]);
+const getInspectionList = async (org_id, emp_int_id = null) => {
+  // Vendor-maintained inspections should be visible to everyone.
+  // Inhouse inspections (no vendor) should be visible only to the assigned emp_int_id.
+  let query;
+  let params;
+
+  if (emp_int_id) {
+    query = `
+      SELECT 
+        sch.ais_id,
+        sch.asset_id,
+        sch.vendor_id,
+        sch.act_insp_st_date,
+        sch.act_insp_end_date,
+        sch.status,
+        NULL as insp_outcome,
+        sch.created_on,
+        sch.created_by,
+        a.asset_id as asset_code,
+        a.serial_number,
+        if.text as asset_type_name,
+        v.vendor_name,
+        b.text as branch_name
+      FROM "tblAAT_Insp_Sch" sch
+      INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
+      LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
+      LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
+      LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
+      WHERE sch.org_id = $1
+        AND (
+          sch.vendor_id IS NOT NULL
+          OR sch.emp_int_id = $2
+        )
+      ORDER BY sch.act_insp_st_date DESC
+    `;
+    params = [org_id, emp_int_id];
+  } else {
+    // No emp provided: show only vendor-maintained inspections
+    query = `
+      SELECT 
+        sch.ais_id,
+        sch.asset_id,
+        sch.vendor_id,
+        sch.act_insp_st_date,
+        sch.act_insp_end_date,
+        sch.status,
+        NULL as insp_outcome,
+        sch.created_on,
+        sch.created_by,
+        a.asset_id as asset_code,
+        a.serial_number,
+        if.text as asset_type_name,
+        v.vendor_name,
+        b.text as branch_name
+      FROM "tblAAT_Insp_Sch" sch
+      INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
+      LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
+      LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
+      LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
+      WHERE sch.org_id = $1
+        AND sch.vendor_id IS NOT NULL
+      ORDER BY sch.act_insp_st_date DESC
+    `;
+    params = [org_id];
+  }
+
+  return await db.query(query, params);
 };
 
 /**
