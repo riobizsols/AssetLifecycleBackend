@@ -1251,6 +1251,9 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       isOverdue: approvalDetail.isOverdue,
       notes: approvalDetail.notes,
       checklist: approvalDetail.checklist,
+      header_emp_int_id: approvalDetail.header_emp_int_id || null,
+      maintained_by: approvalDetail.maintained_by || null,
+      at_main_freq_id: approvalDetail.at_main_freq_id || null,
       vendorDetails: approvalDetail.vendorDetails,
       workflowSteps: approvalDetail.workflowSteps,
       workflowDetails: approvalDetail.workflowDetails,
@@ -1297,11 +1300,11 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
   }
 };
 
-// Update workflow header (vendor and/or maintenance date) independently
+// Update workflow header (vendor, maintenance date or technician) independently
 const updateWorkflowHeaderAction = async (req, res) => {
   try {
     const { wfamshId } = req.params;
-    const { vendorId, maintenanceDate } = req.body;
+    const { vendorId, maintenanceDate, technicianId } = req.body;
     const userId = req.user?.user_id;
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     
@@ -1309,11 +1312,10 @@ const updateWorkflowHeaderAction = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Workflow ID is required' });
     }
     
-    if (vendorId === undefined && maintenanceDate === undefined) {
-      return res.status(400).json({ success: false, message: 'At least one field (vendorId or maintenanceDate) must be provided' });
+    if (vendorId === undefined && maintenanceDate === undefined && technicianId === undefined) {
+      return res.status(400).json({ success: false, message: 'At least one field (vendorId, maintenanceDate or technicianId) must be provided' });
     }
-    
-    const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, userId, orgId);
+    const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, technicianId, userId, orgId);
     
     if (result.success) {
       return res.json(result);

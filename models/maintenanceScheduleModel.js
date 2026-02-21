@@ -356,14 +356,38 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
             created_on,
             changed_by,
             changed_on,
-            org_id,
-            branch_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12)
+        org_id,
+        branch_code,
+        emp_int_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12, $13)
         RETURNING *
     `;
 
   // Only set MT004 when explicitly coming from breakdown screen (isBreakdown)
   const headerMaintTypeId = isBreakdown ? "MT004" : maint_type_id;
+
+  // Determine emp_int_id to save: prefer provided value, otherwise
+  // fetch from tblATMaintFreq only when the frequency is maintained in-house
+  let empIntToSave = null;
+  if (scheduleData.emp_int_id) {
+    empIntToSave = scheduleData.emp_int_id;
+  } else if (at_main_freq_id) {
+    try {
+      const freqRes = await getDb().query(
+        `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 AND org_id = $2 LIMIT 1`,
+        [at_main_freq_id, org_id]
+      );
+      if (freqRes.rows.length > 0) {
+        const freq = freqRes.rows[0];
+        const maintained = (freq.maintained_by || '').toString().toLowerCase().replace(/\s|-/g, '');
+        if (maintained && maintained.includes('inhouse')) {
+          empIntToSave = freq.emp_int_id || null;
+        }
+      }
+    } catch (err) {
+      console.error('Failed to lookup at_main_freq emp_int_id:', err);
+    }
+  }
 
   const values = [
     wfamsh_id,
@@ -378,6 +402,7 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
     created_by,
     org_id,
     branch_code,
+    empIntToSave,
   ];
 
   const dbPool = getDb();
@@ -919,7 +944,9 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             created_on,
             org_id,
             branch_code
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12, $13)
+        ,
+            emp_int_id
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12, $13, $14)
         RETURNING *
     `;
 
@@ -937,6 +964,7 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
     created_by,
     org_id,
     finalBranchCode,
+    null, // emp_int_id will be filled by lookup below when available
   ];
 
   const dbPool = getDb();
@@ -1010,7 +1038,28 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
       const atMainFreqId =
         freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
-      const maintainedBy = asset.service_vendor_id ? "Vendor" : "Inhouse";
+
+      // Lookup AT maintenance frequency to determine maintained_by and emp_int_id
+      let empIntToSave = null;
+      try {
+        if (atMainFreqId) {
+          const mfRes = await client.query(
+            `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 LIMIT 1`,
+            [atMainFreqId]
+          );
+          if (mfRes.rows.length > 0) {
+            const mf = mfRes.rows[0];
+            const mBy = mf.maintained_by || '';
+            if (String(mBy).toLowerCase().includes('vendor')) {
+              empIntToSave = null;
+            } else {
+              empIntToSave = mf.emp_int_id || null;
+            }
+          }
+        }
+      } catch (err) {
+        empIntToSave = null;
+      }
 
       const directInsertQuery = `
                 INSERT INTO "tblAssetMaintSch" (
@@ -1028,8 +1077,9 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                     created_by,
                     created_on,
                     org_id,
-                    branch_code
-                ) VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, NULL, 'IN', $7, $8, CURRENT_TIMESTAMP, $9, $10)
+                    branch_code,
+                    emp_int_id
+                ) VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, NULL, 'IN', $7, $8, CURRENT_TIMESTAMP, $9, $10, $11)
                 RETURNING *
             `;
       await client.query(directInsertQuery, [
@@ -1043,6 +1093,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         created_by,
         org_id,
         asset.branch_code,
+        empIntToSave,
       ]);
 
       await client.query("COMMIT");
@@ -1170,6 +1221,28 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     }
 
     // Create workflow header (using client for transaction)
+    // Lookup AT maintenance frequency to determine emp_int_id for header and schedule
+    let headerEmpInt = null;
+    try {
+      if (atMainFreqId) {
+        const mfRes = await client.query(
+          `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 LIMIT 1`,
+          [atMainFreqId]
+        );
+        if (mfRes.rows.length > 0) {
+          const mf = mfRes.rows[0];
+          const mBy = mf.maintained_by || '';
+          if (String(mBy).toLowerCase().includes('vendor')) {
+            headerEmpInt = null;
+          } else {
+            headerEmpInt = mf.emp_int_id || null;
+          }
+        }
+      }
+    } catch (err) {
+      headerEmpInt = null;
+    }
+
     const headerQuery = `
             INSERT INTO "tblWFAssetMaintSch_H" (
                 "wfamsh_id",
@@ -1186,7 +1259,8 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 changed_by,
                 changed_on,
                 org_id,
-                branch_code
+                branch_code,
+                emp_int_id
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12)
             RETURNING *
         `;
@@ -1204,6 +1278,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       created_by,
       org_id,
       asset.branch_code,
+      headerEmpInt,
     ]);
 
     // Create workflow details
@@ -1293,14 +1368,15 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 maint_type_id,
                 vendor_id,
                 at_main_freq_id,
-                maintained_by,
+          maintained_by,
                 notes,
                 status,
                 act_maint_st_date,
                 created_by,
                 created_on,
                 org_id,
-                branch_code
+          branch_code,
+          emp_int_id
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
             ON CONFLICT (ams_id) DO UPDATE SET
                 wfamsh_id = EXCLUDED.wfamsh_id,
@@ -1325,6 +1401,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       created_by,
       org_id,
       asset.branch_code,
+      headerEmpInt,
     ];
 
     const maintSchResult = await client.query(

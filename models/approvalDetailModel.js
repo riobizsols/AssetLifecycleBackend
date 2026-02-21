@@ -6,8 +6,8 @@ const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
 
-// Update workflow header (vendor_id and/or maintenance date) independently
-const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, userId, orgId = 'ORG001') => {
+// Update workflow header (vendor_id, maintenance date and/or technician) independently
+const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
   try {
     const updateFields = [];
     const updateValues = [];
@@ -21,6 +21,11 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
     if (maintenanceDate !== null && maintenanceDate !== undefined) {
       updateFields.push(`pl_sch_date = $${paramIndex++}`);
       updateValues.push(maintenanceDate);
+    }
+    
+    if (technicianId !== null && technicianId !== undefined) {
+      updateFields.push(`emp_int_id = $${paramIndex++}`);
+      updateValues.push(technicianId);
     }
     
     if (updateFields.length === 0) {
@@ -38,7 +43,7 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
       UPDATE "tblWFAssetMaintSch_H" 
       SET ${updateFields.join(', ')}, changed_on = NOW()::timestamp without time zone
       WHERE wfamsh_id = $${paramIndex++} AND org_id = $${paramIndex++}
-      RETURNING vendor_id, pl_sch_date
+      RETURNING vendor_id, pl_sch_date, emp_int_id
     `;
     
     const result = await getDb().query(updateQuery, updateValues);
@@ -336,7 +341,28 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       }
     }
     
-    if (vendorToCheck) {
+    // Determine if maintenance is actually performed inhouse
+    let isInhouse = false;
+    if (isWfamshId) {
+      const maintByQuery = `
+        SELECT 
+          CASE 
+            WHEN COALESCE(wfh.vendor_id, a.service_vendor_id) IS NOT NULL
+                 AND COALESCE(wfh.vendor_id, a.service_vendor_id) != ''
+            THEN 'Vendor'
+            ELSE 'Inhouse'
+          END as maintained_by
+        FROM "tblWFAssetMaintSch_H" wfh
+        LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+        WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+      `;
+      const maintByRes = await getDb().query(maintByQuery, [assetOrWfamshId, orgId]);
+      if (maintByRes.rows.length > 0) {
+        isInhouse = (maintByRes.rows[0].maintained_by || '').toLowerCase() === 'inhouse';
+      }
+    }
+
+    if (vendorToCheck && !isInhouse) {
       const vendorCheckQuery = `SELECT int_status FROM "tblVendors" WHERE vendor_id = $1 AND org_id = $2`;
       const vendorResult = await getDb().query(vendorCheckQuery, [vendorToCheck, orgId]);
       if (vendorResult.rows.length === 0) {
@@ -1790,6 +1816,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         SELECT 
           wfh.wfamsh_id,
           wfh.asset_id,
+          wfh.emp_int_id as emp_int_id,
           wfh.group_id,
           wfh.pl_sch_date as act_maint_st_date,
           a.asset_type_id,
@@ -1842,6 +1869,13 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Service vendor ID:', workflowData.vendor_id);
      console.log('BF01 notes:', workflowData.bf01_notes);
      console.log('Group ID:', workflowData.group_id);
+
+    // Determine emp_int to save: only when maintenance is in-house
+    const _maintNorm = (workflowData.maintained_by || '').toString().toLowerCase().replace(/\s|-/g, '');
+    let empIntToSave = null;
+    if (workflowData.emp_int_id && _maintNorm.includes('inhouse')) {
+      empIntToSave = workflowData.emp_int_id;
+    }
      
      // Check if maintenance record already exists with status 'AP' (manual creation)
      // This should be checked BEFORE group maintenance and BF01/BF03 logic
@@ -1912,8 +1946,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            maint_type_id = $2,
            vendor_id = $3,
            at_main_freq_id = $4,
-           maintained_by = $5,
-           status = 'IN',
+          maintained_by = $5,
+          emp_int_id = $10,
+          status = 'IN',
            act_maint_st_date = $6,
            notes = CASE 
              WHEN notes IS NULL OR notes = '' THEN $9
@@ -1937,7 +1972,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          workflowData.act_maint_st_date,
          existingAmsId,
          orgId,
-         amsNotes
+         amsNotes,
+         empIntToSave
        ];
        
        await getDb().query(updateQuery, updateParams);
@@ -2040,6 +2076,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            vendor_id,
            at_main_freq_id,
            maintained_by,
+           emp_int_id,
            notes,
            status,
            act_maint_st_date,
@@ -2047,9 +2084,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            created_on,
            org_id,
            branch_code
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14, $15)
        `;
-       
+
        const insertParams = [
          amsId,
          workflowData.wfamsh_id,
@@ -2058,8 +2095,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          maintTypeId,
          workflowData.vendor_id, // Use vendor from representative asset
          workflowData.at_main_freq_id,
-         workflowData.maintained_by, // Use maintained_by from representative asset
-         groupNotes, // Notes field is null for group maintenance
+        workflowData.maintained_by, // Use maintained_by from representative asset
+        empIntToSave,
+        groupNotes, // Notes field is null for group maintenance
          'IN', // Initial status
          workflowData.act_maint_st_date,
          'system', // created_by
@@ -2290,7 +2328,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        const updateQuery = `
          UPDATE "tblAssetMaintSch"
          SET wo_id = $1,
-             branch_code = COALESCE($2, branch_code),
+          branch_code = COALESCE($2, branch_code),
+          emp_int_id = $5,
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $3 AND org_id = $4
@@ -2302,6 +2341,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          workflowData.branch_code,
          existingAmsId,
          orgId
+        , workflowData.emp_int_id
        ];
        
        console.log('BF03 update query params:', updateParams);
@@ -2343,7 +2383,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
              vendor_id = $3,
              at_main_freq_id = $4,
              maintained_by = $5,
-             branch_code = COALESCE($6, branch_code),
+            maintained_by = $5,
+            emp_int_id = $11,
+            branch_code = COALESCE($6, branch_code),
              notes = CASE 
                WHEN notes IS NULL OR notes = '' THEN $9
                WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
@@ -2369,6 +2411,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          orgId,
          amsNotes,
          isSoftwareAsset ? null : workOrderId
+        , workflowData.emp_int_id
        ];
        
        console.log('BF01 update query params:', updateParams);
@@ -2436,6 +2479,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
           vendor_id,
           at_main_freq_id,
           maintained_by,
+          emp_int_id,
           notes,
           status,
           act_maint_st_date,
@@ -2443,7 +2487,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
           created_on,
           org_id,
           branch_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, $14, $15)
       `;
       
       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
@@ -2457,6 +2501,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         workflowData.vendor_id,
         workflowData.at_main_freq_id,
         workflowData.maintained_by, // Set based on service_vendor_id
+        empIntToSave,
         amsNotes, // notes - ensures the breakdown link is preserved for syncing
         'IN', // Initial status
         workflowData.act_maint_st_date,
@@ -2755,6 +2800,10 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfh.asset_id,
         wfh.group_id,
         wfh.vendor_id,
+        wfh.emp_int_id as header_emp_int_id,
+        wfh.at_main_freq_id,
+        -- Get maintained_by from tblATMaintFreq table
+        COALESCE(atmf.maintained_by, 'Inhouse') as maintained_by,
         a.text as asset_name,
         a.serial_number,
         wfh.status as header_status,
@@ -2823,6 +2872,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON COALESCE(wfh.vendor_id, a.service_vendor_id) = v.vendor_id
       LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
+      LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
       WHERE wfd.org_id = $1 
         AND wfd.wfamsh_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
@@ -2843,9 +2893,22 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
     
     const approvalDetails = result.rows;
 
-    console.log('Raw approval details from database:', approvalDetails);
-    console.log('Query parameters:', { orgId, wfamshId });
-    console.log('Number of records found:', approvalDetails.length);
+    console.log('🔍 Raw approval details from database:', approvalDetails);
+    console.log('🔍 Query parameters:', { orgId, wfamshId });
+    console.log('🔍 Number of records found:', approvalDetails.length);
+    
+    // Debug the first record specifically for emp_int_id and maintained_by
+    if (approvalDetails.length > 0) {
+      const firstRecord = approvalDetails[0];
+      console.log('🔍 First record debug:', {
+        wfamsh_id: firstRecord.wfamsh_id,
+        header_emp_int_id: firstRecord.header_emp_int_id,
+        vendor_id: firstRecord.vendor_id,
+        maintained_by: firstRecord.maintained_by,
+        asset_id: firstRecord.asset_id,
+        service_vendor_id: result.rows[0].service_vendor_id
+      });
+    }
 
     if (approvalDetails.length > 0) {
       // Get the first record for basic details
@@ -3062,6 +3125,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         isOverdue: (firstRecord.days_until_due || 0) < 0,
         notes: firstRecord.notes || null,
         checklist: checklistItems,
+        header_emp_int_id: firstRecord.header_emp_int_id || null,
+        maintained_by: firstRecord.maintained_by || null,
+        at_main_freq_id: firstRecord.at_main_freq_id || null,
         vendorDetails: vendorDetails ? {
           ...vendorDetails,
           vendor_status: vendorDetails.int_status
@@ -3096,6 +3162,17 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         // All assets in the group (for display in approval screen)
         groupAssets: groupAssets
       };
+
+      console.log('🔍 Backend Debug - Tab Logic Values:', {
+        wfamshId: firstRecord.wfamsh_id,
+        header_emp_int_id: firstRecord.header_emp_int_id,
+        maintained_by: firstRecord.maintained_by,
+        vendor_id: firstRecord.vendor_id,
+        formattedResponse: {
+          header_emp_int_id: formattedDetail.header_emp_int_id,
+          maintained_by: formattedDetail.maintained_by
+        }
+      });
 
       return formattedDetail;
     } else {

@@ -555,6 +555,23 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     
     // Use technicianId if provided (from vendor selection), otherwise use emp_int_id from header (inhouse)
     const finalTechnicianId = technicianId || header.emp_int_id;
+
+    // Determine maintained_by for this frequency; if vendor-maintained, do not persist emp_int_id
+    let empIntToSave = finalTechnicianId;
+    try {
+      if (header.aatif_id) {
+        const aifRes = await pool.query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [header.aatif_id]);
+        const maintainedBy = aifRes.rows.length ? (aifRes.rows[0].maintained_by || '') : '';
+        if (String(maintainedBy).toLowerCase() === 'vendor') {
+          empIntToSave = null;
+        }
+      } else if (header.vendor_id) {
+        // Fallback: if vendor_id present and no frequency, treat as vendor
+        empIntToSave = null;
+      }
+    } catch (err) {
+      empIntToSave = finalTechnicianId;
+    }
     
     // 2. Generate new AIS ID (e.g. AIS_001)
     const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
@@ -596,7 +613,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.vendor_id,
       header.aatif_id,
       finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
-      finalTechnicianId, // emp_int_id - ensure emp_int_id column is set to technician id
+      empIntToSave, // emp_int_id - do not store for vendor-maintained inspections
       header.pl_sch_date || new Date(), // act_insp_st_date
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
@@ -630,17 +647,16 @@ async function getCertifiedTechnicians(orgId, assetTypeId) {
       e.phone_number,
       tc.tc_id,
       tc.certificate_name as cert_name,
-      tc.certificate_no as cert_number,
-      tc.expiry_date
+      tc.certificate_no as cert_number
     FROM "tblATInspCerts" atic
     INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
     INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
     INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id
     INNER JOIN "tblAATInspCheckList" aatic ON atic.aatic_id = aatic.aatic_id
-    WHERE aatic.asset_type_id = $1
+    WHERE aatic.at_id = $1
       AND e.org_id = $2
       AND e.int_status = 1
-      AND (tc.expiry_date IS NULL OR tc.expiry_date > CURRENT_DATE)
+      AND (etc.status IS NULL OR etc.status IN ('Approved','Confirmed'))
     ORDER BY e.full_name;
   `;
   

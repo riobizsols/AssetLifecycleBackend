@@ -1,0 +1,12 @@
+﻿{
+  "ais_id": "AIS_001",
+  "records": [
+    { "insp_check_id": "IC_TST_01", "recorded_value": "PASS" },
+    { "insp_check_id": "IC_TST_02", "recorded_value": "100" },
+    { "insp_check_id": "IC_TST_03", "recorded_value": "18" },
+    { "insp_check_id": "IC_TST_04", "recorded_value": "GOOD" },
+    { "insp_check_id": "IC_TST_05", "recorded_value": "20" }
+  ],
+  "notes": "Completed inhouse",
+  "trigger_maintenance": true
+}

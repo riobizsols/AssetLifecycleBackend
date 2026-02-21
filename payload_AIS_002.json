@@ -1,0 +1,11 @@
+{
+  "ais_id": "AIS_002",
+  "records": [
+    { "insp_check_id": "IC_TST_01", "recorded_value": "PASS" }
+  ],
+  "inspector_name": "Vendor Tester",
+  "inspector_email": "vendor@test.example",
+  "inspector_phone": "+911112223334",
+  "notes": "Vendor entered values",
+  "trigger_maintenance": false
+}

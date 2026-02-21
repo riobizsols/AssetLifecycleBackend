@@ -44,13 +44,24 @@ class InspectionFrequencyModel {
     try {
       const dbPool = getDb();
       const aatif_id = await generateCustomId('aatif_id', 'tblAAT_Insp_Freq');
-      
+      // normalize maintained_by to 'inhouse' and accept uom as an ID
+      const maintainedBy = data.maintained_by
+        ? String(data.maintained_by).replace(/\s|-/g, '').toLowerCase()
+        : 'inhouse';
+
+      let uomValue = null;
+      if (data.uom !== undefined && data.uom !== null) {
+        if (typeof data.uom === 'object' && data.uom.id !== undefined) uomValue = data.uom.id;
+        else uomValue = data.uom;
+        if (!isNaN(Number(uomValue))) uomValue = Number(uomValue);
+      }
+
       const query = `
         INSERT INTO "tblAAT_Insp_Freq" (
           aatif_id, aatic_id, freq, uom, text, 
-          maintained_by, org_id, is_recurring, 
+          maintained_by, org_id, is_recurring, emp_int_id,
           created_by, changed_by
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING *
       `;
       
@@ -58,11 +69,12 @@ class InspectionFrequencyModel {
         aatif_id,
         data.aatic_id,
         data.freq || null,
-        data.uom || null,
+        uomValue,
         data.text || null,
-        data.maintained_by || 'In-House',
+        maintainedBy,
         orgId,
         data.is_recurring !== undefined ? data.is_recurring : true,
+        data.emp_int_id || null,
         userId,
         userId
       ]);
@@ -77,6 +89,18 @@ class InspectionFrequencyModel {
   static async updateInspectionFrequency(id, data, orgId, userId) {
     try {
       const dbPool = getDb();
+      // normalize maintained_by to 'inhouse' and accept uom as an ID
+      const maintainedBy = data.maintained_by
+        ? String(data.maintained_by).replace(/\s|-/g, '').toLowerCase()
+        : 'inhouse';
+
+      let uomValue = null;
+      if (data.uom !== undefined && data.uom !== null) {
+        if (typeof data.uom === 'object' && data.uom.id !== undefined) uomValue = data.uom.id;
+        else uomValue = data.uom;
+        if (!isNaN(Number(uomValue))) uomValue = Number(uomValue);
+      }
+
       const query = `
         UPDATE "tblAAT_Insp_Freq" 
         SET 
@@ -85,18 +109,20 @@ class InspectionFrequencyModel {
           text = $3,
           maintained_by = $4,
           is_recurring = $5,
-          changed_by = $6,
+          emp_int_id = $6,
+          changed_by = $7,
           changed_on = CURRENT_TIMESTAMP
-        WHERE aatif_id = $7 AND org_id = $8
+        WHERE aatif_id = $8 AND org_id = $9
         RETURNING *
       `;
       
       const result = await dbPool.query(query, [
         data.freq || null,
-        data.uom || null,
+        uomValue,
         data.text || null,
-        data.maintained_by || 'In-House',
+        maintainedBy,
         data.is_recurring !== undefined ? data.is_recurring : true,
+        data.emp_int_id || null,
         userId,
         id,
         orgId

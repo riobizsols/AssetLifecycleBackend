@@ -5,11 +5,12 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 // Get all vendors - supports super access users who can view all branches
-const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => {
+const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, serviceOnly = false) => {
   console.log('=== Vendor Model Listing Debug ===');
   console.log('org_id:', org_id);
   console.log('userBranchCode:', userBranchCode);
   console.log('hasSuperAccess:', hasSuperAccess);
+  console.log('serviceOnly:', serviceOnly);
   
   let query = `
     SELECT * FROM "tblVendors" 
@@ -21,6 +22,20 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => 
   if (!hasSuperAccess && userBranchCode) {
     query += ` AND branch_code = $2`;
     params.push(userBranchCode);
+  }
+
+  // Filter to service vendors if requested. The vendors table contains a boolean
+  // column `service_supply` which indicates whether the vendor provides services.
+  // If the column doesn't exist in a particular tenant DB, this clause will be
+  // ignored by the frontend fallback (frontend already handles absence), but
+  // here we add the filter only when explicitly requested.
+  if (serviceOnly) {
+    // If branch filter was added, parameter index is 2, otherwise 2 will be used below
+    if (!hasSuperAccess && userBranchCode) {
+      query += ` AND service_supply = true`;
+    } else {
+      query += ` AND service_supply = true`;
+    }
   }
   
   query += ` ORDER BY created_on DESC`;

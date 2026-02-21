@@ -32,7 +32,9 @@ exports.getAllVendors = async (req, res) => {
       }
     }
     
-    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess);
+    // Optional query param to request only service vendors
+    const serviceOnly = req.query.serviceOnly === 'true' || req.query.serviceOnly === '1';
+    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
     res.json(vendors);
   } catch (error) {
     console.error("Get all vendors error:", error);

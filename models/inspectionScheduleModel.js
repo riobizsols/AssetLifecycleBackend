@@ -336,6 +336,21 @@ const createWorkflowInspectionDetail = async (data) => {
  * Create direct inspection schedule (no workflow)
  */
 const createDirectInspectionSchedule = async (data) => {
+  // If this inspection frequency indicates vendor maintenance, do not persist emp_int_id
+  let empIntToSave = data.emp_int_id || null;
+  try {
+    if (data.aatif_id) {
+      const aifRes = await db.query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [data.aatif_id]);
+      const maintainedBy = aifRes.rows.length ? (aifRes.rows[0].maintained_by || '') : '';
+      if (String(maintainedBy).toLowerCase() === 'vendor') {
+        empIntToSave = null;
+      }
+    }
+  } catch (err) {
+    // if lookup fails, fallback to provided emp_int_id
+    empIntToSave = data.emp_int_id || null;
+  }
+
   const query = `
     INSERT INTO "tblAAT_Insp_Sch" (
       ais_id,
@@ -352,13 +367,13 @@ const createDirectInspectionSchedule = async (data) => {
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
     RETURNING *
   `;
-  
+
   return await db.query(query, [
     data.ais_id,
     data.aatif_id,
     data.asset_id,
     data.vendor_id || null,
-    data.emp_int_id || null,
+    empIntToSave,
     data.act_insp_st_date,
     data.status || 'PN', // PN = Pending
     data.created_by || 'SYSTEM',
@@ -414,6 +429,7 @@ const getInspectionList = async (org_id, emp_int_id = null) => {
   let query;
   let params;
 
+  // Join frequency table to determine maintained_by (vendor vs inhouse)
   if (emp_int_id) {
     query = `
       SELECT 
@@ -430,15 +446,17 @@ const getInspectionList = async (org_id, emp_int_id = null) => {
         a.serial_number,
         if.text as asset_type_name,
         v.vendor_name,
-        b.text as branch_name
+        b.text as branch_name,
+        aif.maintained_by
       FROM "tblAAT_Insp_Sch" sch
       INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
       LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
       LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
       LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
+      LEFT JOIN "tblAAT_Insp_Freq" aif ON sch.aatif_id = aif.aatif_id
       WHERE sch.org_id = $1
         AND (
-          sch.vendor_id IS NOT NULL
+          COALESCE(aif.maintained_by, '') ILIKE 'vendor'
           OR sch.emp_int_id = $2
         )
       ORDER BY sch.act_insp_st_date DESC
@@ -461,14 +479,16 @@ const getInspectionList = async (org_id, emp_int_id = null) => {
         a.serial_number,
         if.text as asset_type_name,
         v.vendor_name,
-        b.text as branch_name
+        b.text as branch_name,
+        aif.maintained_by
       FROM "tblAAT_Insp_Sch" sch
       INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
       LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
       LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
       LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
+      LEFT JOIN "tblAAT_Insp_Freq" aif ON sch.aatif_id = aif.aatif_id
       WHERE sch.org_id = $1
-        AND sch.vendor_id IS NOT NULL
+        AND COALESCE(aif.maintained_by, '') ILIKE 'vendor'
       ORDER BY sch.act_insp_st_date DESC
     `;
     params = [org_id];
@@ -489,12 +509,14 @@ const getInspectionDetailsById = async (ais_id, org_id) => {
       a.asset_type_id,
       if.text as asset_type_name,
       v.vendor_name,
-      b.text as branch_name
+      b.text as branch_name,
+      aif.maintained_by
     FROM "tblAAT_Insp_Sch" sch
     INNER JOIN "tblAssets" a ON sch.asset_id = a.asset_id
     LEFT JOIN "tblAssetTypes" if ON a.asset_type_id = if.asset_type_id
     LEFT JOIN "tblVendors" v ON sch.vendor_id = v.vendor_id
     LEFT JOIN "tblBranches" b ON sch.branch_code = b.branch_code
+    LEFT JOIN "tblAAT_Insp_Freq" aif ON sch.aatif_id = aif.aatif_id
     WHERE sch.ais_id = $1 AND sch.org_id = $2
   `;
   return await db.query(query, [ais_id, org_id]);
@@ -547,6 +569,14 @@ const getInspectionChecklistByAssetType = async (assetTypeId, org_id) => {
  * Using ais_id to link inspection schedule to records
  */
 const getInspectionRecords = async (aisId, org_id) => {
+  // The tblAAT_Insp_Rec.aatisch_id stores the frequency id (aatif_id).
+  // Map the provided ais_id to its aatif_id before querying records.
+  const freqRes = await db.query(`SELECT aatif_id FROM "tblAAT_Insp_Sch" WHERE ais_id = $1 AND org_id = $2 LIMIT 1`, [aisId, org_id]);
+  if (!freqRes || freqRes.rows.length === 0) {
+    return { rows: [] };
+  }
+  const aatifId = freqRes.rows[0].aatif_id;
+
   const query = `
     SELECT 
       air."attirec_id" as attirec_id,
@@ -562,26 +592,28 @@ const getInspectionRecords = async (aisId, org_id) => {
     WHERE air."aatisch_id" = $1 AND air.org_id = $2
     ORDER BY air.created_on DESC
   `;
-  return await db.query(query, [aisId, org_id]);
+  return await db.query(query, [aatifId, org_id]);
 };
 
 /**
  * Create or update inspection record
  */
 const saveInspectionRecord = async (recordData) => {
-  const { ais_id, insp_check_id, recorded_value, created_by, org_id } = recordData;
-  
+  // Support both passing schedule id (ais_id) or frequency id (aatisch_id).
+  const { ais_id, aatisch_id, insp_check_id, recorded_value, created_by, org_id } = recordData;
+  const linkId = aatisch_id || ais_id; // aatisch_id should be the frequency id (aatif_id)
+
   // Generate unique ID
   const timestamp = Date.now().toString();
   const attirec_id = `ATTIREC_${timestamp}`;
-  
-  // Check if record already exists (use lowercase column names)
+
+  // Check if record already exists
   const checkQuery = `
     SELECT attirec_id FROM "tblAAT_Insp_Rec"
     WHERE aatisch_id = $1 AND insp_check_id = $2
   `;
-  const existingRecord = await db.query(checkQuery, [ais_id, insp_check_id]);
-  
+  const existingRecord = await db.query(checkQuery, [linkId, insp_check_id]);
+
   if (existingRecord.rows.length > 0) {
     // Update existing record
     const updateQuery = `
@@ -590,7 +622,7 @@ const saveInspectionRecord = async (recordData) => {
       WHERE aatisch_id = $3 AND insp_check_id = $4
       RETURNING *
     `;
-    return await db.query(updateQuery, [recorded_value, created_by, ais_id, insp_check_id]);
+    return await db.query(updateQuery, [recorded_value, created_by, linkId, insp_check_id]);
   } else {
     // Create new record
     const insertQuery = `
@@ -606,7 +638,7 @@ const saveInspectionRecord = async (recordData) => {
       RETURNING *
     `;
     return await db.query(insertQuery, [
-      attirec_id, ais_id, insp_check_id, recorded_value, org_id, created_by
+      attirec_id, linkId, insp_check_id, recorded_value, org_id, created_by
     ]);
   }
 };

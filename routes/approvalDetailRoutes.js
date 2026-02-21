@@ -3,7 +3,53 @@ const router = express.Router();
 const { getApprovalDetail, getApprovalDetailByWfamshId, approveMaintenanceAction, rejectMaintenanceAction, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflows, updateWorkflowHeaderAction } = require('../controllers/approvalDetailController');
 const { protect } = require('../middlewares/authMiddleware');
 
-// Apply authentication middleware to all routes
+// DEBUG: Check WFAMSH data (before authentication middleware)
+// GET /api/approval-detail/debug/:wfamshId
+router.get('/debug/:wfamshId', async (req, res) => {
+  try {
+    const { wfamshId } = req.params;
+    const { getDb } = require('../utils/dbContext');
+    
+    // Check header data
+    const headerQuery = `
+      SELECT wfamsh_id, asset_id, vendor_id, emp_int_id, at_main_freq_id
+      FROM "tblWFAssetMaintSch_H"
+      WHERE wfamsh_id = $1
+    `;
+    const headerResult = await getDb().query(headerQuery, [wfamshId]);
+    
+    // Check full query like in getApprovalDetailByWfamshId
+    const fullQuery = `
+      SELECT 
+        wfd.wfamsd_id,
+        wfh.emp_int_id as header_emp_int_id,
+        wfh.vendor_id,
+        a.service_vendor_id,
+        CASE 
+          WHEN COALESCE(wfh.vendor_id, a.service_vendor_id) IS NOT NULL AND COALESCE(wfh.vendor_id, a.service_vendor_id) != '' THEN 'Vendor'
+          ELSE 'Inhouse'
+        END as maintained_by
+      FROM "tblWFAssetMaintSch_D" wfd
+      INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+      LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+      WHERE wfd.wfamsh_id = $1 AND wfd.org_id = 'ORG001'
+      LIMIT 1
+    `;
+    const fullResult = await getDb().query(fullQuery, [wfamshId]);
+    
+    res.json({
+      success: true,
+      data: {
+        headerData: headerResult.rows,
+        fullQueryData: fullResult.rows
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Apply authentication middleware to all other routes
 router.use(protect);
 
 // Get maintenance approvals for the current user

@@ -1,0 +1,9 @@
+{
+  "ais_id": "AIS_001",
+  "records": [],
+  "inspector_name": "John Vendor",
+  "inspector_email": "john@vendor.test",
+  "inspector_phone": "+911234567890",
+  "notes": "Vendor inspection",
+  "trigger_maintenance": true
+}
