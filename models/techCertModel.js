@@ -117,40 +117,51 @@ class TechCertModel {
       throw new Error('tblTechCert does not contain required columns');
     }
 
-    const techCertId = await generateCustomId('tcert', 3);
-
-    const insertColumns = [columns.id, columns.name, columns.number];
-    const values = [techCertId, name, number];
-    const valueTokens = values.map((_, idx) => `$${idx + 1}`);
-
-    if (columns.org) {
-      insertColumns.push(columns.org);
-      values.push(orgId);
-      valueTokens.push(`$${values.length}`);
-    }
-
-    if (columns.createdBy) {
-      insertColumns.push(columns.createdBy);
-      values.push(createdBy);
-      valueTokens.push(`$${values.length}`);
-    }
-
-    if (columns.createdOn) {
-      insertColumns.push(columns.createdOn);
-      valueTokens.push('NOW()');
-    }
-
-    const query = `
-      INSERT INTO "tblTechCert" (${insertColumns.join(', ')})
-      VALUES (${valueTokens.join(', ')})
-      RETURNING ${columns.id} AS tech_cert_id,
-                ${columns.name} AS cert_name,
-                ${columns.number} AS cert_number
-    `;
-
     const dbPool = getDb();
-    const result = await dbPool.query(query, values);
-    return result.rows[0];
+    let attempt = 0;
+    while (attempt < 5) {
+      const techCertId = await generateCustomId('tcert', 3);
+      const insertColumns = [columns.id, columns.name, columns.number];
+      const values = [techCertId, name, number];
+      const valueTokens = values.map((_, idx) => `$${idx + 1}`);
+
+      if (columns.org) {
+        insertColumns.push(columns.org);
+        values.push(orgId);
+        valueTokens.push(`$${values.length}`);
+      }
+
+      if (columns.createdBy) {
+        insertColumns.push(columns.createdBy);
+        values.push(createdBy);
+        valueTokens.push(`$${values.length}`);
+      }
+
+      if (columns.createdOn) {
+        insertColumns.push(columns.createdOn);
+        valueTokens.push('NOW()');
+      }
+
+      const query = `
+        INSERT INTO "tblTechCert" (${insertColumns.join(', ')})
+        VALUES (${valueTokens.join(', ')})
+        RETURNING ${columns.id} AS tech_cert_id,
+                  ${columns.name} AS cert_name,
+                  ${columns.number} AS cert_number
+      `;
+      try {
+        const result = await dbPool.query(query, values);
+        return result.rows[0];
+      } catch (err) {
+        // If duplicate key error, retry with a new ID
+        if (err.code === '23505' && String(err.detail || '').includes('tblTechCert_pkey')) {
+          attempt++;
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new Error('Failed to generate unique certificate ID after multiple attempts');
   }
 
   static async updateCertificate({ id, name, number }) {
