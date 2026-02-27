@@ -24,6 +24,7 @@ class MaintenanceFrequencyModel {
           mf.int_status,
           mf.org_id,
           mf.is_recurring,
+          mf.emp_int_id,
           at.text as asset_type_name,
           at.maint_lead_type,
           mt.text as maint_type_name
@@ -59,6 +60,7 @@ class MaintenanceFrequencyModel {
           int_status,
           org_id,
           is_recurring,
+          emp_int_id,
           COALESCE(lead_time, NULL) as lead_time
         FROM "tblATMaintFreq"
         WHERE asset_type_id = $1 
@@ -91,6 +93,7 @@ class MaintenanceFrequencyModel {
           mf.int_status,
           mf.org_id,
           mf.is_recurring,
+          mf.emp_int_id,
           COALESCE(mf.lead_time, NULL) as lead_time,
           at.text as asset_type_name,
           at.maint_lead_type,
@@ -111,7 +114,18 @@ class MaintenanceFrequencyModel {
   }
 
   // Create maintenance frequency
-  static async createMaintenanceFrequency(assetTypeId, frequency, uom, text, maintainedBy, maintTypeId, orgId, isRecurring = true, leadTime = null) {
+  static async createMaintenanceFrequency(
+    assetTypeId,
+    frequency,
+    uom,
+    text,
+    maintainedBy,
+    maintTypeId,
+    orgId,
+    isRecurring = true,
+    leadTime = null,
+    empIntId = null
+  ) {
     try {
       // For on-demand maintenance, frequency, uom, and text can be null
       if (!isRecurring) {
@@ -170,8 +184,9 @@ class MaintenanceFrequencyModel {
           maint_type_id,
           int_status,
           org_id,
-          is_recurring
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)
+          is_recurring,
+          emp_int_id
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10)
         RETURNING *
       `;
       const params = [
@@ -183,7 +198,8 @@ class MaintenanceFrequencyModel {
         maintainedBy,
         maintTypeId,
         orgId,
-        isRecurring
+        isRecurring,
+        empIntId || null
       ];
       const result = await dbPool.query(query, params);
       return result.rows[0];
@@ -194,7 +210,17 @@ class MaintenanceFrequencyModel {
   }
 
   // Update maintenance frequency
-  static async updateMaintenanceFrequency(atMainFreqId, frequency, uom, text, maintainedBy, maintTypeId, orgId, isRecurring = true) {
+  static async updateMaintenanceFrequency(
+    atMainFreqId,
+    frequency,
+    uom,
+    text,
+    maintainedBy,
+    maintTypeId,
+    orgId,
+    isRecurring = true,
+    empIntId = null
+  ) {
     try {
       // For on-demand maintenance, frequency, uom, and text can be null
       if (!isRecurring) {
@@ -248,8 +274,9 @@ class MaintenanceFrequencyModel {
           text = $3,
           maintained_by = $4,
           maint_type_id = $5,
-          is_recurring = $6
-        WHERE at_main_freq_id = $7 AND org_id = $8
+          is_recurring = $6,
+          emp_int_id = $7
+        WHERE at_main_freq_id = $8 AND org_id = $9
         RETURNING *
       `;
       
@@ -260,6 +287,7 @@ class MaintenanceFrequencyModel {
         maintainedBy,
         maintTypeId,
         isRecurring,
+        empIntId || null,
         atMainFreqId,
         orgId
       ]);

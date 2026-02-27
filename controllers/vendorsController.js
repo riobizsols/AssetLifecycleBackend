@@ -32,7 +32,13 @@ exports.getAllVendors = async (req, res) => {
       }
     }
     
-    // Optional query param to request only service vendors
+    // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
+    const type = req.query.type ? String(req.query.type).toLowerCase() : '';
+    if (type === 'product' || type === 'service') {
+      const vendors = await vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+      return res.json(vendors);
+    }
+    // Optional query param to request only service vendors (legacy, uses service_supply column if present)
     const serviceOnly = req.query.serviceOnly === 'true' || req.query.serviceOnly === '1';
     const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
     res.json(vendors);

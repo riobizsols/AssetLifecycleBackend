@@ -370,6 +370,30 @@ async function getCertifiedTechnicians(req, res) {
 }
 
 /**
+ * Get asset types for which certified technicians are available.
+ * Lists asset_type_id, asset_type_name, and certified_technician_count.
+ */
+async function getAssetTypesWithCertifiedTechnicians(req, res) {
+  try {
+    const orgId = req.user?.org_id || 'ORG001';
+    const rows = await inspectionApprovalModel.getAssetTypesWithCertifiedTechnicians(orgId);
+    return res.json({
+      success: true,
+      data: rows,
+      message: rows.length === 0
+        ? 'No asset types have certified technicians yet. Assign certificates in Technician Certificates and get them approved.'
+        : undefined
+    });
+  } catch (error) {
+    console.error('Error getting asset types with certified technicians:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Internal server error.'
+    });
+  }
+}
+
+/**
  * Get technician details from workflow header (for inhouse maintained assets)
  */
 async function getTechnicianFromHeader(req, res) {
@@ -430,6 +454,7 @@ module.exports = {
   getInspectionHistory,
   processApprovalAction,
   getCertifiedTechnicians,
-  getTechnicianFromHeader
-  , updateWorkflowHeader
+  getAssetTypesWithCertifiedTechnicians,
+  getTechnicianFromHeader,
+  updateWorkflowHeader
 };

@@ -18,6 +18,7 @@ class InspectionFrequencyModel {
           f.int_status,
           f.org_id,
           f.is_recurring,
+          f.emp_int_id,
           at.text as asset_type_name,
           at.asset_type_id,
           a.text as asset_name,

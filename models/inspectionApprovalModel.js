@@ -108,6 +108,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       
       aif.freq as inspection_frequency,
       aif.uom as inspection_uom,
+      COALESCE(uom.UOM, aif.uom) as inspection_uom_text,
       aif.maintained_by,
 
       b.text as branch_name,
@@ -128,6 +129,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
     LEFT JOIN "tblVendors" v ON v.vendor_id = COALESCE(h.vendor_id, a.service_vendor_id)
     INNER JOIN "tblAssetTypes" ast ON a.asset_type_id = ast.asset_type_id
     LEFT JOIN "tblAAT_Insp_Freq" aif ON h.aatif_id = aif.aatif_id
+    LEFT JOIN "tblUom" uom ON (uom.UOM_id::text = aif.uom::text OR uom.UOM = aif.uom)
     LEFT JOIN "tblBranches" b ON h.branch_code = b.branch_code
     
     WHERE h.org_id = $1
@@ -670,6 +672,35 @@ async function getCertifiedTechnicians(orgId, assetTypeId) {
 }
 
 /**
+ * Get asset types that have at least one certified technician (approved/confirmed cert for that asset type).
+ * Used to know "for which asset type the technicians are available".
+ */
+async function getAssetTypesWithCertifiedTechnicians(orgId) {
+  const query = `
+    SELECT
+      aat.at_id AS asset_type_id,
+      at.text AS asset_type_name,
+      COUNT(DISTINCT etc.emp_int_id) AS certified_technician_count
+    FROM "tblATInspCerts" atic
+    INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
+    INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
+    INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id AND e.org_id = $1 AND e.int_status = 1
+    INNER JOIN "tblAATInspCheckList" aat ON atic.aatic_id = aat.aatic_id
+    LEFT JOIN "tblAssetTypes" at ON aat.at_id = at.asset_type_id
+    WHERE (etc.status IS NULL OR etc.status IN ('Approved','Confirmed'))
+    GROUP BY aat.at_id, at.text
+    ORDER BY at.text, aat.at_id;
+  `;
+  try {
+    const result = await pool.query(query, [orgId]);
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching asset types with certified technicians:', error);
+    throw error;
+  }
+}
+
+/**
  * Get technician details by emp_int_id from workflow header
  */
 async function getTechnicianFromWorkflowHeader(orgId, empIntId) {
@@ -708,5 +739,6 @@ module.exports = {
   getPreviousApprovedValues,
   createCompletedInspectionRecord,
   getCertifiedTechnicians,
+  getAssetTypesWithCertifiedTechnicians,
   getTechnicianFromWorkflowHeader
 };

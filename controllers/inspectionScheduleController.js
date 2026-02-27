@@ -479,6 +479,67 @@ const createDirectInspection = async (
   });
 };
 
+/**
+ * Create manual inspection schedule for an individual asset (same idea as create-manual maintenance)
+ */
+const createManualInspectionSchedule = async (req, res) => {
+  try {
+    const { asset_id } = req.body;
+    const org_id = req.user?.org_id || req.body.org_id;
+    const created_by = req.user?.user_id || req.user?.email || 'SYSTEM';
+
+    if (!asset_id) {
+      return res.status(400).json({ success: false, message: 'asset_id is required' });
+    }
+    if (!org_id) {
+      return res.status(400).json({ success: false, message: 'Organization ID is required' });
+    }
+
+    const assetResult = await inspectionModel.getAssetByIdForInspection(asset_id, org_id);
+    if (!assetResult.rows || assetResult.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Asset not found or not eligible for inspection' });
+    }
+    const asset = assetResult.rows[0];
+
+    const freqResult = await inspectionModel.getInspectionFrequency(asset.asset_type_id, org_id);
+    if (!freqResult.rows || freqResult.rows.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No inspection frequency configured for this asset type. Configure it in Admin Settings first.'
+      });
+    }
+    const frequency = freqResult.rows[0];
+
+    const ais_id = inspectionModel.generateUniqueId('AIS');
+    const act_insp_st_date = new Date();
+
+    await inspectionModel.createDirectInspectionSchedule({
+      ais_id,
+      aatif_id: frequency.aatif_id,
+      asset_id: asset.asset_id,
+      vendor_id: asset.vendor_id || null,
+      emp_int_id: frequency.emp_int_id || null,
+      act_insp_st_date,
+      status: 'PN',
+      created_by,
+      org_id,
+      branch_code: asset.branch_code || null
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Inspection schedule created successfully',
+      data: { ais_id, asset_id: asset.asset_id }
+    });
+  } catch (error) {
+    console.error('Error creating manual inspection schedule:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to create inspection schedule'
+    });
+  }
+};
+
 const getInspections = async (req, res) => {
   try {
     const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
@@ -729,6 +790,7 @@ const saveInspectionRecord = async (req, res) => {
 
 module.exports = {
   generateInspectionSchedules,
+  createManualInspectionSchedule,
   getInspections,
   getInspectionDetail,
   updateInspection,

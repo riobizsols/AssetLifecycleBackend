@@ -69,6 +69,34 @@ const getVendorById = async (vendorId) => {
   return null;
 };
 
+/**
+ * Get vendors by supply type (product-based or service-based) using tblVendorProdService + tblProdServs.ps_type.
+ * - product: vendors that have at least one linked prod_serv with ps_type = 'product'
+ * - service: vendors that have at least one linked prod_serv with ps_type = 'service'
+ * Vendors with both appear in both lists.
+ */
+const getVendorsBySupplyType = async (org_id, supplyType, userBranchCode, hasSuperAccess = false) => {
+  if (!supplyType || !['product', 'service'].includes(String(supplyType).toLowerCase())) {
+    return getAllVendors(org_id, userBranchCode, hasSuperAccess, false);
+  }
+  const psType = String(supplyType).toLowerCase();
+  const dbPool = getDb();
+  let query = `
+    SELECT DISTINCT v.vendor_id, v.vendor_name, v.company_name, v.int_status, v.org_id, v.branch_code, v.created_on
+    FROM "tblVendors" v
+    INNER JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id AND vps.org_id = v.org_id
+    INNER JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id AND LOWER(TRIM(ps.ps_type)) = $2
+    WHERE v.org_id = $1 AND (v.int_status = 1 OR v.int_status IS NULL)
+  `;
+  const params = [org_id, psType];
+  if (!hasSuperAccess && userBranchCode) {
+    query += ` AND (v.branch_code = $3 OR v.branch_code IS NULL)`;
+    params.push(userBranchCode);
+  }
+  query += ` ORDER BY v.vendor_name ASC`;
+  const result = await dbPool.query(query, params);
+  return result.rows;
+};
 
 const createVendor = async (vendor) => {
   console.log('=== Vendor Model Creation Debug ===');
@@ -147,5 +175,6 @@ module.exports = {
 module.exports = {
   getAllVendors,
   getVendorById,
+  getVendorsBySupplyType,
   createVendor,
 };

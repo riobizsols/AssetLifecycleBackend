@@ -56,6 +56,25 @@ const getInspectionFrequency = async (asset_type_id, org_id) => {
 };
 
 /**
+ * Get a single asset by id for manual inspection (returns fields needed to create schedule)
+ */
+const getAssetByIdForInspection = async (asset_id, org_id) => {
+  const query = `
+    SELECT 
+      a.asset_id,
+      a.asset_type_id,
+      b.branch_code,
+      a.purchase_vendor_id as vendor_id
+    FROM "tblAssets" a
+    LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+    WHERE a.asset_id = $1
+      AND a.org_id = $2
+      AND UPPER(COALESCE(a.current_status, '')) IN ('ACTIVE', 'IN_USE')
+  `;
+  return await db.query(query, [asset_id, org_id]);
+};
+
+/**
  * Get all individual assets for a specific asset type
  */
 const getAssetsByAssetType = async (asset_type_id, org_id) => {
@@ -364,7 +383,7 @@ const createDirectInspectionSchedule = async (data) => {
       created_on,
       org_id,
       branch_code
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), $8, $9)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), $9, $10)
     RETURNING *
   `;
 
@@ -378,7 +397,7 @@ const createDirectInspectionSchedule = async (data) => {
     data.status || 'PN', // PN = Pending
     data.created_by || 'SYSTEM',
     data.org_id,
-    data.branch_code
+    data.branch_code || null
   ]);
 };
 
@@ -646,6 +665,7 @@ const saveInspectionRecord = async (recordData) => {
 module.exports = {
   getAssetTypesRequiringInspection,
   getInspectionFrequency,
+  getAssetByIdForInspection,
   getAssetsByAssetType,
   getGroupsByAssetType,
   getAssetsByGroupId,

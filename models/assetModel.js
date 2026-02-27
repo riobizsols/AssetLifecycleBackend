@@ -361,6 +361,7 @@ const getAssetWithDetails = async (asset_id) => {
             at.parent_asset_type_id,
             pat.text as parent_asset_type_name,
             b.text as branch_name,
+            o.text as org_name,
             pv.vendor_name as purchase_vendor_name,
             sv.vendor_name as service_vendor_name,
             u.full_name as purchased_by_name,
@@ -369,6 +370,7 @@ const getAssetWithDetails = async (asset_id) => {
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblAssetTypes" pat ON at.parent_asset_type_id = pat.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblOrgs" o ON a.org_id = o.org_id
         LEFT JOIN "tblVendors" pv ON a.purchase_vendor_id = pv.vendor_id
         LEFT JOIN "tblVendors" sv ON a.service_vendor_id = sv.vendor_id
         LEFT JOIN "tblUsers" u ON a.purchased_by = u.user_id

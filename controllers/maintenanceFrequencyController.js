@@ -87,7 +87,7 @@ class MaintenanceFrequencyController {
   // Create maintenance frequency
   static async createMaintenanceFrequency(req, res) {
     try {
-      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type, is_recurring } = req.body;
+      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type, is_recurring, emp_int_id } = req.body;
       // const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
       const orgId = req.user.org_id;
       const changedBy = req.user.user_id;
@@ -136,6 +136,18 @@ class MaintenanceFrequencyController {
       console.log(`Creating ${isRecurring ? 'recurring' : 'on-demand'} maintenance frequency for asset type: ${asset_type_id}`);
       console.log(`UOM received:`, uom, `Type:`, typeof uom);
 
+      // Determine emp_int_id to persist:
+      // - For in-house/self maintenance, use provided emp_int_id
+      // - For vendor-maintained, do not persist emp_int_id
+      const maintainedNormalized = (maintained_by || '')
+        .toString()
+        .toLowerCase()
+        .replace(/\s|-/g, '');
+      let empIntToSave = null;
+      if (maintainedNormalized && !maintainedNormalized.includes('vendor')) {
+        empIntToSave = emp_int_id || null;
+      }
+
       const newFrequency = await MaintenanceFrequencyModel.createMaintenanceFrequency(
         asset_type_id,
         isRecurring ? parseInt(frequency) : null,
@@ -144,7 +156,9 @@ class MaintenanceFrequencyController {
         maintained_by,
         maint_type_id,
         orgId,
-        isRecurring
+        isRecurring,
+        null,
+        empIntToSave
       );
 
       try {
@@ -180,7 +194,7 @@ class MaintenanceFrequencyController {
   static async updateMaintenanceFrequency(req, res) {
     try {
       const { id } = req.params;
-      const { frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
+      const { frequency, uom, text, maintained_by, maint_type_id, is_recurring, emp_int_id } = req.body;
       const orgId = req.user.org_id;
 
       // is_recurring defaults to true if not provided
@@ -219,6 +233,15 @@ class MaintenanceFrequencyController {
 
       console.log(`Updating maintenance frequency ${id} (${isRecurring ? 'recurring' : 'on-demand'})`);
 
+      const maintainedNormalized = (maintained_by || '')
+        .toString()
+        .toLowerCase()
+        .replace(/\s|-/g, '');
+      let empIntToSave = null;
+      if (maintainedNormalized && !maintainedNormalized.includes('vendor')) {
+        empIntToSave = emp_int_id || null;
+      }
+
       const updatedFrequency = await MaintenanceFrequencyModel.updateMaintenanceFrequency(
         id,
         isRecurring ? parseInt(frequency) : null,
@@ -227,7 +250,8 @@ class MaintenanceFrequencyController {
         maintained_by,
         maint_type_id,
         orgId,
-        isRecurring
+        isRecurring,
+        empIntToSave
       );
       
       if (!updatedFrequency) {

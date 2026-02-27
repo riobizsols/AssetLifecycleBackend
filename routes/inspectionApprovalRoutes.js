@@ -25,6 +25,10 @@ router.get('/detail/:wfaiish_id', controller.getInspectionDetail);
 // GET /api/inspection-approval/history/:wfaiish_id
 router.get('/history/:wfaiish_id', controller.getInspectionHistory);
 
+// Get asset types for which certified technicians are available (must be before /technicians/:id)
+// GET /api/inspection-approval/asset-types-with-technicians
+router.get('/asset-types-with-technicians', controller.getAssetTypesWithCertifiedTechnicians);
+
 // Get certified technicians for a specific asset type
 // GET /api/inspection-approval/technicians/:assetTypeId
 router.get('/technicians/:assetTypeId', controller.getCertifiedTechnicians);

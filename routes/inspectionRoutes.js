@@ -65,5 +65,12 @@ router.post(
   inspectionScheduleController.generateInspectionSchedules
 );
 
+// POST /inspection/create-manual - trigger inspection for an individual asset (same as maintenance-list plus)
+router.post(
+  "/create-manual",
+  protect,
+  inspectionScheduleController.createManualInspectionSchedule
+);
+
 module.exports = router;
 
