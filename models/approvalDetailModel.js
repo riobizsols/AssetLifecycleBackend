@@ -385,7 +385,6 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     `;
     const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    const isSystemAdmin = userRoleIds.includes('JR001');
     
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
@@ -393,111 +392,41 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     
     // isWfamshId is already declared above for vendor check
 
+    // ROLE-BASED: Only users with the required role for the current AP step can approve (no System Admin bypass)
     let currentResult;
-    if (isSystemAdmin) {
-      // SYSTEM ADMIN: Find the current pending step (AP) regardless of role assignment
-      console.log(`[SYSTEM ADMIN APPROVAL] User ${userId} is System Admin. Overriding role check.`);
-      console.log(`[SYSTEM ADMIN APPROVAL] isWfamshId=${isWfamshId}, assetOrWfamshId=${assetOrWfamshId}, orgId=${orgId}`);
-      if (isWfamshId) {
-        const adminHeaderQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
-          ORDER BY wfd.sequence ASC
-        `;
-        console.log(`[SYSTEM ADMIN APPROVAL] Executing WFAMSH header query with params:`, [assetOrWfamshId, orgId]);
-        currentResult = await getDb().query(adminHeaderQuery, [assetOrWfamshId, orgId]);
-        console.log(`[SYSTEM ADMIN APPROVAL] WFAMSH query returned ${currentResult.rows.length} rows`);
-      } else {
-        const adminAssetQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-          WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
-          ORDER BY wfd.sequence ASC
-        `;
-        console.log(`[SYSTEM ADMIN APPROVAL] Executing asset query with params:`, [assetOrWfamshId, orgId]);
-        currentResult = await getDb().query(adminAssetQuery, [assetOrWfamshId, orgId]);
-        console.log(`[SYSTEM ADMIN APPROVAL] Asset query returned ${currentResult.rows.length} rows`);
-      }
+    if (isWfamshId) {
+      const byHeaderQuery = `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
+          AND wfd.job_role_id = ANY($3::varchar[])
+        ORDER BY wfd.sequence ASC
+      `;
+      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
-      if (isWfamshId) {
-        // ROLE-BASED: Find workflow step where user has the required role
-        const byHeaderQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-            AND wfd.job_role_id = ANY($3::varchar[])
-          ORDER BY wfd.sequence ASC
-        `;
-        currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
-      } else {
-        // ROLE-BASED: Find workflow step where user has the required role
-        const currentQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-          WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-            AND wfd.job_role_id = ANY($3::varchar[])
-          ORDER BY wfd.sequence ASC
-        `;
-        currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
-      }
+      const currentQuery = `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
+          AND wfd.job_role_id = ANY($3::varchar[])
+        ORDER BY wfd.sequence ASC
+      `;
+      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      // For System Admin, if no AP step found, try to find ANY step that's in process (not yet complete)
-      if (isSystemAdmin) {
-        console.log(`[SYSTEM ADMIN] No AP step found. Looking for any incomplete step...`);
-        let fallbackResult;
-        if (isWfamshId) {
-          const fallbackQuery = `
-            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-            FROM "tblWFAssetMaintSch_D" wfd
-            WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
-            ORDER BY wfd.sequence ASC
-            LIMIT 1
-          `;
-          console.log(`[SYSTEM ADMIN FALLBACK] Executing WFAMSH query with params:`, [assetOrWfamshId, orgId]);
-          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
-        } else {
-          const fallbackQuery = `
-            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-            FROM "tblWFAssetMaintSch_D" wfd
-            INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-            WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
-            ORDER BY wfd.sequence ASC
-            LIMIT 1
-          `;
-          console.log(`[SYSTEM ADMIN FALLBACK] Executing Asset query with params:`, [assetOrWfamshId, orgId]);
-          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
-        }
-        
-        console.log(`[SYSTEM ADMIN FALLBACK] Query returned ${fallbackResult.rows.length} rows`);
-        
-        if (fallbackResult.rows.length === 0) {
-          console.error(`[SYSTEM ADMIN FALLBACK] No workflow steps found. Asset/ID: ${assetOrWfamshId}, Org: ${orgId}`);
-          throw new Error('No pending or incomplete workflow step found for approval');
-        }
-        console.log(`[SYSTEM ADMIN FALLBACK SUCCESS] Found step:`, fallbackResult.rows[0]);
-        currentResult.rows = fallbackResult.rows;
-      } else {
-        throw new Error('No workflow found for this asset or user does not have required role');
-      }
+      throw new Error('No workflow found for this asset or user does not have required role');
     }
     
     const workflowDetails2 = currentResult.rows;
     
-    // ROLE-BASED: Find the current step that needs approval (status AP), or first IN step for System Admin
-    let currentUserStep = workflowDetails2.find(w => w.status === 'AP');
+    // Find the current step that needs approval (status AP)
+    const currentUserStep = workflowDetails2.find(w => w.status === 'AP');
     console.log(`[APPROVAL STEP SELECTION] Looking for AP step. Found:`, currentUserStep ? 'YES' : 'NO');
-    
-    if (!currentUserStep && isSystemAdmin) {
-      // System Admin can approve the first IN step if no AP step exists
-      currentUserStep = workflowDetails2.find(w => w.status === 'IN');
-      console.log(`[APPROVAL STEP SELECTION] System Admin mode. Looking for IN step. Found:`, currentUserStep ? 'YES' : 'NO');
-    }
     
     if (!currentUserStep) {
       console.error(`[APPROVAL ERROR] No approval step found. Available steps:`, workflowDetails2);
@@ -671,7 +600,6 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     `;
     const userRolesResult = await getDb().query(userRolesQuery, [userId]);
     const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    const isSystemAdmin = userRoleIds.includes('JR001');
     
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
@@ -680,102 +608,38 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
+    // ROLE-BASED: Only users with the required role for the current AP step can reject (no System Admin bypass)
     let currentResult;
-    if (isSystemAdmin) {
-      // SYSTEM ADMIN: Find the current pending step (AP) regardless of role assignment
-      console.log(`[SYSTEM ADMIN REJECTION] User ${userId} is System Admin. Overriding role check.`);
-      console.log(`[SYSTEM ADMIN REJECTION] isWfamshId=${isWfamshId}, assetOrWfamshId=${assetOrWfamshId}, orgId=${orgId}`);
-      if (isWfamshId) {
-        const adminHeaderQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
-          ORDER BY wfd.sequence ASC
-        `;
-        console.log(`[SYSTEM ADMIN REJECTION] Executing WFAMSH header query with params:`, [assetOrWfamshId, orgId]);
-        currentResult = await getDb().query(adminHeaderQuery, [assetOrWfamshId, orgId]);
-        console.log(`[SYSTEM ADMIN REJECTION] WFAMSH query returned ${currentResult.rows.length} rows`);
-      } else {
-        const adminAssetQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-          WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status = 'AP'
-          ORDER BY wfd.sequence ASC
-        `;
-        console.log(`[SYSTEM ADMIN REJECTION] Executing asset query with params:`, [assetOrWfamshId, orgId]);
-        currentResult = await getDb().query(adminAssetQuery, [assetOrWfamshId, orgId]);
-        console.log(`[SYSTEM ADMIN REJECTION] Asset query returned ${currentResult.rows.length} rows`);
-      }
+    if (isWfamshId) {
+      const byHeaderQuery = `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
+          AND wfd.job_role_id = ANY($3::varchar[])
+        ORDER BY wfd.sequence ASC
+      `;
+      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
-      if (isWfamshId) {
-        // ROLE-BASED: Find workflow step where user has the required role
-        const byHeaderQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-            AND wfd.job_role_id = ANY($3::varchar[])
-          ORDER BY wfd.sequence ASC
-        `;
-        currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
-      } else {
-        // ROLE-BASED: Find workflow step where user has the required role
-        const currentQuery = `
-          SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-          FROM "tblWFAssetMaintSch_D" wfd
-          INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-          WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-            AND wfd.job_role_id = ANY($3::varchar[])
-          ORDER BY wfd.sequence ASC
-        `;
-        currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
-      }
+      const currentQuery = `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
+          AND wfd.job_role_id = ANY($3::varchar[])
+        ORDER BY wfd.sequence ASC
+      `;
+      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
     }
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
-      // For System Admin, if no AP step found, try to find ANY step that's in process (not yet complete)
-      if (isSystemAdmin) {
-        console.log(`[SYSTEM ADMIN REJECTION] No AP step found. Looking for any incomplete step...`);
-        let fallbackResult;
-        if (isWfamshId) {
-          const fallbackQuery = `
-            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-            FROM "tblWFAssetMaintSch_D" wfd
-            WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
-            ORDER BY wfd.sequence ASC
-            LIMIT 1
-          `;
-          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
-        } else {
-          const fallbackQuery = `
-            SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-            FROM "tblWFAssetMaintSch_D" wfd
-            INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-            WHERE wfh.asset_id = $1 AND wfd.org_id = $2 AND wfd.status IN ('AP', 'IN')
-            ORDER BY wfd.sequence ASC
-            LIMIT 1
-          `;
-          fallbackResult = await getDb().query(fallbackQuery, [assetOrWfamshId, orgId]);
-        }
-        
-        if (fallbackResult.rows.length === 0) {
-          throw new Error('No pending or incomplete workflow step found for rejection');
-        }
-        currentResult.rows = fallbackResult.rows;
-      } else {
-        throw new Error('No workflow found for this asset or user does not have required role');
-      }
+      throw new Error('No workflow found for this asset or user does not have required role');
     }
     
     const workflowDetails2 = currentResult.rows;
-    
-    // ROLE-BASED: Find the current step that needs approval (status AP), or first IN step for System Admin
-    let currentUserStep = workflowDetails2.find(w => w.status === 'AP');
-    if (!currentUserStep && isSystemAdmin) {
-      // System Admin can reject the first IN step if no AP step exists
-      currentUserStep = workflowDetails2.find(w => w.status === 'IN');
-    }
+    const currentUserStep = workflowDetails2.find(w => w.status === 'AP');
     if (!currentUserStep) {
       console.error(`[REJECTION ERROR] No rejection step found. Available steps:`, workflowDetails2);
       throw new Error(`No pending approval step found for rejection. Found ${workflowDetails2.length} steps with statuses: ${workflowDetails2.map(s => s.status).join(', ')}`);

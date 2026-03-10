@@ -22,7 +22,7 @@ const getAllWorkflowSteps = async (req, res) => {
 // Create workflow step
 const createWorkflowStep = async (req, res) => {
     try {
-        const { text } = req.body;
+        const { text, esc_no_days } = req.body;
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
@@ -33,7 +33,8 @@ const createWorkflowStep = async (req, res) => {
             });
         }
 
-        const result = await model.createWorkflowStep(org_id, text.trim(), created_by);
+        const escDays = esc_no_days === undefined || esc_no_days === '' ? null : parseInt(esc_no_days, 10);
+        const result = await model.createWorkflowStep(org_id, text.trim(), created_by, escDays);
         res.status(201).json({
             success: true,
             message: 'Workflow step created successfully',
@@ -53,7 +54,7 @@ const createWorkflowStep = async (req, res) => {
 const updateWorkflowStep = async (req, res) => {
     try {
         const { id } = req.params;
-        const { text } = req.body;
+        const { text, esc_no_days } = req.body;
 
         if (!text || !text.trim()) {
             return res.status(400).json({
@@ -62,7 +63,7 @@ const updateWorkflowStep = async (req, res) => {
             });
         }
 
-        const result = await model.updateWorkflowStep(id, text.trim());
+        const result = await model.updateWorkflowStep(id, text.trim(), esc_no_days);
         
         if (result.rows.length === 0) {
             return res.status(404).json({

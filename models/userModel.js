@@ -1,41 +1,59 @@
-const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
 
-// Helper function to get database connection (tenant pool or default)
+// Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
 
 // Find user by email or username (used for login)
 // Checks tblRioAdmin first if email/username is "rioadmin", otherwise checks tblUsers
-// If tenantPool is provided, use it; otherwise use getDb() which gets from context
 const findUserByEmail = async (emailOrUsername, tenantPool = null) => {
-    const connection = tenantPool || getDb();
-    
-    // Check if this is a RioAdmin login attempt (username = "rioadmin")
-    if (emailOrUsername && emailOrUsername.toLowerCase() === 'rioadmin') {
-        const rioAdminResult = await connection.query(
-            'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE username = $1 OR email = $1',
+    const runLookup = async (connection) => {
+        // Check if this is a RioAdmin login attempt (username = "rioadmin")
+        if (emailOrUsername && emailOrUsername.toLowerCase() === 'rioadmin') {
+            const rioAdminResult = await connection.query(
+                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE username = $1 OR email = $1',
+                [emailOrUsername]
+            );
+            if (rioAdminResult.rows.length > 0) {
+                return rioAdminResult.rows[0];
+            }
+        }
+        
+        // Check tblRioAdmin by email (in case email is used)
+        const rioAdminByEmailResult = await connection.query(
+            'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE email = $1',
             [emailOrUsername]
         );
-        if (rioAdminResult.rows.length > 0) {
-            return rioAdminResult.rows[0];
+        if (rioAdminByEmailResult.rows.length > 0) {
+            return rioAdminByEmailResult.rows[0];
         }
+        
+        // Fall back to tblUsers (normal login)
+        const result = await connection.query(
+            'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
+            [emailOrUsername]
+        );
+        return result.rows[0];
+    };
+
+    if (tenantPool) {
+        return runLookup(tenantPool);
     }
-    
-    // Check tblRioAdmin by email (in case email is used)
-    const rioAdminByEmailResult = await connection.query(
-        'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE email = $1',
-        [emailOrUsername]
-    );
-    if (rioAdminByEmailResult.rows.length > 0) {
-        return rioAdminByEmailResult.rows[0];
+
+    // Use a short-lived pool for normal login lookups so auth is isolated from
+    // any stale/ended shared pool state.
+    const { Pool } = require('pg');
+    const tempPool = new Pool({
+        connectionString: process.env.DATABASE_URL,
+        max: 2,
+        idleTimeoutMillis: 10000,
+        connectionTimeoutMillis: 5000,
+        ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    });
+    try {
+        return await runLookup(tempPool);
+    } finally {
+        await tempPool.end().catch(() => {});
     }
-    
-    // Fall back to tblUsers (normal login)
-    const result = await connection.query(
-        'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
-        [emailOrUsername]
-    );
-    return result.rows[0];
 };
 
 // Create user — called by super_admin

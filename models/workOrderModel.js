@@ -116,25 +116,26 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
                     LIMIT 5
                 ) AS activity_row
             ) as recent_activities,
-            -- Get final approver name (highest sequence with status 'UA')
+            -- Get final approver name from history (who performed last UA action; works for role-based flow where wfd.user_id may be NULL)
             (
-                SELECT u.full_name
-                FROM "tblWFAssetMaintSch_D" wfd
-                LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-                WHERE wfd.wfamsh_id = ams.wfamsh_id
-                  AND wfd.org_id = ams.org_id
-                  AND wfd.status = 'UA'
-                ORDER BY wfd.sequence DESC, wfd.created_on DESC
+                SELECT COALESCE(u.full_name, u_emp.full_name)
+                FROM "tblWFAssetMaintHist" wh
+                LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+                LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                  AND wh.action = 'UA'
+                ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
             ) as final_approver_name,
-            -- Get final approval date (changed_on of the same record)
+            -- Get final approval date from history
             (
-                SELECT wfd.changed_on
-                FROM "tblWFAssetMaintSch_D" wfd
-                WHERE wfd.wfamsh_id = ams.wfamsh_id
-                  AND wfd.org_id = ams.org_id
-                  AND wfd.status = 'UA'
-                ORDER BY wfd.sequence DESC, wfd.created_on DESC
+                SELECT wh.action_on
+                FROM "tblWFAssetMaintHist" wh
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                  AND wh.action = 'UA'
+                ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
             ) as approval_date,
             -- Get breakdown information if this is a breakdown maintenance
@@ -331,25 +332,26 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
                     LIMIT 5
                 ) AS activity_row
             ) as recent_activities,
-            -- Get final approver name (highest sequence with status 'UA')
+            -- Get final approver name from history (who performed last UA action; works for role-based flow where wfd.user_id may be NULL)
             (
-                SELECT u.full_name
-                FROM "tblWFAssetMaintSch_D" wfd
-                LEFT JOIN "tblUsers" u ON wfd.user_id = u.user_id
-                WHERE wfd.wfamsh_id = ams.wfamsh_id
-                  AND wfd.org_id = ams.org_id
-                  AND wfd.status = 'UA'
-                ORDER BY wfd.sequence DESC, wfd.created_on DESC
+                SELECT COALESCE(u.full_name, u_emp.full_name)
+                FROM "tblWFAssetMaintHist" wh
+                LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+                LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                  AND wh.action = 'UA'
+                ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
             ) as final_approver_name,
-            -- Get final approval date (changed_on of the same record)
+            -- Get final approval date from history
             (
-                SELECT wfd.changed_on
-                FROM "tblWFAssetMaintSch_D" wfd
-                WHERE wfd.wfamsh_id = ams.wfamsh_id
-                  AND wfd.org_id = ams.org_id
-                  AND wfd.status = 'UA'
-                ORDER BY wfd.sequence DESC, wfd.created_on DESC
+                SELECT wh.action_on
+                FROM "tblWFAssetMaintHist" wh
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                  AND wh.action = 'UA'
+                ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
             ) as approval_date,
             -- Get breakdown information if this is a breakdown maintenance
@@ -402,27 +404,6 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
           AND ams.org_id = $2 
           AND a.org_id = $2 
           AND b.org_id = $2
-          AND ams.status = 'IN' 
-          AND ams.wo_id IS NOT NULL
-          AND (
-            -- Include vendor-maintained work orders
-            ams.maintained_by = 'Vendor'
-            OR
-            -- Include breakdown maintenance (MT004) even if not vendor-maintained
-            ams.maint_type_id = 'MT004'
-            OR
-            -- Include breakdown work orders identified by notes or breakdown table (for backward compatibility)
-            (ams.notes ILIKE '%Breakdown%' AND EXISTS (
-              SELECT 1 FROM "tblAssetBRDet" brd
-              WHERE brd.asset_id = ams.asset_id
-                AND brd.org_id = ams.org_id
-                AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
-                AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
-            ))
-            OR
-            -- Include group maintenance work orders (detected by group_id from workflow header)
-            (wfh.group_id IS NOT NULL)
-          )
     `;
     
     // Build parameters array dynamically

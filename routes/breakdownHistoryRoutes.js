@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const {
     getBreakdownHistory,
+    getBreakdownById,
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
     getBreakdownFilterOptions,
@@ -26,5 +27,8 @@ router.get('/filter-options', getBreakdownFilterOptions);
 
 // Export breakdown history
 router.post('/export', exportBreakdownHistory);
+
+// Get single breakdown by ID (must be after other static routes to avoid matching :breakdownId)
+router.get('/:breakdownId', getBreakdownById);
 
 module.exports = router;

@@ -4,13 +4,14 @@ const { generateCustomId } = require('../utils/idGenerator');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// Get all workflow steps
+// Get all workflow steps (including esc_no_days for escalation)
 const getAllWorkflowSteps = async (org_id) => {
     const query = `
         SELECT 
             wf_steps_id,
             org_id,
-            text
+            text,
+            esc_no_days
         FROM "tblWFSteps"
         WHERE org_id = $1
         ORDER BY text
@@ -20,34 +21,44 @@ const getAllWorkflowSteps = async (org_id) => {
     return await dbPool.query(query, [org_id]);
 };
 
-// Create workflow step
-const createWorkflowStep = async (org_id, text, created_by) => {
+// Create workflow step (esc_no_days = max days for approval at this step; null = use fallback)
+const createWorkflowStep = async (org_id, text, created_by, esc_no_days = null) => {
     const wf_steps_id = await generateCustomId('wfs', 3);
     
     const query = `
         INSERT INTO "tblWFSteps" (
             wf_steps_id,
             org_id,
-            text
-        ) VALUES ($1, $2, $3)
+            text,
+            esc_no_days
+        ) VALUES ($1, $2, $3, $4)
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_steps_id, org_id, text]);
+    return await dbPool.query(query, [wf_steps_id, org_id, text, esc_no_days]);
 };
 
-// Update workflow step
-const updateWorkflowStep = async (wf_steps_id, text) => {
+// Update workflow step (esc_no_days = max days for approval at this step)
+const updateWorkflowStep = async (wf_steps_id, text, esc_no_days = undefined) => {
+    const updates = ['text = $1'];
+    const values = [text];
+    let paramIndex = 2;
+    if (esc_no_days !== undefined) {
+        updates.push(`esc_no_days = $${paramIndex}`);
+        values.push(esc_no_days === null || esc_no_days === '' ? null : parseInt(esc_no_days, 10));
+        paramIndex++;
+    }
+    values.push(wf_steps_id);
     const query = `
         UPDATE "tblWFSteps"
-        SET text = $1
-        WHERE wf_steps_id = $2
+        SET ${updates.join(', ')}
+        WHERE wf_steps_id = $${paramIndex}
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [text, wf_steps_id]);
+    return await dbPool.query(query, values);
 };
 
 // Delete workflow step
@@ -71,7 +82,8 @@ const getWorkflowSequencesByAssetType = async (asset_type_id, org_id) => {
             wfas.wf_steps_id,
             wfas.seqs_no,
             wfas.org_id,
-            ws.text as step_text
+            ws.text as step_text,
+            ws.esc_no_days
         FROM "tblWFATSeqs" wfas
         LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
         WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2

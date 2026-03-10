@@ -75,6 +75,7 @@ const inspectionChecklistRoutes = require("./routes/inspectionChecklistRoutes");
 const inspectionFrequencyRoutes = require("./routes/inspectionFrequencyRoutes");
 const costCenterTransferRoutes = require("./routes/costCenterTransferRoutes");
 const assetTypeChecklistMappingRoutes = require("./routes/assetTypeChecklistMappingRoutes");
+const internalRoutes = require("./routes/internalRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 
@@ -255,6 +256,7 @@ app.use("/api/audit-log-configs", auditLogConfigRoutes);
 app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
 app.use("/api/cost-center-transfer", costCenterTransferRoutes);
+app.use("/api/internal", internalRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
@@ -262,10 +264,21 @@ app.get("/", (req, res) => {
 
 
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   
   // Initialize cron jobs after server starts
   const cronService = new CronService();
   cronService.initCronJobs();
 });
+
+// Graceful shutdown: stop accepting new connections, then exit (do NOT end the pool
+// so in-flight requests never see "Cannot use a pool after calling end")
+function gracefulShutdown() {
+  console.log('\n🛑 Shutting down (closing server)...');
+  server.close(() => {
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

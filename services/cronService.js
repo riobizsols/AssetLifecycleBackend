@@ -14,27 +14,34 @@ class CronService {
         this.maintenanceCronTask = null; // Store the cron task reference
     }
 
-    // Initialize all cron jobs
+    // Initialize all cron jobs with staggered startup to avoid a "connection storm"
+    // (multiple cron loggers hitting the DB pool at once and exhausting connections).
+    // Gaps of 10–15s let the pool rest between each cron's startup logging.
     initCronJobs() {
         const userId = 'SYSTEM';
         
         console.log('Initializing cron jobs...');
         
-        maintenanceCronLogger.logCronJobInitialization({
-            jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
-            userId
-        }).catch(err => console.error('Logging error:', err));
+        // Defer initial logging so it doesn't run in parallel with DB startup
+        setTimeout(() => {
+            maintenanceCronLogger.logCronJobInitialization({
+                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }, 2000);
         
-        // Schedule maintenance schedule generation every 24 hours at 12 AM
+        // Schedule maintenance first (paused; only runs on manual trigger)
         this.scheduleMaintenanceGeneration();
         
-        // Schedule workflow escalation every day at 9 AM
-        this.scheduleWorkflowEscalation();
+        // Stagger workflow (10s) and vendor (20s) so pool has time to recover between cron startups
+        setTimeout(() => {
+            this.scheduleWorkflowEscalation();
+        }, 10000);
         
-        // Schedule vendor contract renewal check every day at 8 AM
-        this.scheduleVendorContractRenewal();
-        
-        console.log('Cron jobs initialized successfully');
+        setTimeout(() => {
+            this.scheduleVendorContractRenewal();
+            console.log('Cron jobs initialized successfully');
+        }, 30000);
     }
 
     // Schedule workflow escalation for overdue approvals

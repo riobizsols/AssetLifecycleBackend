@@ -90,7 +90,8 @@ const startVendorContractRenewalCron = () => {
         const vendorsDueResult = await dbPool.query(vendorsDueQuery, [todayStr, tenDaysDateStr]);
         console.log(`   Found ${vendorsDueResult.rows.length} vendor(s) with contracts ending within 10 days`);
         
-        // Create renewal workflows for vendors due in 10 days
+        // Sequential loop: one connection at a time. Do NOT use forEach+async or Promise.all
+        // or the pool will be exhausted (connection storm) and login/API will time out.
         for (const vendor of vendorsDueResult.rows) {
           try {
             console.log(`   Creating renewal workflow for vendor: ${vendor.vendor_name} (${vendor.vendor_id})`);
@@ -196,7 +197,7 @@ const triggerVendorContractRenewal = async () => {
     const vendorsDueResult = await dbPool.query(vendorsDueQuery, [todayStr, tenDaysDateStr]);
     console.log(`   Found ${vendorsDueResult.rows.length} vendor(s) with contracts ending within 10 days`);
     
-    // Create renewal workflows for vendors due in 10 days
+    // Sequential loop: one connection at a time (pool-friendly; do not switch to forEach+async).
     for (const vendor of vendorsDueResult.rows) {
       try {
         console.log(`   Creating renewal workflow for vendor: ${vendor.vendor_name} (${vendor.vendor_id})`);

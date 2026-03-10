@@ -467,6 +467,102 @@ const getBreakdownHistoryCount = async (filters = {}, orgId = 'ORG001') => {
     return await dbPool.query(query, queryParams);
 };
 
+// Get single breakdown by ID (for detail page)
+const getBreakdownById = async (breakdownId, orgId = 'ORG001') => {
+    const query = `
+        SELECT 
+            -- Breakdown Information
+            brd.abr_id,
+            brd.asset_id,
+            brd.atbrrc_id,
+            brd.reported_by,
+            brd.is_create_maintenance,
+            brd.decision_code,
+            brd.status as breakdown_status,
+            brd.description as breakdown_description,
+            brd.created_on as breakdown_date,
+            brd.created_on as breakdown_updated_on,
+            brd.reported_by as breakdown_updated_by,
+            brd.org_id,
+            
+            -- Asset Information
+            a.serial_number,
+            a.description as asset_description,
+            a.current_status as asset_status,
+            a.purchased_on,
+            a.purchased_cost,
+            a.service_vendor_id,
+            a.group_id,
+            a.branch_id,
+            
+            -- Asset Type Information
+            at.asset_type_id,
+            at.text as asset_type_name,
+            at.maint_lead_type,
+            
+            -- Breakdown Reason Code Information
+            brc.text as breakdown_reason,
+            brc.instatus as reason_code_status,
+            
+            -- Reported By User Information
+            u.full_name as reported_by_name,
+            u.email as reported_by_email,
+            u.phone as reported_by_phone,
+            
+            -- Department Information (from user)
+            d.text as department_name,
+            d.dept_id,
+            
+            -- Vendor Information
+            v.vendor_id,
+            v.vendor_name,
+            v.contact_person_name,
+            v.contact_person_email as vendor_email,
+            v.contact_person_number as vendor_phone,
+            CONCAT(v.address_line1, ', ', v.city, ', ', v.state, ' ', v.pincode) as vendor_address,
+            
+            -- Work Order Information (if maintenance was created)
+            ams.ams_id as work_order_id,
+            ams.act_maint_st_date as maintenance_start_date,
+            ams.act_main_end_date as maintenance_end_date,
+            ams.status as maintenance_status,
+            ams.notes as maintenance_notes,
+            ams.maintained_by,
+            ams.po_number,
+            ams.invoice,
+            ams.technician_name,
+            ams.technician_email,
+            ams.technician_phno,
+            
+            -- Maintenance Type Information
+            mt.text as maintenance_type_name,
+            
+            -- Branch Information
+            b.text as branch_name,
+            
+            -- Group Information
+            ag.text as group_name
+            
+        FROM "tblAssetBRDet" brd
+        INNER JOIN "tblAssets" a ON brd.asset_id = a.asset_id
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+        LEFT JOIN "tblUsers" u ON brd.reported_by = u.user_id
+        LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
+        LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
+        LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
+            AND ams.status IN ('IN', 'AP', 'IP', 'CO')
+        LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+        LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
+        WHERE brd.abr_id = $1 AND brd.org_id = $2
+        ORDER BY ams.ams_id DESC NULLS LAST
+        LIMIT 1
+    `;
+    const dbPool = getDb();
+    return await dbPool.query(query, [breakdownId, orgId]);
+};
+
 // Get breakdown history by asset ID
 const getBreakdownHistoryByAsset = async (assetId, orgId = 'ORG001') => {
     const query = `
@@ -706,6 +802,7 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
 module.exports = {
     getBreakdownHistory,
     getBreakdownHistoryCount,
+    getBreakdownById,
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
     getBreakdownFilterOptions
