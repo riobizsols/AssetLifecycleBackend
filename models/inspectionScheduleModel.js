@@ -440,6 +440,64 @@ const generateUniqueId = (prefix) => {
 };
 
 /**
+ * Generate next sequential wfaiish_id for tblWFAATInspSch_H
+ * Format: WFAIISH_01, WFAIISH_02, ...
+ */
+const getNextWFAIISHId = async () => {
+  const query = `
+    SELECT wfaiish_id
+    FROM "tblWFAATInspSch_H"
+    ORDER BY CAST(SUBSTRING(wfaiish_id FROM '[0-9]+$') AS INTEGER) DESC
+    LIMIT 1
+  `;
+
+  const result = await db.query(query);
+
+  if (result.rows.length === 0) {
+    return 'WFAIISH_01';
+  }
+
+  const lastId = result.rows[0].wfaiish_id;
+  const match = lastId.match(/[0-9]+/g);
+  if (match) {
+    const lastPart = match[match.length - 1];
+    const nextNum = parseInt(lastPart, 10) + 1;
+    return `WFAIISH_${String(nextNum).padStart(2, '0')}`;
+  }
+
+  return 'WFAIISH_01';
+};
+
+/**
+ * Generate next sequential wfaiisd_id for tblWFAATInspSch_D
+ * Format: WFAIISD_01, WFAIISD_02, ...
+ */
+const getNextWFAIISDId = async () => {
+  const query = `
+    SELECT wfaiisd_id
+    FROM "tblWFAATInspSch_D"
+    ORDER BY CAST(SUBSTRING(wfaiisd_id FROM '[0-9]+$') AS INTEGER) DESC
+    LIMIT 1
+  `;
+
+  const result = await db.query(query);
+
+  if (result.rows.length === 0) {
+    return 'WFAIISD_01';
+  }
+
+  const lastId = result.rows[0].wfaiisd_id;
+  const match = lastId.match(/[0-9]+/g);
+  if (match) {
+    const lastPart = match[match.length - 1];
+    const nextNum = parseInt(lastPart, 10) + 1;
+    return `WFAIISD_${String(nextNum).padStart(2, '0')}`;
+  }
+
+  return 'WFAIISD_01';
+};
+
+/**
  * Get list of inspections for execution/viewing
  */
 const getInspectionList = async (org_id, emp_int_id = null) => {
@@ -679,6 +737,8 @@ module.exports = {
   createDirectInspectionSchedule,
   calculateNextInspectionDate,
   generateUniqueId,
+  getNextWFAIISHId,
+  getNextWFAIISDId,
   getInspectionList,
   getInspectionDetailsById,
   updateInspectionRecord,

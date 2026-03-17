@@ -799,11 +799,67 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
     };
 };
 
+// Get breakdown fix list that have been reopened more than once (for Reopen Details screen)
+// Reopen is tracked by appending "[Reopened: notes]" to description; count = occurrences of "[Reopened:"
+const getBreakdownsReopenedMultiple = async (orgId = 'ORG001', branchId = null, hasSuperAccess = false) => {
+    const dbPool = getDb();
+    const reopenMarker = '[Reopened:';
+    const markerLen = reopenMarker.length;
+
+    let query = `
+        WITH reopen_counts AS (
+            SELECT 
+                brd.abr_id,
+                brd.asset_id,
+                brd.reported_by,
+                brd.atbrrc_id,
+                brd.description,
+                brd.status AS breakdown_status,
+                brd.created_on,
+                brd.reopen_notes,
+                (LENGTH(COALESCE(brd.description, '')) - LENGTH(REPLACE(COALESCE(brd.description, ''), $2, ''))) / NULLIF($3, 0) AS reopen_count
+            FROM "tblAssetBRDet" brd
+            WHERE brd.org_id = $1
+        )
+        SELECT 
+            rc.abr_id,
+            rc.asset_id,
+            rc.description,
+            rc.breakdown_status,
+            rc.created_on,
+            rc.reopen_notes,
+            rc.reopen_count,
+            a.serial_number,
+            a.description AS asset_description,
+            at.text AS asset_type_name,
+            u.full_name AS reported_by_name,
+            brc.text AS breakdown_reason
+        FROM reopen_counts rc
+        INNER JOIN "tblAssets" a ON rc.asset_id = a.asset_id
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblUsers" u ON rc.reported_by = u.user_id
+        LEFT JOIN "tblATBRReasonCodes" brc ON rc.atbrrc_id = brc.atbrrc_id
+        WHERE rc.reopen_count > 1
+    `;
+    const params = [orgId, reopenMarker, markerLen];
+
+    if (!hasSuperAccess && branchId) {
+        query += ` AND a.branch_id = $${params.length + 1}`;
+        params.push(branchId);
+    }
+
+    query += ` ORDER BY rc.created_on DESC, rc.abr_id DESC`;
+
+    const result = await dbPool.query(query, params);
+    return result.rows;
+};
+
 module.exports = {
     getBreakdownHistory,
     getBreakdownHistoryCount,
     getBreakdownById,
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
-    getBreakdownFilterOptions
+    getBreakdownFilterOptions,
+    getBreakdownsReopenedMultiple
 };

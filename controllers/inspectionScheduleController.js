@@ -394,8 +394,8 @@ const createWorkflowInspection = async (
   scheduledDate,
   org_id
 ) => {
-  // Generate unique header ID
-  const wfaiish_id = inspectionModel.generateUniqueId('WFAIISH');
+  // Generate sequential header ID (e.g. WFAIISH_01, WFAIISH_02, ...)
+  const wfaiish_id = await inspectionModel.getNextWFAIISHId();
 
   // Create header record
   await inspectionModel.createWorkflowInspectionHeader({
@@ -434,7 +434,8 @@ const createWorkflowInspection = async (
     }
 
     const jobRole = jobRoleResult.rows[0];
-    const wfaiisd_id = inspectionModel.generateUniqueId('WFAIISD');
+    // Generate sequential detail ID (e.g. WFAIISD_01, WFAIISD_02, ...)
+    const wfaiisd_id = await inspectionModel.getNextWFAIISDId();
 
     // First sequence = Action Pending (AP), others = Initiated (IN)
     const status = i === 0 ? 'AP' : 'IN';

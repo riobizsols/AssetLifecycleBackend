@@ -6,6 +6,7 @@ const {
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
     getBreakdownFilterOptions,
+    getBreakdownsReopenedMultiple,
     exportBreakdownHistory
 } = require('../controllers/breakdownHistoryController');
 const { protect } = require('../middlewares/authMiddleware');
@@ -24,6 +25,9 @@ router.get('/summary', getBreakdownHistorySummary);
 
 // Get available filter options
 router.get('/filter-options', getBreakdownFilterOptions);
+
+// Get breakdowns reopened more than once (Reopen Details screen)
+router.get('/reopened-multiple', getBreakdownsReopenedMultiple);
 
 // Export breakdown history
 router.post('/export', exportBreakdownHistory);

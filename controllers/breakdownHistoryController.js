@@ -512,6 +512,30 @@ const getBreakdownHistorySummary = async (req, res) => {
     }
 };
 
+// Get breakdowns reopened more than once (for Reopen Details screen)
+const getBreakdownsReopenedMultiple = async (req, res) => {
+    try {
+        const orgId = req.query.orgId || 'ORG001';
+        const userBranchId = req.user?.branch_id;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+
+        const rows = await model.getBreakdownsReopenedMultiple(orgId, userBranchId, hasSuperAccess);
+
+        res.json({
+            success: true,
+            data: rows,
+            count: rows.length
+        });
+    } catch (error) {
+        console.error('Error in getBreakdownsReopenedMultiple:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch breakdown reopen details',
+            error: error.message
+        });
+    }
+};
+
 // Get available filter options
 const getBreakdownFilterOptions = async (req, res) => {
     try {
@@ -776,5 +800,6 @@ module.exports = {
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
     getBreakdownFilterOptions,
+    getBreakdownsReopenedMultiple,
     exportBreakdownHistory
 };
