@@ -198,27 +198,23 @@ async function processApprovalAction(req, res) {
         );
         nextStepMessage = 'Next approver notified.';
       } else {
-        // 4b. Workflow complete - Update Header to 'CO' (Completed)
+        // 4b. Workflow complete - create master inspection record first.
+        // If this fails, return error and do NOT mark header as completed.
+        await inspectionApprovalModel.createCompletedInspectionRecord(
+          orgId,
+          step.wfaiish_id,
+          userId,
+          technicianId
+        );
+        console.log('Created master inspection record for:', step.wfaiish_id, 'with technician:', technicianId);
+
+        // 5. Mark header as 'CO' (Completed) only after master record exists
         await inspectionApprovalModel.updateHeaderStatus(
-          orgId, 
-          step.wfaiish_id, 
-          'CO', 
+          orgId,
+          step.wfaiish_id,
+          'CO',
           userId
         );
-        
-        // 5. Create final inspection record in master table (tblAAT_Insp_Sch)
-        try {
-          await inspectionApprovalModel.createCompletedInspectionRecord(
-            orgId,
-            step.wfaiish_id,
-            userId,
-            technicianId
-          );
-          console.log('Created master inspection record for:', step.wfaiish_id, 'with technician:', technicianId);
-        } catch (masterErr) {
-          console.error('Failed to create master inspection record:', masterErr);
-          // Non-blocking error, but should be noted
-        }
 
         nextStepMessage = 'Workflow completed. Inspection approved and recorded.';
         
