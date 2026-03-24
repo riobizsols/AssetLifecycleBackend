@@ -4,18 +4,45 @@ const { generateCustomId } = require('../utils/idGenerator');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
+// Compatibility: some DBs may not have esc_no_days yet.
+const hasEscNoDaysColumn = async () => {
+    const query = `
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tblWFSteps'
+          AND column_name = 'esc_no_days'
+        LIMIT 1
+    `;
+    const dbPool = getDb();
+    const result = await dbPool.query(query);
+    return result.rows.length > 0;
+};
+
 // Get all workflow steps (including esc_no_days for escalation)
 const getAllWorkflowSteps = async (org_id) => {
-    const query = `
-        SELECT 
-            wf_steps_id,
-            org_id,
-            text,
-            esc_no_days
-        FROM "tblWFSteps"
-        WHERE org_id = $1
-        ORDER BY text
-    `;
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            SELECT 
+                wf_steps_id,
+                org_id,
+                text,
+                esc_no_days
+            FROM "tblWFSteps"
+            WHERE org_id = $1
+            ORDER BY text
+        `
+        : `
+            SELECT 
+                wf_steps_id,
+                org_id,
+                text,
+                NULL::integer AS esc_no_days
+            FROM "tblWFSteps"
+            WHERE org_id = $1
+            ORDER BY text
+        `;
     
     const dbPool = getDb();
     return await dbPool.query(query, [org_id]);
@@ -24,39 +51,61 @@ const getAllWorkflowSteps = async (org_id) => {
 // Create workflow step (esc_no_days = max days for approval at this step; null = use fallback)
 const createWorkflowStep = async (org_id, text, created_by, esc_no_days = null) => {
     const wf_steps_id = await generateCustomId('wfs', 3);
-    
-    const query = `
-        INSERT INTO "tblWFSteps" (
-            wf_steps_id,
-            org_id,
-            text,
-            esc_no_days
-        ) VALUES ($1, $2, $3, $4)
-        RETURNING *
-    `;
-    
+
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            INSERT INTO "tblWFSteps" (
+                wf_steps_id,
+                org_id,
+                text,
+                esc_no_days
+            ) VALUES ($1, $2, $3, $4)
+            RETURNING *
+        `
+        : `
+            INSERT INTO "tblWFSteps" (
+                wf_steps_id,
+                org_id,
+                text
+            ) VALUES ($1, $2, $3)
+            RETURNING *, NULL::integer AS esc_no_days
+        `;
+
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_steps_id, org_id, text, esc_no_days]);
+    return escNoDaysExists
+        ? dbPool.query(query, [wf_steps_id, org_id, text, esc_no_days])
+        : dbPool.query(query, [wf_steps_id, org_id, text]);
 };
 
 // Update workflow step (esc_no_days = max days for approval at this step)
 const updateWorkflowStep = async (wf_steps_id, text, esc_no_days = undefined) => {
+    const escNoDaysExists = await hasEscNoDaysColumn();
     const updates = ['text = $1'];
     const values = [text];
     let paramIndex = 2;
-    if (esc_no_days !== undefined) {
+
+    if (escNoDaysExists && esc_no_days !== undefined) {
         updates.push(`esc_no_days = $${paramIndex}`);
         values.push(esc_no_days === null || esc_no_days === '' ? null : parseInt(esc_no_days, 10));
         paramIndex++;
     }
+
     values.push(wf_steps_id);
-    const query = `
-        UPDATE "tblWFSteps"
-        SET ${updates.join(', ')}
-        WHERE wf_steps_id = $${paramIndex}
-        RETURNING *
-    `;
-    
+    const query = escNoDaysExists
+        ? `
+            UPDATE "tblWFSteps"
+            SET ${updates.join(', ')}
+            WHERE wf_steps_id = $${paramIndex}
+            RETURNING *
+        `
+        : `
+            UPDATE "tblWFSteps"
+            SET text = $1
+            WHERE wf_steps_id = $2
+            RETURNING *, NULL::integer AS esc_no_days
+        `;
+
     const dbPool = getDb();
     return await dbPool.query(query, values);
 };
@@ -75,21 +124,37 @@ const deleteWorkflowStep = async (wf_steps_id) => {
 
 // Get workflow sequences for asset type
 const getWorkflowSequencesByAssetType = async (asset_type_id, org_id) => {
-    const query = `
-        SELECT 
-            wfas.wf_at_seqs_id,
-            wfas.asset_type_id,
-            wfas.wf_steps_id,
-            wfas.seqs_no,
-            wfas.org_id,
-            ws.text as step_text,
-            ws.esc_no_days
-        FROM "tblWFATSeqs" wfas
-        LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
-        WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
-        ORDER BY CAST(wfas.seqs_no AS INTEGER)
-    `;
-    
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            SELECT 
+                wfas.wf_at_seqs_id,
+                wfas.asset_type_id,
+                wfas.wf_steps_id,
+                wfas.seqs_no,
+                wfas.org_id,
+                ws.text as step_text,
+                ws.esc_no_days
+            FROM "tblWFATSeqs" wfas
+            LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
+            WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
+            ORDER BY CAST(wfas.seqs_no AS INTEGER)
+        `
+        : `
+            SELECT 
+                wfas.wf_at_seqs_id,
+                wfas.asset_type_id,
+                wfas.wf_steps_id,
+                wfas.seqs_no,
+                wfas.org_id,
+                ws.text as step_text,
+                NULL::integer as esc_no_days
+            FROM "tblWFATSeqs" wfas
+            LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
+            WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
+            ORDER BY CAST(wfas.seqs_no AS INTEGER)
+        `;
+
     const dbPool = getDb();
     return await dbPool.query(query, [asset_type_id, org_id]);
 };
