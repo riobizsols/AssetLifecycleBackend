@@ -1,5 +1,31 @@
 const pool = require('../config/db');
 
+const pickColumn = (columnMap, candidates) => {
+  for (const candidate of candidates) {
+    const key = candidate.toLowerCase();
+    if (columnMap[key]) return columnMap[key];
+  }
+  return null;
+};
+
+const getTableColumns = async (tableName) => {
+  const result = await pool.query(
+    `
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1
+    `,
+    [tableName]
+  );
+
+  return result.rows.reduce((acc, row) => {
+    acc[row.column_name.toLowerCase()] = row.column_name;
+    return acc;
+  }, {});
+};
+
+const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
+
 /**
  * CHUNK 2.1: BASIC APPROVAL QUERIES (READ OPERATIONS)
  * 
@@ -641,30 +667,132 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
  * @returns {Array} List of certified technicians
  */
 async function getCertifiedTechnicians(orgId, assetTypeId) {
-  const query = `
-    SELECT DISTINCT
-      e.emp_int_id,
-      e.full_name,
-      e.email_id,
-      e.phone_number,
-      tc.tc_id,
-      tc.certificate_name as cert_name,
-      tc.certificate_no as cert_number
-    FROM "tblATInspCerts" atic
-    INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
-    INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
-    INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id
-    INNER JOIN "tblAATInspCheckList" aatic ON atic.aatic_id = aatic.aatic_id
-    WHERE aatic.at_id = $1
-      AND e.org_id = $2
-      AND e.int_status = 1
-      AND (etc.status IS NULL OR etc.status IN ('Approved','Confirmed'))
-    ORDER BY e.full_name;
-  `;
-  
   try {
-    const result = await pool.query(query, [assetTypeId, orgId]);
-    return result.rows;
+    const rows = [];
+    const addRows = (list) => {
+      if (Array.isArray(list) && list.length > 0) rows.push(...list);
+    };
+
+    // Newer maintenance certificate mapping path
+    try {
+      const mapCols = await getTableColumns('tblATMaintCert');
+      const empCertCols = await getTableColumns('tblEmpTechCert');
+      const empCols = await getTableColumns('tblEmployees');
+      const certCols = await getTableColumns('tblTechCert');
+
+      const mapAssetTypeId = pickColumn(mapCols, ['asset_type_id', 'assettype_id']);
+      const mapTcId = pickColumn(mapCols, ['tc_id']);
+      const mapOrg = pickColumn(mapCols, ['org_id', 'orgid']);
+
+      const empCertEmpId = pickColumn(empCertCols, ['emp_int_id', 'emp_intid', 'employee_int_id']);
+      const empCertTcId = pickColumn(empCertCols, ['tc_id']);
+      const empCertStatus = pickColumn(empCertCols, ['status']);
+      const empCertOrg = pickColumn(empCertCols, ['org_id', 'orgid']);
+
+      const empId = pickColumn(empCols, ['emp_int_id', 'emp_intid', 'employee_int_id']);
+      const empName = pickColumn(empCols, ['full_name', 'name']);
+      const empEmail = pickColumn(empCols, ['email_id']);
+      const empPhone = pickColumn(empCols, ['phone_number']);
+      const empOrg = pickColumn(empCols, ['org_id', 'orgid']);
+      const empIntStatus = pickColumn(empCols, ['int_status']);
+
+      const certId = pickColumn(certCols, ['tc_id']);
+      const certName = pickColumn(certCols, ['certificate_name', 'cert_name']);
+      const certNumber = pickColumn(certCols, ['certificate_no', 'cert_number', 'cert_no']);
+
+      if (mapAssetTypeId && mapTcId && empCertEmpId && empCertTcId && empId && empName && certId) {
+        const params = [assetTypeId];
+        const where = [`atmc.${qId(mapAssetTypeId)} = $1`];
+
+        if (mapOrg) {
+          params.push(orgId);
+          where.push(`atmc.${qId(mapOrg)} = $${params.length}`);
+        }
+        if (empCertOrg) {
+          params.push(orgId);
+          where.push(`etc.${qId(empCertOrg)} = $${params.length}`);
+        }
+        if (empOrg) {
+          params.push(orgId);
+          where.push(`e.${qId(empOrg)} = $${params.length}`);
+        }
+        if (empIntStatus) where.push(`e.${qId(empIntStatus)} = 1`);
+        if (empCertStatus) {
+          where.push(`(etc.${qId(empCertStatus)} IS NULL OR UPPER(etc.${qId(empCertStatus)}) IN ('APPROVED', 'CONFIRMED'))`);
+        }
+
+        const query = `
+          SELECT DISTINCT
+            e.${qId(empId)} AS emp_int_id,
+            e.${qId(empName)} AS full_name,
+            ${empEmail ? `e.${qId(empEmail)} AS email_id,` : 'NULL AS email_id,'}
+            ${empPhone ? `e.${qId(empPhone)} AS phone_number,` : 'NULL AS phone_number,'}
+            atmc.${qId(mapTcId)} AS tc_id,
+            ${certName ? `tc.${qId(certName)} AS cert_name,` : 'NULL AS cert_name,'}
+            ${certNumber ? `tc.${qId(certNumber)} AS cert_number` : 'NULL AS cert_number'}
+          FROM "tblATMaintCert" atmc
+          INNER JOIN "tblEmpTechCert" etc ON atmc.${qId(mapTcId)} = etc.${qId(empCertTcId)}
+          INNER JOIN "tblEmployees" e ON etc.${qId(empCertEmpId)} = e.${qId(empId)}
+          LEFT JOIN "tblTechCert" tc ON atmc.${qId(mapTcId)} = tc.${qId(certId)}
+          WHERE ${where.join('\n            AND ')}
+        `;
+        const result = await pool.query(query, params);
+        addRows(result.rows);
+      }
+    } catch (error) {
+      console.warn('Maintenance technician lookup skipped:', error.message);
+    }
+
+    // Legacy inspection mapping path (to avoid regression on inspection screens)
+    try {
+      const legacyQuery = `
+        SELECT DISTINCT
+          e.emp_int_id,
+          e.full_name,
+          e.email_id,
+          e.phone_number,
+          tc.tc_id,
+          tc.certificate_name AS cert_name,
+          tc.certificate_no AS cert_number
+        FROM "tblATInspCerts" atic
+        INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
+        INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
+        INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id
+        INNER JOIN "tblAATInspCheckList" aatic ON atic.aatic_id = aatic.aatic_id
+        WHERE aatic.at_id = $1
+          AND e.org_id = $2
+          AND e.int_status = 1
+          AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
+      `;
+      const result = await pool.query(legacyQuery, [assetTypeId, orgId]);
+      addRows(result.rows);
+    } catch (error) {
+      console.warn('Legacy inspection technician lookup skipped:', error.message);
+    }
+
+    // Merge duplicates from both paths
+    const dedup = new Map();
+    for (const row of rows) {
+      const key = row.emp_int_id;
+      if (!key) continue;
+      if (!dedup.has(key)) {
+        dedup.set(key, row);
+      } else {
+        const existing = dedup.get(key);
+        dedup.set(key, {
+          ...existing,
+          email_id: existing.email_id || row.email_id || null,
+          phone_number: existing.phone_number || row.phone_number || null,
+          tc_id: existing.tc_id || row.tc_id || null,
+          cert_name: existing.cert_name || row.cert_name || null,
+          cert_number: existing.cert_number || row.cert_number || null
+        });
+      }
+    }
+
+    return Array.from(dedup.values()).sort((a, b) =>
+      String(a.full_name || '').localeCompare(String(b.full_name || ''))
+    );
   } catch (error) {
     console.error('Error fetching certified technicians:', error);
     throw error;
@@ -676,24 +804,119 @@ async function getCertifiedTechnicians(orgId, assetTypeId) {
  * Used to know "for which asset type the technicians are available".
  */
 async function getAssetTypesWithCertifiedTechnicians(orgId) {
-  const query = `
-    SELECT
-      aat.at_id AS asset_type_id,
-      at.text AS asset_type_name,
-      COUNT(DISTINCT etc.emp_int_id) AS certified_technician_count
-    FROM "tblATInspCerts" atic
-    INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
-    INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
-    INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id AND e.org_id = $1 AND e.int_status = 1
-    INNER JOIN "tblAATInspCheckList" aat ON atic.aatic_id = aat.aatic_id
-    LEFT JOIN "tblAssetTypes" at ON aat.at_id = at.asset_type_id
-    WHERE (etc.status IS NULL OR etc.status IN ('Approved','Confirmed'))
-    GROUP BY aat.at_id, at.text
-    ORDER BY at.text, aat.at_id;
-  `;
   try {
-    const result = await pool.query(query, [orgId]);
-    return result.rows;
+    const assetTypeTechSet = new Map();
+    const addPair = (assetTypeId, assetTypeName, empIntId) => {
+      if (!assetTypeId || !empIntId) return;
+      if (!assetTypeTechSet.has(assetTypeId)) {
+        assetTypeTechSet.set(assetTypeId, {
+          asset_type_id: assetTypeId,
+          asset_type_name: assetTypeName || null,
+          technicians: new Set()
+        });
+      }
+      const entry = assetTypeTechSet.get(assetTypeId);
+      if (!entry.asset_type_name && assetTypeName) entry.asset_type_name = assetTypeName;
+      entry.technicians.add(empIntId);
+    };
+
+    // Newer maintenance certificate mapping path
+    try {
+      const mapCols = await getTableColumns('tblATMaintCert');
+      const empCertCols = await getTableColumns('tblEmpTechCert');
+      const empCols = await getTableColumns('tblEmployees');
+      const assetTypeCols = await getTableColumns('tblAssetTypes');
+
+      const mapAssetTypeId = pickColumn(mapCols, ['asset_type_id', 'assettype_id']);
+      const mapTcId = pickColumn(mapCols, ['tc_id']);
+      const mapOrg = pickColumn(mapCols, ['org_id', 'orgid']);
+
+      const empCertEmpId = pickColumn(empCertCols, ['emp_int_id', 'emp_intid', 'employee_int_id']);
+      const empCertTcId = pickColumn(empCertCols, ['tc_id']);
+      const empCertStatus = pickColumn(empCertCols, ['status']);
+      const empCertOrg = pickColumn(empCertCols, ['org_id', 'orgid']);
+
+      const empId = pickColumn(empCols, ['emp_int_id', 'emp_intid', 'employee_int_id']);
+      const empOrg = pickColumn(empCols, ['org_id', 'orgid']);
+      const empIntStatus = pickColumn(empCols, ['int_status']);
+
+      const atId = pickColumn(assetTypeCols, ['asset_type_id']);
+      const atText = pickColumn(assetTypeCols, ['text']);
+
+      if (mapAssetTypeId && mapTcId && empCertEmpId && empCertTcId && empId && atId) {
+        const params = [];
+        const where = [];
+
+        if (mapOrg) {
+          params.push(orgId);
+          where.push(`atmc.${qId(mapOrg)} = $${params.length}`);
+        }
+        if (empCertOrg) {
+          params.push(orgId);
+          where.push(`etc.${qId(empCertOrg)} = $${params.length}`);
+        }
+        if (empOrg) {
+          params.push(orgId);
+          where.push(`e.${qId(empOrg)} = $${params.length}`);
+        }
+        if (empIntStatus) where.push(`e.${qId(empIntStatus)} = 1`);
+        if (empCertStatus) {
+          where.push(`(etc.${qId(empCertStatus)} IS NULL OR UPPER(etc.${qId(empCertStatus)}) IN ('APPROVED', 'CONFIRMED'))`);
+        }
+
+        const whereClause = where.length ? `WHERE ${where.join('\n          AND ')}` : '';
+        const query = `
+          SELECT DISTINCT
+            atmc.${qId(mapAssetTypeId)} AS asset_type_id,
+            ${atText ? `at.${qId(atText)} AS asset_type_name,` : 'NULL AS asset_type_name,'}
+            etc.${qId(empCertEmpId)} AS emp_int_id
+          FROM "tblATMaintCert" atmc
+          INNER JOIN "tblEmpTechCert" etc ON atmc.${qId(mapTcId)} = etc.${qId(empCertTcId)}
+          INNER JOIN "tblEmployees" e ON etc.${qId(empCertEmpId)} = e.${qId(empId)}
+          LEFT JOIN "tblAssetTypes" at ON atmc.${qId(mapAssetTypeId)} = at.${qId(atId)}
+          ${whereClause}
+        `;
+        const result = await pool.query(query, params);
+        result.rows.forEach((r) => addPair(r.asset_type_id, r.asset_type_name, r.emp_int_id));
+      }
+    } catch (error) {
+      console.warn('Maintenance asset-type technician lookup skipped:', error.message);
+    }
+
+    // Legacy inspection mapping path
+    try {
+      const legacyQuery = `
+        SELECT DISTINCT
+          aat.at_id AS asset_type_id,
+          at.text AS asset_type_name,
+          etc.emp_int_id
+        FROM "tblATInspCerts" atic
+        INNER JOIN "tblTechCert" tc ON atic.tc_id = tc.tc_id
+        INNER JOIN "tblEmpTechCert" etc ON tc.tc_id = etc.tc_id
+        INNER JOIN "tblEmployees" e ON etc.emp_int_id = e.emp_int_id
+        INNER JOIN "tblAATInspCheckList" aat ON atic.aatic_id = aat.aatic_id
+        LEFT JOIN "tblAssetTypes" at ON aat.at_id = at.asset_type_id
+        WHERE e.org_id = $1
+          AND e.int_status = 1
+          AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
+      `;
+      const result = await pool.query(legacyQuery, [orgId]);
+      result.rows.forEach((r) => addPair(r.asset_type_id, r.asset_type_name, r.emp_int_id));
+    } catch (error) {
+      console.warn('Legacy inspection asset-type technician lookup skipped:', error.message);
+    }
+
+    return Array.from(assetTypeTechSet.values())
+      .map((entry) => ({
+        asset_type_id: entry.asset_type_id,
+        asset_type_name: entry.asset_type_name,
+        certified_technician_count: entry.technicians.size
+      }))
+      .sort((a, b) =>
+        String(a.asset_type_name || a.asset_type_id || '').localeCompare(
+          String(b.asset_type_name || b.asset_type_id || '')
+        )
+      );
   } catch (error) {
     console.error('Error fetching asset types with certified technicians:', error);
     throw error;
