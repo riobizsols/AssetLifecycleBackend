@@ -30,7 +30,7 @@ const insertAssetType = async (
             assignment_type, inspection_required, group_required, created_by, 
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_type_id, maint_lead_type, last_gen_seq_no, depreciation_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, $14, 0, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, 0, $14)
         RETURNING *
     `;
     
