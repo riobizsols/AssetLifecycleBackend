@@ -863,12 +863,14 @@ const updateBreakdownReport = async (abrId, updateData) => {
       SET 
         atbrrc_id = $1,
         description = $2,
-        decision_code = $3${newStatus ? ', status = $5' : ''}
+        decision_code = COALESCE($3, decision_code)${newStatus ? ', status = $5' : ''}
       WHERE abr_id = $4
       RETURNING *
     `;
 
-    const updateValues = [atbrrc_id, description, decision_code, abrId];
+    // Keep existing decision_code when frontend omits it (null/undefined)
+    const decisionCodeToPersist = decision_code || null;
+    const updateValues = [atbrrc_id, description, decisionCodeToPersist, abrId];
     if (newStatus) {
       updateValues.push(newStatus);
     }
