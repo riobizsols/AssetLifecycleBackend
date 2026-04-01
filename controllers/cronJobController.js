@@ -1,4 +1,5 @@
 const CronJobService = require('../services/cronJobService');
+const { backfillMissingWorkflowSequences } = require('../cron/wfAtSeqBackfillCron');
 
 class CronJobController {
     /**
@@ -69,6 +70,32 @@ class CronJobController {
             res.status(500).json({
                 error: 'Failed to get cron job status',
                 message: error.message
+            });
+        }
+    }
+
+    /**
+     * Run one-time backfill:
+     * Set default workflow sequence for eligible asset types missing tblWFATSeqs rows.
+     */
+    static async triggerDefaultWorkflowSequenceBackfill(req, res) {
+        try {
+            const user_id = req.user?.user_id || 'SYSTEM';
+            console.log(`Manual trigger of WFAT default sequence backfill requested by user: ${user_id}`);
+
+            const result = await backfillMissingWorkflowSequences();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Default workflow sequence backfill completed',
+                result,
+            });
+        } catch (error) {
+            console.error('Error triggering WFAT default sequence backfill:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to run default workflow sequence backfill',
+                message: error.message,
             });
         }
     }

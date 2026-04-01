@@ -295,13 +295,13 @@ const getJobRolesByWorkflowStep = async (req, res) => {
 // Create workflow job role
 const createWorkflowJobRole = async (req, res) => {
     try {
-        const { wf_steps_id, job_role_id, emp_int_id, dept_id } = req.body;
+        const { wf_steps_id, job_role_id, emp_int_id } = req.body;
         const org_id = req.user.org_id;
 
-        if (!wf_steps_id || !job_role_id || !dept_id) {
+        if (!wf_steps_id || !job_role_id) {
             return res.status(400).json({
                 success: false,
-                error: 'Workflow step, job role, and department are required'
+                error: 'Workflow step and job role are required'
             });
         }
 
@@ -314,7 +314,7 @@ const createWorkflowJobRole = async (req, res) => {
             });
         }
 
-        const result = await model.createWorkflowJobRole(wf_steps_id, job_role_id, emp_int_id || null, dept_id, org_id);
+        const result = await model.createWorkflowJobRole(wf_steps_id, job_role_id, emp_int_id || null, org_id);
         res.status(201).json({
             success: true,
             message: 'Job role assigned successfully',
@@ -334,13 +334,13 @@ const createWorkflowJobRole = async (req, res) => {
 const updateWorkflowJobRole = async (req, res) => {
     try {
         const { id } = req.params;
-        const { wf_steps_id, job_role_id, emp_int_id, dept_id } = req.body;
+        const { wf_steps_id, job_role_id, emp_int_id } = req.body;
         const org_id = req.user.org_id;
 
-        if (!job_role_id || !dept_id) {
+        if (!job_role_id) {
             return res.status(400).json({
                 success: false,
-                error: 'Job role and department are required'
+                error: 'Job role is required'
             });
         }
 
@@ -359,7 +359,7 @@ const updateWorkflowJobRole = async (req, res) => {
             }
         }
 
-        const result = await model.updateWorkflowJobRole(id, job_role_id, emp_int_id || null, dept_id);
+        const result = await model.updateWorkflowJobRole(id, job_role_id, emp_int_id || null);
         
         if (result.rows.length === 0) {
             return res.status(404).json({

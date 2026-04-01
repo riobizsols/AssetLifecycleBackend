@@ -667,6 +667,29 @@ const checkVendorExists = async (vendor_id) => {
   return await dbPool.query(query, [vendor_id]);
 };
 
+/**
+ * Returns true if any active maintenance frequency for this asset type
+ * is configured as vendor-maintained.
+ */
+const isAssetTypeVendorMaintained = async (asset_type_id, org_id) => {
+  if (!asset_type_id || !org_id) return false;
+  const dbPool = getDb();
+  const freqQuery = `
+    SELECT maintained_by
+    FROM "tblATMaintFreq"
+    WHERE asset_type_id = $1
+      AND org_id = $2
+      AND int_status = 1
+  `;
+  const freqResult = await dbPool.query(freqQuery, [asset_type_id, org_id]);
+  return freqResult.rows.some((r) =>
+    String(r.maintained_by || "")
+      .toLowerCase()
+      .replace(/\s|-/g, "")
+      .includes("vendor"),
+  );
+};
+
 const checkProdServExists = async (prod_serv_id) => {
   const query = `
         SELECT prod_serv_id FROM "tblProdServs"
@@ -1453,6 +1476,7 @@ module.exports = {
   checkAssetExists,
   checkAssetIdExists,
   checkVendorExists,
+  isAssetTypeVendorMaintained,
   checkProdServExists,
   getAssetTypeAssignmentType,
   insertAssetPropValue,

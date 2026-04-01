@@ -5,10 +5,31 @@ const workflowNotificationService = require('../services/workflowNotificationSer
 const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
+const brHistModel = require('./assetMaintSchBrHistModel');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
   try {
+    if (vendorId !== null && vendorId !== undefined) {
+      const vendorCheckQuery = `
+        SELECT int_status
+        FROM "tblVendors"
+        WHERE vendor_id = $1 AND org_id = $2
+      `;
+      const vendorCheckResult = await getDb().query(vendorCheckQuery, [vendorId, orgId]);
+      if (vendorCheckResult.rows.length === 0) {
+        return { success: false, message: 'Vendor not found' };
+      }
+      const vendorStatus = vendorCheckResult.rows[0].int_status;
+      if (vendorStatus !== 1) {
+        return {
+          success: false,
+          message: 'The specified Service Vendor is Inactive or CR Approved. Please choose another vendor for service.',
+          vendorStatus,
+        };
+      }
+    }
+
     const updateFields = [];
     const updateValues = [];
     let paramIndex = 1;
@@ -50,6 +71,28 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
     
     if (result.rows.length === 0) {
       return { success: false, message: 'Workflow header not found' };
+    }
+
+    // Keep asset master in sync: if vendor is changed at workflow level,
+    // update the specific asset's service vendor immediately.
+    if (vendorId !== null && vendorId !== undefined) {
+      const updateAssetVendorQuery = `
+        UPDATE "tblAssets" a
+        SET service_vendor_id = $1,
+            changed_by = $2,
+            changed_on = NOW()::timestamp without time zone
+        FROM "tblWFAssetMaintSch_H" wfh
+        WHERE wfh.wfamsh_id = $3
+          AND wfh.org_id = $4
+          AND a.asset_id = wfh.asset_id
+          AND a.org_id = wfh.org_id
+      `;
+      await getDb().query(updateAssetVendorQuery, [
+        vendorId,
+        userId ? userId.substring(0, 20) : 'system',
+        wfamshId,
+        orgId,
+      ]);
     }
     
     return {
@@ -468,6 +511,44 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
         
         await getDb().query(updateHeaderQuery, updateValues);
         console.log(`✅ Updated workflow header: ${updateFields.join(', ')}`);
+      }
+    }
+
+    // If a new vendor is explicitly chosen during approval,
+    // persist it to tblAssets.service_vendor_id for this asset.
+    if (vendorId !== null && vendorId !== undefined) {
+      if (isWfamshId) {
+        const updateAssetVendorByWorkflowQuery = `
+          UPDATE "tblAssets" a
+          SET service_vendor_id = $1,
+              changed_by = $2,
+              changed_on = NOW()::timestamp without time zone
+          FROM "tblWFAssetMaintSch_H" wfh
+          WHERE wfh.wfamsh_id = $3
+            AND wfh.org_id = $4
+            AND a.asset_id = wfh.asset_id
+            AND a.org_id = wfh.org_id
+        `;
+        await getDb().query(updateAssetVendorByWorkflowQuery, [
+          vendorId,
+          userId.substring(0, 20),
+          currentUserStep.wfamsh_id,
+          orgId,
+        ]);
+      } else {
+        const updateAssetVendorByAssetIdQuery = `
+          UPDATE "tblAssets"
+          SET service_vendor_id = $1,
+              changed_by = $2,
+              changed_on = NOW()::timestamp without time zone
+          WHERE asset_id = $3 AND org_id = $4
+        `;
+        await getDb().query(updateAssetVendorByAssetIdQuery, [
+          vendorId,
+          userId.substring(0, 20),
+          assetOrWfamshId,
+          orgId,
+        ]);
       }
     }
     
@@ -1093,26 +1174,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          // Don't throw - continue with maintenance record creation
        }
        
-       // Update vendor int_status to 3 (CRApproved) when workflow is completed
-       // Only update if vendor exists and is not already blocked (int_status != 4)
-       if (vendorId) {
-         try {
-           await getDb().query(
-             `UPDATE "tblVendors" 
-              SET int_status = 3, 
-                  changed_by = 'SYSTEM', 
-                  changed_on = CURRENT_TIMESTAMP
-              WHERE vendor_id = $1 
-                AND org_id = $2
-                AND int_status != 4`,
-             [vendorId, orgId]
-           );
-           console.log(`✅ Vendor ${vendorId} status updated to 3 (CRApproved) after workflow completion`);
-         } catch (vendorUpdateError) {
-           console.error(`Error updating vendor status for ${vendorId}:`, vendorUpdateError);
-           // Don't throw error - allow workflow to complete even if vendor update fails
-         }
-       }
+       // Do NOT mutate vendor int_status on approval completion.
+       //
+       // Business rule:
+       // - Vendor Contract Renewal (MT005): approval only authorizes renewal workflow; the user must upload
+       //   renewal docs and update the contract_end_date from the Vendor screen.
+       // - If contract_end_date is NOT updated before it expires, a cron job will mark the vendor inactive (int_status = 0).
+       // - Blacklist is a separate manual action (int_status = 4).
        
       // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
       if (!isVendorContractRenewal) {
@@ -1842,6 +1910,23 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        
        await getDb().query(updateQuery, updateParams);
        console.log('Maintenance record updated from AP to IN successfully with ams_id:', existingAmsId);
+
+       // If this is breakdown maintenance, write initial history row as well.
+       if (maintTypeId === 'MT004') {
+         try {
+           await brHistModel.insertBrHist(
+             {
+               ams_id: existingAmsId,
+               status: 'IN',
+               created_by: 'system',
+               notes: amsNotes,
+             },
+             getDb(),
+           );
+         } catch (e) {
+           console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> AP to IN):', e.message || e);
+         }
+       }
        
        // Notify maintenance supervisors
        console.log('=== About to notify maintenance supervisors (Manual Maintenance) ===');
@@ -1979,6 +2064,23 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        });
        
        await getDb().query(insertQuery, insertParams);
+
+       // If this is breakdown maintenance, write initial history row as well.
+       if (maintTypeId === 'MT004') {
+         try {
+           await brHistModel.insertBrHist(
+             {
+               ams_id: amsId,
+               status: 'IN',
+               created_by: 'system',
+               notes: groupNotes,
+             },
+             getDb(),
+           );
+         } catch (e) {
+           console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> group create):', e.message || e);
+         }
+       }
        
        // Notify maintenance supervisors (using representative asset_id)
        console.log(`=== About to notify maintenance supervisors for group ${workflowData.group_id} ===`);
@@ -2380,6 +2482,23 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('About to execute insert query...');
      
      await getDb().query(insertQuery, insertParams);
+
+     // If this is breakdown maintenance, write initial history row as well.
+     if (maintTypeId === 'MT004') {
+       try {
+         await brHistModel.insertBrHist(
+           {
+             ams_id: amsId,
+             status: 'IN',
+             created_by: 'system',
+             notes: amsNotes,
+           },
+           getDb(),
+         );
+       } catch (e) {
+         console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> create):', e.message || e);
+       }
+     }
      
      console.log('Maintenance record created successfully with ams_id:', amsId);
      

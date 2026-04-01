@@ -11,7 +11,7 @@ const { deactivateExpiredVendors } = require('../models/vendorContractRenewalMod
  * PURPOSE:
  * Automatically checks vendor contract end dates and:
  * 1. Creates renewal notifications for contracts ending within 10 days (0-10 days)
- * 2. Blocks vendors (int_status = 4) if contract expired and workflow not approved
+ * 2. Deactivates vendors (int_status = 0) if contract expired and renewal not completed
  * 
  * HOW IT WORKS:
  * 1. Checks vendors with contract_end_date within 10 days (today to 10 days from today)
@@ -102,7 +102,7 @@ const startVendorContractRenewalCron = () => {
           }
         }
         
-    // Step 2: Block vendors with expired contracts (workflow not approved before contract_end_date)
+    // Step 2: Deactivate vendors with expired contracts (renewal not completed before contract_end_date)
     console.log('\n📅 Step 2: Checking vendors with expired contracts...');
     const todayDateStr = todayDate.toISOString().split('T')[0];
     
@@ -116,7 +116,7 @@ const startVendorContractRenewalCron = () => {
         console.log(`✅ Process completed in ${duration}ms`);
         console.log(`📊 Summary:`);
         console.log(`   - Renewal workflows created: ${vendorsDueResult.rows.length}`);
-        console.log(`   - Vendors blocked: ${expiredVendorsResult.deactivated}`);
+        console.log(`   - Vendors deactivated: ${expiredVendorsResult.deactivated}`);
         console.log('───────────────────────────────────────────────────────────────────\n');
         
       } catch (error) {
@@ -208,7 +208,7 @@ const triggerVendorContractRenewal = async () => {
       }
     }
     
-    // Step 2: Block vendors with expired contracts (workflow not approved before contract_end_date)
+    // Step 2: Deactivate vendors with expired contracts (renewal not completed before contract_end_date)
     console.log('\n📅 Step 2: Checking vendors with expired contracts...');
     const todayDateStr = todayDate.toISOString().split('T')[0];
     
@@ -222,7 +222,7 @@ const triggerVendorContractRenewal = async () => {
     console.log(`✅ Process completed in ${duration}ms`);
     console.log(`📊 Summary:`);
     console.log(`   - Renewal workflows created: ${vendorsDueResult.rows.length}`);
-    console.log(`   - Vendors blocked: ${expiredVendorsResult.deactivated}`);
+    console.log(`   - Vendors deactivated: ${expiredVendorsResult.deactivated}`);
     console.log('───────────────────────────────────────────────────────────────────\n');
     
     return {

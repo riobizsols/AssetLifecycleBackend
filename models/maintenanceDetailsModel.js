@@ -232,14 +232,11 @@ const getJobRolesByWorkflowStep = async (wf_steps_id, org_id) => {
             wfjr.wf_steps_id,
             wfjr.job_role_id,
             wfjr.emp_int_id,
-            wfjr.dept_id,
             wfjr.org_id,
             jr.text as job_role_name,
-            d.text as department_name,
             e.full_name as employee_name
         FROM "tblWFJobRole" wfjr
         LEFT JOIN "tblJobRoles" jr ON wfjr.job_role_id = jr.job_role_id
-        LEFT JOIN "tblDepartments" d ON wfjr.dept_id = d.dept_id
         LEFT JOIN "tblEmployees" e ON wfjr.emp_int_id = e.emp_int_id
         WHERE wfjr.wf_steps_id = $1 AND wfjr.org_id = $2
         ORDER BY wfjr.wf_job_role_id
@@ -269,7 +266,7 @@ const checkJobRoleExists = async (wf_steps_id, job_role_id, org_id, exclude_wf_j
 };
 
 // Create workflow job role
-const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, dept_id, org_id) => {
+const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_id) => {
     const wf_job_role_id = await generateCustomId('wfjr', 3);
     
     const query = `
@@ -278,30 +275,28 @@ const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, dept_
             wf_steps_id,
             job_role_id,
             emp_int_id,
-            dept_id,
             org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, dept_id, org_id]);
+    return await dbPool.query(query, [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, org_id]);
 };
 
 // Update workflow job role
-const updateWorkflowJobRole = async (wf_job_role_id, job_role_id, emp_int_id, dept_id) => {
+const updateWorkflowJobRole = async (wf_job_role_id, job_role_id, emp_int_id) => {
     const query = `
         UPDATE "tblWFJobRole"
         SET 
             job_role_id = $1,
-            emp_int_id = $2,
-            dept_id = $3
-        WHERE wf_job_role_id = $4
+            emp_int_id = $2
+        WHERE wf_job_role_id = $3
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [job_role_id, emp_int_id, dept_id, wf_job_role_id]);
+    return await dbPool.query(query, [job_role_id, emp_int_id, wf_job_role_id]);
 };
 
 // Delete workflow job role

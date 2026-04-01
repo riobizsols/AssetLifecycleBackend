@@ -563,7 +563,7 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
 
     const getWorkflowJobRoles = async (wfStepsId) => {
         const r = await dbPool.query(
-            `SELECT wf_job_role_id, wf_steps_id, job_role_id, dept_id, emp_int_id
+            `SELECT wf_job_role_id, wf_steps_id, job_role_id, emp_int_id
              FROM "tblWFJobRole"
              WHERE wf_steps_id = $1
              ORDER BY wf_job_role_id ASC`,
@@ -611,7 +611,7 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
                         id, wfscrap_h_id, job_role_id, dept_id, seq,
                         status, notes, created_by, created_on, changed_by, changed_on
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, NULL, NULL)`,
-                    [id, wfscrap_h_id, jr.job_role_id, jr.dept_id, Number(seq.seq_no), status, notes, created_by]
+                    [id, wfscrap_h_id, jr.job_role_id, null, Number(seq.seq_no), status, notes, created_by]
                 );
                 created += 1;
             }

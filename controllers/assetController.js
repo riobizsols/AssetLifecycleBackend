@@ -106,6 +106,16 @@ const addAsset = async (req, res) => {
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
+        // Enforce service vendor when asset type maintenance is vendor-managed.
+        if (asset_type_id) {
+            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
+            if (vendorMaintained && !service_vendor_id) {
+                return res.status(400).json({
+                    error: "Service vendor is required for vendor-maintained asset types"
+                });
+            }
+        }
+
         // Step 2: Validate vendors if provided
         if (purchase_vendor_id) {
             await logCheckingVendor({
@@ -438,6 +448,16 @@ const updateAsset = async (req, res) => {
       const existingAsset = await model.getAssetById(asset_id);
       if (existingAsset.rows.length > 0) {
         finalOrgId = existingAsset.rows[0].org_id;
+      }
+    }
+
+    // Enforce service vendor when asset type maintenance is vendor-managed.
+    if (asset_type_id) {
+      const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, finalOrgId);
+      if (vendorMaintained && !service_vendor_id) {
+        return res.status(400).json({
+          error: "Service vendor is required for vendor-maintained asset types",
+        });
       }
     }
     
@@ -1600,6 +1620,16 @@ const createAsset = async (req, res) => {
 
         if (!text || !org_id) {
             return res.status(400).json({ error: "text, and org_id are required fields" });
+        }
+
+        // Enforce service vendor when asset type maintenance is vendor-managed.
+        if (asset_type_id) {
+            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
+            if (vendorMaintained && !service_vendor_id) {
+                return res.status(400).json({
+                    error: "Service vendor is required for vendor-maintained asset types"
+                });
+            }
         }
 
         if (purchase_vendor_id) {

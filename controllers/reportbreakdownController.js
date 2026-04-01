@@ -564,7 +564,17 @@ const updateBreakdownReport = async (req, res) => {
       });
     }
     
-    res.status(500).json({ error: 'Failed to update breakdown report' });
+    res.status(500).json({
+      error: 'Failed to update breakdown report',
+      details: {
+        message: err?.message,
+        code: err?.code,
+        detail: err?.detail,
+        constraint: err?.constraint,
+        table: err?.table,
+        column: err?.column,
+      },
+    });
   }
 };
 

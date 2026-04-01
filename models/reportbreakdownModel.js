@@ -4,8 +4,7 @@ const ALLOWED_STATUSES = [
   "IN", // Initiated
   "CO", // Completed
   "CF", // Confirmed
-  "RE", // Reopened
-  "Reopened", // Full text Reopened
+  "RO", // Reopened
   "AP", "IP", "CA" // others if used
 ];
 
@@ -53,8 +52,7 @@ const confirmEmployeeReportBreakdown = async (abrId, orgId, userId) => {
     const maintUpdate = await client.query(
       `UPDATE "tblAssetMaintSch" 
        SET status = 'CO', 
-           changed_on = CURRENT_TIMESTAMP,
-           notes = COALESCE(notes, '') || ' [Final Confirmation Received]'
+           changed_on = CURRENT_TIMESTAMP
        WHERE org_id = $1 AND (
          (asset_id = $2 AND status IN ('IN', 'IP', 'CO', 'AP') AND (notes ILIKE $3 OR wo_id ILIKE $3))
          OR 
@@ -117,20 +115,19 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
     const assetId = res.rows[0].asset_id;
 
     // 1. Update Breakdown Table (tblAssetBRDet)
-    // Set status = 'Reopened' and save notes
+    // Requirement: when user reopens, breakdown goes back to IN (Initiated),
+    // while maintenance schedule is marked RO and a BR_Hist line is written.
     await client.query(
       `UPDATE "tblAssetBRDet" 
-       SET status = 'Reopened', 
+       SET status = 'IN', 
            reopen_notes = $1,
-           description = COALESCE(description, '') || ' [Reopened: ' || $1 || ']',
            changed_on = CURRENT_TIMESTAMP
        WHERE abr_id = $2 AND org_id = $3`,
       [notes, abrId, orgId]
     );
 
-    // 2. Update Maintenance Table (tblAssetMaintSch) - THE APPROVAL BYPASS
-    // Reset status back to 'IP' (In Progress) for the technician
-    // This makes it reappear in the maintenance list without requiring a new approval cycle
+    // 2. Update Maintenance Table (tblAssetMaintSch)
+    // Requirement: maintenance schedule should be marked RO (reopened).
     
     // First, find wfamsh_id if possible by searching for the ABR ID in workflow notes
     const wfRefRes = await client.query(
@@ -141,19 +138,45 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
     );
     let linkedWfamshId = wfRefRes.rows[0]?.wfamsh_id || null;
 
-    const maintUpdate = await client.query(
-      `UPDATE "tblAssetMaintSch" 
-       SET status = 'IP', 
-           notes = COALESCE(notes, '') || ' [Reopened: ' || $1 || ']',
-           changed_on = CURRENT_TIMESTAMP 
-       WHERE org_id = $2 AND (
-         (asset_id = $3 AND status IN ('CO', 'CF') AND (notes ILIKE $4 OR wo_id ILIKE $4 OR notes ILIKE $6 OR wo_id ILIKE $6))
-         OR 
-         (wfamsh_id = $5 AND status IN ('CO', 'CF'))
-       )
-       RETURNING ams_id, wfamsh_id`,
-      [notes, orgId, assetId, `%${abrId}%`, linkedWfamshId, `%${abrId.replace('ABR', 'ABR-')}%`]
-    );
+    // Prefer updating by wfamsh_id (fast + exact) to avoid wildcard scans on notes/wo_id.
+    const maintUpdate = linkedWfamshId
+      ? await client.query(
+          `WITH target AS (
+             SELECT ams_id, wfamsh_id
+             FROM "tblAssetMaintSch"
+             WHERE org_id = $2 AND wfamsh_id = $3 AND status IN ('CO', 'CF')
+             ORDER BY changed_on DESC NULLS LAST, created_on DESC NULLS LAST
+             LIMIT 1
+           )
+           UPDATE "tblAssetMaintSch" ams
+           SET status = 'IN',
+               notes = COALESCE(ams.notes, '') || ' [Reopened: ' || $1 || ']',
+               changed_on = CURRENT_TIMESTAMP
+           FROM target
+           WHERE ams.ams_id = target.ams_id
+           RETURNING ams.ams_id, ams.wfamsh_id`,
+          [notes, orgId, linkedWfamshId],
+        )
+      : await client.query(
+          `WITH target AS (
+             SELECT ams_id, wfamsh_id
+             FROM "tblAssetMaintSch"
+             WHERE org_id = $2
+               AND asset_id = $3
+               AND status IN ('CO', 'CF')
+               AND (wo_id ILIKE $4 OR notes ILIKE $4 OR wo_id ILIKE $5 OR notes ILIKE $5)
+             ORDER BY changed_on DESC NULLS LAST, created_on DESC NULLS LAST
+             LIMIT 1
+           )
+           UPDATE "tblAssetMaintSch" ams
+           SET status = 'IN',
+               notes = COALESCE(ams.notes, '') || ' [Reopened: ' || $1 || ']',
+               changed_on = CURRENT_TIMESTAMP
+           FROM target
+           WHERE ams.ams_id = target.ams_id
+           RETURNING ams.ams_id, ams.wfamsh_id`,
+          [notes, orgId, assetId, `%${abrId}%`, `%${abrId.replace('ABR', 'ABR-')}%`],
+        );
 
     // 3. Optional: If the maintenance had an associated workflow, keep it as 'CO' (Completed)
     // When reopening a breakdown, the workflow should remain completed; only the breakdown status changes
@@ -166,9 +189,27 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
     }
 
     if (maintUpdate.rows.length > 0) {
-      console.log(`✅ Maintenance ${maintUpdate.rows[0].ams_id} reset to IP (Approval Bypass)`);
+      console.log(`✅ Maintenance ${maintUpdate.rows[0].ams_id} set to IN (after reopen)`);
     } else {
       console.warn(`⚠️ No maintenance schedule found to reset for breakdown ${abrId}`);
+    }
+
+    // Record reopen in tblAssetMaintSch_BR_Hist
+    if (maintUpdate.rows.length > 0) {
+      try {
+        const brHistModel = require('./assetMaintSchBrHistModel');
+        await brHistModel.insertBrHist(
+          {
+            ams_id: maintUpdate.rows[0].ams_id,
+            status: 'RO',
+            created_by: userId || 'SYSTEM',
+            notes,
+          },
+          client
+        );
+      } catch (e) {
+        console.error('Error writing tblAssetMaintSch_BR_Hist (reopen):', e.message || e);
+      }
     }
 
     await client.query("COMMIT");
@@ -327,6 +368,38 @@ const triggerBreakdownWorkflow = async (
   const nowISODateOnly = new Date().toISOString().split("T")[0];
   let maintenanceResult = null;
 
+  // tblWFAssetMaintSch_D.dept_id is NOT NULL, but tblWFJobRole no longer carries dept_id.
+  // Resolve a safe fallback department for workflow detail rows from the reporter.
+  const resolveFallbackDeptId = async () => {
+    if (!reported_by) return null;
+    const s = String(reported_by);
+
+    // If reported_by itself is a department id, use it.
+    if (/^DPT/i.test(s)) return s;
+
+    // Try user_id -> dept_id
+    try {
+      const userRes = await client.query(
+        `SELECT dept_id FROM "tblUsers" WHERE user_id = $1 LIMIT 1`,
+        [s],
+      );
+      if (userRes.rows[0]?.dept_id) return userRes.rows[0].dept_id;
+    } catch {}
+
+    // Try employee internal id -> dept_id
+    try {
+      const empRes = await client.query(
+        `SELECT dept_id FROM "tblEmployees" WHERE emp_int_id = $1 LIMIT 1`,
+        [s],
+      );
+      if (empRes.rows[0]?.dept_id) return empRes.rows[0].dept_id;
+    } catch {}
+
+    return null;
+  };
+
+  const fallbackDeptId = await resolveFallbackDeptId();
+
   // Determine if workflow applies (by asset type)
   let hasWorkflow = false;
   if (assetRow && assetRow.asset_type_id) {
@@ -355,7 +428,7 @@ const triggerBreakdownWorkflow = async (
           maint_type_id = freqRes.rows[0].maint_type_id;
         }
       }
-      const wfamsh_id = await msModel.getNextWFAMSHId();
+      const wfamsh_id = await msModel.getNextWFAMSHId(client);
       const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
         wfamsh_id,
         at_main_freq_id,
@@ -370,14 +443,14 @@ const triggerBreakdownWorkflow = async (
         org_id,
         branch_code: assetRow ? assetRow.branch_code : null,
         isBreakdown: true,
-      });
+      }, client);
       // Create first detail step as AP (Approval Pending), others IN (Inactive)
       const seqsRes = await msModel.getWorkflowAssetSequences(
         assetRow.asset_type_id,
       );
       for (let i = 0; i < seqsRes.rows.length; i++) {
         const seq = seqsRes.rows[i];
-        const wfamsd_id = await msModel.getNextWFAMSDId();
+        const wfamsd_id = await msModel.getNextWFAMSDId(client);
         // Fetch approvers for step
         const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
         const firstDetailStatus = i === 0 ? "AP" : "IN";
@@ -385,18 +458,24 @@ const triggerBreakdownWorkflow = async (
         const noteText = existingSchedule
           ? `BF01-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
           : `BF01-Breakdown-${abr_id}`;
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
+        if (!deptToUse) {
+          throw new Error(
+            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
+          );
+        }
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
           job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
           user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          dept_id: deptToUse,
           sequence: seq.seqs_no,
           status: firstDetailStatus,
           notes: noteText,
           created_by: reported_by,
           org_id,
-        });
+        }, client);
       }
       maintenanceResult = headerRes.rows[0];
     } else if (existingSchedule) {
@@ -452,7 +531,7 @@ const triggerBreakdownWorkflow = async (
           maint_type_id = freqRes.rows[0].maint_type_id;
         }
       }
-      const wfamsh_id = await msModel.getNextWFAMSHId();
+      const wfamsh_id = await msModel.getNextWFAMSHId(client);
       const headerRes = await msModel.insertWorkflowMaintenanceScheduleHeader({
         wfamsh_id,
         at_main_freq_id,
@@ -467,26 +546,32 @@ const triggerBreakdownWorkflow = async (
         org_id,
         branch_code: assetRow ? assetRow.branch_code : null,
         isBreakdown: true,
-      });
+      }, client);
       const seqsRes = await msModel.getWorkflowAssetSequences(
         assetRow.asset_type_id,
       );
       for (let i = 0; i < seqsRes.rows.length; i++) {
         const seq = seqsRes.rows[i];
-        const wfamsd_id = await msModel.getNextWFAMSDId();
+        const wfamsd_id = await msModel.getNextWFAMSDId(client);
         const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
+        if (!deptToUse) {
+          throw new Error(
+            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
+          );
+        }
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
           job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
           user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          dept_id: deptToUse,
           sequence: seq.seqs_no,
           status: i === 0 ? "AP" : "IN",
           notes: `Breakdown ${abr_id}`,
           created_by: reported_by,
           org_id,
-        });
+        }, client);
       }
       maintenanceResult = headerRes.rows[0];
     } else {
@@ -526,7 +611,7 @@ const triggerBreakdownWorkflow = async (
         }
       }
 
-      const wfamsh_id = await msModel.getNextWFAMSHId();
+      const wfamsh_id = await msModel.getNextWFAMSHId(client);
 
       // Create workflow header with BF03 postpone information
       const noteText = existingSchedule
@@ -547,7 +632,7 @@ const triggerBreakdownWorkflow = async (
         org_id,
         branch_code: assetRow ? assetRow.branch_code : null,
         isBreakdown: true,
-      });
+      }, client);
 
       // Create workflow details for each approver
       const seqsRes = await msModel.getWorkflowAssetSequences(
@@ -555,22 +640,27 @@ const triggerBreakdownWorkflow = async (
       );
       for (let i = 0; i < seqsRes.rows.length; i++) {
         const seq = seqsRes.rows[i];
-        const wfamsd_id = await msModel.getNextWFAMSDId();
+        const wfamsd_id = await msModel.getNextWFAMSDId(client);
         const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
         const firstDetailStatus = i === 0 ? "AP" : "IN";
-
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
+        if (!deptToUse) {
+          throw new Error(
+            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
+          );
+        }
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
           job_role_id: jobRolesRes.rows[0]?.job_role_id || null,
           user_id: jobRolesRes.rows[0]?.emp_int_id || null,
-          dept_id: jobRolesRes.rows[0]?.dept_id || null,
+          dept_id: deptToUse,
           sequence: seq.seqs_no,
           status: firstDetailStatus,
           notes: noteText,
           created_by: reported_by,
           org_id,
-        });
+        }, client);
       }
       maintenanceResult = headerRes.rows[0];
     } else {
@@ -763,7 +853,7 @@ const updateBreakdownReport = async (abrId, updateData) => {
     let newStatus = null;
     if ((isDecisionCodeSet || isDecisionCodeChanged) && 
         currentBreakdown.status !== "CO" && 
-        currentBreakdown.status !== "Reopened") {
+        currentBreakdown.status !== "RO") {
       newStatus = "IN"; // Initiated
       console.log(`Setting status to "IN" (Initiated) for breakdown ${abrId} as decision code is being set/changed`);
     }

@@ -1,8 +1,64 @@
 const db = require("../config/db");
 const { getDbFromContext } = require("../utils/dbContext");
+const brHistModel = require("./assetMaintSchBrHistModel");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
+
+/** Normalize parsed text to tblAssetBRDet.abr_id (e.g. ABR001). */
+function normalizeAbrId(raw) {
+  if (raw == null || raw === "") return null;
+  let s = String(raw).trim().toUpperCase();
+  if (!s) return null;
+  if (s.startsWith("ABR")) return s;
+  if (/^[0-9]+$/.test(s)) return `ABR${s.padStart(3, "0")}`;
+  return s;
+}
+
+/** Breakdown maintenance or any AMS row clearly tied to an ABR (wo_id / notes / workflow). */
+function shouldSyncBreakdownDetail(row) {
+  if (!row) return false;
+  const mt = String(row.maint_type_id || "")
+    .trim()
+    .toUpperCase();
+  if (mt === "MT004") return true;
+  if (row.wfamsh_id && row.asset_id) return true;
+  if (row.wo_id && /ABR[0-9]+/i.test(String(row.wo_id))) return true;
+  if (row.notes && /ABR[0-9]+/i.test(String(row.notes))) return true;
+  return false;
+}
+
+/**
+ * Same idea as approvalDetailModel breakdown lookup: tie ABR to this workflow + asset.
+ */
+async function resolveAbrFromWorkflowAndAsset(dbPool, asset_id, wfamsh_id, orgId) {
+  if (!asset_id || !wfamsh_id || !orgId) return null;
+  const r = await dbPool.query(
+    `SELECT brd.abr_id
+     FROM "tblAssetBRDet" brd
+     WHERE brd.asset_id = $1
+       AND brd.org_id = $2
+       AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
+       AND (
+         EXISTS (
+           SELECT 1 FROM "tblWFAssetMaintSch_D" wfd
+           WHERE wfd.wfamsh_id = $3
+             AND wfd.org_id = $2
+             AND wfd.notes ILIKE '%' || brd.abr_id || '%'
+         )
+         OR EXISTS (
+           SELECT 1 FROM "tblWFAssetMaintSch_H" wfh
+           WHERE wfh.wfamsh_id = $3
+             AND wfh.org_id = $2
+             AND wfh.maint_type_id = 'MT004'
+         )
+       )
+     ORDER BY brd.created_on DESC
+     LIMIT 1`,
+    [asset_id, orgId, wfamsh_id],
+  );
+  return r.rows.length ? normalizeAbrId(r.rows[0].abr_id) : null;
+}
 
 // 1. Get asset types that require maintenance
 const getAssetTypesRequiringMaintenance = async () => {
@@ -255,7 +311,6 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
             wf_job_role_id,
             wf_steps_id,
             job_role_id,
-            dept_id,
             emp_int_id
         FROM "tblWFJobRole"
         WHERE wf_steps_id = $1
@@ -268,7 +323,7 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
 };
 
 // 8. Generate next WFAMSH_ID
-const getNextWFAMSHId = async () => {
+const getNextWFAMSHId = async (dbClient = null) => {
   const query = `
         SELECT "wfamsh_id" 
         FROM "tblWFAssetMaintSch_H" 
@@ -276,9 +331,8 @@ const getNextWFAMSHId = async () => {
         LIMIT 1
     `;
 
-  const dbPool = getDb();
-
-  const result = await dbPool.query(query);
+  const runner = dbClient || getDb();
+  const result = await runner.query(query);
 
   if (result.rows.length === 0) {
     return "WFAMSH_01";
@@ -296,7 +350,7 @@ const getNextWFAMSHId = async () => {
 };
 
 // 9. Generate next WFAMSD_ID
-const getNextWFAMSDId = async () => {
+const getNextWFAMSDId = async (dbClient = null) => {
   const query = `
         SELECT wfamsd_id 
         FROM "tblWFAssetMaintSch_D" 
@@ -304,9 +358,8 @@ const getNextWFAMSDId = async () => {
         LIMIT 1
     `;
 
-  const dbPool = getDb();
-
-  const result = await dbPool.query(query);
+  const runner = dbClient || getDb();
+  const result = await runner.query(query);
 
   if (result.rows.length === 0) {
     return "WFAMSD_01";
@@ -324,7 +377,7 @@ const getNextWFAMSDId = async () => {
 };
 
 // 10. Insert workflow maintenance schedule header
-const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
+const insertWorkflowMaintenanceScheduleHeader = async (scheduleData, dbClient = null) => {
   const {
     wfamsh_id,
     at_main_freq_id,
@@ -368,12 +421,14 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
 
   // Determine emp_int_id to save: prefer provided value, otherwise
   // fetch from tblATMaintFreq only when the frequency is maintained in-house
+  const runner = dbClient || getDb();
+
   let empIntToSave = null;
   if (scheduleData.emp_int_id) {
     empIntToSave = scheduleData.emp_int_id;
   } else if (at_main_freq_id) {
     try {
-      const freqRes = await getDb().query(
+      const freqRes = await runner.query(
         `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 AND org_id = $2 LIMIT 1`,
         [at_main_freq_id, org_id]
       );
@@ -405,13 +460,11 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData) => {
     empIntToSave,
   ];
 
-  const dbPool = getDb();
-
-  return await dbPool.query(query, values);
+  return await runner.query(query, values);
 };
 
 // 11. Insert workflow maintenance schedule detail
-const insertWorkflowMaintenanceScheduleDetail = async (detailData) => {
+const insertWorkflowMaintenanceScheduleDetail = async (detailData, dbClient = null) => {
   const {
     wfamsd_id,
     wfamsh_id,
@@ -457,9 +510,8 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData) => {
     org_id,
   ];
 
-  const dbPool = getDb();
-
-  const result = await dbPool.query(query, values);
+  const runner = dbClient || getDb();
+  const result = await runner.query(query, values);
 
   // Send push notification for new workflow detail
   try {
@@ -706,6 +758,14 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     changed_on,
   } = updateData;
 
+  // Empty string from the client must not wipe notes (we store "Breakdown Maintenance - ABR…" for linking).
+  const notesForUpdate =
+    notes === undefined || notes === null
+      ? null
+      : String(notes).trim() === ""
+        ? null
+        : notes;
+
   // Automatically set end date to current date when updating
   const currentDate = new Date().toISOString().split("T")[0];
 
@@ -731,7 +791,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   const values = [
     amsId,
-    notes,
+    notesForUpdate,
     status,
     currentDate, // Automatically set to current date
     po_number,
@@ -750,60 +810,146 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   const result = await dbPool.query(query, values);
 
-  // Sync breakdown status if applicable (Status CO = Completed)
-  if (status === "CO" && result.rows.length > 0) {
+  // Record status change history for breakdown maintenance schedules (MT004)
+  if (result.rows.length > 0) {
+    const row = result.rows[0];
     try {
-      await syncBreakdownStatus(result.rows[0], orgId);
-    } catch (err) {
-      console.error("Error in automatic breakdown sync:", err);
+      if (
+        String(row.maint_type_id || "")
+          .trim()
+          .toUpperCase() === "MT004" &&
+        updateData?.status
+      ) {
+        await brHistModel.insertBrHist({
+          ams_id: row.ams_id,
+          status: updateData.status,
+          created_by: updateData.changed_by || updateData.created_by || "system",
+          notes: updateData.notes || null,
+        });
+      }
+    } catch (e) {
+      console.error("Error writing tblAssetMaintSch_BR_Hist (status change):", e.message || e);
+    }
+  }
+
+  // Mirror maintenance status to linked tblAssetBRDet when this schedule is breakdown-related
+  if (updateData?.status && result.rows.length > 0) {
+    const row = result.rows[0];
+    if (shouldSyncBreakdownDetail(row)) {
+      try {
+        await syncBreakdownStatus(row, orgId, updateData.status);
+      } catch (err) {
+        console.error("Error syncing tblAssetBRDet from maintenance status:", err);
+      }
     }
   }
 
   return result;
 };
 
-// Sync breakdown status from a maintenance record
-const syncBreakdownStatus = async (maintenanceRecord, orgId) => {
+// Sync linked tblAssetBRDet.status from supervisor maintenance status (same codes: IN, IP, CO, CA, ...)
+const syncBreakdownStatus = async (maintenanceRecord, orgId, maintenanceStatus) => {
   const dbPool = getDb();
   let breakdownId = null;
 
+  // 0. Strong link: same AMS row's wo_id contains this asset's breakdown id
+  if (maintenanceRecord.ams_id) {
+    const linkRes = await dbPool.query(
+      `SELECT d.abr_id
+       FROM "tblAssetMaintSch" ams
+       INNER JOIN "tblAssetBRDet" d ON d.asset_id = ams.asset_id AND d.org_id = ams.org_id
+       WHERE ams.ams_id = $1 AND ams.org_id = $2
+         AND ams.wo_id IS NOT NULL
+         AND ams.wo_id ILIKE '%' || d.abr_id || '%'
+       ORDER BY d.created_on DESC
+       LIMIT 1`,
+      [maintenanceRecord.ams_id, orgId],
+    );
+    if (linkRes.rows.length > 0) {
+      breakdownId = normalizeAbrId(linkRes.rows[0].abr_id);
+    }
+  }
+
   // 1. Try to find in notes
-  if (maintenanceRecord.notes) {
+  if (!breakdownId && maintenanceRecord.notes) {
+    console.log("[SYNC] Resolving abr_id from notes", {
+      ams_id: maintenanceRecord.ams_id,
+      org_id: orgId,
+      notes: maintenanceRecord.notes,
+    });
     const match = maintenanceRecord.notes.match(
       /(?:Breakdown(?:\s+Maintenance)?\s*[–\-\s:]*|BF0[1-3]-Breakdown-)([A-Z0-9]+)/i,
     );
     if (match && match[1]) {
-      breakdownId = match[1].toUpperCase();
+      breakdownId = normalizeAbrId(match[1]);
+    }
+    if (!breakdownId) {
+      const abrOnly = maintenanceRecord.notes.match(/ABR[0-9]+/i);
+      if (abrOnly) breakdownId = normalizeAbrId(abrOnly[0]);
+    }
+    if (breakdownId) {
+      console.log("[SYNC] abr_id resolved from notes", {
+        ams_id: maintenanceRecord.ams_id,
+        abr_id: breakdownId,
+      });
     }
   }
 
   // 2. Try to find in wo_id (format: WO-WFAMSH_01-ABR001)
   if (!breakdownId && maintenanceRecord.wo_id) {
+    console.log("[SYNC] Resolving abr_id from wo_id", {
+      ams_id: maintenanceRecord.ams_id,
+      org_id: orgId,
+      wo_id: maintenanceRecord.wo_id,
+    });
     const match = maintenanceRecord.wo_id.match(/ABR[0-9]+/i);
     if (match) {
-      breakdownId = match[0].toUpperCase();
+      breakdownId = normalizeAbrId(match[0]);
+    }
+    if (breakdownId) {
+      console.log("[SYNC] abr_id resolved from wo_id", {
+        ams_id: maintenanceRecord.ams_id,
+        abr_id: breakdownId,
+      });
+    } else {
+      console.log("[SYNC] No ABR pattern found in wo_id", {
+        ams_id: maintenanceRecord.ams_id,
+        wo_id: maintenanceRecord.wo_id,
+      });
     }
   }
 
-  // 3. Try to find via workflow details if wfamsh_id is present
+  // 3. Try to find via workflow details if wfamsh_id is present (scan all steps)
   if (!breakdownId && maintenanceRecord.wfamsh_id) {
     const wfQuery = `
       SELECT notes 
       FROM "tblWFAssetMaintSch_D" 
       WHERE wfamsh_id = $1 AND org_id = $2 
       AND (notes ILIKE '%Breakdown%' OR notes ILIKE '%ABR%')
-      LIMIT 1
+      ORDER BY sequence ASC
     `;
     const wfRes = await dbPool.query(wfQuery, [
       maintenanceRecord.wfamsh_id,
       orgId,
     ]);
-    if (wfRes.rows.length > 0) {
-      const match = wfRes.rows[0].notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
-      if (match) {
-        breakdownId = `ABR${match[1].toUpperCase()}`;
+    for (const r of wfRes.rows) {
+      if (!r.notes) continue;
+      const m1 = r.notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+      if (m1) {
+        breakdownId = normalizeAbrId(m1[1]);
+        break;
       }
     }
+  }
+
+  // 3b. Workflow + asset join (matches approval-detail breakdown resolution)
+  if (!breakdownId && maintenanceRecord.asset_id && maintenanceRecord.wfamsh_id) {
+    breakdownId = await resolveAbrFromWorkflowAndAsset(
+      dbPool,
+      maintenanceRecord.asset_id,
+      maintenanceRecord.wfamsh_id,
+      orgId,
+    );
   }
 
   // 4. FALLBACK: Search for the most recent non-completed breakdown for this asset
@@ -817,22 +963,33 @@ const syncBreakdownStatus = async (maintenanceRecord, orgId) => {
       [maintenanceRecord.asset_id, orgId]
     );
     if (fbRes.rows.length > 0) {
-      breakdownId = fbRes.rows[0].abr_id;
+      breakdownId = normalizeAbrId(fbRes.rows[0].abr_id);
       console.log(`[SYNC] Fallback found breakdown ID: ${breakdownId}`);
     }
   }
 
   if (breakdownId) {
-    console.log(`Found linked Breakdown ID ${breakdownId} for maintenance ${maintenanceRecord.ams_id}. Syncing status to CO...`);
+    console.log(
+      `Found linked Breakdown ID ${breakdownId} for maintenance ${maintenanceRecord.ams_id}. Syncing tblAssetBRDet status to ${maintenanceStatus}...`,
+    );
     const updateBreakdownQuery = `
       UPDATE "tblAssetBRDet"
-      SET status = 'CO', changed_on = CURRENT_TIMESTAMP
+      SET status = $3,
+          changed_on = CURRENT_TIMESTAMP
       WHERE abr_id = $1 AND org_id = $2
       RETURNING *
     `;
-    await dbPool.query(updateBreakdownQuery, [breakdownId, orgId]);
+    await dbPool.query(updateBreakdownQuery, [breakdownId, orgId, maintenanceStatus]);
     return true;
   }
+  console.warn("[SYNC] tblAssetBRDet not updated — could not resolve abr_id", {
+    ams_id: maintenanceRecord.ams_id,
+    org_id: orgId,
+    maint_type_id: maintenanceRecord.maint_type_id,
+    wfamsh_id: maintenanceRecord.wfamsh_id,
+    wo_id: maintenanceRecord.wo_id,
+    has_notes: !!maintenanceRecord.notes,
+  });
   return false;
 };
 
@@ -1287,7 +1444,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
 
     for (const seq of sequences) {
       const jobRolesResult = await client.query(
-        `SELECT wf_job_role_id, wf_steps_id, job_role_id, dept_id, emp_int_id
+        `SELECT wf_job_role_id, wf_steps_id, job_role_id, emp_int_id
                  FROM "tblWFJobRole"
                  WHERE wf_steps_id = $1
                  ORDER BY wf_job_role_id ASC`,
@@ -1346,7 +1503,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
           wfamshId,
           jr.job_role_id,
           null, // user_id
-          jr.dept_id,
+          null, // dept_id (department removed from tblWFJobRole)
           Number(seq.seqs_no),
           status,
           null, // notes

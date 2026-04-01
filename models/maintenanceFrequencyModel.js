@@ -60,8 +60,7 @@ class MaintenanceFrequencyModel {
           int_status,
           org_id,
           is_recurring,
-          emp_int_id,
-          COALESCE(lead_time, NULL) as lead_time
+          emp_int_id
         FROM "tblATMaintFreq"
         WHERE asset_type_id = $1 
         AND org_id = $2 
@@ -94,7 +93,6 @@ class MaintenanceFrequencyModel {
           mf.org_id,
           mf.is_recurring,
           mf.emp_int_id,
-          COALESCE(mf.lead_time, NULL) as lead_time,
           at.text as asset_type_name,
           at.maint_lead_type,
           mt.text as maint_type_name

@@ -3,6 +3,7 @@ const axios = require('axios');
 const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
+const { startWfAtSeqBackfillCron } = require('../cron/wfAtSeqBackfillCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
@@ -25,7 +26,7 @@ class CronService {
         // Defer initial logging so it doesn't run in parallel with DB startup
         setTimeout(() => {
             maintenanceCronLogger.logCronJobInitialization({
-                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
+                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal', 'wfat_sequence_backfill'],
                 userId
             }).catch(err => console.error('Logging error:', err));
         }, 2000);
@@ -42,6 +43,11 @@ class CronService {
             this.scheduleVendorContractRenewal();
             console.log('Cron jobs initialized successfully');
         }, 30000);
+
+        // Start WFAT sequence backfill after other jobs to reduce startup contention.
+        setTimeout(() => {
+            this.scheduleWfAtSeqBackfill();
+        }, 45000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -64,6 +70,17 @@ class CronService {
             console.log('   → Blocks vendors with expired contracts (workflow not approved before contract_end_date)');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule vendor contract renewal:', error.message);
+        }
+    }
+
+    // Backfill missing default workflow sequences for eligible asset types
+    scheduleWfAtSeqBackfill() {
+        try {
+            startWfAtSeqBackfillCron();
+            console.log('📅 [CRON] WFAT Sequence Backfill: Scheduled for every day at 1:00 AM (IST)');
+            console.log('   → Finds eligible asset types without tblWFATSeqs rows and inserts default Seq 10 / WFS-06');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule WFAT sequence backfill:', error.message);
         }
     }
 

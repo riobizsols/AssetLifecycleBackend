@@ -70,14 +70,19 @@ const protect = async (req, res, next) => {
         // Set database in async context so all models can access it
         // This allows models to use getDb() without passing dbConnection through every function
         return runWithDb(dbPool, async () => {
-            // Helper function to retry on connection pool exhaustion
-            const retryOnPoolExhaustion = async (fn, maxRetries = 3, delay = 100) => {
+            // Helper function to retry on transient DB errors
+            // NOTE: We originally only retried on "too many clients" (53300).
+            // In real deployments we also see transient socket errors like EADDRNOTAVAIL.
+            const retryOnPoolExhaustion = async (fn, maxRetries = 3, delay = 150) => {
                 for (let i = 0; i < maxRetries; i++) {
                     try {
                         return await fn();
                     } catch (error) {
-                        // Check if it's a connection pool exhaustion error
-                        if (error.code === '53300' || (error.message && error.message.includes('too many clients'))) {
+                        const msg = String(error?.message || '');
+                        const code = error?.code;
+
+                        // 1) Connection pool exhaustion / too many clients
+                        if (code === '53300' || msg.includes('too many clients')) {
                             // Log pool stats if available
                             if (dbPool && typeof dbPool.totalCount !== 'undefined') {
                                 console.error(`[AuthMiddleware] Pool stats - Total: ${dbPool.totalCount}, Idle: ${dbPool.idleCount}, Waiting: ${dbPool.waitingCount}, Active: ${dbPool.totalCount - dbPool.idleCount}`);
@@ -94,6 +99,18 @@ const protect = async (req, res, next) => {
                                 throw new Error('Database connection pool is full. Please close unused database connections (e.g., DBeaver) and try again.');
                             }
                         }
+
+                        // 2) Transient socket/network errors (common when DB is remote)
+                        const transientCodes = new Set(['EADDRNOTAVAIL', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
+                        if (transientCodes.has(code)) {
+                            if (i < maxRetries - 1) {
+                                const waitMs = delay * (i + 1);
+                                console.warn(`[AuthMiddleware] Transient DB error (${code}), retrying (${i + 1}/${maxRetries}) after ${waitMs}ms...`);
+                                await new Promise(resolve => setTimeout(resolve, waitMs));
+                                continue;
+                            }
+                        }
+
                         throw error;
                     }
                 }

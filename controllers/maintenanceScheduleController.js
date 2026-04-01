@@ -208,7 +208,7 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
                     wfamsh_id: wfamshId,
                     job_role_id: jobRole.job_role_id,
                     user_id: jobRole.emp_int_id,
-                    dept_id: jobRole.dept_id,
+                    dept_id: null, // department removed from tblWFJobRole
                     sequence: sequence.seqs_no,
                     status: status,
                     notes: `Group maintenance for ${groupAssets.length} assets`,
@@ -561,7 +561,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                                 wfamsh_id: wfamshId,
                                 job_role_id: jobRole.job_role_id,
                                 user_id: jobRole.emp_int_id, // Use emp_int_id from tblWFJobRole
-                                dept_id: jobRole.dept_id,
+                                dept_id: null, // department removed from tblWFJobRole
                                 sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
                                 status: status, // 'AP' for sequence 10, 'IN' for others
                                 notes: null,
@@ -570,7 +570,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                             };
                             
                             await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, user ${jobRole.emp_int_id}, status: ${status}`);
+                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, user ${jobRole.emp_int_id}, status: ${status}`);
                             totalDetailsCreated++;
                         }
                     }
@@ -852,7 +852,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                     wfamsh_id: wfamshId,
                                     job_role_id: jobRole.job_role_id,
                                     user_id: null, // Changed: No specific user, role-based instead
-                                    dept_id: jobRole.dept_id,
+                                    dept_id: null, // department removed from tblWFJobRole
                                     sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
                                     status: status, // 'AP' for sequence 10, 'IN' for others
                                     notes: null,
@@ -861,7 +861,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 };
                                 
                                 await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                                console.log(`Created workflow maintenance schedule detail (ROLE-BASED): ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, status: ${status}`);
+                                console.log(`Created workflow maintenance schedule detail (ROLE-BASED): ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, status: ${status}`);
                                 totalDetailsCreated++;
                             }
                         }
@@ -1233,27 +1233,7 @@ const updateMaintenanceSchedule = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
         }
 
-        // --- CRITICAL WORKFLOW SYNC: Maintenance -> Breakdown ---
-        // If status is 'CO' (Completed), we must ensure the linked breakdown is also marked as 'CO'
-        // so that the employee can confirm/verify the work.
-        if (updateData.status === 'CO') {
-            try {
-                const maintenanceRecord = result.rows[0];
-                console.log(`[SYNC] Maintenance ${id} marked as Completed. Checking for linked breakdown...`);
-                
-                const synced = await model.syncBreakdownStatus(maintenanceRecord, orgId);
-                
-                if (synced) {
-                    console.log(`[SYNC] Successfully synced breakdown status to CO for maintenance ${id}`);
-                } else {
-                    console.log(`[SYNC] No linked breakdown found for maintenance ${id}`);
-                }
-            } catch (syncError) {
-                console.error(`[SYNC] Error syncing breakdown status for maintenance ${id}:`, syncError);
-                // We don't fail the whole request if sync fails, but we log it heavily
-            }
-        }
-        // -------------------------------------------------------
+        // Linked tblAssetBRDet sync is handled inside model.updateMaintenanceSchedule (MT004).
 
         // Log success (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {

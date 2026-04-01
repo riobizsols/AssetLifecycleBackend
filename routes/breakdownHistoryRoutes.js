@@ -9,6 +9,11 @@ const {
     getBreakdownsReopenedMultiple,
     exportBreakdownHistory
 } = require('../controllers/breakdownHistoryController');
+const {
+  getReopenedBreakdowns,
+  getReopenedBreakdownsFilterOptions,
+  getReopenedBreakdownBrHist,
+} = require('../controllers/reopenedBreakdownsController');
 const { protect } = require('../middlewares/authMiddleware');
 
 // Apply authentication middleware to all routes
@@ -28,6 +33,11 @@ router.get('/filter-options', getBreakdownFilterOptions);
 
 // Get breakdowns reopened more than once (Reopen Details screen)
 router.get('/reopened-multiple', getBreakdownsReopenedMultiple);
+
+// Reopened breakdowns (maintenance RO history) report
+router.get('/reopened-breakdowns', getReopenedBreakdowns);
+router.get('/reopened-breakdowns/filter-options', getReopenedBreakdownsFilterOptions);
+router.get('/reopened-breakdowns/:amsId/history', getReopenedBreakdownBrHist);
 
 // Export breakdown history
 router.post('/export', exportBreakdownHistory);

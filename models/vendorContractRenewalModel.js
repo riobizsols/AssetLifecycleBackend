@@ -91,10 +91,10 @@ const createVendorContractRenewalWorkflow = async (vendor) => {
 };
 
 /**
- * Block vendors with expired contracts where workflow is not approved before contract_end_date
- * Sets vendor status to blocked (int_status = 4) if:
+ * Deactivate vendors with expired contracts where renewal is not completed in time.
+ * Sets vendor status to inactive (int_status = 0) if:
  * 1. Contract end date has passed (contract_end_date < today)
- * 2. Maintenance workflow (MT005) is not approved (status != 'CO') or doesn't exist
+ * 2. Vendor contract renewal workflow (MT005) is not approved (status != 'CO') or doesn't exist
  */
 const deactivateExpiredVendors = async (todayDate) => {
   const dbPool = getDb();
@@ -105,12 +105,12 @@ const deactivateExpiredVendors = async (todayDate) => {
     // OR if no workflow exists at all
     const expiredVendorsQuery = `
       UPDATE "tblVendors" v
-      SET int_status = 4,
+      SET int_status = 0,
           changed_by = 'SYSTEM',
           changed_on = CURRENT_TIMESTAMP
       WHERE v.contract_end_date IS NOT NULL
         AND v.contract_end_date::date < $1::date
-        AND v.int_status != 4  -- Don't update already blocked vendors
+        AND v.int_status NOT IN (0, 4)  -- Don't touch already inactive or blacklisted vendors
         AND (
           -- No workflow exists for this vendor renewal
           NOT EXISTS (
@@ -134,7 +134,7 @@ const deactivateExpiredVendors = async (todayDate) => {
     
     const result = await dbPool.query(expiredVendorsQuery, [todayDate]);
     
-    console.log(`Blocked ${result.rows.length} vendor(s) with expired contracts (workflow not approved before contract_end_date):`);
+    console.log(`Deactivated ${result.rows.length} vendor(s) with expired contracts (renewal not completed before contract_end_date):`);
     result.rows.forEach(vendor => {
       console.log(`   - ${vendor.vendor_name} (${vendor.vendor_id}) - Contract ended: ${vendor.contract_end_date}`);
     });

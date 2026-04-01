@@ -156,15 +156,25 @@ const getActiveAssetAssignmentsByEmployeeWithDetails = async (employee_id) => {
   // Then get active asset assignments - search by both emp_int_id and employee_id
   const assignmentsQuery = `
         SELECT 
-            asset_assign_id, dept_id, asset_id, org_id, employee_int_id,
-            action, action_on, action_by, latest_assignment_flag
-        FROM "tblAssetAssignments"
-        WHERE (employee_int_id = $1 OR employee_int_id = (
-            SELECT emp_int_id FROM "tblEmployees" 
-            WHERE employee_id = $1
+          aa.asset_assign_id,
+          aa.dept_id,
+          aa.asset_id,
+          aa.org_id,
+          aa.employee_int_id,
+          aa.action,
+          aa.action_on,
+          aa.action_by,
+          aa.latest_assignment_flag,
+          a.description as description,
+          a.text as asset_text
+        FROM "tblAssetAssignments" aa
+        LEFT JOIN "tblAssets" a ON aa.asset_id = a.asset_id
+        WHERE (aa.employee_int_id = $1 OR aa.employee_int_id = (
+          SELECT emp_int_id FROM "tblEmployees" 
+          WHERE employee_id = $1
         ))
-        AND action = 'A' AND latest_assignment_flag = true
-        ORDER BY action_on DESC
+        AND aa.action = 'A' AND aa.latest_assignment_flag = true
+        ORDER BY aa.action_on DESC
     `;
 
   const assignmentsResult = await dbPool.query(assignmentsQuery, [employee_id]);
