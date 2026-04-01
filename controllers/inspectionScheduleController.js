@@ -761,9 +761,16 @@ const saveInspectionRecord = async (req, res) => {
     if (trigger_maintenance !== undefined) updateData.trigger_maintenance = trigger_maintenance;
 
     if (isVendor && inspector_name) {
-      // append inspector info to notes for record
+      // Append inspector info once; avoid repeated duplication across saves.
       const inspectorInfo = `Inspector: ${inspector_name}${inspector_email ? ' | ' + inspector_email : ''}${inspector_phone ? ' | ' + inspector_phone : ''}`;
-      updateData.notes = (updateData.notes ? updateData.notes + '\n' : '') + inspectorInfo;
+      const baseNotes = updateData.notes ? String(updateData.notes) : '';
+      const alreadyHasInspectorInfo = baseNotes.includes(inspectorInfo);
+      const combinedNotes = alreadyHasInspectorInfo
+        ? baseNotes
+        : (baseNotes ? `${baseNotes}\n${inspectorInfo}` : inspectorInfo);
+      // tblAAT_Insp_Sch.notes is varchar(100) in current schema.
+      // Truncate safely to prevent 22001 errors.
+      updateData.notes = combinedNotes.slice(0, 100);
       // set changed_by to inspector name so table reflects who saved
       updateData.changed_by = inspector_name;
       // Also persist inspector fields to the schedule so they are visible in the UI

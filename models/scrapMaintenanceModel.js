@@ -201,7 +201,6 @@ async function createScrapWorkflowDetails({
   wfscrap_h_id,
   sequences,
   created_by,
-  orgId = null,
   initialNotes = null,
 }) {
   if (!Array.isArray(sequences) || sequences.length === 0) {
@@ -210,41 +209,6 @@ async function createScrapWorkflowDetails({
 
   const minSeq = Math.min(...sequences.map((s) => Number(s.seq_no)));
   let created = 0;
-
-  // tblWFScrap_D.dept_id is NOT NULL in this schema.
-  // Resolve a safe fallback department from the actor or org.
-  const resolveFallbackDeptId = async () => {
-    if (created_by) {
-      const s = String(created_by);
-      if (/^DPT/i.test(s)) return s;
-
-      // Try tblUsers by user_id
-      const userRes = await getDb().query(
-        `SELECT dept_id FROM "tblUsers" WHERE user_id = $1 LIMIT 1`,
-        [s],
-      );
-      if (userRes.rows[0]?.dept_id) return userRes.rows[0].dept_id;
-
-      // Try tblUsers by emp_int_id
-      const userEmpRes = await getDb().query(
-        `SELECT dept_id FROM "tblUsers" WHERE emp_int_id = $1 LIMIT 1`,
-        [s],
-      );
-      if (userEmpRes.rows[0]?.dept_id) return userEmpRes.rows[0].dept_id;
-    }
-
-    // Final fallback: first department in org.
-    if (orgId) {
-      const deptRes = await getDb().query(
-        `SELECT dept_id FROM "tblDepartments" WHERE org_id = $1 ORDER BY dept_id ASC LIMIT 1`,
-        [orgId],
-      );
-      if (deptRes.rows[0]?.dept_id) return deptRes.rows[0].dept_id;
-    }
-
-    return null;
-  };
-  const fallbackDeptId = await resolveFallbackDeptId();
 
   for (const seq of sequences) {
     // eslint-disable-next-line no-await-in-loop
@@ -267,7 +231,7 @@ async function createScrapWorkflowDetails({
             status, notes, created_by, created_on, changed_by, changed_on
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, NULL, NULL)
         `,
-        [id, wfscrap_h_id, jr.job_role_id, fallbackDeptId, Number(seq.seq_no), status, notes, created_by]
+        [id, wfscrap_h_id, jr.job_role_id, null, Number(seq.seq_no), status, notes, created_by]
       );
       created += 1;
     }
@@ -1428,7 +1392,6 @@ async function createScrapRequest({
     wfscrap_h_id: header.id_d,
     sequences,
     created_by: userId,
-    orgId,
     initialNotes: request_notes || null,
   });
 
