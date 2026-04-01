@@ -368,38 +368,6 @@ const triggerBreakdownWorkflow = async (
   const nowISODateOnly = new Date().toISOString().split("T")[0];
   let maintenanceResult = null;
 
-  // tblWFAssetMaintSch_D.dept_id is NOT NULL, but tblWFJobRole no longer carries dept_id.
-  // Resolve a safe fallback department for workflow detail rows from the reporter.
-  const resolveFallbackDeptId = async () => {
-    if (!reported_by) return null;
-    const s = String(reported_by);
-
-    // If reported_by itself is a department id, use it.
-    if (/^DPT/i.test(s)) return s;
-
-    // Try user_id -> dept_id
-    try {
-      const userRes = await client.query(
-        `SELECT dept_id FROM "tblUsers" WHERE user_id = $1 LIMIT 1`,
-        [s],
-      );
-      if (userRes.rows[0]?.dept_id) return userRes.rows[0].dept_id;
-    } catch {}
-
-    // Try employee internal id -> dept_id
-    try {
-      const empRes = await client.query(
-        `SELECT dept_id FROM "tblEmployees" WHERE emp_int_id = $1 LIMIT 1`,
-        [s],
-      );
-      if (empRes.rows[0]?.dept_id) return empRes.rows[0].dept_id;
-    } catch {}
-
-    return null;
-  };
-
-  const fallbackDeptId = await resolveFallbackDeptId();
-
   // Determine if workflow applies (by asset type)
   let hasWorkflow = false;
   if (assetRow && assetRow.asset_type_id) {
@@ -458,12 +426,7 @@ const triggerBreakdownWorkflow = async (
         const noteText = existingSchedule
           ? `BF01-Breakdown-${abr_id}-ExistingSchedule-${existingSchedule.ams_id}`
           : `BF01-Breakdown-${abr_id}`;
-        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
-        if (!deptToUse) {
-          throw new Error(
-            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
-          );
-        }
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || null;
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
@@ -554,12 +517,7 @@ const triggerBreakdownWorkflow = async (
         const seq = seqsRes.rows[i];
         const wfamsd_id = await msModel.getNextWFAMSDId(client);
         const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
-        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
-        if (!deptToUse) {
-          throw new Error(
-            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
-          );
-        }
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || null;
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
@@ -643,12 +601,7 @@ const triggerBreakdownWorkflow = async (
         const wfamsd_id = await msModel.getNextWFAMSDId(client);
         const jobRolesRes = await msModel.getWorkflowJobRoles(seq.wf_steps_id);
         const firstDetailStatus = i === 0 ? "AP" : "IN";
-        const deptToUse = jobRolesRes.rows[0]?.dept_id || fallbackDeptId;
-        if (!deptToUse) {
-          throw new Error(
-            `Cannot create workflow detail: dept_id is required (wf_steps_id=${seq.wf_steps_id})`,
-          );
-        }
+        const deptToUse = jobRolesRes.rows[0]?.dept_id || null;
         await msModel.insertWorkflowMaintenanceScheduleDetail({
           wfamsd_id,
           wfamsh_id: headerRes.rows[0].wfamsh_id,
