@@ -1,5 +1,6 @@
 const CronJobService = require('../services/cronJobService');
 const { backfillMissingWorkflowSequences } = require('../cron/wfAtSeqBackfillCron');
+const { backfillMissingScrapWorkflowSequences } = require('../cron/wfScrapSeqBackfillCron');
 
 class CronJobController {
     /**
@@ -95,6 +96,31 @@ class CronJobController {
             return res.status(500).json({
                 success: false,
                 error: 'Failed to run default workflow sequence backfill',
+                message: error.message,
+            });
+        }
+    }
+
+    /**
+     * One-time / manual: default scrap workflow (tblWFScrapSeq) for asset types missing a row.
+     */
+    static async triggerDefaultScrapWorkflowSequenceBackfill(req, res) {
+        try {
+            const user_id = req.user?.user_id || 'SYSTEM';
+            console.log(`Manual trigger of WF scrap default sequence backfill requested by user: ${user_id}`);
+
+            const result = await backfillMissingScrapWorkflowSequences();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Default scrap workflow sequence backfill completed',
+                result,
+            });
+        } catch (error) {
+            console.error('Error triggering WF scrap default sequence backfill:', error);
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to run default scrap workflow sequence backfill',
                 message: error.message,
             });
         }

@@ -4,6 +4,7 @@ const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
 const { startWfAtSeqBackfillCron } = require('../cron/wfAtSeqBackfillCron');
+const { startWfScrapSeqBackfillCron } = require('../cron/wfScrapSeqBackfillCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
@@ -26,7 +27,7 @@ class CronService {
         // Defer initial logging so it doesn't run in parallel with DB startup
         setTimeout(() => {
             maintenanceCronLogger.logCronJobInitialization({
-                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal', 'wfat_sequence_backfill'],
+                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal', 'wfat_sequence_backfill', 'wfscrap_sequence_backfill'],
                 userId
             }).catch(err => console.error('Logging error:', err));
         }, 2000);
@@ -48,6 +49,10 @@ class CronService {
         setTimeout(() => {
             this.scheduleWfAtSeqBackfill();
         }, 45000);
+
+        setTimeout(() => {
+            this.scheduleWfScrapSeqBackfill();
+        }, 60000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -73,14 +78,25 @@ class CronService {
         }
     }
 
-    // Backfill missing default workflow sequences for eligible asset types
+    // Backfill missing default workflow sequences for any asset type/org without tblWFATSeqs
     scheduleWfAtSeqBackfill() {
         try {
             startWfAtSeqBackfillCron();
             console.log('📅 [CRON] WFAT Sequence Backfill: Scheduled for every day at 1:00 AM (IST)');
-            console.log('   → Finds eligible asset types without tblWFATSeqs rows and inserts default Seq 10 / WFS-06');
+            console.log('   → For each tblAssetTypes row with org_id missing tblWFATSeqs, inserts default Seq 10 / WFS-06');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule WFAT sequence backfill:', error.message);
+        }
+    }
+
+    /** tblWFScrapSeq: one-level scrap approval for asset types missing a row (default WFS-02, seq 10). */
+    scheduleWfScrapSeqBackfill() {
+        try {
+            startWfScrapSeqBackfillCron();
+            console.log('📅 [CRON] WF Scrap Sequence Backfill: Scheduled for every day at 3:30 AM (IST)');
+            console.log('   → For each tblAssetTypes row missing tblWFScrapSeq, inserts default Seq 10 / WFS-02');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule WF scrap sequence backfill:', error.message);
         }
     }
 

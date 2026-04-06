@@ -1376,7 +1376,7 @@ async function createScrapRequest({
   if (approvalRequired && !sequences.length) {
     return {
       success: false,
-      message: `Scrap approval is required but workflow sequence is not configured for asset type ${assetTypeId}. Please configure tblWFScrapSeq.`,
+      message: `Scrap approval is required but the scrap workflow sequence is not configured for asset type ${assetTypeId}.`,
       asset_type_id: assetTypeId,
     };
   }

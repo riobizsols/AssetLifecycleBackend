@@ -8,34 +8,19 @@ const DEFAULT_WF_STEP_ID = process.env.WFATSEQ_DEFAULT_WF_STEP_ID || 'WFS-06';
 const DEFAULT_SEQ_NO = Number(process.env.WFATSEQ_DEFAULT_SEQ_NO || 10);
 
 const getEligibleAssetTypesWithoutWorkflowSeq = async () => {
+  // Only asset types that have zero rows in tblWFATSeqs for (asset_type_id, org_id).
+  // If any workflow sequence already exists for that pair, we do not insert (manual or cron).
   const query = `
     SELECT at.asset_type_id, at.org_id
     FROM "tblAssetTypes" at
-    WHERE at.int_status = 1
-      AND at.maint_required = true
-      AND COALESCE(TRIM(at.maint_type_id), '') <> ''
-      AND EXISTS (
-        SELECT 1
-        FROM "tblATMaintFreq" mf
-        WHERE mf.asset_type_id = at.asset_type_id
-          AND mf.org_id = at.org_id
-          AND mf.int_status = 1
-          AND COALESCE(TRIM(mf.maintained_by), '') <> ''
-      )
-      AND EXISTS (
-        SELECT 1
-        FROM "tblAssets" a
-        WHERE a.asset_type_id = at.asset_type_id
-          AND a.org_id = at.org_id
-          AND UPPER(COALESCE(a.current_status, '')) = 'ACTIVE'
-      )
+    WHERE COALESCE(TRIM(at.org_id), '') <> ''
       AND NOT EXISTS (
         SELECT 1
         FROM "tblWFATSeqs" s
         WHERE s.asset_type_id = at.asset_type_id
           AND s.org_id = at.org_id
       )
-    ORDER BY at.asset_type_id
+    ORDER BY at.org_id, at.asset_type_id
   `;
   return getDb().query(query);
 };
@@ -58,6 +43,8 @@ const backfillMissingWorkflowSequences = async () => {
     inserted: 0,
     skipped: 0,
     skippedMissingWfStep: 0,
+    /** Insert affected 0 rows: seq appeared between scan and insert (rare race). */
+    skippedAlreadyHasSeq: 0,
     errors: 0,
   };
 
@@ -79,13 +66,39 @@ const backfillMissingWorkflowSequences = async () => {
       }
 
       const wfAtSeqId = await generateCustomId('wfas', 3);
-      await getDb().query(
+      // Atomic: only insert if still no row for this asset type/org (avoids duplicates on concurrent runs).
+      // Use $6/$7 for NOT EXISTS (duplicate values) — reusing $2/$5 in SELECT + subquery
+      // causes PostgreSQL: "inconsistent types deduced for parameter $2".
+      const insertRes = await getDb().query(
         `
           INSERT INTO "tblWFATSeqs" (wf_at_seqs_id, asset_type_id, wf_steps_id, seqs_no, org_id)
-          VALUES ($1, $2, $3, $4, $5)
+          SELECT $1, $2, $3, $4, $5
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM "tblWFATSeqs" s
+            WHERE s.asset_type_id = $6
+              AND s.org_id = $7
+          )
+          RETURNING wf_at_seqs_id
         `,
-        [wfAtSeqId, asset_type_id, DEFAULT_WF_STEP_ID, DEFAULT_SEQ_NO, org_id],
+        [
+          wfAtSeqId,
+          asset_type_id,
+          DEFAULT_WF_STEP_ID,
+          DEFAULT_SEQ_NO,
+          org_id,
+          asset_type_id,
+          org_id,
+        ],
       );
+
+      if (insertRes.rowCount === 0) {
+        result.skippedAlreadyHasSeq += 1;
+        console.log(
+          `[WFATSEQ BACKFILL] Skipped ${asset_type_id}/${org_id}: workflow sequence already present`,
+        );
+        continue;
+      }
 
       result.inserted += 1;
       console.log(
