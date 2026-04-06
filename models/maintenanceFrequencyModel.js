@@ -1,6 +1,11 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
 
+/** Stored values for on-demand rows (columns must remain NOT NULL). */
+const ON_DEMAND_FREQUENCY = 0;
+const ON_DEMAND_UOM = 'On Demand';
+const ON_DEMAND_TEXT = 'On Demand';
+
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => {
   const contextDb = getDbFromContext();
@@ -125,14 +130,11 @@ class MaintenanceFrequencyModel {
     empIntId = null
   ) {
     try {
-      // For on-demand maintenance, frequency, uom, and text can be null
       if (!isRecurring) {
-        // On-demand: set defaults
-        frequency = null;
-        uom = null;
-        text = text || 'On Demand';
+        frequency = ON_DEMAND_FREQUENCY;
+        uom = ON_DEMAND_UOM;
+        text = (text && String(text).trim()) || ON_DEMAND_TEXT;
       } else {
-        // Recurring: validate required fields
         if (!uom || !uom.trim()) {
           throw new Error('UOM is required for recurring maintenance');
         }
@@ -220,14 +222,11 @@ class MaintenanceFrequencyModel {
     empIntId = null
   ) {
     try {
-      // For on-demand maintenance, frequency, uom, and text can be null
       if (!isRecurring) {
-        // On-demand: set defaults
-        frequency = null;
-        uom = null;
-        text = text || 'On Demand';
+        frequency = ON_DEMAND_FREQUENCY;
+        uom = ON_DEMAND_UOM;
+        text = (text && String(text).trim()) || ON_DEMAND_TEXT;
       } else {
-        // Recurring: validate required fields
         if (!uom || !uom.trim()) {
           throw new Error('UOM is required for recurring maintenance');
         }
