@@ -649,10 +649,10 @@ const createBreakdownReport = async (breakdownData) => {
       throw new Error("Invalid decision code. Must be BF01, BF02, or BF03");
     }
 
-    // Use a placeholder value if decision_code is not provided (to satisfy NOT NULL constraint)
-    // This allows decision_code to be set later via update endpoint
-    // Note: If the database column should be nullable, a migration should be created
-    const finalDecisionCode = decision_code || "BF03"; // Default to BF03 (Postpone) if not provided
+    // Keep decision code empty until user explicitly selects one.
+    // This preserves the create->edit workflow where status moves CR -> IN
+    // only when decision_code is set/changed in updateBreakdownReport.
+    const finalDecisionCode = decision_code || null;
 
     // Generate a unique sequential abr_id
     const getNextAbrId = async () => {
@@ -676,6 +676,10 @@ const createBreakdownReport = async (breakdownData) => {
       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,CURRENT_TIMESTAMP)
       RETURNING *
     `;
+    // If a decision is explicitly selected at create time, move status to Initiated.
+    // Otherwise keep Created until decision is selected later in edit flow.
+    const initialStatus = decision_code ? "IN" : "CR";
+
     const insertValues = [
       abr_id,
       asset_id,
@@ -683,7 +687,7 @@ const createBreakdownReport = async (breakdownData) => {
       reported_by,
       false,
       finalDecisionCode,
-      "CR",
+      initialStatus,
       description,
       org_id,
     ];
@@ -794,17 +798,23 @@ const updateBreakdownReport = async (abrId, updateData) => {
     // Check if decision_code is being set or changed
     // Trigger workflow if:
     // 1. decision_code is being set for the first time (null/empty -> BF01/BF02/BF03), OR
-    // 2. decision_code is being changed to a different value
+    // 2. decision_code is being changed to a different value, OR
+    // 3. legacy default case: CR + BF03 should be treated as "not selected yet"
+    //    when user explicitly submits BF03.
     const isDecisionCodeSet = !currentBreakdown.decision_code && decision_code;
     const isDecisionCodeChanged =
       currentBreakdown.decision_code &&
       decision_code &&
       currentBreakdown.decision_code !== decision_code;
+    const isLegacyDefaultDecisionSelection =
+      currentBreakdown.status === "CR" &&
+      currentBreakdown.decision_code === "BF03" &&
+      decision_code === "BF03";
 
     // Determine new status: if decision_code is being set/changed, update status from CR to IN
     // Do not update if status is already CO (Completed) or Reopened
     let newStatus = null;
-    if ((isDecisionCodeSet || isDecisionCodeChanged) && 
+    if ((isDecisionCodeSet || isDecisionCodeChanged || isLegacyDefaultDecisionSelection) && 
         currentBreakdown.status !== "CO" && 
         currentBreakdown.status !== "RO") {
       newStatus = "IN"; // Initiated
@@ -831,7 +841,7 @@ const updateBreakdownReport = async (abrId, updateData) => {
     const result = await client.query(updateQuery, updateValues);
     const updatedBreakdown = result.rows[0];
 
-    if (isDecisionCodeSet || isDecisionCodeChanged) {
+    if (isDecisionCodeSet || isDecisionCodeChanged || isLegacyDefaultDecisionSelection) {
       console.log(
         `Decision code set for breakdown ${abrId}: ${decision_code} - Triggering workflow`,
       );
