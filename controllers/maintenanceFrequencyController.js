@@ -136,17 +136,8 @@ class MaintenanceFrequencyController {
       console.log(`Creating ${isRecurring ? 'recurring' : 'on-demand'} maintenance frequency for asset type: ${asset_type_id}`);
       console.log(`UOM received:`, uom, `Type:`, typeof uom);
 
-      // Determine emp_int_id to persist:
-      // - For in-house/self maintenance, use provided emp_int_id
-      // - For vendor-maintained, do not persist emp_int_id
-      const maintainedNormalized = (maintained_by || '')
-        .toString()
-        .toLowerCase()
-        .replace(/\s|-/g, '');
-      let empIntToSave = null;
-      if (maintainedNormalized && !maintainedNormalized.includes('vendor')) {
-        empIntToSave = emp_int_id || null;
-      }
+      // Create flow no longer captures technician; always persist emp_int_id as NULL.
+      const empIntToSave = null;
 
       const newFrequency = await MaintenanceFrequencyModel.createMaintenanceFrequency(
         asset_type_id,

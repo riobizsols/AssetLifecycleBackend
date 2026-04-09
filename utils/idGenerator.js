@@ -196,15 +196,24 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
 
         const columnName = columnMap[tableKey];
         if (columnName) {
-            const existingCheck = await dbPool.query(
-                `SELECT ${columnName} FROM "${targetTable}" WHERE ${columnName} = $1`,
-                [generatedId]
-            );
+            try {
+                const existingCheck = await dbPool.query(
+                    `SELECT ${columnName} FROM "${targetTable}" WHERE ${columnName} = $1`,
+                    [generatedId]
+                );
 
-            if (existingCheck.rows.length > 0) {
-                console.warn(`⚠️ Generated ID ${generatedId} already exists, generating new one...`);
-                // If ID exists, recursively generate a new one
-                return await exports.generateCustomId(tableKey, padLength);
+                if (existingCheck.rows.length > 0) {
+                    console.warn(`⚠️ Generated ID ${generatedId} already exists, generating new one...`);
+                    return await exports.generateCustomId(tableKey, padLength);
+                }
+            } catch (e) {
+                if (e.code === '42P01') {
+                    console.warn(
+                        `[idGenerator] Table "${targetTable}" missing; skip duplicate check for ${tableKey}`
+                    );
+                } else {
+                    throw e;
+                }
             }
         }
     }

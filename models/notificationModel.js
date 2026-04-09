@@ -160,7 +160,13 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
 };
 
 // Supports super access users who can view all branches
-const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId, hasSuperAccess = false) => {
+const getMaintenanceNotificationsByUser = async (
+  empIntId,
+  orgId = 'ORG001',
+  branchId,
+  hasSuperAccess = false,
+  tokenJobRoleId = null
+) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
   // Includes:
   // - asset-based maintenance + vendor contract renewal (MT005)
@@ -177,21 +183,26 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   if (!hasSuperAccess && branchId) {
     branchIdParamIndex = paramIndex;
     params.push(branchId);
-    branchFilter = ` AND a.branch_id = $${paramIndex}`;
+    // NULL asset branch = org-wide asset; strict = excluded everyone (same as wfh.branch_code fix)
+    branchFilter = ` AND (a.branch_id = $${paramIndex} OR a.branch_id IS NULL)`;
     paramIndex++;
   }
   
   // empIntId parameter index
   const empIntIdParamIndex = paramIndex;
   params.push(empIntId);
+  paramIndex++;
+  const tokenJobRoleParamIndex = paramIndex;
+  params.push(tokenJobRoleId || null);
+  paramIndex++;
   
   const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
     ? ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex}))`
     : '';
 
-  // Inspection branch filtering uses asset branch_id like maintenance
+  // Inspection branch filtering uses asset branch_id like maintenance (NULL = org-wide)
   const inspectionBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
-    ? ` AND a.branch_id = $${branchIdParamIndex}`
+    ? ` AND (a.branch_id = $${branchIdParamIndex} OR a.branch_id IS NULL)`
     : '';
 
   const maintenanceQuery = `
@@ -247,21 +258,16 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-    -- Get current action role (workflow step with AP status)
+    -- Current step: prefer AP over IN when both exist (same wfamsh_id)
     LEFT JOIN (
-      SELECT 
+      SELECT DISTINCT ON (wfd2.wfamsh_id)
         wfd2.wfamsh_id,
         wfd2.job_role_id,
         jr2.text as job_role_name
       FROM "tblWFAssetMaintSch_D" wfd2
       LEFT JOIN "tblJobRoles" jr2 ON wfd2.job_role_id = jr2.job_role_id
       WHERE wfd2.status IN ('AP', 'IN')
-        AND wfd2.wfamsd_id = (
-          SELECT MAX(wfd3.wfamsd_id)
-          FROM "tblWFAssetMaintSch_D" wfd3
-          WHERE wfd3.wfamsh_id = wfd2.wfamsh_id
-            AND wfd3.status IN ('AP', 'IN')
-        )
+      ORDER BY wfd2.wfamsh_id, (CASE WHEN wfd2.status = 'AP' THEN 0 ELSE 1 END), wfd2.wfamsd_id DESC
     ) current_action_role ON wfh.wfamsh_id = current_action_role.wfamsh_id
     -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
@@ -282,16 +288,30 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
           AND wfd.org_id = $1
           AND wfd.status IN ('IN', 'IP', 'AP')
       )
-      -- Check if the requesting employee has a role involved in this workflow with pending status
-      AND EXISTS (
-        SELECT 1 
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
-        INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
-        WHERE wfd.wfamsh_id = wfh.wfamsh_id
-          AND u.emp_int_id = $${empIntIdParamIndex}
-          AND u.int_status = 1
-          AND wfd.status IN ('IN', 'IP', 'AP')
+      -- User must match a pending step: via tblUserJobRoles OR JWT job_role_id (same as approvals list)
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+          INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+          WHERE wfd.wfamsh_id = wfh.wfamsh_id
+            AND u.emp_int_id = $${empIntIdParamIndex}
+            AND u.int_status = 1
+            AND wfd.status IN ('IN', 'IP', 'AP')
+        )
+        OR (
+          $${tokenJobRoleParamIndex}::text IS NOT NULL
+          AND EXISTS (SELECT 1 FROM "tblUsers" u0 WHERE u0.emp_int_id = $${empIntIdParamIndex} AND u0.int_status = 1)
+          AND EXISTS (
+            SELECT 1
+            FROM "tblWFAssetMaintSch_D" wfd
+            WHERE wfd.wfamsh_id = wfh.wfamsh_id
+              AND wfd.org_id = $1
+              AND wfd.status IN ('IN', 'IP', 'AP')
+              AND wfd.job_role_id = $${tokenJobRoleParamIndex}::varchar
+          )
+        )
       )
     ) n
   `;

@@ -197,14 +197,23 @@ const triggerVendorContractRenewal = async () => {
     const vendorsDueResult = await dbPool.query(vendorsDueQuery, [todayStr, tenDaysDateStr]);
     console.log(`   Found ${vendorsDueResult.rows.length} vendor(s) with contracts ending within 10 days`);
     
+    let workflowsCreated = 0;
+    const failedVendors = [];
+
     // Sequential loop: one connection at a time (pool-friendly; do not switch to forEach+async).
     for (const vendor of vendorsDueResult.rows) {
       try {
         console.log(`   Creating renewal workflow for vendor: ${vendor.vendor_name} (${vendor.vendor_id})`);
         await createVendorContractRenewalWorkflow(vendor);
         console.log(`   ✅ Created renewal workflow for ${vendor.vendor_id}`);
+        workflowsCreated += 1;
       } catch (err) {
         console.error(`   ❌ Failed to create renewal workflow for ${vendor.vendor_id}:`, err.message);
+        failedVendors.push({
+          vendor_id: vendor.vendor_id,
+          vendor_name: vendor.vendor_name,
+          error: err.message,
+        });
       }
     }
     
@@ -221,14 +230,21 @@ const triggerVendorContractRenewal = async () => {
     console.log('╚═══════════════════════════════════════════════════════════════════╝');
     console.log(`✅ Process completed in ${duration}ms`);
     console.log(`📊 Summary:`);
-    console.log(`   - Renewal workflows created: ${vendorsDueResult.rows.length}`);
+    console.log(`   - Renewal workflows created: ${workflowsCreated}`);
+    console.log(`   - Renewal workflow failures: ${failedVendors.length}`);
     console.log(`   - Vendors deactivated: ${expiredVendorsResult.deactivated}`);
     console.log('───────────────────────────────────────────────────────────────────\n');
     
     return {
-      success: true,
-      message: 'Vendor contract renewal check completed',
-      workflowsCreated: vendorsDueResult.rows.length,
+      success: failedVendors.length === 0,
+      message:
+        failedVendors.length === 0
+          ? 'Vendor contract renewal check completed'
+          : 'Vendor contract renewal check completed with errors',
+      vendorsDue: vendorsDueResult.rows.length,
+      workflowsCreated,
+      workflowFailures: failedVendors.length,
+      failedVendors,
       vendorsDeactivated: expiredVendorsResult.deactivated,
       duration: duration
     };

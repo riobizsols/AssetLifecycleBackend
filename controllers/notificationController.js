@@ -76,7 +76,13 @@ const getUserNotifications = async (req, res) => {
 
     console.log(`🐛 [getUserNotifications] Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
     
-    const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId, req.user?.hasSuperAccess || false);
+    const notifications = await getMaintenanceNotificationsByUser(
+      userId,
+      orgId,
+      branchId,
+      req.user?.hasSuperAccess || false,
+      req.user?.job_role_id || null
+    );
     
     console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);
     console.log('🐛 [getUserNotifications] First 3 notifications:', notifications.slice(0, 3));

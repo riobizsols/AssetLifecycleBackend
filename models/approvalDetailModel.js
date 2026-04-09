@@ -226,8 +226,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       // Get the first record for basic details
       const firstRecord = approvalDetails[0];
       
-              // Fetch checklist items for this asset
-        const checklistItems = await getChecklistByAssetId(assetId, orgId);
+              // Fetch checklist items for this asset (scope to this workflow when possible)
+        const checklistItems = await getChecklistByAssetId(assetId, orgId, firstRecord.wfamsh_id);
         
         // Fetch vendor details
         let vendorDetails = null;
@@ -1328,13 +1328,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 };
 
 // Supports super access users who can view all branches
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false) => {
+// tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
      console.log('orgId:', orgId);
      console.log('userBranchCode:', userBranchCode);
      console.log('hasSuperAccess:', hasSuperAccess);
+     console.log('tokenJobRoleId:', tokenJobRoleId);
      
      // Handle empty string or null empIntId
      if (!empIntId || empIntId === '') {
@@ -1355,14 +1357,17 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
      const rolesResult = await getDb().query(rolesQuery, [userId]);
-     const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
+     const userRoleIds = [...new Set([
+       ...rolesResult.rows.map(r => r.job_role_id),
+       ...(tokenJobRoleId ? [String(tokenJobRoleId).trim()] : [])
+     ].filter(Boolean))];
      
      if (userRoleIds.length === 0) {
        console.log('User has no assigned roles');
        return [];
      }
      
-     console.log('User roles:', userRoleIds);
+     console.log('User roles (DB + token):', userRoleIds);
      
      // Check for System Administrator role (JR001) or other super access
      const isSystemAdmin = userRoleIds.includes('JR001');
@@ -1413,9 +1418,9 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            AND a.org_id = $1
      `;
      
-     // Apply branch_code filter only if user doesn't have super access
+     // Branch: strict equality excluded rows when wfh.branch_code was NULL (org-wide workflow)
      if (!hasSuperAccess && userBranchCode) {
-       query += ` AND wfh.branch_code = $${paramIndex}`;
+       query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
        paramIndex++;
      }
@@ -2678,8 +2683,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         });
       });
 
-      // Fetch checklist items for this asset
-      const checklistItems = await getChecklistByAssetId(assetId, orgId);
+      // Fetch checklist items for this asset (scope to this workflow header)
+      const checklistItems = await getChecklistByAssetId(assetId, orgId, header.wfamsh_id);
       
       // Fetch vendor details
       let vendorDetails = null;
@@ -2785,8 +2790,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfh.vendor_id,
         wfh.emp_int_id as header_emp_int_id,
         wfh.at_main_freq_id,
-        -- Get maintained_by from tblATMaintFreq table
-        COALESCE(atmf.maintained_by, 'Inhouse') as maintained_by,
+        -- Get maintained_by from tblATMaintFreq; MT005 has no at_main_freq row — do not default to Inhouse (breaks Vendor tab UX)
+        CASE
+          WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor'
+          ELSE COALESCE(atmf.maintained_by, 'Inhouse')
+        END as maintained_by,
         a.text as asset_name,
         a.serial_number,
         wfh.status as header_status,
@@ -2937,7 +2945,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
       
       // Fetch regular checklist items for this asset
-      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
+      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId, wfamshId);
       
       // Build final checklist based on decision code
       if (breakdownInfo) {

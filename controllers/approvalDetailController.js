@@ -783,7 +783,13 @@ const getMaintenanceApprovalsController = async (req, res) => {
       });
     }
 
-    const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+    const maintenanceApprovals = await getMaintenanceApprovals(
+      empIntId,
+      orgId,
+      userBranchCode,
+      req.user?.hasSuperAccess || false,
+      req.user?.job_role_id || null
+    );
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({

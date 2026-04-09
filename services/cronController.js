@@ -64,13 +64,23 @@ class CronController {
     async triggerVendorContractRenewal(req, res) {
         try {
             const result = await this.cronService.triggerVendorContractRenewal();
+            if (!result?.success) {
+                return res.status(500).json({
+                    success: false,
+                    message: "Vendor contract renewal completed with errors",
+                    result
+                });
+            }
+
             res.status(200).json({
+                success: true,
                 message: "Vendor contract renewal triggered successfully",
-                result: result
+                result
             });
         } catch (error) {
             console.error('Error triggering vendor contract renewal:', error);
             res.status(500).json({
+                success: false,
                 error: "Failed to trigger vendor contract renewal",
                 details: error.message
             });

@@ -3,6 +3,9 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
+/** PostgreSQL undefined_table — some tenants never migrated tblVendorSLAs */
+const isUndefinedTable = (err) => err && err.code === '42P01';
+
 // Get vendor SLAs by vendor_id (returns one row with all 10 SLA columns)
 const getVendorSLAs = async (vendorId) => {
   const dbPool = getDb();
@@ -29,20 +32,29 @@ const getVendorSLAs = async (vendorId) => {
     WHERE vs.vendor_id = $1
   `;
   
-  const result = await dbPool.query(query, [vendorId]);
-  return result.rows[0] || null; // Return single row or null
+  try {
+    const result = await dbPool.query(query, [vendorId]);
+    return result.rows[0] || null;
+  } catch (e) {
+    if (isUndefinedTable(e)) {
+      console.warn('[vendorSLAModel] tblVendorSLAs is missing; skipping SLA read (migrate DB to enable SLA).');
+      return null;
+    }
+    throw e;
+  }
 };
 
 // Create or update vendor SLA (one row per vendor)
 const upsertVendorSLA = async (vendorSLA) => {
   const dbPool = getDb();
-  
-  // Check if record exists
-  const existing = await getVendorSLAs(vendorSLA.vendor_id);
-  
-  if (existing) {
-    // Update existing record
-    const query = `
+
+  try {
+    // Check if record exists
+    const existing = await getVendorSLAs(vendorSLA.vendor_id);
+
+    if (existing) {
+      // Update existing record
+      const query = `
       UPDATE "tblVendorSLAs" SET
         "SLA-1" = $1,
         "SLA-2" = $2,
@@ -60,25 +72,26 @@ const upsertVendorSLA = async (vendorSLA) => {
       RETURNING *;
     `;
 
-    const values = [
-      vendorSLA["SLA-1"] || null,
-      vendorSLA["SLA-2"] || null,
-      vendorSLA["SLA-3"] || null,
-      vendorSLA["SLA-4"] || null,
-      vendorSLA["SLA-5"] || null,
-      vendorSLA["SLA-6"] || null,
-      vendorSLA["SLA-7"] || null,
-      vendorSLA["SLA-8"] || null,
-      vendorSLA["SLA-9"] || null,
-      vendorSLA["SLA-10"] || null,
-      vendorSLA.changed_by,
-      vendorSLA.changed_on || new Date(),
-      vendorSLA.vendor_id
-    ];
+      const values = [
+        vendorSLA["SLA-1"] || null,
+        vendorSLA["SLA-2"] || null,
+        vendorSLA["SLA-3"] || null,
+        vendorSLA["SLA-4"] || null,
+        vendorSLA["SLA-5"] || null,
+        vendorSLA["SLA-6"] || null,
+        vendorSLA["SLA-7"] || null,
+        vendorSLA["SLA-8"] || null,
+        vendorSLA["SLA-9"] || null,
+        vendorSLA["SLA-10"] || null,
+        vendorSLA.changed_by,
+        vendorSLA.changed_on || new Date(),
+        vendorSLA.vendor_id
+      ];
 
-    const { rows } = await dbPool.query(query, values);
-    return rows[0];
-  } else {
+      const { rows } = await dbPool.query(query, values);
+      return rows[0];
+    }
+
     // Create new record
     const query = `
       INSERT INTO "tblVendorSLAs" (
@@ -126,6 +139,12 @@ const upsertVendorSLA = async (vendorSLA) => {
 
     const { rows } = await dbPool.query(query, values);
     return rows[0];
+  } catch (e) {
+    if (isUndefinedTable(e)) {
+      console.warn('[vendorSLAModel] tblVendorSLAs is missing; skipping SLA upsert (migrate DB to enable SLA).');
+      return null;
+    }
+    throw e;
   }
 };
 
@@ -133,8 +152,16 @@ const upsertVendorSLA = async (vendorSLA) => {
 const deleteVendorSLA = async (vendorId) => {
   const dbPool = getDb();
   const query = 'DELETE FROM "tblVendorSLAs" WHERE vendor_id = $1 RETURNING *;';
-  const { rows } = await dbPool.query(query, [vendorId]);
-  return rows[0] || null;
+  try {
+    const { rows } = await dbPool.query(query, [vendorId]);
+    return rows[0] || null;
+  } catch (e) {
+    if (isUndefinedTable(e)) {
+      console.warn('[vendorSLAModel] tblVendorSLAs is missing; skipping SLA delete.');
+      return null;
+    }
+    throw e;
+  }
 };
 
 module.exports = {
