@@ -621,7 +621,7 @@ const getAllMaintenanceSchedules = async (
             a.description as asset_description,
             at.text as asset_type_name,
             mt.text as maintenance_type_name,
-            NULL::numeric as hours_required,
+            COALESCE(mt.hours_required, 0)::numeric as hours_required,
             v.vendor_name,
             -- Calculate days until due (if act_maint_st_date is in the future)
             CASE 
@@ -671,7 +671,7 @@ const getMaintenanceScheduleById = async (
             ag.text as group_name,
             -- Get group asset count
             (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
-            NULL::numeric as hours_required
+            COALESCE(mt.hours_required, 0)::numeric as hours_required
         FROM "tblAssetMaintSch" ams
         LEFT JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id

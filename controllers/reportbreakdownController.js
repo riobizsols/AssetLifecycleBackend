@@ -305,7 +305,7 @@ const createBreakdownReport = async (req, res) => {
       userId
     });
 
-    // Validate required fields (decision_code is optional, will default to BF03 if not provided)
+    // Validate required fields (decision_code is optional)
     if (!asset_id || !atbrrc_id || !reported_by || !description) {
       await logMissingParameters({
         appId: APP_ID,
