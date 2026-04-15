@@ -8,6 +8,9 @@ const { startWfScrapSeqBackfillCron } = require('../cron/wfScrapSeqBackfillCron'
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
+const {
+    ensureWarrantyNotificationsForWindowAllOrgs,
+} = require('../models/assetWarrantyNotifyModel');
 
 class CronService {
     constructor() {
@@ -53,6 +56,10 @@ class CronService {
         setTimeout(() => {
             this.scheduleWfScrapSeqBackfill();
         }, 60000);
+
+        setTimeout(() => {
+            this.scheduleWarrantyNotificationTrigger();
+        }, 75000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -97,6 +104,30 @@ class CronService {
             console.log('   → For each tblAssetTypes row missing tblWFScrapSeq, inserts default Seq 10 / WFS-02');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule WF scrap sequence backfill:', error.message);
+        }
+    }
+
+    // Schedule warranty notifications for assets expiring within 10 days.
+    scheduleWarrantyNotificationTrigger() {
+        try {
+            cron.schedule('0 7 * * *', async () => {
+                const startedAt = new Date().toISOString();
+                try {
+                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 10 });
+                    console.log(
+                        `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
+                    );
+                } catch (error) {
+                    console.error('❌ [CRON] Warranty notification trigger failed:', error.message);
+                }
+            }, {
+                timezone: "Asia/Kolkata",
+            });
+
+            console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
+            console.log('   → Creates notifications for assets with warranty expiry within next 10 days');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
         }
     }
 
@@ -376,6 +407,15 @@ class CronService {
                 status: 'ACTIVE',
                 canTrigger: true,
                 purpose: 'Automatically manages vendor contract renewals and deactivates expired vendors'
+            },
+            warrantyNotificationTrigger: {
+                name: 'Warranty Notification Trigger',
+                schedule: '0 7 * * *',
+                description: 'Creates warranty alerts for assets whose expiry_date falls within next 10 days.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 7:00 AM IST',
+                status: 'ACTIVE',
+                purpose: 'Proactively notify mapped job roles before warranty end date'
             }
         };
     }

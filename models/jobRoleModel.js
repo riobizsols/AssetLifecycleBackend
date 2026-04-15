@@ -11,7 +11,7 @@ const getJobRolesByOrg = async (org_id) => {
     const dbPool = getDb();
 
     const result = await dbPool.query(
-        `SELECT job_role_id, text, job_function, int_status
+        `SELECT job_role_id, text, job_function, int_status, notif_warranty, notif_scrap
          FROM "tblJobRoles" 
          WHERE org_id = $1 AND int_status = 1
          ORDER BY job_role_id DESC`,
@@ -38,15 +38,23 @@ const getJobRoleByIdFromDb = async (job_role_id, org_id) => {
  * Create a new job role in tblJobRoles
  */
 const createJobRole = async (data) => {
-    const { org_id, job_role_id, text, job_function, created_by } = data;
+    const {
+        org_id,
+        job_role_id,
+        text,
+        job_function,
+        created_by,
+        notif_warranty = false,
+        notif_scrap = false
+    } = data;
     const dbPool = getDb();
 
     const result = await dbPool.query(
         `INSERT INTO "tblJobRoles" 
-         (org_id, job_role_id, text, job_function, int_status)
-         VALUES ($1, $2, $3, $4, 1)
+         (org_id, job_role_id, text, job_function, int_status, notif_warranty, notif_scrap)
+         VALUES ($1, $2, $3, $4, 1, $5, $6)
          RETURNING *`,
-        [org_id, job_role_id, text, job_function || null]
+        [org_id, job_role_id, text, job_function || null, !!notif_warranty, !!notif_scrap]
     );
     return result.rows[0];
 };
@@ -55,17 +63,27 @@ const createJobRole = async (data) => {
  * Update existing job role in tblJobRoles
  */
 const updateJobRoleById = async (job_role_id, data, org_id) => {
-    const { text, job_function, int_status } = data;
+    const { text, job_function, int_status, notif_warranty, notif_scrap } = data;
     const dbPool = getDb();
 
     const result = await dbPool.query(
         `UPDATE "tblJobRoles" 
          SET text = $1, 
              job_function = $2,
-             int_status = $3
-         WHERE job_role_id = $4 AND org_id = $5
+             int_status = $3,
+             notif_warranty = $4,
+             notif_scrap = $5
+         WHERE job_role_id = $6 AND org_id = $7
          RETURNING *`,
-        [text, job_function, int_status !== undefined ? int_status : 1, job_role_id, org_id]
+        [
+            text,
+            job_function,
+            int_status !== undefined ? int_status : 1,
+            !!notif_warranty,
+            !!notif_scrap,
+            job_role_id,
+            org_id
+        ]
     );
     return result.rows[0];
 };

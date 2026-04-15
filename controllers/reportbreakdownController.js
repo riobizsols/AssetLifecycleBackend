@@ -532,7 +532,7 @@ const updateBreakdownReport = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating breakdown report:', err);
-    
+
     // Determine error level
     const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
     

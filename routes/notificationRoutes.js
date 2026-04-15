@@ -4,7 +4,10 @@ const {
   getAllNotifications, 
   getUserNotifications, 
   getNotificationStatistics, 
-  getFilteredNotifications 
+  getFilteredNotifications,
+  openWarrantyNotification,
+  discardWarrantyNotificationAction,
+  snoozeWarrantyNotificationAction,
 } = require('../controllers/notificationController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -26,6 +29,10 @@ router.get('/stats', getNotificationStatistics);
 // Get filtered notifications
 // GET /api/notifications/filtered?status=IN&urgency=urgent&assetType=laptop
 router.get('/filtered', getFilteredNotifications);
+
+router.put('/warranty/:notifyId/open', openWarrantyNotification);
+router.put('/warranty/:notifyId/discard', discardWarrantyNotificationAction);
+router.put('/warranty/:notifyId/snooze', snoozeWarrantyNotificationAction);
 
 
 module.exports = router;

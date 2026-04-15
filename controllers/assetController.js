@@ -29,6 +29,11 @@ const {
     logAssetDeletionError,
     logDatabaseConstraintViolation
 } = require("../eventLoggers/assetEventLogger");
+const {
+  resolveWarrantyNotification,
+  resolveWarrantyNotificationsByAsset,
+  createWarrantyNotificationsForAsset,
+} = require("../models/assetWarrantyNotifyModel");
 
 const addAsset = async (req, res) => {
     const startTime = Date.now();
@@ -384,6 +389,12 @@ const updateAsset = async (req, res) => {
   const userId = req.user?.user_id;
   
   try {
+    const existingAssetResult = await model.getAssetById(asset_id);
+    const existingAssetRow = existingAssetResult?.rows?.[0] || null;
+    if (!existingAssetRow) {
+      return res.status(404).json({ error: "Asset not found" });
+    }
+
     // Get user's branch information (MOVED INSIDE TRY BLOCK)
     const userModel = require("../models/userModel");
     const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
@@ -419,6 +430,8 @@ const updateAsset = async (req, res) => {
       insurance_start_date,
       insurance_end_date,
       comprehensive_insurance
+      ,
+      warranty_notify_id
     } = req.body;
 
     // Log API called
@@ -443,13 +456,7 @@ const updateAsset = async (req, res) => {
     });
     
     // Get existing asset to retrieve org_id if not provided
-    let finalOrgId = org_id || req.user?.org_id;
-    if (!finalOrgId) {
-      const existingAsset = await model.getAssetById(asset_id);
-      if (existingAsset.rows.length > 0) {
-        finalOrgId = existingAsset.rows[0].org_id;
-      }
-    }
+    let finalOrgId = org_id || req.user?.org_id || existingAssetRow.org_id;
 
     // Enforce service vendor when asset type maintenance is vendor-managed.
     if (asset_type_id) {
@@ -543,6 +550,43 @@ const updateAsset = async (req, res) => {
     } catch (notificationError) {
       console.error('❌ Error in asset update notification flow:', notificationError);
       // Don't fail the request if notification fails
+    }
+
+    if (typeof warranty_period !== "undefined") {
+      try {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const riskWindowEnd = new Date(now);
+        riskWindowEnd.setDate(riskWindowEnd.getDate() + 10);
+
+        const parsedWarrantyDate =
+          warranty_period && !Number.isNaN(new Date(warranty_period).getTime())
+            ? new Date(warranty_period)
+            : null;
+        if (parsedWarrantyDate) parsedWarrantyDate.setHours(0, 0, 0, 0);
+
+        if (parsedWarrantyDate && parsedWarrantyDate <= riskWindowEnd) {
+          // Expired or expiring soon: ensure an active alert exists.
+          await createWarrantyNotificationsForAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        } else {
+          // Expiry moved outside risk window (or cleared): resolve active alerts.
+          if (warranty_notify_id) {
+            await resolveWarrantyNotification({
+              notifyId: warranty_notify_id,
+              orgId: finalOrgId || req.user?.org_id,
+            });
+          }
+          await resolveWarrantyNotificationsByAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        }
+      } catch (warrantyResolveError) {
+        console.error("Failed to evaluate warranty notification update:", warrantyResolveError.message);
+      }
     }
 
     res.json(updatedAsset);

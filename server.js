@@ -76,6 +76,7 @@ const inspectionFrequencyRoutes = require("./routes/inspectionFrequencyRoutes");
 const costCenterTransferRoutes = require("./routes/costCenterTransferRoutes");
 const assetTypeChecklistMappingRoutes = require("./routes/assetTypeChecklistMappingRoutes");
 const internalRoutes = require("./routes/internalRoutes");
+const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 
@@ -257,6 +258,7 @@ app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
 app.use("/api/cost-center-transfer", costCenterTransferRoutes);
 app.use("/api/internal", internalRoutes);
+app.use("/api/job-monitor", jobMonitorRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
