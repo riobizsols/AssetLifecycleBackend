@@ -134,17 +134,38 @@ const addScrapAsset = async (scrapData) => {
 
     const scrapResult = await client.query(insertQuery, insertValues);
     
-    // 2. Update the main asset status to SCRAPPED
+    // Resolve changed_by to tblUsers.user_id (tblAssets.changed_by has FK to tblUsers)
+    let changedByUserId = null;
+    if (scrapped_by) {
+      const byEmp = await client.query(`SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1`, [scrapped_by]);
+      if (byEmp.rows.length) {
+        changedByUserId = byEmp.rows[0].user_id;
+      } else {
+        const byUserId = await client.query(`SELECT user_id FROM "tblUsers" WHERE user_id = $1`, [scrapped_by]);
+        if (byUserId.rows.length) changedByUserId = scrapped_by;
+      }
+    }
+
+    // 2. Update the main asset status to SCRAPPED (+ store scrap metadata in tblAssets)
     const updateQuery = `
       UPDATE "tblAssets" 
       SET current_status = 'SCRAPPED', 
           changed_by = $1, 
-          changed_on = CURRENT_TIMESTAMP
+          changed_on = CURRENT_TIMESTAMP,
+          scrap_notes = $3,
+          scraped_by = $4,
+          scraped_on = COALESCE($5::timestamp, CURRENT_TIMESTAMP)
       WHERE asset_id = $2
       RETURNING *
     `;
     
-    await client.query(updateQuery, [scrapped_by, asset_id]);
+    await client.query(updateQuery, [
+      changedByUserId,
+      asset_id,
+      notes || null,
+      scrapped_by || null,
+      scrapped_date || null,
+    ]);
     
     // 3. Unassign asset from department or employee if currently assigned
     // Update all active assignments (action='A' and latest_assignment_flag=true) to unassign them
@@ -159,6 +180,7 @@ const addScrapAsset = async (scrapData) => {
         AND latest_assignment_flag = true
     `;
     
+    // action_by in assignments is not FK-constrained in most schemas, keep original scrapped_by value
     await client.query(unassignQuery, [scrapped_by, asset_id]);
     
     // Commit the transaction
@@ -242,7 +264,7 @@ const checkScrapAssetExists = async (asd_id) => {
   return await dbPool.query(query, [asd_id]);
 };
 
-// Get available assets by asset type (exclude those already scrapped)
+// Get available assets by asset type (exclude those already scrapped and those in any group)
 const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null) => {
   let query = `
     SELECT 
@@ -255,6 +277,12 @@ const getAvailableAssetsByAssetType = async (asset_type_id, org_id = null) => {
     FROM "tblAssets" a
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     WHERE a.asset_type_id = $1
+      AND a.group_id IS NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM "tblAssetGroup_D" agd
+        WHERE agd.asset_id = a.asset_id
+      )
       AND NOT EXISTS (
         SELECT 1 
         FROM "tblAssetScrapDet" s 

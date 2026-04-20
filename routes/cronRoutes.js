@@ -10,6 +10,9 @@ router.post('/trigger-maintenance', cronController.triggerMaintenanceGeneration.
 // Manual trigger endpoint for vendor contract renewal (for testing)
 router.post('/trigger-vendor-contract-renewal', cronController.triggerVendorContractRenewal.bind(cronController));
 
+// Manual trigger endpoint for inspection generation (for testing)
+router.post('/trigger-inspection', cronController.triggerInspection.bind(cronController));
+
 // Get cron job status
 router.get('/status', cronController.getCronStatus.bind(cronController));
 

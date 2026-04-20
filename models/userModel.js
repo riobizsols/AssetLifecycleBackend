@@ -1,33 +1,66 @@
-const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
 const logger = require('../utils/logger');
 
-// Helper function to get database connection (tenant pool or default)
+// Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
 
-// Find user by email (used for login)
-// Only queries tblUsers - tenant databases don't have tblRioAdmin
-// If tenantPool is provided, use it; otherwise use getDb() which gets from context
-const findUserByEmail = async (email, tenantPool = null) => {
-    const connection = tenantPool || getDb();
-    
-    logger.debug(`[UserModel] 🔍 Searching for user with email: "${email}"`);
-    logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
-    
-    // Query tblUsers by email only (tenant databases use this)
-    const result = await connection.query(
-        'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
-        [email]
-    );
-    
-    logger.debug(`[UserModel] Query result: ${result.rows.length} user(s) found`);
-    if (result.rows.length > 0) {
-        logger.debug(`[UserModel] ✅ User found: ${result.rows[0].user_id} (${result.rows[0].full_name}), org_id: ${result.rows[0].org_id}`);
-    } else {
-        logger.debug(`[UserModel] ❌ No user found with email: "${email}"`);
+// Find user by email or username (used for login)
+// For tenant database connections, query tblUsers only (tenant DBs don't have tblRioAdmin).
+// For default database connections, support both tblRioAdmin and tblUsers lookups.
+const findUserByEmail = async (emailOrUsername, tenantPool = null) => {
+    const runLookup = async (connection, includeRioAdmin) => {
+        // Check if this is a RioAdmin login attempt (username = "rioadmin")
+        if (includeRioAdmin && emailOrUsername && emailOrUsername.toLowerCase() === 'rioadmin') {
+            const rioAdminResult = await connection.query(
+                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE username = $1 OR email = $1',
+                [emailOrUsername]
+            );
+            if (rioAdminResult.rows.length > 0) {
+                return rioAdminResult.rows[0];
+            }
+        }
+        
+        if (includeRioAdmin) {
+            // Check tblRioAdmin by email (in case email is used)
+            const rioAdminByEmailResult = await connection.query(
+                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE email = $1',
+                [emailOrUsername]
+            );
+            if (rioAdminByEmailResult.rows.length > 0) {
+                return rioAdminByEmailResult.rows[0];
+            }
+        }
+        
+        // Fall back to tblUsers (normal login)
+        const result = await connection.query(
+            'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
+            [emailOrUsername]
+        );
+        return result.rows[0];
+    };
+
+    if (tenantPool) {
+        logger.debug(`[UserModel] 🔍 Searching tenant user with identifier: "${emailOrUsername}"`);
+        // Tenant DBs are schema-isolated and do not contain tblRioAdmin.
+        return runLookup(tenantPool, false);
     }
-    
-    return result.rows[0];
+
+    const connection = getDb();
+    logger.debug(`[UserModel] 🔍 Searching default user with identifier: "${emailOrUsername}"`);
+    try {
+        return await runLookup(connection, true);
+    } catch (err) {
+        // If tblRioAdmin doesn't exist in current DB context, fallback safely to tblUsers.
+        if (err && (err.code === '42P01' || String(err.message || '').includes('tblRioAdmin'))) {
+            logger.warn('[UserModel] tblRioAdmin table not found, falling back to tblUsers-only lookup');
+            const userResult = await connection.query(
+                'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
+                [emailOrUsername]
+            );
+            return userResult.rows[0];
+        }
+        throw err;
+    }
 };
 
 // Create user — called by super_admin

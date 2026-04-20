@@ -1,20 +1,19 @@
 /**
  * Database Context Utility
- * 
+ *
  * Provides request-scoped database connection management for multi-tenancy.
- * Stores the tenant database connection in AsyncLocalStorage so all models
- * can access it without passing it through every function call.
+ * getDb() returns the proxy from config/db (never the raw pool), so callers
+ * always get a live reference that forwards to the current pool — no stale refs after storm/reload.
  */
 
 const { AsyncLocalStorage } = require('async_hooks');
-const db = require('../config/db');
 
 // Create async local storage for request context
 const dbContext = new AsyncLocalStorage();
 
 /**
  * Run a function with a database connection in context
- * @param {Object} dbConnection - The database connection (pool) to use
+ * @param {Object} dbConnection - The database connection (pool/proxy) to use
  * @param {Function} callback - Function to execute with the db connection in context
  */
 function runWithDb(dbConnection, callback) {
@@ -22,13 +21,23 @@ function runWithDb(dbConnection, callback) {
 }
 
 /**
- * Get the current database connection from context
- * Falls back to default database if no tenant connection is set
- * @returns {Object} Database connection pool
+ * Get the current database connection from context.
+ * Returns tenant pool if in context, otherwise the default from config/db (the proxy).
+ * The proxy always forwards to the current pool, so no stale or ended reference.
+ * @returns {Object} Database connection (proxy or tenant pool)
  */
 function getDb() {
   const tenantDb = dbContext.getStore();
-  return tenantDb || db;
+  if (tenantDb) {
+    // Guard against leaked/ended pool references in async context.
+    if (tenantDb.ending === true) {
+      return require('../config/db');
+    }
+    if (typeof tenantDb.query === 'function') {
+      return tenantDb;
+    }
+  }
+  return require('../config/db'); // proxy; never the raw pool
 }
 
 /**

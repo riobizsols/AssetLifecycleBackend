@@ -4,50 +4,110 @@ const { generateCustomId } = require('../utils/idGenerator');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// Get all workflow steps
-const getAllWorkflowSteps = async (org_id) => {
+// Compatibility: some DBs may not have esc_no_days yet.
+const hasEscNoDaysColumn = async () => {
     const query = `
-        SELECT 
-            wf_steps_id,
-            org_id,
-            text
-        FROM "tblWFSteps"
-        WHERE org_id = $1
-        ORDER BY text
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tblWFSteps'
+          AND column_name = 'esc_no_days'
+        LIMIT 1
     `;
+    const dbPool = getDb();
+    const result = await dbPool.query(query);
+    return result.rows.length > 0;
+};
+
+// Get all workflow steps (including esc_no_days for escalation)
+const getAllWorkflowSteps = async (org_id) => {
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            SELECT 
+                wf_steps_id,
+                org_id,
+                text,
+                esc_no_days
+            FROM "tblWFSteps"
+            WHERE org_id = $1
+            ORDER BY text
+        `
+        : `
+            SELECT 
+                wf_steps_id,
+                org_id,
+                text,
+                NULL::integer AS esc_no_days
+            FROM "tblWFSteps"
+            WHERE org_id = $1
+            ORDER BY text
+        `;
     
     const dbPool = getDb();
     return await dbPool.query(query, [org_id]);
 };
 
-// Create workflow step
-const createWorkflowStep = async (org_id, text, created_by) => {
+// Create workflow step (esc_no_days = max days for approval at this step; null = use fallback)
+const createWorkflowStep = async (org_id, text, created_by, esc_no_days = null) => {
     const wf_steps_id = await generateCustomId('wfs', 3);
-    
-    const query = `
-        INSERT INTO "tblWFSteps" (
-            wf_steps_id,
-            org_id,
-            text
-        ) VALUES ($1, $2, $3)
-        RETURNING *
-    `;
-    
+
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            INSERT INTO "tblWFSteps" (
+                wf_steps_id,
+                org_id,
+                text,
+                esc_no_days
+            ) VALUES ($1, $2, $3, $4)
+            RETURNING *
+        `
+        : `
+            INSERT INTO "tblWFSteps" (
+                wf_steps_id,
+                org_id,
+                text
+            ) VALUES ($1, $2, $3)
+            RETURNING *, NULL::integer AS esc_no_days
+        `;
+
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_steps_id, org_id, text]);
+    return escNoDaysExists
+        ? dbPool.query(query, [wf_steps_id, org_id, text, esc_no_days])
+        : dbPool.query(query, [wf_steps_id, org_id, text]);
 };
 
-// Update workflow step
-const updateWorkflowStep = async (wf_steps_id, text) => {
-    const query = `
-        UPDATE "tblWFSteps"
-        SET text = $1
-        WHERE wf_steps_id = $2
-        RETURNING *
-    `;
-    
+// Update workflow step (esc_no_days = max days for approval at this step)
+const updateWorkflowStep = async (wf_steps_id, text, esc_no_days = undefined) => {
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const updates = ['text = $1'];
+    const values = [text];
+    let paramIndex = 2;
+
+    if (escNoDaysExists && esc_no_days !== undefined) {
+        updates.push(`esc_no_days = $${paramIndex}`);
+        values.push(esc_no_days === null || esc_no_days === '' ? null : parseInt(esc_no_days, 10));
+        paramIndex++;
+    }
+
+    values.push(wf_steps_id);
+    const query = escNoDaysExists
+        ? `
+            UPDATE "tblWFSteps"
+            SET ${updates.join(', ')}
+            WHERE wf_steps_id = $${paramIndex}
+            RETURNING *
+        `
+        : `
+            UPDATE "tblWFSteps"
+            SET text = $1
+            WHERE wf_steps_id = $2
+            RETURNING *, NULL::integer AS esc_no_days
+        `;
+
     const dbPool = getDb();
-    return await dbPool.query(query, [text, wf_steps_id]);
+    return await dbPool.query(query, values);
 };
 
 // Delete workflow step
@@ -64,20 +124,37 @@ const deleteWorkflowStep = async (wf_steps_id) => {
 
 // Get workflow sequences for asset type
 const getWorkflowSequencesByAssetType = async (asset_type_id, org_id) => {
-    const query = `
-        SELECT 
-            wfas.wf_at_seqs_id,
-            wfas.asset_type_id,
-            wfas.wf_steps_id,
-            wfas.seqs_no,
-            wfas.org_id,
-            ws.text as step_text
-        FROM "tblWFATSeqs" wfas
-        LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
-        WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
-        ORDER BY CAST(wfas.seqs_no AS INTEGER)
-    `;
-    
+    const escNoDaysExists = await hasEscNoDaysColumn();
+    const query = escNoDaysExists
+        ? `
+            SELECT 
+                wfas.wf_at_seqs_id,
+                wfas.asset_type_id,
+                wfas.wf_steps_id,
+                wfas.seqs_no,
+                wfas.org_id,
+                ws.text as step_text,
+                ws.esc_no_days
+            FROM "tblWFATSeqs" wfas
+            LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
+            WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
+            ORDER BY CAST(wfas.seqs_no AS INTEGER)
+        `
+        : `
+            SELECT 
+                wfas.wf_at_seqs_id,
+                wfas.asset_type_id,
+                wfas.wf_steps_id,
+                wfas.seqs_no,
+                wfas.org_id,
+                ws.text as step_text,
+                NULL::integer as esc_no_days
+            FROM "tblWFATSeqs" wfas
+            LEFT JOIN "tblWFSteps" ws ON wfas.wf_steps_id = ws.wf_steps_id
+            WHERE wfas.asset_type_id = $1 AND wfas.org_id = $2
+            ORDER BY CAST(wfas.seqs_no AS INTEGER)
+        `;
+
     const dbPool = getDb();
     return await dbPool.query(query, [asset_type_id, org_id]);
 };
@@ -155,14 +232,11 @@ const getJobRolesByWorkflowStep = async (wf_steps_id, org_id) => {
             wfjr.wf_steps_id,
             wfjr.job_role_id,
             wfjr.emp_int_id,
-            wfjr.dept_id,
             wfjr.org_id,
             jr.text as job_role_name,
-            d.text as department_name,
             e.full_name as employee_name
         FROM "tblWFJobRole" wfjr
         LEFT JOIN "tblJobRoles" jr ON wfjr.job_role_id = jr.job_role_id
-        LEFT JOIN "tblDepartments" d ON wfjr.dept_id = d.dept_id
         LEFT JOIN "tblEmployees" e ON wfjr.emp_int_id = e.emp_int_id
         WHERE wfjr.wf_steps_id = $1 AND wfjr.org_id = $2
         ORDER BY wfjr.wf_job_role_id
@@ -192,7 +266,7 @@ const checkJobRoleExists = async (wf_steps_id, job_role_id, org_id, exclude_wf_j
 };
 
 // Create workflow job role
-const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, dept_id, org_id) => {
+const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_id) => {
     const wf_job_role_id = await generateCustomId('wfjr', 3);
     
     const query = `
@@ -201,30 +275,28 @@ const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, dept_
             wf_steps_id,
             job_role_id,
             emp_int_id,
-            dept_id,
             org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5)
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, dept_id, org_id]);
+    return await dbPool.query(query, [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, org_id]);
 };
 
 // Update workflow job role
-const updateWorkflowJobRole = async (wf_job_role_id, job_role_id, emp_int_id, dept_id) => {
+const updateWorkflowJobRole = async (wf_job_role_id, job_role_id, emp_int_id) => {
     const query = `
         UPDATE "tblWFJobRole"
         SET 
             job_role_id = $1,
-            emp_int_id = $2,
-            dept_id = $3
-        WHERE wf_job_role_id = $4
+            emp_int_id = $2
+        WHERE wf_job_role_id = $3
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [job_role_id, emp_int_id, dept_id, wf_job_role_id]);
+    return await dbPool.query(query, [job_role_id, emp_int_id, wf_job_role_id]);
 };
 
 // Delete workflow job role

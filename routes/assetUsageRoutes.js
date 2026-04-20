@@ -7,6 +7,7 @@ router.get("/report/data", protect, assetUsageController.getUsageReport);
 router.get("/report/filter-options", protect, assetUsageController.getUsageReportFilterOptions);
 router.get("/report/export/csv", protect, assetUsageController.exportUsageReportCSV);
 router.get("/report/export/pdf", protect, assetUsageController.exportUsageReportPDF);
+router.get("/assets/diagnose", protect, assetUsageController.diagnoseAssetUsageData);
 router.get("/assets", protect, assetUsageController.getAssetsForUsageRecording);
 router.get("/:assetId/history", protect, assetUsageController.getUsageHistory);
 router.post("/", protect, assetUsageController.recordUsage);

@@ -92,7 +92,6 @@ const getAllAssetTypes = async (req, res) => {
     try {
         const { assignment_type } = req.query;
         const org_id = req.user?.org_id;
-        const branch_id = req.user?.branch_id;
 
         if (!org_id) {
             return res.status(400).json({ error: "Organization context missing" });
@@ -121,22 +120,9 @@ const getAllAssetTypes = async (req, res) => {
         `;
 
         const params = [org_id];
-
-        const hasSuperAccess = req.user?.hasSuperAccess || false;
-        
-        // Apply branch filter only if user doesn't have super access
-        if (!hasSuperAccess && branch_id) {
-            params.push(branch_id);
-            query += `
-              AND (
-                    d.branch_id IS NULL
-                 OR d.branch_id = $${params.length}
-              )
-            `;
-            console.log(`Filtering asset types for org ${org_id} and branch ${branch_id}`);
-        } else {
-            console.log(`Filtering asset types for org ${org_id} with no branch restriction (super access: ${hasSuperAccess})`);
-        }
+        // Asset types must be visible across all branches within the same org.
+        // Keep only org-level filtering here.
+        console.log(`Filtering asset types for org ${org_id} with no branch restriction`);
 
         if (assignment_type) {
             params.push(assignment_type);
@@ -149,7 +135,7 @@ const getAllAssetTypes = async (req, res) => {
         // Use tenant database from request if available, otherwise use default
         const dbPool = req.db || db;
         const result = await dbPool.query(query, params);
-        console.log(`Found ${result.rows.length} asset types for org ${org_id}${branch_id ? ` and branch ${branch_id}` : ''}`);
+        console.log(`Found ${result.rows.length} asset types for org ${org_id}`);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);

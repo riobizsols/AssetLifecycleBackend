@@ -136,7 +136,7 @@ const getWorkOrderById = async (req, res) => {
         if (result.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "Work order not found or does not meet criteria (status 'IN' and maintained_by 'Vendor')"
+                message: "Work order not found"
             });
         }
         

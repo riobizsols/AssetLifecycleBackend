@@ -1,4 +1,4 @@
-const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getAllMaintenanceWorkflowsByAssetId } = require('../models/approvalDetailModel');
+const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const {
     // Generic helpers
     logApiCall,
@@ -84,7 +84,17 @@ const getApprovalDetail = async (req, res) => {
       });
     }
 
-    const approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
+    // Detect if assetId is a WFAMSH ID (starts with 'WFAMSH_')
+    const isWfamshId = String(assetId || '').startsWith('WFAMSH_');
+    
+    let approvalDetail;
+    if (isWfamshId) {
+      // Use the workflow-specific endpoint for WFAMSH IDs
+      approvalDetail = await getApprovalDetailByWfamshId(assetId, orgId);
+    } else {
+      // Use asset-based endpoint for asset IDs
+      approvalDetail = await getApprovalDetailByAssetId(assetId, orgId);
+    }
 
     if (!approvalDetail) {
       if (context === 'SUPERVISORAPPROVAL') {
@@ -209,7 +219,7 @@ const approveMaintenanceAction = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const { empIntId, note } = req.body;
+    const { empIntId, note, vendorId, maintenanceDate } = req.body;
     const orgId = req.query.orgId || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
@@ -290,7 +300,37 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 5: Execute approval
-    const result = await approveMaintenance(assetId, empIntId, note, orgId);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate);
+
+    // Step 5.5: Check if approval failed due to vendor status
+    if (!result.success) {
+      if (context === 'SUPERVISORAPPROVAL') {
+        supervisorApprovalLogger.logSupervisorApprovalCompleted({
+          wfamshId: assetId,
+          action: 'approve',
+          empIntId,
+          userId,
+          duration: Date.now() - startTime,
+          error: result.message
+        }).catch(err => console.error('Logging error:', err));
+      } else {
+        logMaintenanceApproved({
+          assetId,
+          empIntId,
+          note,
+          resultMessage: result.message,
+          userId,
+          duration: Date.now() - startTime,
+          error: result.message
+        }).catch(err => console.error('Logging error:', err));
+      }
+      
+      return res.status(400).json({
+        success: false,
+        message: result.message,
+        vendorStatus: result.vendorStatus
+      });
+    }
 
     // Step 6: Log success (context-aware)
     if (context === 'SUPERVISORAPPROVAL') {
@@ -320,11 +360,15 @@ const approveMaintenanceAction = async (req, res) => {
 
   } catch (error) {
     console.error('Error in approveMaintenanceAction:', error);
+    console.error('Error stack:', error.stack);
     
     const { context } = req.query;
     
     // Determine if it's a critical error or just an error
     const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
+    
+    // Build detailed error message for user
+    const detailedErrorMsg = error.message || 'Failed to approve maintenance';
     
     if (isDbError) {
       if (error.code === 'ECONNREFUSED') {
@@ -386,8 +430,8 @@ const approveMaintenanceAction = async (req, res) => {
     
     res.status(500).json({
       success: false,
-      message: 'Failed to approve maintenance',
-      error: error.message
+      message: detailedErrorMsg,
+      error: detailedErrorMsg
     });
   }
 };
@@ -584,10 +628,13 @@ const rejectMaintenanceAction = async (req, res) => {
       }
     }
     
+    // Build detailed error message for user
+    const detailedErrorMsg = error.message || 'Failed to reject maintenance';
+    
     res.status(500).json({
       success: false,
-      message: 'Failed to reject maintenance',
-      error: error.message
+      message: detailedErrorMsg,
+      error: detailedErrorMsg
     });
   }
 };
@@ -736,7 +783,13 @@ const getMaintenanceApprovalsController = async (req, res) => {
       });
     }
 
-    const maintenanceApprovals = await getMaintenanceApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+    const maintenanceApprovals = await getMaintenanceApprovals(
+      empIntId,
+      orgId,
+      userBranchCode,
+      req.user?.hasSuperAccess || false,
+      req.user?.job_role_id || null
+    );
 
     // Format the data for frontend
     const formattedData = maintenanceApprovals.map(record => ({
@@ -798,6 +851,129 @@ const getMaintenanceApprovalsController = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve maintenance approvals',
+      error: error.message
+    });
+  }
+};
+
+// Get vendor renewal approvals controller
+const getVendorRenewalApprovalsController = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  
+  try {
+    const empIntId = req.user.emp_int_id; // Get from auth middleware
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    
+    // Get user's branch information to get branch_code
+    const userModel = require("../models/userModel");
+    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+    const userBranchId = userWithBranch?.branch_id;
+    
+    console.log('=== Vendor Renewal Approval Controller Debug ===');
+    console.log('User org_id:', orgId);
+    console.log('User branch_id:', userBranchId);
+    
+    // Get branch_code from tblBranches
+    let userBranchCode = null;
+    if (userBranchId) {
+      const dbPool = req.db || require("../config/db");
+      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+
+      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
+      if (branchResult.rows.length > 0) {
+        userBranchCode = branchResult.rows[0].branch_code;
+        console.log('User branch_code:', userBranchCode);
+      } else {
+        console.log('Branch not found for branch_id:', userBranchId);
+      }
+    }
+
+    // Log API called
+    await logApiCall({
+      operation: 'Get Vendor Renewal Approvals',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { emp_int_id: empIntId, org_id: orgId, branch_code: userBranchCode },
+      userId
+    });
+
+    if (!empIntId || empIntId === '') {
+      // WARNING: No employee ID
+      await logNoApprovalsForEmployee({
+        empIntId: 'NOT_PROVIDED',
+        orgId,
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.json({
+        success: true,
+        message: 'No vendor renewal approvals found - Employee ID not available',
+        data: [],
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+
+    // Format the data for frontend
+    const formattedData = vendorRenewalApprovals.map(record => ({
+      wfamsh_id: record.wfamsh_id,
+      vendor_id: record.vendor_id,
+      vendor_name: record.vendor_name || '-',
+      company_name: record.company_name || '-',
+      contact_person_name: record.contact_person_name || '-',
+      contact_person_email: record.contact_person_email || '-',
+      scheduled_date: record.scheduled_date,
+      actual_date: record.act_sch_date,
+      maintenance_type: record.maintenance_type_name || 'Vendor Contract Renewal',
+      status: record.header_status,
+      days_until_due: record.days_until_due,
+      days_until_cutoff: record.days_until_cutoff,
+      maintenance_created_on: record.maintenance_created_on,
+      maintenance_changed_on: record.maintenance_changed_on,
+      branch_code: record.branch_code,
+      org_id: orgId
+    }));
+
+    // Log success
+    await logApprovalsRetrieved({
+      empIntId,
+      count: formattedData.length,
+      orgId,
+      userId,
+      duration: Date.now() - startTime
+    });
+
+    res.json({
+      success: true,
+      message: 'Vendor renewal approvals retrieved successfully',
+      data: formattedData,
+      count: formattedData.length,
+      user_context: {
+        org_id: orgId,
+        branch_id: userBranchId,
+        branch_code: userBranchCode
+      },
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error('Error in getVendorRenewalApprovals:', error);
+    
+    // Log error
+    await logDataRetrievalError({
+      operation: 'Get Vendor Renewal Approvals',
+      params: { emp_int_id: req.user?.emp_int_id, org_id: req.query.orgId },
+      error,
+      userId,
+      duration: Date.now() - startTime
+    });
+    
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve vendor renewal approvals',
       error: error.message
     });
   }
@@ -1081,6 +1257,9 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       isOverdue: approvalDetail.isOverdue,
       notes: approvalDetail.notes,
       checklist: approvalDetail.checklist,
+      header_emp_int_id: approvalDetail.header_emp_int_id || null,
+      maintained_by: approvalDetail.maintained_by || null,
+      at_main_freq_id: approvalDetail.at_main_freq_id || null,
       vendorDetails: approvalDetail.vendorDetails,
       workflowSteps: approvalDetail.workflowSteps,
       workflowDetails: approvalDetail.workflowDetails,
@@ -1127,6 +1306,38 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
   }
 };
 
+// Update workflow header (vendor, maintenance date or technician) independently
+const updateWorkflowHeaderAction = async (req, res) => {
+  try {
+    const { wfamshId } = req.params;
+    const { vendorId, maintenanceDate, technicianId } = req.body;
+    const userId = req.user?.user_id;
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    
+    if (!wfamshId) {
+      return res.status(400).json({ success: false, message: 'Workflow ID is required' });
+    }
+    
+    if (vendorId === undefined && maintenanceDate === undefined && technicianId === undefined) {
+      return res.status(400).json({ success: false, message: 'At least one field (vendorId, maintenanceDate or technicianId) must be provided' });
+    }
+    const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, technicianId, userId, orgId);
+    
+    if (result.success) {
+      return res.json(result);
+    } else {
+      return res.status(400).json(result);
+    }
+  } catch (error) {
+    console.error('Error updating workflow header:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to update workflow header',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getApprovalDetail,
   getApprovalDetailByWfamshId: getApprovalDetailByWfamshIdController,
@@ -1135,5 +1346,7 @@ module.exports = {
   getWorkflowHistory: getWorkflowHistoryController,
   getWorkflowHistoryByWfamshId: getWorkflowHistoryByWfamshIdController,
   getMaintenanceApprovals: getMaintenanceApprovalsController,
-  getAllMaintenanceWorkflows
+  getVendorRenewalApprovals: getVendorRenewalApprovalsController,
+  getAllMaintenanceWorkflows,
+  updateWorkflowHeaderAction
 }; 

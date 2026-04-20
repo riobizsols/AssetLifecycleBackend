@@ -187,8 +187,8 @@ const createScrapSale = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // Create scrap sale
-        const result = await model.createScrapSale(saleData);
+        // Create scrap sale with workflow (for approval process)
+        const result = await model.createScrapSaleWithWorkflow(saleData, org_id, created_by);
         
         // Log database transaction completed
         scrapSalesLogger.logDatabaseTransactionCompleted({

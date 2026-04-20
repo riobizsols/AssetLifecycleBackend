@@ -8,7 +8,22 @@ const getDb = () => {
   return contextDb;
 };
 
-const insertAssetType = async (org_id, asset_type_id, int_status, maint_required, assignment_type, inspection_required, group_required, created_by, text, is_child = false, parent_asset_type_id = null, maint_type_id = null, maint_lead_type = null, depreciation_type = 'ND') => {
+const insertAssetType = async (
+    org_id,
+    asset_type_id,
+    int_status,
+    maint_required,
+    assignment_type,
+    inspection_required,
+    group_required,
+    created_by,
+    text,
+    is_child = false,
+    parent_asset_type_id = null,
+    maint_type_id = null,
+    maint_lead_type = null,
+    depreciation_type = 'ND'
+) => {
     const query = `
         INSERT INTO "tblAssetTypes" (
             org_id, asset_type_id, int_status, maint_required, 
@@ -21,7 +36,8 @@ const insertAssetType = async (org_id, asset_type_id, int_status, maint_required
     
     const values = [
         org_id, asset_type_id, int_status, maint_required,
-        assignment_type, inspection_required, group_required, created_by, text,
+        assignment_type, inspection_required, group_required,
+        created_by, text,
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type
     ];
     
@@ -87,12 +103,29 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     
     const values = [
         org_id, int_status, maint_required, assignment_type,
-        inspection_required, group_required, changed_by, text,
+        inspection_required, group_required,
+        changed_by, text,
         is_child, parent_asset_type_id, maint_type_id, maint_lead_type, depreciation_type, asset_type_id
     ];
     
     const dbPool = getDb();
     return await dbPool.query(query, values);
+};
+
+const updateAssetTypeMaintenance = async (asset_type_id, maint_type_id, maint_lead_type, org_id, changed_by) => {
+    const query = `
+        UPDATE "tblAssetTypes"
+        SET maint_required = true,
+            maint_type_id = $1,
+            maint_lead_type = $2,
+            changed_by = $3,
+            changed_on = CURRENT_TIMESTAMP
+        WHERE asset_type_id = $4 AND org_id = $5
+        RETURNING *
+    `;
+
+    const dbPool = getDb();
+    return await dbPool.query(query, [maint_type_id, maint_lead_type, changed_by, asset_type_id, org_id]);
 };
 
 const checkAssetTypeExists = async (org_id, asset_type_id) => {
@@ -128,20 +161,29 @@ const checkAssetTypeReferences = async (asset_type_id) => {
     }
 };
 
-const getParentAssetTypes = async () => {
-    const query = `
+const getParentAssetTypes = async (org_id = null) => {
+    const dbPool = getDb();
+    const params = [];
+    
+    let query = `
         SELECT 
             asset_type_id,
             text,
             int_status
         FROM "tblAssetTypes"
-        WHERE is_child = false
-        AND int_status = 1
-        ORDER BY text
+        WHERE int_status = 1
+          AND COALESCE(is_child, false) = false
+          AND (parent_asset_type_id IS NULL OR parent_asset_type_id = '')
     `;
     
-    const dbPool = getDb();
-    return await dbPool.query(query);
+    if (org_id) {
+        query += ` AND org_id = $1`;
+        params.push(org_id);
+    }
+    
+    query += ` ORDER BY text`;
+    
+    return await dbPool.query(query, params);
 };
 
 const getAssetTypesByAssignmentType = async (assignment_type) => {
@@ -546,6 +588,7 @@ module.exports = {
     getAllAssetTypes,
     getAssetTypeById,
     updateAssetType,
+    updateAssetTypeMaintenance,
     deleteAssetType,
     checkAssetTypeExists,
     checkAssetTypeReferences,

@@ -5,8 +5,12 @@ const {
   getOverdueWorkflowsController,
   triggerEscalationProcessController,
   getNextApproverController,
-  manualEscalateWorkflowController
+  manualEscalateWorkflowController,
+  getEscalationStatusController
 } = require('../controllers/workflowEscalationController');
+
+// Escalation status: overdue count, steps with esc_no_days, and whether escalation will run
+router.get('/status', protect, getEscalationStatusController);
 
 // Get all overdue workflows
 router.get('/overdue', protect, getOverdueWorkflowsController);

@@ -1,7 +1,6 @@
-const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
 
-// Helper function to get database connection (tenant pool or default)
+// Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
 
 
@@ -19,10 +18,23 @@ class TechnicalLogConfigModel {
                 WHERE app_id = $1
             `;
             const dbPool = getDb();
-
-            const result = await dbPool.query(query, [appId]);
+            let result;
+            try {
+                result = await dbPool.query(query, [appId]);
+            } catch (error) {
+                const isPoolEnded = error && /pool after calling end/i.test(String(error.message));
+                if (!isPoolEnded) throw error;
+                // Fallback to live default DB proxy in case context/passed pool became stale.
+                const defaultDb = require('../config/db');
+                result = await defaultDb.query(query, [appId]);
+            }
             return result.rows[0] || null;
         } catch (error) {
+            const isPoolEnded = error && /pool after calling end/i.test(String(error.message));
+            if (isPoolEnded) {
+                console.warn('Technical log config: pool unavailable, skipping log config.');
+                return null;
+            }
             console.error('Error getting technical log config:', error);
             throw error;
         }

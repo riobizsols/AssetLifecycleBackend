@@ -5,6 +5,106 @@ const workflowNotificationService = require('../services/workflowNotificationSer
 const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
+const brHistModel = require('./assetMaintSchBrHistModel');
+
+// Update workflow header (vendor_id, maintenance date and/or technician) independently
+const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
+  try {
+    if (vendorId !== null && vendorId !== undefined) {
+      const vendorCheckQuery = `
+        SELECT int_status
+        FROM "tblVendors"
+        WHERE vendor_id = $1 AND org_id = $2
+      `;
+      const vendorCheckResult = await getDb().query(vendorCheckQuery, [vendorId, orgId]);
+      if (vendorCheckResult.rows.length === 0) {
+        return { success: false, message: 'Vendor not found' };
+      }
+      const vendorStatus = vendorCheckResult.rows[0].int_status;
+      if (vendorStatus !== 1) {
+        return {
+          success: false,
+          message: 'The specified Service Vendor is Inactive or CR Approved. Please choose another vendor for service.',
+          vendorStatus,
+        };
+      }
+    }
+
+    const updateFields = [];
+    const updateValues = [];
+    let paramIndex = 1;
+    
+    if (vendorId !== null && vendorId !== undefined) {
+      updateFields.push(`vendor_id = $${paramIndex++}`);
+      updateValues.push(vendorId);
+    }
+    
+    if (maintenanceDate !== null && maintenanceDate !== undefined) {
+      updateFields.push(`pl_sch_date = $${paramIndex++}`);
+      updateValues.push(maintenanceDate);
+    }
+    
+    if (technicianId !== null && technicianId !== undefined) {
+      updateFields.push(`emp_int_id = $${paramIndex++}`);
+      updateValues.push(technicianId);
+    }
+    
+    if (updateFields.length === 0) {
+      return { success: false, message: 'No fields to update' };
+    }
+    
+    // Add changed_by and changed_on
+    updateFields.push(`changed_by = $${paramIndex++}`);
+    updateValues.push(userId ? userId.substring(0, 20) : 'system');
+    
+    // Add WHERE clause parameters
+    updateValues.push(wfamshId, orgId);
+    
+    const updateQuery = `
+      UPDATE "tblWFAssetMaintSch_H" 
+      SET ${updateFields.join(', ')}, changed_on = NOW()::timestamp without time zone
+      WHERE wfamsh_id = $${paramIndex++} AND org_id = $${paramIndex++}
+      RETURNING vendor_id, pl_sch_date, emp_int_id
+    `;
+    
+    const result = await getDb().query(updateQuery, updateValues);
+    
+    if (result.rows.length === 0) {
+      return { success: false, message: 'Workflow header not found' };
+    }
+
+    // Keep asset master in sync: if vendor is changed at workflow level,
+    // update the specific asset's service vendor immediately.
+    if (vendorId !== null && vendorId !== undefined) {
+      const updateAssetVendorQuery = `
+        UPDATE "tblAssets" a
+        SET service_vendor_id = $1,
+            changed_by = $2,
+            changed_on = NOW()::timestamp without time zone
+        FROM "tblWFAssetMaintSch_H" wfh
+        WHERE wfh.wfamsh_id = $3
+          AND wfh.org_id = $4
+          AND a.asset_id = wfh.asset_id
+          AND a.org_id = wfh.org_id
+      `;
+      await getDb().query(updateAssetVendorQuery, [
+        vendorId,
+        userId ? userId.substring(0, 20) : 'system',
+        wfamshId,
+        orgId,
+      ]);
+    }
+    
+    return {
+      success: true,
+      message: 'Workflow header updated successfully',
+      data: result.rows[0]
+    };
+  } catch (error) {
+    console.error('Error updating workflow header:', error);
+    throw error;
+  }
+};
 
 // Helper function to convert emp_int_id to user_id
 const getUserIdByEmpIntId = async (empIntId) => {
@@ -77,10 +177,10 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         at.text as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
         -- To see who actually approved, check tblWFAssetMaintHist.action_by
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
@@ -126,8 +226,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       // Get the first record for basic details
       const firstRecord = approvalDetails[0];
       
-              // Fetch checklist items for this asset
-        const checklistItems = await getChecklistByAssetId(assetId, orgId);
+              // Fetch checklist items for this asset (scope to this workflow when possible)
+        const checklistItems = await getChecklistByAssetId(assetId, orgId, firstRecord.wfamsh_id);
         
         // Fetch vendor details
         let vendorDetails = null;
@@ -240,12 +340,86 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001') => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null) => {
   try {
     // Convert emp_int_id to user_id
     const userId = await getUserIdByEmpIntId(empIntId);
     if (!userId) {
       throw new Error('User not found with the provided employee ID');
+    }
+    
+    // Detect whether the identifier is a wfamsh_id or asset_id (needed for vendor check)
+    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    
+    // If vendor_id is provided, validate it's active (int_status = 1)
+    // Also check the current vendor from workflow if no new vendor is provided
+    let vendorToCheck = vendorId;
+    if (!vendorToCheck) {
+      if (isWfamshId) {
+        // Get current vendor from workflow header
+        const currentVendorQuery = `SELECT vendor_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`;
+        const currentVendorResult = await getDb().query(currentVendorQuery, [assetOrWfamshId, orgId]);
+        if (currentVendorResult.rows.length > 0 && currentVendorResult.rows[0].vendor_id) {
+          vendorToCheck = currentVendorResult.rows[0].vendor_id;
+        } else {
+          // Try to get from asset's service_vendor_id
+          const assetVendorQuery = `
+            SELECT a.service_vendor_id 
+            FROM "tblWFAssetMaintSch_H" wfh
+            INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+            WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+          `;
+          const assetVendorResult = await getDb().query(assetVendorQuery, [assetOrWfamshId, orgId]);
+          if (assetVendorResult.rows.length > 0 && assetVendorResult.rows[0].service_vendor_id) {
+            vendorToCheck = assetVendorResult.rows[0].service_vendor_id;
+          }
+        }
+      } else {
+        // For asset_id, get service_vendor_id from asset
+        const assetVendorQuery = `SELECT service_vendor_id FROM "tblAssets" WHERE asset_id = $1 AND org_id = $2`;
+        const assetVendorResult = await getDb().query(assetVendorQuery, [assetOrWfamshId, orgId]);
+        if (assetVendorResult.rows.length > 0 && assetVendorResult.rows[0].service_vendor_id) {
+          vendorToCheck = assetVendorResult.rows[0].service_vendor_id;
+        }
+      }
+    }
+    
+    // Determine if maintenance is actually performed inhouse
+    let isInhouse = false;
+    if (isWfamshId) {
+      const maintByQuery = `
+        SELECT 
+          CASE 
+            WHEN COALESCE(wfh.vendor_id, a.service_vendor_id) IS NOT NULL
+                 AND COALESCE(wfh.vendor_id, a.service_vendor_id) != ''
+            THEN 'Vendor'
+            ELSE 'Inhouse'
+          END as maintained_by
+        FROM "tblWFAssetMaintSch_H" wfh
+        LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+        WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+      `;
+      const maintByRes = await getDb().query(maintByQuery, [assetOrWfamshId, orgId]);
+      if (maintByRes.rows.length > 0) {
+        isInhouse = (maintByRes.rows[0].maintained_by || '').toLowerCase() === 'inhouse';
+      }
+    }
+
+    if (vendorToCheck && !isInhouse) {
+      const vendorCheckQuery = `SELECT int_status FROM "tblVendors" WHERE vendor_id = $1 AND org_id = $2`;
+      const vendorResult = await getDb().query(vendorCheckQuery, [vendorToCheck, orgId]);
+      if (vendorResult.rows.length === 0) {
+        throw new Error('Vendor not found');
+      }
+      const vendorStatus = vendorResult.rows[0].int_status;
+      if (vendorStatus !== 1) {
+        // Return error response instead of throwing - this is a validation message, not an error
+        return {
+          success: false,
+          message: 'The specified Service Vendor is Inactive or CR Approved. Please choose another vendor for service.',
+          vendorStatus: vendorStatus
+        };
+      }
     }
     
     // ROLE-BASED WORKFLOW: Get user's roles
@@ -259,27 +433,27 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       throw new Error('User has no assigned roles');
     }
     
-    // Detect whether the identifier is a wfamsh_id or asset_id
-    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    // isWfamshId is already declared above for vendor check
 
+    // ROLE-BASED: Only users with the required role for the current AP step can approve (no System Admin bypass)
     let currentResult;
     if (isWfamshId) {
-      // ROLE-BASED: Find workflow step where user has the required role
       const byHeaderQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
       currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
-      // ROLE-BASED: Find workflow step where user has the required role
       const currentQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
         WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
@@ -291,17 +465,107 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       throw new Error('No workflow found for this asset or user does not have required role');
     }
     
-    // ROLE-BASED: Find the current step that needs approval (status AP)
-    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
+    const workflowDetails2 = currentResult.rows;
+    
+    // Find the current step that needs approval (status AP)
+    const currentUserStep = workflowDetails2.find(w => w.status === 'AP');
+    console.log(`[APPROVAL STEP SELECTION] Looking for AP step. Found:`, currentUserStep ? 'YES' : 'NO');
+    
     if (!currentUserStep) {
-      throw new Error('No pending approval step found for your role');
+      console.error(`[APPROVAL ERROR] No approval step found. Available steps:`, workflowDetails2);
+      throw new Error(`No pending approval step found. Found ${workflowDetails2.length} steps with statuses: ${workflowDetails2.map(s => s.status).join(', ')}`);
+    }
+    
+    console.log(`[APPROVAL] Using workflow step:`, { wfamsd_id: currentUserStep.wfamsd_id, status: currentUserStep.status, sequence: currentUserStep.sequence});
+    
+    // Update vendor_id and maintenance date in header if provided
+    // Always update if values are provided (even if same as current) to ensure changes are saved
+    if (vendorId !== null && vendorId !== undefined || maintenanceDate !== null && maintenanceDate !== undefined) {
+      const updateFields = [];
+      const updateValues = [];
+      let paramIndex = 1;
+      
+      if (vendorId !== null && vendorId !== undefined) {
+        updateFields.push(`vendor_id = $${paramIndex++}`);
+        updateValues.push(vendorId);
+        console.log(`Updating vendor_id to: ${vendorId}`);
+      }
+      
+      if (maintenanceDate !== null && maintenanceDate !== undefined) {
+        updateFields.push(`pl_sch_date = $${paramIndex++}`);
+        updateValues.push(maintenanceDate);
+        console.log(`Updating pl_sch_date to: ${maintenanceDate}`);
+      }
+      
+      if (updateFields.length > 0) {
+        updateFields.push(`changed_by = $${paramIndex++}`);
+        updateValues.push(userId.substring(0, 20));
+        
+        updateValues.push(currentUserStep.wfamsh_id, orgId);
+        
+        const updateHeaderQuery = `
+          UPDATE "tblWFAssetMaintSch_H" 
+          SET ${updateFields.join(', ')}, changed_on = NOW()::timestamp without time zone
+          WHERE wfamsh_id = $${paramIndex++} AND org_id = $${paramIndex++}
+        `;
+        
+        await getDb().query(updateHeaderQuery, updateValues);
+        console.log(`✅ Updated workflow header: ${updateFields.join(', ')}`);
+      }
+    }
+
+    // If a new vendor is explicitly chosen during approval,
+    // persist it to tblAssets.service_vendor_id for this asset.
+    if (vendorId !== null && vendorId !== undefined) {
+      if (isWfamshId) {
+        const updateAssetVendorByWorkflowQuery = `
+          UPDATE "tblAssets" a
+          SET service_vendor_id = $1,
+              changed_by = $2,
+              changed_on = NOW()::timestamp without time zone
+          FROM "tblWFAssetMaintSch_H" wfh
+          WHERE wfh.wfamsh_id = $3
+            AND wfh.org_id = $4
+            AND a.asset_id = wfh.asset_id
+            AND a.org_id = wfh.org_id
+        `;
+        await getDb().query(updateAssetVendorByWorkflowQuery, [
+          vendorId,
+          userId.substring(0, 20),
+          currentUserStep.wfamsh_id,
+          orgId,
+        ]);
+      } else {
+        const updateAssetVendorByAssetIdQuery = `
+          UPDATE "tblAssets"
+          SET service_vendor_id = $1,
+              changed_by = $2,
+              changed_on = NOW()::timestamp without time zone
+          WHERE asset_id = $3 AND org_id = $4
+        `;
+        await getDb().query(updateAssetVendorByAssetIdQuery, [
+          vendorId,
+          userId.substring(0, 20),
+          assetOrWfamshId,
+          orgId,
+        ]);
+      }
     }
     
     // ROLE-BASED: Update workflow step status to UA (User Approved)
     // user_id remains NULL - only job_role_id is used
+    // We preserve existing notes if they contain breakdown info
     await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
-       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       SET status = $1, 
+           notes = CASE 
+             WHEN notes ILIKE '%Breakdown%' AND $2::text IS NOT NULL AND $2::text != '' 
+             THEN notes || ' (Note: ' || $2::text || ')'
+             WHEN $2::text IS NOT NULL AND $2::text != '' THEN $2::text
+             ELSE notes
+           END,
+           changed_by = $3, 
+           changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
       ['UA', note, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
@@ -375,16 +639,13 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
         console.error('Failed to send notification to next approver:', notifyErr);
       }
     } else {
-      // No next user - check if all users have approved
+      // No next user - check if all workflow steps have been approved
+      // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
       const allUsersApprovedQuery = `
-        SELECT COUNT(*) as total_users,
-               COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users
-        FROM (
-          SELECT DISTINCT wfd.user_id, 
-                 FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-          FROM "tblWFAssetMaintSch_D" wfd
-          WHERE wfd.wfamsh_id = $1
-        ) latest_status
+        SELECT COUNT(DISTINCT wfd.sequence) as total_users,
+               COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1
       `;
       
       const approvalCheckResult = await getDb().query(allUsersApprovedQuery, [currentUserStep.wfamsh_id]);
@@ -425,27 +686,28 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User has no assigned roles');
     }
     
-    // Detect whether the identifier is a wfamsh_id or asset_id
+    // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
+    // ROLE-BASED: Only users with the required role for the current AP step can reject (no System Admin bypass)
     let currentResult;
     if (isWfamshId) {
-      // ROLE-BASED: Find workflow step where user has the required role
       const byHeaderQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
       currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
     } else {
-      // ROLE-BASED: Find workflow step where user has the required role
       const currentQuery = `
         SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
         FROM "tblWFAssetMaintSch_D" wfd
         INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
         WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
           AND wfd.job_role_id = ANY($3::varchar[])
         ORDER BY wfd.sequence ASC
       `;
@@ -457,17 +719,28 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('No workflow found for this asset or user does not have required role');
     }
     
-    // ROLE-BASED: Find the current step that needs approval (status AP)
-    let currentUserStep = workflowDetails.find(w => w.status === 'AP');
+    const workflowDetails2 = currentResult.rows;
+    const currentUserStep = workflowDetails2.find(w => w.status === 'AP');
     if (!currentUserStep) {
-      throw new Error('No pending approval step found for your role');
+      console.error(`[REJECTION ERROR] No rejection step found. Available steps:`, workflowDetails2);
+      throw new Error(`No pending approval step found for rejection. Found ${workflowDetails2.length} steps with statuses: ${workflowDetails2.map(s => s.status).join(', ')}`);
     }
     
+    console.log(`[REJECTION STEP SELECTED] Step ID: ${currentUserStep.wfamsd_id}, Current Status: ${currentUserStep.status}, Sequence: ${currentUserStep.sequence}`);
+    
     // ROLE-BASED: Update workflow step status to UR (User Rejected)
-    // user_id remains NULL - only job_role_id is used
+    // Preserve existing breakdown notes if present
     await getDb().query(
       `UPDATE "tblWFAssetMaintSch_D" 
-       SET status = $1, notes = $2, changed_by = $3, changed_on = ARRAY[NOW()::timestamp without time zone]
+       SET status = $1, 
+           notes = CASE 
+             WHEN notes ILIKE '%Breakdown%' AND $2::text IS NOT NULL AND $2::text != '' 
+             THEN notes || ' (Rejection Reason: ' || $2::text || ')'
+             WHEN $2::text IS NOT NULL AND $2::text != '' THEN $2::text
+             ELSE notes
+           END,
+           changed_by = $3, 
+           changed_on = ARRAY[NOW()::timestamp without time zone]
        WHERE wfamsd_id = $4`,
       ['UR', reason, userId.substring(0, 20), currentUserStep.wfamsd_id]
     );
@@ -592,17 +865,14 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       }
     }
     
-    // Check if all users have rejected
+    // Check if all workflow steps have been rejected
+    // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
     const rejectionCheckQuery = `
       SELECT 
-        COUNT(*) as total_users,
-        COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users
-      FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1
-      ) latest_status
+        COUNT(DISTINCT wfd.sequence) as total_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1
     `;
     
     const rejectionCheckResult = await getDb().query(rejectionCheckQuery, [currentUserStep.wfamsh_id]);
@@ -616,19 +886,16 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
     } else {
       // Check if this rejection creates a deadlock (no more path forward)
+      // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
       const deadlockCheckQuery = `
         SELECT 
-          COUNT(*) as total_users,
-          COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-          COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-          COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-        FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
+          COUNT(DISTINCT wfd.sequence) as total_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users,
+          COUNT(DISTINCT CASE WHEN wfd.status = 'AP' THEN wfd.sequence END) as pending_users
         FROM "tblWFAssetMaintSch_D" wfd
         WHERE wfd.wfamsh_id = $1
-      ) latest_status
-    `;
+      `;
     
     const deadlockResult = await getDb().query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
     const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
@@ -823,34 +1090,40 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
 // Helper function to check and update workflow status
 const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
   try {
-    // Get current status of all users in the workflow
+    // Get current status of all workflow steps (sequences)
+    // For ROLE-BASED workflows where user_id is NULL, we count by sequence instead
     const statusQuery = `
       SELECT 
-        COUNT(*) as total_users,
-        COUNT(CASE WHEN latest_status.status = 'UA' THEN 1 END) as approved_users,
-        COUNT(CASE WHEN latest_status.status = 'UR' THEN 1 END) as rejected_users,
-        COUNT(CASE WHEN latest_status.status = 'AP' THEN 1 END) as pending_users
-      FROM (
-        SELECT DISTINCT wfd.user_id, 
-               FIRST_VALUE(wfd.status) OVER (PARTITION BY wfd.user_id ORDER BY wfd.created_on DESC) as status
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1
-      ) latest_status
+        COUNT(DISTINCT wfd.sequence) as total_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users,
+        COUNT(DISTINCT CASE WHEN wfd.status = 'AP' THEN wfd.sequence END) as pending_users
+      FROM "tblWFAssetMaintSch_D" wfd
+      WHERE wfd.wfamsh_id = $1
     `;
     
     const statusResult = await getDb().query(statusQuery, [wfamshId]);
     const { total_users, approved_users, rejected_users, pending_users } = statusResult.rows[0];
     
-    console.log(`Workflow status check - Total: ${total_users}, Approved: ${approved_users}, Rejected: ${rejected_users}, Pending: ${pending_users}`);
+    console.log(`Workflow status check (by sequence) - Total steps: ${total_users}, Approved: ${approved_users}, Rejected: ${rejected_users}, Pending: ${pending_users}`);
     
          // Check for completion (all users approved)
      if (parseInt(approved_users) === parseInt(total_users)) {
        console.log(`All users approved! Total: ${total_users}, Approved: ${approved_users}`);
        
-       // Get workflow type to check if it's vendor contract renewal (MT005)
-       const workflowTypeQuery = `SELECT maint_type_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`;
+       // Get workflow type and vendor_id to check if it's vendor contract renewal (MT005) or vendor workflow
+       // Check both workflow header vendor_id and asset's service_vendor_id
+       const workflowTypeQuery = `
+         SELECT 
+           wfh.maint_type_id, 
+           COALESCE(wfh.vendor_id, a.service_vendor_id) as vendor_id
+         FROM "tblWFAssetMaintSch_H" wfh
+         LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
+       `;
        const workflowTypeResult = await getDb().query(workflowTypeQuery, [wfamshId, orgId]);
        const maintTypeId = workflowTypeResult.rows.length > 0 ? workflowTypeResult.rows[0].maint_type_id : null;
+       const vendorId = workflowTypeResult.rows.length > 0 ? workflowTypeResult.rows[0].vendor_id : null;
        const isVendorContractRenewal = maintTypeId === 'MT005';
        
        await getDb().query(
@@ -862,6 +1135,52 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          [wfamshId, orgId]
        );
        console.log('Workflow completed - Status set to CO');
+
+       // Update tblAssetBRDet status to CO if this workflow is for a breakdown
+       try {
+         // Try to find if any workflow step has a breakdown ID in notes
+         const breakdownIdQuery = `
+           SELECT notes FROM "tblWFAssetMaintSch_D" 
+           WHERE wfamsh_id = $1 AND org_id = $2 
+           AND (notes ILIKE '%BF01-Breakdown%' OR notes ILIKE '%BF03-Breakdown%' OR notes ILIKE '%Breakdown%')
+           LIMIT 1
+         `;
+         const breakdownIdResult = await getDb().query(breakdownIdQuery, [wfamshId, orgId]);
+         
+         if (breakdownIdResult.rows.length > 0) {
+           const notes = breakdownIdResult.rows[0].notes;
+           // Extract breakdown ID (ABR-XXX or ABRXXX)
+           const abrMatch = notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+           const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
+           
+           if (breakdownId) {
+             // Strict Status Workflow: Status stays as 'IN' (Initiated) during approval closure.
+             // However, if the status is 'Reopened', we keep it as 'Reopened' to preserve history.
+             // It will only change to 'CO' (Completed) when the technician finishes work in the Maintenance List.
+             await getDb().query(
+               `UPDATE "tblAssetBRDet" 
+                SET status = CASE 
+                  WHEN status = 'Reopened' THEN 'Reopened' 
+                  ELSE 'IN' 
+                END 
+                WHERE abr_id = $1 AND org_id = $2`,
+               [breakdownId, orgId]
+             );
+             console.log(`✅ Linked breakdown report ${breakdownId} status synced (IN or Reopened)`);
+           }
+         }
+       } catch (brErr) {
+         console.error('Error updating breakdown report status on workflow completion:', brErr);
+         // Don't throw - continue with maintenance record creation
+       }
+       
+       // Do NOT mutate vendor int_status on approval completion.
+       //
+       // Business rule:
+       // - Vendor Contract Renewal (MT005): approval only authorizes renewal workflow; the user must upload
+       //   renewal docs and update the contract_end_date from the Vendor screen.
+       // - If contract_end_date is NOT updated before it expires, a cron job will mark the vendor inactive (int_status = 0).
+       // - Blacklist is a separate manual action (int_status = 4).
        
       // Create maintenance record in tblAssetMaintSch (skip for vendor contract renewal MT005)
       if (!isVendorContractRenewal) {
@@ -886,8 +1205,8 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
               wfh.branch_code,
               wfh.pl_sch_date,
               v.vendor_name,
-              v.contract_start_date,
-              v.contract_end_date,
+              NULL as contract_start_date,
+              NULL as contract_end_date,
               wfh.created_by
             FROM "tblWFAssetMaintSch_H" wfh
             LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
@@ -951,6 +1270,32 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          [wfamshId, orgId]
        );
        console.log('Workflow cancelled - All users rejected, Status set to CA');
+
+       // Update tblAssetBRDet status to CA if this workflow is for a breakdown
+       try {
+         const breakdownIdQuery = `
+           SELECT notes FROM "tblWFAssetMaintSch_D" 
+           WHERE wfamsh_id = $1 AND org_id = $2 
+           AND (notes ILIKE '%BF01-Breakdown%' OR notes ILIKE '%BF03-Breakdown%' OR notes ILIKE '%Breakdown%')
+           LIMIT 1
+         `;
+         const breakdownIdResult = await getDb().query(breakdownIdQuery, [wfamshId, orgId]);
+         if (breakdownIdResult.rows.length > 0) {
+           const notes = breakdownIdResult.rows[0].notes;
+           const abrMatch = notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+           const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
+           if (breakdownId) {
+             await getDb().query(
+               `UPDATE "tblAssetBRDet" SET status = 'CA' WHERE abr_id = $1 AND org_id = $2`,
+               [breakdownId, orgId]
+             );
+             console.log(`❌ Linked breakdown report ${breakdownId} status updated to CA`);
+           }
+         }
+       } catch (brErr) {
+         console.error('Error updating breakdown report status on rejection:', brErr);
+       }
+
        return 'CA';
      }
      
@@ -983,13 +1328,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 };
 
 // Supports super access users who can view all branches
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false) => {
+// tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
      console.log('orgId:', orgId);
      console.log('userBranchCode:', userBranchCode);
      console.log('hasSuperAccess:', hasSuperAccess);
+     console.log('tokenJobRoleId:', tokenJobRoleId);
      
      // Handle empty string or null empIntId
      if (!empIntId || empIntId === '') {
@@ -1010,14 +1357,24 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
      const rolesResult = await getDb().query(rolesQuery, [userId]);
-     const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
+     const userRoleIds = [...new Set([
+       ...rolesResult.rows.map(r => r.job_role_id),
+       ...(tokenJobRoleId ? [String(tokenJobRoleId).trim()] : [])
+     ].filter(Boolean))];
      
      if (userRoleIds.length === 0) {
        console.log('User has no assigned roles');
        return [];
      }
      
-     console.log('User roles:', userRoleIds);
+     console.log('User roles (DB + token):', userRoleIds);
+     
+     // Check for System Administrator role (JR001) or other super access
+     const isSystemAdmin = userRoleIds.includes('JR001');
+     if (isSystemAdmin) {
+       console.log('User has System Administrator role (JR001) - granting super access for this query');
+       hasSuperAccess = true;
+     }
      
      // Build parameters array dynamically
      const params = [orgId];
@@ -1025,54 +1382,66 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      // ROLE-BASED: Query workflows where user's roles match workflow steps AND maintenance belongs to user's org/branch_code
      let query = `
-       SELECT DISTINCT
-         wfh.wfamsh_id,
-         wfh.asset_id,
-         wfh.pl_sch_date as scheduled_date,
-         wfh.act_sch_date,
-         wfh.status as header_status,
-         wfh.created_on as maintenance_created_on,
-         wfh.changed_on as maintenance_changed_on,
-         wfh.branch_code,
-         a.asset_type_id,
-         at.text as asset_type_name,
-         a.serial_number,
-         a.description as asset_description,
-         v.vendor_name,
-         v.vendor_name as vendor,
-         d.text as department_name,
-         jr.text as job_role_name,
-         mt.text as maintenance_type_name,
-         mt.text as maintenance_type,
-         -- Calculate days until due
-         EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
-         -- Calculate days until cutoff
-         EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(NULLIF(at.maint_lead_type, '') AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
-       FROM "tblWFAssetMaintSch_H" wfh
-       INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
-       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
-       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
-       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-       LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
-       LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
-       WHERE wfd.org_id = $1 
-         AND a.org_id = $1
+       SELECT * FROM (
+         SELECT DISTINCT ON (wfh.wfamsh_id)
+           wfh.wfamsh_id,
+           wfh.asset_id,
+           wfh.pl_sch_date as scheduled_date,
+           wfh.act_sch_date,
+           wfh.status as header_status,
+           wfh.created_on as maintenance_created_on,
+           wfh.changed_on as maintenance_changed_on,
+           wfh.branch_code,
+           a.asset_type_id,
+           at.text as asset_type_name,
+           a.serial_number,
+           a.description as asset_description,
+           v.vendor_name,
+           v.vendor_name as vendor,
+           d.text as department_name,
+           jr.text as job_role_name,
+           mt.text as maintenance_type_name,
+           mt.text as maintenance_type,
+           -- Calculate days until due
+           EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+           -- Calculate days until cutoff
+           EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(CAST(NULLIF(at.maint_lead_type, '') AS INTEGER), 0)) - CURRENT_DATE)) as days_until_cutoff
+         FROM "tblWFAssetMaintSch_H" wfh
+         INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
+         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+         LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
+         LEFT JOIN "tblDepartments" d ON wfd.dept_id = d.dept_id
+         LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
+         WHERE wfd.org_id = $1 
+           AND a.org_id = $1
      `;
      
-     // Apply branch_code filter only if user doesn't have super access
+     // Branch: strict equality excluded rows when wfh.branch_code was NULL (org-wide workflow)
      if (!hasSuperAccess && userBranchCode) {
-       query += ` AND wfh.branch_code = $${paramIndex}`;
+       query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
        paramIndex++;
      }
      
-     query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
-         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
+     // Only apply role filter if user doesn't have super access
+     if (!hasSuperAccess) {
+       query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])`;
+       params.push(userRoleIds);
+       paramIndex++;
+     }
+
+     query += ` AND (
+           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA')) OR 
+           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA'))
+         )
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
-       ORDER BY wfh.pl_sch_date ASC, wfh.created_on DESC
+         AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
+       ORDER BY wfh.wfamsh_id DESC, (CASE WHEN wfd.status = 'AP' THEN 0 ELSE 1 END), wfd.sequence DESC
+       ) sub
+       ORDER BY maintenance_created_on DESC, wfamsh_id DESC
      `;
-     params.push(userRoleIds);
 
      const result = await getDb().query(query, params);
      console.log('Query executed successfully, found rows:', result.rows.length);
@@ -1086,7 +1455,109 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        detail: error.detail,
        hint: error.hint,
        position: error.position,
-       where: error.where
+     });
+     throw error;
+   }
+ };
+
+// Get vendor renewal approvals (MT005 only)
+const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false) => {
+  try {
+    console.log('=== getVendorRenewalApprovals model (ROLE-BASED with branch_code) ===');
+    console.log('empIntId:', empIntId);
+    console.log('orgId:', orgId);
+    console.log('userBranchCode:', userBranchCode);
+    console.log('hasSuperAccess:', hasSuperAccess);
+    
+    // Handle empty string or null empIntId
+    if (!empIntId || empIntId === '') {
+      console.log('empIntId is empty or null, returning empty array');
+      return [];
+    }
+    
+    // ROLE-BASED: Get user's roles first
+    const userQuery = `SELECT user_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`;
+    const userResult = await getDb().query(userQuery, [empIntId]);
+    
+    if (userResult.rows.length === 0) {
+      console.log('User not found with emp_int_id:', empIntId);
+      return [];
+    }
+    
+    const userId = userResult.rows[0].user_id;
+    
+    const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
+    const rolesResult = await getDb().query(rolesQuery, [userId]);
+    const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
+    
+    if (userRoleIds.length === 0) {
+      console.log('User has no assigned roles');
+      return [];
+    }
+    
+    console.log('User roles:', userRoleIds);
+    
+    // Build parameters array dynamically
+    const params = [orgId];
+    let paramIndex = 2;
+    
+    // ROLE-BASED: Query workflows where user's roles match workflow steps AND maint_type_id = 'MT005'
+    let query = `
+      SELECT DISTINCT
+        wfh.wfamsh_id,
+        wfh.vendor_id,
+        wfh.pl_sch_date as scheduled_date,
+        wfh.act_sch_date,
+        wfh.status as header_status,
+        wfh.created_on as maintenance_created_on,
+        wfh.changed_on as maintenance_changed_on,
+        wfh.branch_code,
+        v.vendor_name,
+        v.vendor_name as vendor,
+        v.company_name,
+        v.contact_person_name,
+        v.contact_person_email,
+        mt.text as maintenance_type_name,
+        mt.text as maintenance_type,
+        -- Calculate days until due
+        EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+        -- Calculate days until cutoff (10 days before for vendor renewals)
+        EXTRACT(DAY FROM ((wfh.pl_sch_date - INTERVAL '10 days') - CURRENT_DATE)) as days_until_cutoff
+      FROM "tblWFAssetMaintSch_H" wfh
+      INNER JOIN "tblWFAssetMaintSch_D" wfd ON wfh.wfamsh_id = wfd.wfamsh_id
+      LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+      LEFT JOIN "tblVendors" v ON wfh.vendor_id = v.vendor_id
+      LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
+      WHERE wfd.org_id = $1 
+        AND wfh.maint_type_id = 'MT005'
+    `;
+    
+    // Apply branch_code filter only if user doesn't have super access
+    if (!hasSuperAccess && userBranchCode) {
+      query += ` AND wfh.branch_code = $${paramIndex}`;
+      params.push(userBranchCode);
+      paramIndex++;
+    }
+    
+    query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
+        AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
+        AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
+      ORDER BY wfh.created_on DESC
+    `;
+    params.push(userRoleIds);
+
+    const result = await getDb().query(query, params);
+    console.log('Query executed successfully, found rows:', result.rows.length);
+    console.log('Sample row (if any):', result.rows[0] || 'No rows found');
+    return result.rows;
+  } catch (error) {
+    console.error('Error in getVendorRenewalApprovals:', error);
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      detail: error.detail,
+      hint: error.hint,
+      position: error.position
      });
      throw error;
    }
@@ -1274,14 +1745,15 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
   const createMaintenanceRecord = async (wfamshId, orgId = 'ORG001') => {
     try {
       console.log('=== createMaintenanceRecord called ===');
-      console.log('Creating maintenance record for wfamsh_id:', wfamshId);
+      console.log('Creating/updating maintenance record for wfamsh_id:', wfamshId);
       console.log('Org ID:', orgId);
       
-           // Get maintenance details from workflow header
+      // Get maintenance details from workflow header
       const workflowQuery = `
         SELECT 
           wfh.wfamsh_id,
           wfh.asset_id,
+          wfh.emp_int_id as emp_int_id,
           wfh.group_id,
           wfh.pl_sch_date as act_maint_st_date,
           a.asset_type_id,
@@ -1334,6 +1806,148 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      console.log('Service vendor ID:', workflowData.vendor_id);
      console.log('BF01 notes:', workflowData.bf01_notes);
      console.log('Group ID:', workflowData.group_id);
+
+    // Determine emp_int to save: only when maintenance is in-house
+    const _maintNorm = (workflowData.maintained_by || '').toString().toLowerCase().replace(/\s|-/g, '');
+    let empIntToSave = null;
+    if (workflowData.emp_int_id && _maintNorm.includes('inhouse')) {
+      empIntToSave = workflowData.emp_int_id;
+    }
+     
+     // Check if maintenance record already exists with status 'AP' (manual creation)
+     // This should be checked BEFORE group maintenance and BF01/BF03 logic
+     const existingRecordQuery = `
+       SELECT ams_id, status, asset_id
+       FROM "tblAssetMaintSch"
+       WHERE wfamsh_id = $1 AND org_id = $2 AND status = 'AP'
+     `;
+     const existingRecord = await getDb().query(existingRecordQuery, [wfamshId, orgId]);
+     
+     if (existingRecord.rows.length > 0) {
+       // Update existing record from 'AP' to 'IN' (manual maintenance creation)
+       console.log('Found existing maintenance record with status AP (manual creation), updating to IN');
+       const existingAmsId = existingRecord.rows[0].ams_id;
+       
+       // Generate work order ID if needed
+       const softwareAssetTypeQuery = `
+         SELECT value 
+         FROM "tblOrgSettings" 
+         WHERE key = 'software_at_id' 
+         AND org_id = $1
+         LIMIT 1
+       `;
+       const softwareAssetTypeResult = await getDb().query(softwareAssetTypeQuery, [orgId]);
+       const softwareAssetTypeId = softwareAssetTypeResult.rows.length > 0 ? softwareAssetTypeResult.rows[0].value : null;
+       const originalMaintTypeId = workflowData.maint_type_id || 'MT002';
+       const isSoftwareAsset = (softwareAssetTypeId && workflowData.asset_type_id === softwareAssetTypeId) || originalMaintTypeId === 'MT001';
+       
+       // Decide maintenance type
+       const isBreakdown = !!workflowData.has_breakdown_note;
+       const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
+       
+       let workOrderId = null;
+       let breakdownId = null;
+       if (!isSoftwareAsset) {
+         if (workflowData.bf01_notes) {
+           const abrMatch = workflowData.bf01_notes.match(/(?:BF0[1-3]-Breakdown-|Breakdown\s+Maintenance\s*-\s*|Breakdown[-\s]*)([A-Z0-9]+)/i);
+           if (abrMatch && abrMatch[1]) {
+             breakdownId = abrMatch[1].toUpperCase();
+           }
+         }
+
+         // FALLBACK: If it's a breakdown but we lost the ID in notes, find most recent non-completed breakdown for this asset
+         if (!breakdownId && maintTypeId === 'MT004') {
+           const fallbackBrRes = await getDb().query(
+             `SELECT abr_id FROM "tblAssetBRDet" 
+              WHERE asset_id = $1 AND org_id = $2 AND status NOT IN ('CO', 'CA', 'CF')
+              ORDER BY created_on DESC LIMIT 1`,
+             [workflowData.asset_id, orgId]
+           );
+           if (fallbackBrRes.rows.length > 0) {
+             breakdownId = fallbackBrRes.rows[0].abr_id;
+           }
+         }
+
+         if (breakdownId) {
+           workOrderId = `WO-${wfamshId}-${breakdownId}`;
+         } else {
+           workOrderId = `WO-${wfamshId}`;
+         }
+       }
+       
+       // Update existing record from 'AP' to 'IN'
+       const updateQuery = `
+         UPDATE "tblAssetMaintSch"
+         SET 
+           wo_id = $1,
+           maint_type_id = $2,
+           vendor_id = $3,
+           at_main_freq_id = $4,
+          maintained_by = $5,
+          emp_int_id = $10,
+          status = 'IN',
+           act_maint_st_date = $6,
+           notes = CASE 
+             WHEN notes IS NULL OR notes = '' THEN $9
+             WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+             ELSE notes
+           END,
+           changed_by = 'system',
+           changed_on = CURRENT_TIMESTAMP
+         WHERE ams_id = $7 AND org_id = $8
+         RETURNING ams_id
+       `;
+       
+       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
+       
+       const updateParams = [
+         isSoftwareAsset ? null : workOrderId,
+         maintTypeId,
+         workflowData.vendor_id,
+         workflowData.at_main_freq_id,
+         workflowData.maintained_by,
+         workflowData.act_maint_st_date,
+         existingAmsId,
+         orgId,
+         amsNotes,
+         empIntToSave
+       ];
+       
+       await getDb().query(updateQuery, updateParams);
+       console.log('Maintenance record updated from AP to IN successfully with ams_id:', existingAmsId);
+
+       // If this is breakdown maintenance, write initial history row as well.
+       if (maintTypeId === 'MT004') {
+         try {
+           await brHistModel.insertBrHist(
+             {
+               ams_id: existingAmsId,
+               status: 'IN',
+               created_by: 'system',
+               notes: amsNotes,
+             },
+             getDb(),
+           );
+         } catch (e) {
+           console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> AP to IN):', e.message || e);
+         }
+       }
+       
+       // Notify maintenance supervisors
+       console.log('=== About to notify maintenance supervisors (Manual Maintenance) ===');
+       try {
+         const notificationResult = await notifyMaintenanceSupervisors(existingAmsId, workflowData.asset_id, wfamshId, orgId);
+         console.log('Notification result:', JSON.stringify(notificationResult, null, 2));
+         if (!notificationResult.success) {
+           console.error('⚠️  Notification failed:', notificationResult.reason || notificationResult.error);
+         }
+       } catch (notifyErr) {
+         console.error('❌ CRITICAL: Failed to send notification to supervisors after manual maintenance update:', notifyErr);
+         console.error('Error stack:', notifyErr.stack);
+       }
+       
+       return existingAmsId;
+     }
      
      // Check if this is a group maintenance
      if (workflowData.group_id) {
@@ -1416,6 +2030,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            vendor_id,
            at_main_freq_id,
            maintained_by,
+           emp_int_id,
            notes,
            status,
            act_maint_st_date,
@@ -1423,9 +2038,9 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            created_on,
            org_id,
            branch_code
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14, $15)
        `;
-       
+
        const insertParams = [
          amsId,
          workflowData.wfamsh_id,
@@ -1434,8 +2049,9 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          maintTypeId,
          workflowData.vendor_id, // Use vendor from representative asset
          workflowData.at_main_freq_id,
-         workflowData.maintained_by, // Use maintained_by from representative asset
-         groupNotes, // Notes field is null for group maintenance
+        workflowData.maintained_by, // Use maintained_by from representative asset
+        empIntToSave,
+        groupNotes, // Notes field is null for group maintenance
          'IN', // Initial status
          workflowData.act_maint_st_date,
          'system', // created_by
@@ -1453,6 +2069,23 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        });
        
        await getDb().query(insertQuery, insertParams);
+
+       // If this is breakdown maintenance, write initial history row as well.
+       if (maintTypeId === 'MT004') {
+         try {
+           await brHistModel.insertBrHist(
+             {
+               ams_id: amsId,
+               status: 'IN',
+               created_by: 'system',
+               notes: groupNotes,
+             },
+             getDb(),
+           );
+         } catch (e) {
+           console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> group create):', e.message || e);
+         }
+       }
        
        // Notify maintenance supervisors (using representative asset_id)
        console.log(`=== About to notify maintenance supervisors for group ${workflowData.group_id} ===`);
@@ -1482,7 +2115,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      // Check for BF01 breakdown
      if (workflowData.bf01_notes && workflowData.bf01_notes.includes('BF01-Breakdown')) {
        // Extract breakdown ID from notes: BF01-Breakdown-{ABR_ID}
-       const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown-([A-Z0-9]+)/);
+       const abrMatch = workflowData.bf01_notes.match(/BF01-Breakdown[-\s]*([A-Z0-9]+)/);
        if (abrMatch && abrMatch[1]) {
          breakdownId = abrMatch[1];
          console.log('Found BF01 breakdown ID:', breakdownId);
@@ -1517,7 +2150,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        console.log('Found BF03 postpone breakdown - will update wo_id only');
        
        // Extract breakdown ID for work order tracking
-       const abrMatch = workflowData.bf01_notes.match(/BF03-Breakdown-([A-Z0-9]+)/);
+       const abrMatch = workflowData.bf01_notes.match(/BF03-Breakdown[-\s]*([A-Z0-9]+)/);
        if (abrMatch && abrMatch[1]) {
          breakdownId = abrMatch[1];
          console.log('BF03 breakdown ID:', breakdownId);
@@ -1559,8 +2192,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          console.log('Found BF02 breakdown (or generic breakdown note)');
          
          // Try to extract breakdown ID from "Breakdown {ABR_ID}" format
-         // Pattern matches: "Breakdown ABR001" or "Breakdown-ABR001" or "BreakdownABR001"
-         const bf02Match = workflowData.bf01_notes.match(/Breakdown[\s-]*([A-Z0-9]+)/i);
+         // Pattern matches: "Breakdown ABR001" or "Breakdown-ABR001" or "Breakdown Maintenance - ABR001"
+         const bf02Match = workflowData.bf01_notes.match(/Breakdown(?:\s+Maintenance)?[\s-]*([A-Z0-9]+)/i);
          if (bf02Match && bf02Match[1]) {
            breakdownId = bf02Match[1];
            console.log('BF02 breakdown ID extracted:', breakdownId);
@@ -1586,6 +2219,27 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        }
      }
      
+     // FALLBACK: If this is a breakdown (MT004 or has_breakdown_note) but we haven't found a breakdownId yet,
+     // it might be because the notes were overwritten during approval.
+     // Search for the most recent non-completed breakdown for this asset.
+     const isBreakdown = !!workflowData.has_breakdown_note || workflowData.maint_type_id === 'MT004';
+     if (isBreakdown && !breakdownId) {
+       console.log(`[SYNC] Breakdown detected but ID lost for workflow ${wfamshId}. Running fallback search for asset ${workflowData.asset_id}...`);
+       const fallbackBrRes = await getDb().query(
+         `SELECT brd.abr_id, brd.atbrrc_id, brd.description, brc.text as breakdown_reason
+          FROM "tblAssetBRDet" brd
+          LEFT JOIN "tblATBRReasonCodes" brc ON brd.atbrrc_id = brc.atbrrc_id
+          WHERE brd.asset_id = $1 AND brd.org_id = $2 AND brd.status NOT IN ('CO', 'CA', 'CF')
+          ORDER BY brd.created_on DESC LIMIT 1`,
+         [workflowData.asset_id, orgId]
+       );
+       if (fallbackBrRes.rows.length > 0) {
+         breakdownId = fallbackBrRes.rows[0].abr_id;
+         breakdownReasonCode = fallbackBrRes.rows[0].breakdown_reason || fallbackBrRes.rows[0].atbrrc_id;
+         console.log(`[SYNC] Fallback found breakdown ID: ${breakdownId} with reason: ${breakdownReasonCode}`);
+       }
+     }
+
      // Check if this is a software asset (Subscription Renewal - MT001) BEFORE deciding maintenance type
      // Get software asset type ID from orgSettings
      const softwareAssetTypeQuery = `
@@ -1611,7 +2265,6 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      // Decide maintenance type
      // If any detail note contains 'breakdown', force MT004; otherwise use header value or default to MT002
-     const isBreakdown = !!workflowData.has_breakdown_note;
      const maintTypeId = isBreakdown ? 'MT004' : originalMaintTypeId;
      
      // Generate work order ID
@@ -1646,7 +2299,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        const updateQuery = `
          UPDATE "tblAssetMaintSch"
          SET wo_id = $1,
-             branch_code = COALESCE($2, branch_code),
+          branch_code = COALESCE($2, branch_code),
+          emp_int_id = $5,
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $3 AND org_id = $4
@@ -1658,6 +2312,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          workflowData.branch_code,
          existingAmsId,
          orgId
+        , workflowData.emp_int_id
        ];
        
        console.log('BF03 update query params:', updateParams);
@@ -1699,12 +2354,22 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
              vendor_id = $3,
              at_main_freq_id = $4,
              maintained_by = $5,
-             branch_code = COALESCE($6, branch_code),
+            maintained_by = $5,
+            emp_int_id = $11,
+            branch_code = COALESCE($6, branch_code),
+             notes = CASE 
+               WHEN notes IS NULL OR notes = '' THEN $9
+               WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+               ELSE notes
+             END,
+             wo_id = COALESCE($10, wo_id),
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $7 AND org_id = $8
          RETURNING ams_id, wo_id
        `;
+       
+       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
        
        const updateParams = [
          workflowData.wfamsh_id,
@@ -1714,7 +2379,10 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
          workflowData.maintained_by,
          workflowData.branch_code,
          existingAmsId,
-         orgId
+         orgId,
+         amsNotes,
+         isSoftwareAsset ? null : workOrderId
+        , workflowData.emp_int_id
        ];
        
        console.log('BF01 update query params:', updateParams);
@@ -1782,6 +2450,7 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           vendor_id,
           at_main_freq_id,
           maintained_by,
+          emp_int_id,
           notes,
           status,
           act_maint_st_date,
@@ -1789,9 +2458,11 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
           created_on,
           org_id,
           branch_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, $14, $15)
       `;
       
+      const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
+
       const insertParams = [
         amsId,
         workflowData.wfamsh_id,
@@ -1801,7 +2472,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
         workflowData.vendor_id,
         workflowData.at_main_freq_id,
         workflowData.maintained_by, // Set based on service_vendor_id
-        null, // notes - will be set when maintenance is performed
+        empIntToSave,
+        amsNotes, // notes - ensures the breakdown link is preserved for syncing
         'IN', // Initial status
         workflowData.act_maint_st_date,
         'system', // created_by
@@ -1815,6 +2487,23 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      console.log('About to execute insert query...');
      
      await getDb().query(insertQuery, insertParams);
+
+     // If this is breakdown maintenance, write initial history row as well.
+     if (maintTypeId === 'MT004') {
+       try {
+         await brHistModel.insertBrHist(
+           {
+             ams_id: amsId,
+             status: 'IN',
+             created_by: 'system',
+             notes: amsNotes,
+           },
+           getDb(),
+         );
+       } catch (e) {
+         console.error('Error writing tblAssetMaintSch_BR_Hist (approval -> create):', e.message || e);
+       }
+     }
      
      console.log('Maintenance record created successfully with ams_id:', amsId);
      
@@ -1994,8 +2683,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         });
       });
 
-      // Fetch checklist items for this asset
-      const checklistItems = await getChecklistByAssetId(assetId, orgId);
+      // Fetch checklist items for this asset (scope to this workflow header)
+      const checklistItems = await getChecklistByAssetId(assetId, orgId, header.wfamsh_id);
       
       // Fetch vendor details
       let vendorDetails = null;
@@ -2099,6 +2788,13 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         wfh.asset_id,
         wfh.group_id,
         wfh.vendor_id,
+        wfh.emp_int_id as header_emp_int_id,
+        wfh.at_main_freq_id,
+        -- Get maintained_by from tblATMaintFreq; MT005 has no at_main_freq row — do not default to Inhouse (breaks Vendor tab UX)
+        CASE
+          WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor'
+          ELSE COALESCE(atmf.maintained_by, 'Inhouse')
+        END as maintained_by,
         a.text as asset_name,
         a.serial_number,
         wfh.status as header_status,
@@ -2118,8 +2814,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         v.pincode,
         v.gst_number,
         v.cin_number,
-        v.contract_start_date,
-        v.contract_end_date,
+        v.int_status as vendor_status,
+        NULL as contract_start_date,
+        NULL as contract_end_date,
         at.maint_lead_type,
         CASE 
           WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
@@ -2127,9 +2824,9 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         END as asset_type_name,
         COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
         mt.text as maint_type_name,
-        jr.text as job_role_name,
+        COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
-        jr.text as user_name,
+        COALESCE(jr.text, 'Unassigned Role') as user_name,
         NULL as email,
         -- Group asset maintenance information
         ag.text as group_name,
@@ -2166,6 +2863,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON COALESCE(wfh.vendor_id, a.service_vendor_id) = v.vendor_id
       LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
+      LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
       WHERE wfd.org_id = $1 
         AND wfd.wfamsh_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
@@ -2186,9 +2884,22 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
     
     const approvalDetails = result.rows;
 
-    console.log('Raw approval details from database:', approvalDetails);
-    console.log('Query parameters:', { orgId, wfamshId });
-    console.log('Number of records found:', approvalDetails.length);
+    console.log('🔍 Raw approval details from database:', approvalDetails);
+    console.log('🔍 Query parameters:', { orgId, wfamshId });
+    console.log('🔍 Number of records found:', approvalDetails.length);
+    
+    // Debug the first record specifically for emp_int_id and maintained_by
+    if (approvalDetails.length > 0) {
+      const firstRecord = approvalDetails[0];
+      console.log('🔍 First record debug:', {
+        wfamsh_id: firstRecord.wfamsh_id,
+        header_emp_int_id: firstRecord.header_emp_int_id,
+        vendor_id: firstRecord.vendor_id,
+        maintained_by: firstRecord.maintained_by,
+        asset_id: firstRecord.asset_id,
+        service_vendor_id: result.rows[0].service_vendor_id
+      });
+    }
 
     if (approvalDetails.length > 0) {
       // Get the first record for basic details
@@ -2234,7 +2945,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         breakdownInfo = breakdownResult.rows.length > 0 ? breakdownResult.rows[0] : null;
       
       // Fetch regular checklist items for this asset
-      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId);
+      const regularChecklistItems = await getChecklistByAssetId(firstRecord.asset_id, orgId, wfamshId);
       
       // Build final checklist based on decision code
       if (breakdownInfo) {
@@ -2405,7 +3116,13 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         isOverdue: (firstRecord.days_until_due || 0) < 0,
         notes: firstRecord.notes || null,
         checklist: checklistItems,
-        vendorDetails: vendorDetails || {
+        header_emp_int_id: firstRecord.header_emp_int_id || null,
+        maintained_by: firstRecord.maintained_by || null,
+        at_main_freq_id: firstRecord.at_main_freq_id || null,
+        vendorDetails: vendorDetails ? {
+          ...vendorDetails,
+          vendor_status: vendorDetails.int_status
+        } : {
           vendorName: firstRecord.vendor_name,
           vendorId: firstRecord.vendor_id,
           vendor_name: firstRecord.vendor_name,
@@ -2423,7 +3140,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           cin_number: firstRecord.cin_number,
           contract_start_date: vendorDetails?.contract_start_date || firstRecord.contract_start_date,
           contract_end_date: vendorDetails?.contract_end_date || firstRecord.contract_end_date,
-          rating: vendorDetails?.rating || null
+          rating: vendorDetails?.rating || null,
+          vendor_status: firstRecord.vendor_status || null
         },
         workflowSteps: workflowSteps,
         workflowDetails: approvalDetails,
@@ -2435,6 +3153,17 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         // All assets in the group (for display in approval screen)
         groupAssets: groupAssets
       };
+
+      console.log('🔍 Backend Debug - Tab Logic Values:', {
+        wfamshId: firstRecord.wfamsh_id,
+        header_emp_int_id: firstRecord.header_emp_int_id,
+        maintained_by: firstRecord.maintained_by,
+        vendor_id: firstRecord.vendor_id,
+        formattedResponse: {
+          header_emp_int_id: formattedDetail.header_emp_int_id,
+          maintained_by: formattedDetail.maintained_by
+        }
+      });
 
       return formattedDetail;
     } else {
@@ -2455,6 +3184,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
    getWorkflowHistory,
    getWorkflowHistoryByWfamshId,
    getMaintenanceApprovals,
+   getVendorRenewalApprovals,
    createMaintenanceRecord,
-   getAllMaintenanceWorkflowsByAssetId
+   getAllMaintenanceWorkflowsByAssetId,
+   updateWorkflowHeader
  }; 

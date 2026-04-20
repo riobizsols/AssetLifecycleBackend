@@ -208,7 +208,7 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
                     wfamsh_id: wfamshId,
                     job_role_id: jobRole.job_role_id,
                     user_id: jobRole.emp_int_id,
-                    dept_id: jobRole.dept_id,
+                    dept_id: null, // department removed from tblWFJobRole
                     sequence: sequence.seqs_no,
                     status: status,
                     notes: `Group maintenance for ${groupAssets.length} assets`,
@@ -561,7 +561,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                                 wfamsh_id: wfamshId,
                                 job_role_id: jobRole.job_role_id,
                                 user_id: jobRole.emp_int_id, // Use emp_int_id from tblWFJobRole
-                                dept_id: jobRole.dept_id,
+                                dept_id: null, // department removed from tblWFJobRole
                                 sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
                                 status: status, // 'AP' for sequence 10, 'IN' for others
                                 notes: null,
@@ -570,7 +570,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                             };
                             
                             await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, user ${jobRole.emp_int_id}, status: ${status}`);
+                            console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, user ${jobRole.emp_int_id}, status: ${status}`);
                             totalDetailsCreated++;
                         }
                     }
@@ -852,7 +852,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                     wfamsh_id: wfamshId,
                                     job_role_id: jobRole.job_role_id,
                                     user_id: null, // Changed: No specific user, role-based instead
-                                    dept_id: jobRole.dept_id,
+                                    dept_id: null, // department removed from tblWFJobRole
                                     sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
                                     status: status, // 'AP' for sequence 10, 'IN' for others
                                     notes: null,
@@ -861,7 +861,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 };
                                 
                                 await model.insertWorkflowMaintenanceScheduleDetail(scheduleDetailData);
-                                console.log(`Created workflow maintenance schedule detail (ROLE-BASED): ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, dept ${jobRole.dept_id}, status: ${status}`);
+                                console.log(`Created workflow maintenance schedule detail (ROLE-BASED): ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, status: ${status}`);
                                 totalDetailsCreated++;
                             }
                         }
@@ -1233,6 +1233,8 @@ const updateMaintenanceSchedule = async (req, res) => {
             return res.status(404).json({ success: false, message: 'Maintenance schedule not found or not updated' });
         }
 
+        // Linked tblAssetBRDet sync is handled inside model.updateMaintenanceSchedule (MT004).
+
         // Log success (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
             supervisorApprovalLogger.logMaintenanceUpdated({
@@ -1263,6 +1265,48 @@ const updateMaintenanceSchedule = async (req, res) => {
     }
 };
 
+// Create manual maintenance schedule
+const createManualMaintenanceSchedule = async (req, res) => {
+    try {
+        const { asset_id, asset_type_id } = req.body;
+        const orgId = req.user?.org_id || req.body.org_id;
+        const userId = req.user?.user_id;
+
+        if (!asset_id || !asset_type_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'asset_id and asset_type_id are required'
+            });
+        }
+
+        if (!orgId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Organization ID is required'
+            });
+        }
+
+        const result = await model.createManualMaintenanceSchedule({
+            asset_id,
+            asset_type_id,
+            org_id: orgId,
+            created_by: userId || 'system',
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: 'Manual maintenance schedule created successfully',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error creating manual maintenance schedule:', error);
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'Failed to create manual maintenance schedule'
+        });
+    }
+};
+
 module.exports = {
     generateMaintenanceSchedules,
     generateMaintenanceSchedulesWithWorkflowBypass,
@@ -1271,5 +1315,6 @@ module.exports = {
     getMaintenanceFrequencyForAssetType,
     getAllMaintenanceSchedules,
     getMaintenanceScheduleById,
-    updateMaintenanceSchedule
+    updateMaintenanceSchedule,
+    createManualMaintenanceSchedule
 }; 

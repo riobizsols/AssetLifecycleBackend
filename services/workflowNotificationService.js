@@ -79,6 +79,127 @@ class WorkflowNotificationService {
     }
 
     /**
+     * Send push notification when new inspection workflow detail is created/activated
+     * @param {Object} detailData
+     */
+    async notifyNewInspectionDetail(detailData) {
+        try {
+            const { wfaiisd_id, wfaiish_id, job_role_id, status, sequence, org_id } = detailData;
+
+            if (status !== 'AP') {
+                 console.log(`Skipping notification for inspection ${wfaiisd_id} - status is ${status}, not AP`);
+                 return { success: true, reason: 'Status not AP' };
+            }
+
+            // Get workflow header information
+            const workflowInfo = await this.getInspectionWorkflowInfo(wfaiish_id, org_id);
+            if (!workflowInfo) {
+                console.log(`No workflow info found for inspection ${wfaiish_id}`);
+                return { success: false, reason: 'Workflow info not found' };
+            }
+
+            // Get job role information
+            const jobRoleInfo = await this.getJobRoleInfo(job_role_id);
+            if (!jobRoleInfo) {
+                console.log(`No job role info found for job_role_id ${job_role_id}`);
+                return { success: false, reason: 'Job role info not found' };
+            }
+
+            // Prepare notification data
+            const notificationData = {
+                title: 'New Inspection Approval Required',
+                body: `Asset "${workflowInfo.asset_name}" requires inspection approval. Please review.`,
+                data: {
+                    wfaiisd_id: wfaiisd_id || '',
+                    wfaiish_id: wfaiish_id || '',
+                    asset_id: workflowInfo.asset_id || '',
+                    asset_name: workflowInfo.asset_name || '',
+                    planned_date: workflowInfo.pl_sch_date ? new Date(workflowInfo.pl_sch_date).toISOString() : '',
+                    job_role_name: jobRoleInfo.text || '',
+                    sequence: sequence ? sequence.toString() : '',
+                    notification_type: 'inspection_approval'
+                },
+                jobRoleId: job_role_id,
+                notificationType: 'inspection_approval'
+            };
+
+            // Send to all users with this role
+            const result = await fcmService.sendNotificationToRole(notificationData);
+            console.log(`Inspection notification sent for ${wfaiisd_id}:`, {
+                jobRoleId: job_role_id,
+                totalUsers: result.totalUsers,
+                successCount: result.successCount
+            });
+            return result;
+
+        } catch (error) {
+            console.error('Error sending inspection notification:', error);
+            // Don't throw, just log
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Get inspection workflow header information
+     */
+    async getInspectionWorkflowInfo(wfaiish_id, org_id) {
+        try {
+            const query = `
+                SELECT 
+                    h.wfaiish_id,
+                    h.asset_id,
+                    h.pl_sch_date,
+                    h.status,
+                    ast.text as asset_name
+                FROM "tblWFAATInspSch_H" h
+                INNER JOIN "tblAssets" a ON h.asset_id = a.asset_id
+                INNER JOIN "tblAssetTypes" ast ON a.asset_type_id = ast.asset_type_id
+                WHERE h.wfaiish_id = $1 AND h.org_id = $2
+            `;
+            const result = await getDb().query(query, [wfaiish_id, org_id]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Error getting inspection workflow info:', error);
+            return null;
+        }
+    }
+
+    /**
+     * Notify previous approver that rejection reverted the workflow
+     */
+    async notifyInspectionRejectionReverted(data) {
+        try {
+             const { wfaiisd_id, wfaiish_id, job_role_id, org_id, rejection_reason } = data;
+             
+             // Get workflow header information
+            const workflowInfo = await this.getInspectionWorkflowInfo(wfaiish_id, org_id);
+            if (!workflowInfo) return { success: false };
+
+            const jobRoleInfo = await this.getJobRoleInfo(job_role_id);
+             
+             const notificationData = {
+                title: 'Inspection Returned for Review',
+                body: `An inspection for "${workflowInfo.asset_name}" you approved has been rejected by the next approver. Reason: ${rejection_reason}`,
+                data: {
+                    wfaiisd_id: wfaiisd_id || '',
+                    wfaiish_id: wfaiish_id || '',
+                    notification_type: 'inspection_rejection'
+                },
+                jobRoleId: job_role_id, // Send to this role
+                notificationType: 'inspection_approval'
+             };
+             
+             const result = await fcmService.sendNotificationToRole(notificationData);
+             console.log(`Rejection notification sent to previous approver role ${job_role_id}`);
+             return result;
+
+        } catch (error) {
+            console.error('Error sending inspection rejection notification:', error);
+             return { success: false, error: error.message };
+        }
+    }
+
+    /**
      * Get workflow header information
      * @param {string} wfamsh_id - Workflow header ID
      * @param {string} org_id - Organization ID

@@ -72,27 +72,106 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
       )
       AND wfd.job_role_id IS NOT NULL
       AND u.int_status = 1
-    ORDER BY wfh.pl_sch_date ASC, wfd.sequence ASC, u.full_name ASC
   `;
+
+  // Inspection Notifications Query
+  const inspectionQuery = `
+    SELECT 
+      wfd.wfaiisd_id as wfamsd_id,
+      wfd.wfaiish_id as wfamsh_id,
+      wfd.job_role_id,
+      wfd.sequence,
+      wfd.status as detail_status,
+      wfh.pl_sch_date,
+      wfh.asset_id,
+      NULL::varchar as group_id,
+      NULL::varchar as vendor_id,
+      wfh.status as header_status,
+      a.asset_type_id,
+      '0' as maint_lead_type, -- Default lead time 0
+      at.text as asset_type_name,
+      NULL::varchar as group_name,
+      0 as group_asset_count,
+      'INSPECTION' as maint_type_id,
+      'Inspection' as maint_type_name,
+      jr.text as job_role_name,
+      u.user_id,
+      u.emp_int_id,
+      u.full_name as user_name,
+      u.email,
+      -- Cutoff date is schedule date
+      wfh.pl_sch_date as cutoff_date,
+      -- Days until due
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+      -- Days until cutoff
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_cutoff
+    FROM "tblWFAATInspSch_D" wfd
+    INNER JOIN "tblWFAATInspSch_H" wfh ON wfd.wfaiish_id = wfh.wfaiish_id
+    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+    LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+    LEFT JOIN "tblUsers" u ON ujr.user_id = u.user_id
+    
+    WHERE wfd.org_id = $1
+      AND wfh.org_id = $1
+      AND a.org_id = $1
+      ${!hasSuperAccess && branchId ? 'AND a.branch_id = $2' : ''}
+      AND wfd.status IN ('IN', 'IP', 'AP')
+      AND wfh.status IN ('IN', 'IP')
+      AND wfd.job_role_id IS NOT NULL
+      AND u.int_status = 1
+  `;
+
   try {
     const params = [orgId];
     if (!hasSuperAccess && branchId) {
       params.push(branchId);
     }
-    const result = await getDb().query(query, params);
-    return result.rows;
+    
+    // Execute Maintenance Query
+    const results = await getDb().query(query, params);
+    let allNotifications = results.rows || [];
+
+    // Execute Inspection Query
+    try {
+        const inspResults = await getDb().query(inspectionQuery, params);
+        if (inspResults.rows && inspResults.rows.length > 0) {
+            allNotifications = [...allNotifications, ...inspResults.rows];
+        }
+    } catch (inspError) {
+        console.warn('Error fetching inspection notifications (might be missing tables):', inspError.message);
+    }
+    
+    // Sort combined results
+    allNotifications.sort((a, b) => {
+        const dA = a.pl_sch_date ? new Date(a.pl_sch_date) : new Date(0);
+        const dB = b.pl_sch_date ? new Date(b.pl_sch_date) : new Date(0);
+        return dA - dB;
+    });
+
+    return allNotifications;
   } catch (error) {
     console.error('Error in getMaintenanceNotifications:', error);
     console.error('Failed SQL Query:', query);
-    console.error('Query Parameters:', params);
+    console.error('Query Parameters:', [orgId, branchId]);
     throw error;
   }
 };
 
 // Supports super access users who can view all branches
-const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', branchId, hasSuperAccess = false) => {
+const getMaintenanceNotificationsByUser = async (
+  empIntId,
+  orgId = 'ORG001',
+  branchId,
+  hasSuperAccess = false,
+  tokenJobRoleId = null
+) => {
   // ROLE-BASED WORKFLOW: Check if user has any of the required job roles for pending workflows
-  // Includes both asset-based maintenance and vendor contract renewal (MT005)
+  // Includes:
+  // - asset-based maintenance + vendor contract renewal (MT005)
+  // - scrap maintenance workflow approvals (tblWFScrap_*) - if tables exist
+  // - inspection approvals (tblWFAATInspSch_*)
   
   // Build parameters array dynamically
   const params = [orgId];
@@ -100,17 +179,35 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
   
   // Add branch filter condition if user doesn't have super access
   let branchFilter = '';
+  let branchIdParamIndex = null;
   if (!hasSuperAccess && branchId) {
+    branchIdParamIndex = paramIndex;
     params.push(branchId);
-    branchFilter = ` AND a.branch_id = $${paramIndex}`;
+    // NULL asset branch = org-wide asset; strict = excluded everyone (same as wfh.branch_code fix)
+    branchFilter = ` AND (a.branch_id = $${paramIndex} OR a.branch_id IS NULL)`;
     paramIndex++;
   }
   
   // empIntId parameter index
   const empIntIdParamIndex = paramIndex;
   params.push(empIntId);
+  paramIndex++;
+  const tokenJobRoleParamIndex = paramIndex;
+  params.push(tokenJobRoleId || null);
+  paramIndex++;
   
-  const query = `
+  const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
+    ? ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex}))`
+    : '';
+
+  // Inspection branch filtering uses asset branch_id like maintenance (NULL = org-wide)
+  const inspectionBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
+    ? ` AND (a.branch_id = $${branchIdParamIndex} OR a.branch_id IS NULL)`
+    : '';
+
+  const maintenanceQuery = `
+    SELECT *
+    FROM (
     SELECT DISTINCT
       wfh.wfamsh_id,
       wfh.pl_sch_date,
@@ -161,21 +258,16 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
     LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
-    -- Get current action role (workflow step with AP status)
+    -- Current step: prefer AP over IN when both exist (same wfamsh_id)
     LEFT JOIN (
-      SELECT 
+      SELECT DISTINCT ON (wfd2.wfamsh_id)
         wfd2.wfamsh_id,
         wfd2.job_role_id,
         jr2.text as job_role_name
       FROM "tblWFAssetMaintSch_D" wfd2
       LEFT JOIN "tblJobRoles" jr2 ON wfd2.job_role_id = jr2.job_role_id
       WHERE wfd2.status IN ('AP', 'IN')
-        AND wfd2.wfamsd_id = (
-          SELECT MAX(wfd3.wfamsd_id)
-          FROM "tblWFAssetMaintSch_D" wfd3
-          WHERE wfd3.wfamsh_id = wfd2.wfamsh_id
-            AND wfd3.status IN ('AP', 'IN')
-        )
+      ORDER BY wfd2.wfamsh_id, (CASE WHEN wfd2.status = 'AP' THEN 0 ELSE 1 END), wfd2.wfamsd_id DESC
     ) current_action_role ON wfh.wfamsh_id = current_action_role.wfamsh_id
     -- Check if the requesting employee has a role involved in this workflow
     WHERE wfh.org_id = $1 
@@ -196,26 +288,190 @@ const getMaintenanceNotificationsByUser = async (empIntId, orgId = 'ORG001', bra
           AND wfd.org_id = $1
           AND wfd.status IN ('IN', 'IP', 'AP')
       )
-      -- Check if the requesting employee has a role involved in this workflow with pending status
+      -- User must match a pending step: via tblUserJobRoles OR JWT job_role_id (same as approvals list)
+      AND (
+        EXISTS (
+          SELECT 1
+          FROM "tblWFAssetMaintSch_D" wfd
+          INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+          INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+          WHERE wfd.wfamsh_id = wfh.wfamsh_id
+            AND u.emp_int_id = $${empIntIdParamIndex}
+            AND u.int_status = 1
+            AND wfd.status IN ('IN', 'IP', 'AP')
+        )
+        OR (
+          $${tokenJobRoleParamIndex}::text IS NOT NULL
+          AND EXISTS (SELECT 1 FROM "tblUsers" u0 WHERE u0.emp_int_id = $${empIntIdParamIndex} AND u0.int_status = 1)
+          AND EXISTS (
+            SELECT 1
+            FROM "tblWFAssetMaintSch_D" wfd
+            WHERE wfd.wfamsh_id = wfh.wfamsh_id
+              AND wfd.org_id = $1
+              AND wfd.status IN ('IN', 'IP', 'AP')
+              AND wfd.job_role_id = $${tokenJobRoleParamIndex}::varchar
+          )
+        )
+      )
+    ) n
+  `;
+
+  const scrapQuery = `
+      SELECT DISTINCT
+        wh.id_d as wfamsh_id,
+        wh.created_on as pl_sch_date,
+        NULL::varchar as asset_id,
+        wh.assetgroup_id as group_id,
+        NULL::varchar as vendor_id,
+        wh.status as header_status,
+        seq.asset_type_id as asset_type_id,
+        CASE
+          WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' THEN 'Individual Asset'
+          WHEN wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN 'Scrap Sales'
+          ELSE COALESCE(agh.text, 'Unknown Group')
+        END as group_name,
+        CASE
+          WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
+            SELECT COUNT(*)::int FROM "tblAssetScrap" WHERE asset_group_id = wh.assetgroup_id
+          )
+          ELSE (
+            SELECT COUNT(*)::int FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wh.assetgroup_id
+          )
+        END as group_asset_count,
+        '0'::text as maint_lead_type,
+        COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+        'SCRAP'::varchar as maint_type_id,
+        CASE
+          WHEN wh.is_scrap_sales = 'Y' THEN 'Scrap Sales'
+          ELSE 'Scrap Maintenance'
+        END as maint_type_name,
+        COALESCE(current_scrap_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
+        current_scrap_action_role.job_role_id as current_action_role_id,
+        NULL::timestamp as cutoff_date,
+        999::int as days_until_due,
+        999::int as days_until_cutoff
+      FROM "tblWFScrap_H" wh
+      LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
+      INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
+      LEFT JOIN LATERAL (
+        SELECT d.job_role_id, jr.text as job_role_name
+        FROM "tblWFScrap_D" d
+        LEFT JOIN "tblJobRoles" jr ON d.job_role_id = jr.job_role_id
+        WHERE d.wfscrap_h_id = wh.id_d
+          AND d.status IN ('AP','IN')
+        ORDER BY d.seq ASC, d.created_on ASC
+        LIMIT 1
+      ) current_scrap_action_role ON true
+      WHERE (
+          (wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') AND seq.org_id = $1
+          OR (agh.org_id = $1)
+        )
+        ${scrapBranchFilter}
+        AND wh.status IN ('IN','IP')
+        AND EXISTS (
+          SELECT 1
+          FROM "tblWFScrap_D" d2
+          WHERE d2.wfscrap_h_id = wh.id_d
+            AND d2.status IN ('IN','AP')
+        )
+        AND EXISTS (
+          SELECT 1
+          FROM "tblWFScrap_D" d3
+          INNER JOIN "tblUserJobRoles" ujr3 ON d3.job_role_id = ujr3.job_role_id
+          INNER JOIN "tblUsers" u3 ON ujr3.user_id = u3.user_id
+          WHERE d3.wfscrap_h_id = wh.id_d
+            AND u3.emp_int_id = $${empIntIdParamIndex}
+            AND u3.int_status = 1
+            AND d3.status IN ('IN','AP')
+        )
+  `;
+
+  // NEW: Inspection Query
+  const inspectionQuery = `
+    SELECT DISTINCT
+      wfh.wfaiish_id as wfamsh_id,
+      wfh.pl_sch_date,
+      wfh.asset_id,
+      NULL::varchar as group_id,
+      NULL::varchar as vendor_id,
+      wfh.status as header_status,
+      a.asset_type_id,
+      NULL::varchar as group_name,
+      0::int as group_asset_count,
+      '0'::text as maint_lead_type,
+      COALESCE(at.text, 'Unknown Asset Type') as asset_type_name,
+      'INSPECTION'::varchar as maint_type_id,
+      'Inspection' as maint_type_name,
+      jr.text as current_action_role_name,
+      wfd.job_role_id as current_action_role_id,
+      wfh.pl_sch_date as cutoff_date,
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_due,
+      EXTRACT(DAY FROM (wfh.pl_sch_date - CURRENT_DATE)) as days_until_cutoff
+    FROM "tblWFAATInspSch_H" wfh
+    INNER JOIN "tblWFAATInspSch_D" wfd ON wfh.wfaiish_id = wfd.wfaiish_id
+    INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
+    WHERE wfh.org_id = $1
+      ${inspectionBranchFilter}
+      AND wfh.status IN ('IN', 'AP', 'IP')
+      AND wfd.status = 'AP'
+      -- User must have this role assignemnt
       AND EXISTS (
         SELECT 1 
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
+        FROM "tblUserJobRoles" ujr
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
-        WHERE wfd.wfamsh_id = wfh.wfamsh_id
+        WHERE ujr.job_role_id = wfd.job_role_id
           AND u.emp_int_id = $${empIntIdParamIndex}
           AND u.int_status = 1
-          AND wfd.status IN ('IN', 'IP', 'AP')
       )
-    ORDER BY wfh.pl_sch_date ASC
   `;
-  
+
   try {
-    const result = await getDb().query(query, params);
-    return result.rows;
+    // Run maintenance query (core tables always exist)
+    const maintenanceResult = await getDb().query(maintenanceQuery, params);
+    let allRows = maintenanceResult.rows || [];
+
+    // Run inspection query (try/catch in case tables are missing)
+    try {
+      const inspectionResult = await getDb().query(inspectionQuery, params);
+      if (inspectionResult.rows && inspectionResult.rows.length > 0) {
+        allRows = [...allRows, ...inspectionResult.rows];
+      }
+    } catch (inspErr) {
+       console.warn('Error fetching inspection notifications:', inspErr.message);
+    }
+
+    // Try scrap query - scrap tables may not exist in all DBs (e.g. hospitality)
+    try {
+      const scrapResult = await getDb().query(
+        `SELECT * FROM (${scrapQuery}) s ORDER BY s.pl_sch_date ASC NULLS LAST`,
+        params
+      );
+      if (scrapResult.rows && scrapResult.rows.length > 0) {
+        allRows = [...allRows, ...scrapResult.rows];
+      }
+    } catch (scrapErr) {
+      // 42P01 = relation does not exist; scrap tables not yet migrated
+      if (scrapErr.code === '42P01') {
+        console.warn('Scrap workflow tables not found, skipping scrap notifications:', scrapErr.message);
+      } else {
+        console.warn('Error fetching scrap notifications:', scrapErr.message);
+      }
+    }
+
+    // Sort combined results by pl_sch_date
+    allRows.sort((a, b) => {
+      const dA = a.pl_sch_date ? new Date(a.pl_sch_date) : new Date(0);
+      const dB = b.pl_sch_date ? new Date(b.pl_sch_date) : new Date(0);
+      return dA - dB;
+    });
+
+    return allRows;
   } catch (error) {
     console.error('Error in getMaintenanceNotificationsByUser:', error);
-    console.error('Failed SQL Query:', query);
+    console.error('Failed SQL Query (maintenance):', maintenanceQuery);
     console.error('Query Parameters:', params);
     throw error;
   }

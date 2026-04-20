@@ -29,6 +29,11 @@ const {
     logAssetDeletionError,
     logDatabaseConstraintViolation
 } = require("../eventLoggers/assetEventLogger");
+const {
+  resolveWarrantyNotification,
+  resolveWarrantyNotificationsByAsset,
+  createWarrantyNotificationsForAsset,
+} = require("../models/assetWarrantyNotifyModel");
 
 const addAsset = async (req, res) => {
     const startTime = Date.now();
@@ -104,6 +109,16 @@ const addAsset = async (req, res) => {
             });
             
             return res.status(400).json({ error: "text, and org_id are required fields" });
+        }
+
+        // Enforce service vendor when asset type maintenance is vendor-managed.
+        if (asset_type_id) {
+            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
+            if (vendorMaintained && !service_vendor_id) {
+                return res.status(400).json({
+                    error: "Service vendor is required for vendor-maintained asset types"
+                });
+            }
         }
 
         // Step 2: Validate vendors if provided
@@ -374,6 +389,12 @@ const updateAsset = async (req, res) => {
   const userId = req.user?.user_id;
   
   try {
+    const existingAssetResult = await model.getAssetById(asset_id);
+    const existingAssetRow = existingAssetResult?.rows?.[0] || null;
+    if (!existingAssetRow) {
+      return res.status(404).json({ error: "Asset not found" });
+    }
+
     // Get user's branch information (MOVED INSIDE TRY BLOCK)
     const userModel = require("../models/userModel");
     const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
@@ -409,6 +430,8 @@ const updateAsset = async (req, res) => {
       insurance_start_date,
       insurance_end_date,
       comprehensive_insurance
+      ,
+      warranty_notify_id
     } = req.body;
 
     // Log API called
@@ -433,11 +456,15 @@ const updateAsset = async (req, res) => {
     });
     
     // Get existing asset to retrieve org_id if not provided
-    let finalOrgId = org_id || req.user?.org_id;
-    if (!finalOrgId) {
-      const existingAsset = await model.getAssetById(asset_id);
-      if (existingAsset.rows.length > 0) {
-        finalOrgId = existingAsset.rows[0].org_id;
+    let finalOrgId = org_id || req.user?.org_id || existingAssetRow.org_id;
+
+    // Enforce service vendor when asset type maintenance is vendor-managed.
+    if (asset_type_id) {
+      const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, finalOrgId);
+      if (vendorMaintained && !service_vendor_id) {
+        return res.status(400).json({
+          error: "Service vendor is required for vendor-maintained asset types",
+        });
       }
     }
     
@@ -523,6 +550,43 @@ const updateAsset = async (req, res) => {
     } catch (notificationError) {
       console.error('❌ Error in asset update notification flow:', notificationError);
       // Don't fail the request if notification fails
+    }
+
+    if (typeof warranty_period !== "undefined") {
+      try {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const riskWindowEnd = new Date(now);
+        riskWindowEnd.setDate(riskWindowEnd.getDate() + 10);
+
+        const parsedWarrantyDate =
+          warranty_period && !Number.isNaN(new Date(warranty_period).getTime())
+            ? new Date(warranty_period)
+            : null;
+        if (parsedWarrantyDate) parsedWarrantyDate.setHours(0, 0, 0, 0);
+
+        if (parsedWarrantyDate && parsedWarrantyDate <= riskWindowEnd) {
+          // Expired or expiring soon: ensure an active alert exists.
+          await createWarrantyNotificationsForAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        } else {
+          // Expiry moved outside risk window (or cleared): resolve active alerts.
+          if (warranty_notify_id) {
+            await resolveWarrantyNotification({
+              notifyId: warranty_notify_id,
+              orgId: finalOrgId || req.user?.org_id,
+            });
+          }
+          await resolveWarrantyNotificationsByAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        }
+      } catch (warrantyResolveError) {
+        console.error("Failed to evaluate warranty notification update:", warrantyResolveError.message);
+      }
     }
 
     res.json(updatedAsset);
@@ -938,12 +1002,24 @@ const getInactiveAssetsByAssetType = async (req, res) => {
         const userOrgId = req.user?.org_id || userWithBranch?.org_id;
         const userBranchId = userWithBranch?.branch_id;
         
+        // Determine assignment_type based on context
+        // For department assignments, filter by 'department' assignment_type
+        // For employee assignments, filter by 'user' assignment_type
+        let assignmentType = null;
+        if (context === 'DEPTASSIGNMENT') {
+            assignmentType = 'department';
+        } else if (context === 'EMPASSIGNMENT') {
+            assignmentType = 'user';
+        }
+        
         console.log('=== Inactive Assets Controller Debug ===');
         console.log('asset_type_id:', asset_type_id);
         console.log('User org_id:', userOrgId);
         console.log('User branch_id:', userBranchId);
+        console.log('Context:', context);
+        console.log('Assignment Type Filter:', assignmentType);
         
-        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId);
+        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId, assignmentType);
         
         const count = result.rows.length;
         const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";
@@ -1018,7 +1094,8 @@ const getAssetsWithFilters = async (req, res) => {
             vendor_id, 
             status, 
             org_id,
-            search 
+            search,
+            exclude_in_maintenance 
         } = req.query;
 
         // Get user's organization and branch information
@@ -1031,7 +1108,7 @@ const getAssetsWithFilters = async (req, res) => {
             userId,
             userOrgId,
             userBranchId,
-            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search }
+            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search, exclude_in_maintenance }
         });
 
         // Always apply user context filtering first, then apply additional filters
@@ -1039,12 +1116,13 @@ const getAssetsWithFilters = async (req, res) => {
             asset_type_id,
             status,
             vendor_id,
-            search
+            search,
+            exclude_in_maintenance: exclude_in_maintenance === 'true' || exclude_in_maintenance === true
         };
 
         // Remove null/undefined values
         Object.keys(additionalFilters).forEach(key => {
-            if (additionalFilters[key] === null || additionalFilters[key] === undefined) {
+            if (additionalFilters[key] === null || additionalFilters[key] === undefined || additionalFilters[key] === false) {
                 delete additionalFilters[key];
             }
         });
@@ -1586,6 +1664,16 @@ const createAsset = async (req, res) => {
 
         if (!text || !org_id) {
             return res.status(400).json({ error: "text, and org_id are required fields" });
+        }
+
+        // Enforce service vendor when asset type maintenance is vendor-managed.
+        if (asset_type_id) {
+            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
+            if (vendorMaintained && !service_vendor_id) {
+                return res.status(400).json({
+                    error: "Service vendor is required for vendor-maintained asset types"
+                });
+            }
         }
 
         if (purchase_vendor_id) {

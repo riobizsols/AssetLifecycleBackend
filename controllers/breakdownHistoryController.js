@@ -1,4 +1,5 @@
 const model = require('../models/breakdownHistoryModel');
+const { listAssetMaintDocsByWorkOrder } = require('../models/assetMaintDocsModel');
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -254,6 +255,123 @@ const getBreakdownHistory = async (req, res) => {
     }
 };
 
+// Get single breakdown by ID (detail page: details, invoice, documents, before/after images)
+const getBreakdownById = async (req, res) => {
+    try {
+        const { breakdownId } = req.params;
+        const orgId = req.query.orgId || 'ORG001';
+
+        const result = await model.getBreakdownById(breakdownId, orgId);
+        if (!result.rows || result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Breakdown not found',
+                breakdown_id: breakdownId
+            });
+        }
+
+        const record = result.rows[0];
+        const formatted = {
+            breakdown_id: record.abr_id,
+            asset_id: record.asset_id,
+            breakdown_reason_code_id: record.atbrrc_id,
+            reported_by: record.reported_by,
+            is_create_maintenance: record.is_create_maintenance,
+            decision_code: record.decision_code,
+            breakdown_status: record.breakdown_status,
+            breakdown_description: record.breakdown_description,
+            breakdown_date: record.breakdown_date,
+            breakdown_updated_on: record.breakdown_updated_on,
+            breakdown_updated_by: record.breakdown_updated_by,
+            serial_number: record.serial_number,
+            asset_description: record.asset_description,
+            asset_status: record.asset_status,
+            purchased_on: record.purchased_on,
+            purchased_cost: record.purchased_cost,
+            service_vendor_id: record.service_vendor_id,
+            group_id: record.group_id,
+            branch_id: record.branch_id,
+            asset_type_id: record.asset_type_id,
+            asset_type_name: record.asset_type_name,
+            maintenance_lead_type: record.maint_lead_type,
+            breakdown_reason: record.breakdown_reason,
+            reason_code_status: record.reason_code_status,
+            reported_by_name: record.reported_by_name,
+            reported_by_email: record.reported_by_email,
+            reported_by_phone: record.reported_by_phone,
+            department_id: record.dept_id,
+            department_name: record.department_name,
+            vendor_id: record.vendor_id,
+            vendor_name: record.vendor_name,
+            vendor_contact_person: record.contact_person_name,
+            vendor_email: record.vendor_email,
+            vendor_phone: record.vendor_phone,
+            vendor_address: record.vendor_address,
+            work_order_id: record.work_order_id,
+            maintenance_start_date: record.maintenance_start_date,
+            maintenance_end_date: record.maintenance_end_date,
+            maintenance_status: record.maintenance_status,
+            maintenance_notes: record.maintenance_notes,
+            maintained_by: record.maintained_by,
+            po_number: record.po_number,
+            invoice: record.invoice,
+            technician_name: record.technician_name,
+            technician_email: record.technician_email,
+            technician_phone: record.technician_phno,
+            maintenance_type_name: record.maintenance_type_name,
+            branch_name: record.branch_name,
+            group_name: record.group_name
+        };
+
+        let before_images = [];
+        let after_images = [];
+        let supporting_documents = [];
+
+        if (record.work_order_id) {
+            try {
+                const docsResult = await listAssetMaintDocsByWorkOrder(record.work_order_id);
+                const docs = docsResult.rows || [];
+                const docType = (d) => (d.doc_type_text || d.doc_type_name || '').toLowerCase();
+                docs.forEach((doc) => {
+                    const type = docType(doc);
+                    const item = {
+                        amd_id: doc.amd_id,
+                        file_name: doc.file_name || 'document',
+                        doc_type_text: doc.doc_type_text || doc.doc_type_name,
+                        doc_path: doc.doc_path
+                    };
+                    if (type.includes('before')) {
+                        before_images.push(item);
+                    } else if (type.includes('after')) {
+                        after_images.push(item);
+                    } else {
+                        supporting_documents.push(item);
+                    }
+                });
+            } catch (docErr) {
+                console.error('Error fetching breakdown documents:', docErr);
+            }
+        }
+
+        res.json({
+            success: true,
+            data: {
+                ...formatted,
+                before_images,
+                after_images,
+                supporting_documents
+            }
+        });
+    } catch (error) {
+        console.error('Error in getBreakdownById:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch breakdown detail',
+            error: error.message
+        });
+    }
+};
+
 // Get breakdown history by asset ID
 const getBreakdownHistoryByAsset = async (req, res) => {
     try {
@@ -389,6 +507,30 @@ const getBreakdownHistorySummary = async (req, res) => {
         res.status(500).json({
             success: false,
             message: 'Failed to fetch breakdown history summary',
+            error: error.message
+        });
+    }
+};
+
+// Get breakdowns reopened more than once (for Reopen Details screen)
+const getBreakdownsReopenedMultiple = async (req, res) => {
+    try {
+        const orgId = req.query.orgId || 'ORG001';
+        const userBranchId = req.user?.branch_id;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
+
+        const rows = await model.getBreakdownsReopenedMultiple(orgId, userBranchId, hasSuperAccess);
+
+        res.json({
+            success: true,
+            data: rows,
+            count: rows.length
+        });
+    } catch (error) {
+        console.error('Error in getBreakdownsReopenedMultiple:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Failed to fetch breakdown reopen details',
             error: error.message
         });
     }
@@ -654,8 +796,10 @@ const generatePDF = async (data, filters) => {
 
 module.exports = {
     getBreakdownHistory,
+    getBreakdownById,
     getBreakdownHistoryByAsset,
     getBreakdownHistorySummary,
     getBreakdownFilterOptions,
+    getBreakdownsReopenedMultiple,
     exportBreakdownHistory
 };

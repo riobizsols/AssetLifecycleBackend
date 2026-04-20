@@ -5,11 +5,12 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 // Get all vendors - supports super access users who can view all branches
-const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => {
+const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, serviceOnly = false) => {
   console.log('=== Vendor Model Listing Debug ===');
   console.log('org_id:', org_id);
   console.log('userBranchCode:', userBranchCode);
   console.log('hasSuperAccess:', hasSuperAccess);
+  console.log('serviceOnly:', serviceOnly);
   
   let query = `
     SELECT * FROM "tblVendors" 
@@ -22,6 +23,20 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => 
     query += ` AND branch_code = $2`;
     params.push(userBranchCode);
   }
+
+  // Filter to service vendors if requested. The vendors table contains a boolean
+  // column `service_supply` which indicates whether the vendor provides services.
+  // If the column doesn't exist in a particular tenant DB, this clause will be
+  // ignored by the frontend fallback (frontend already handles absence), but
+  // here we add the filter only when explicitly requested.
+  if (serviceOnly) {
+    // If branch filter was added, parameter index is 2, otherwise 2 will be used below
+    if (!hasSuperAccess && userBranchCode) {
+      query += ` AND service_supply = true`;
+    } else {
+      query += ` AND service_supply = true`;
+    }
+  }
   
   query += ` ORDER BY created_on DESC`;
   
@@ -31,13 +46,57 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false) => 
   return result.rows;
 };
 
-// Get vendor by ID
+// Get vendor by ID - try tenant DB first, fallback to default DB
 const getVendorById = async (vendorId) => {
   const dbPool = getDb();
-  const result = await dbPool.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
-  return result.rows[0];
+  try {
+    const result = await dbPool.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
+    if (result.rows && result.rows.length > 0) return result.rows[0];
+  } catch (e) {
+    console.warn('Vendor lookup in request DB failed:', e.message);
+  }
+
+  // Fallback: try default DB pool
+  if (db && db !== dbPool) {
+    try {
+      const fallback = await db.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
+      if (fallback.rows && fallback.rows.length > 0) return fallback.rows[0];
+    } catch (e) {
+      console.warn('Vendor lookup in default DB failed:', e.message);
+    }
+  }
+
+  return null;
 };
 
+/**
+ * Get vendors by supply type (product-based or service-based) using tblVendorProdService + tblProdServs.ps_type.
+ * - product: vendors that have at least one linked prod_serv with ps_type = 'product'
+ * - service: vendors that have at least one linked prod_serv with ps_type = 'service'
+ * Vendors with both appear in both lists.
+ */
+const getVendorsBySupplyType = async (org_id, supplyType, userBranchCode, hasSuperAccess = false) => {
+  if (!supplyType || !['product', 'service'].includes(String(supplyType).toLowerCase())) {
+    return getAllVendors(org_id, userBranchCode, hasSuperAccess, false);
+  }
+  const psType = String(supplyType).toLowerCase();
+  const dbPool = getDb();
+  let query = `
+    SELECT DISTINCT v.vendor_id, v.vendor_name, v.company_name, v.int_status, v.org_id, v.branch_code, v.created_on
+    FROM "tblVendors" v
+    INNER JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id AND vps.org_id = v.org_id
+    INNER JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id AND LOWER(TRIM(ps.ps_type)) = $2
+    WHERE v.org_id = $1 AND (v.int_status = 1 OR v.int_status IS NULL)
+  `;
+  const params = [org_id, psType];
+  if (!hasSuperAccess && userBranchCode) {
+    query += ` AND (v.branch_code = $3 OR v.branch_code IS NULL)`;
+    params.push(userBranchCode);
+  }
+  query += ` ORDER BY v.vendor_name ASC`;
+  const result = await dbPool.query(query, params);
+  return result.rows;
+};
 
 const createVendor = async (vendor) => {
   console.log('=== Vendor Model Creation Debug ===');
@@ -116,5 +175,6 @@ module.exports = {
 module.exports = {
   getAllVendors,
   getVendorById,
+  getVendorsBySupplyType,
   createVendor,
 };

@@ -22,7 +22,7 @@ const getAllWorkflowSteps = async (req, res) => {
 // Create workflow step
 const createWorkflowStep = async (req, res) => {
     try {
-        const { text } = req.body;
+        const { text, esc_no_days } = req.body;
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
 
@@ -33,7 +33,8 @@ const createWorkflowStep = async (req, res) => {
             });
         }
 
-        const result = await model.createWorkflowStep(org_id, text.trim(), created_by);
+        const escDays = esc_no_days === undefined || esc_no_days === '' ? null : parseInt(esc_no_days, 10);
+        const result = await model.createWorkflowStep(org_id, text.trim(), created_by, escDays);
         res.status(201).json({
             success: true,
             message: 'Workflow step created successfully',
@@ -53,7 +54,7 @@ const createWorkflowStep = async (req, res) => {
 const updateWorkflowStep = async (req, res) => {
     try {
         const { id } = req.params;
-        const { text } = req.body;
+        const { text, esc_no_days } = req.body;
 
         if (!text || !text.trim()) {
             return res.status(400).json({
@@ -62,7 +63,7 @@ const updateWorkflowStep = async (req, res) => {
             });
         }
 
-        const result = await model.updateWorkflowStep(id, text.trim());
+        const result = await model.updateWorkflowStep(id, text.trim(), esc_no_days);
         
         if (result.rows.length === 0) {
             return res.status(404).json({
@@ -152,12 +153,12 @@ const createWorkflowSequence = async (req, res) => {
             });
         }
 
-        // Validate sequence number format (should be 5, 10, 15, 20, etc.)
+        // Validate sequence number format (should be 1, 2, 3, etc.)
         const seqNum = parseInt(seqs_no);
-        if (isNaN(seqNum) || seqNum % 5 !== 0 || seqNum < 5) {
+        if (isNaN(seqNum) || seqNum < 1) {
             return res.status(400).json({
                 success: false,
-                error: 'Sequence number must be a multiple of 5 (e.g., 5, 10, 15, 20)'
+                error: 'Sequence number must be a positive integer (e.g., 1, 2, 3)'
             });
         }
 
@@ -200,12 +201,12 @@ const updateWorkflowSequence = async (req, res) => {
             });
         }
 
-        // Validate sequence number format (should be 5, 10, 15, 20, etc.)
+        // Validate sequence number format (should be 1, 2, 3, etc.)
         const seqNum = parseInt(seqs_no);
-        if (isNaN(seqNum) || seqNum % 5 !== 0 || seqNum < 5) {
+        if (isNaN(seqNum) || seqNum < 1) {
             return res.status(400).json({
                 success: false,
-                error: 'Sequence number must be a multiple of 5 (e.g., 5, 10, 15, 20)'
+                error: 'Sequence number must be a positive integer (e.g., 1, 2, 3)'
             });
         }
 
@@ -294,13 +295,13 @@ const getJobRolesByWorkflowStep = async (req, res) => {
 // Create workflow job role
 const createWorkflowJobRole = async (req, res) => {
     try {
-        const { wf_steps_id, job_role_id, emp_int_id, dept_id } = req.body;
+        const { wf_steps_id, job_role_id, emp_int_id } = req.body;
         const org_id = req.user.org_id;
 
-        if (!wf_steps_id || !job_role_id || !dept_id) {
+        if (!wf_steps_id || !job_role_id) {
             return res.status(400).json({
                 success: false,
-                error: 'Workflow step, job role, and department are required'
+                error: 'Workflow step and job role are required'
             });
         }
 
@@ -313,7 +314,7 @@ const createWorkflowJobRole = async (req, res) => {
             });
         }
 
-        const result = await model.createWorkflowJobRole(wf_steps_id, job_role_id, emp_int_id || null, dept_id, org_id);
+        const result = await model.createWorkflowJobRole(wf_steps_id, job_role_id, emp_int_id || null, org_id);
         res.status(201).json({
             success: true,
             message: 'Job role assigned successfully',
@@ -333,13 +334,13 @@ const createWorkflowJobRole = async (req, res) => {
 const updateWorkflowJobRole = async (req, res) => {
     try {
         const { id } = req.params;
-        const { wf_steps_id, job_role_id, emp_int_id, dept_id } = req.body;
+        const { wf_steps_id, job_role_id, emp_int_id } = req.body;
         const org_id = req.user.org_id;
 
-        if (!job_role_id || !dept_id) {
+        if (!job_role_id) {
             return res.status(400).json({
                 success: false,
-                error: 'Job role and department are required'
+                error: 'Job role is required'
             });
         }
 
@@ -358,7 +359,7 @@ const updateWorkflowJobRole = async (req, res) => {
             }
         }
 
-        const result = await model.updateWorkflowJobRole(id, job_role_id, emp_int_id || null, dept_id);
+        const result = await model.updateWorkflowJobRole(id, job_role_id, emp_int_id || null);
         
         if (result.rows.length === 0) {
             return res.status(404).json({

@@ -3,8 +3,14 @@ const axios = require('axios');
 const { BACKEND_URL } = require('../config/environment');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
+const { startWfAtSeqBackfillCron } = require('../cron/wfAtSeqBackfillCron');
+const { startWfScrapSeqBackfillCron } = require('../cron/wfScrapSeqBackfillCron');
 const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogger');
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
+const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
+const {
+    ensureWarrantyNotificationsForWindowAllOrgs,
+} = require('../models/assetWarrantyNotifyModel');
 
 class CronService {
     constructor() {
@@ -13,27 +19,47 @@ class CronService {
         this.maintenanceCronTask = null; // Store the cron task reference
     }
 
-    // Initialize all cron jobs
+    // Initialize all cron jobs with staggered startup to avoid a "connection storm"
+    // (multiple cron loggers hitting the DB pool at once and exhausting connections).
+    // Gaps of 10–15s let the pool rest between each cron's startup logging.
     initCronJobs() {
         const userId = 'SYSTEM';
         
         console.log('Initializing cron jobs...');
         
-        maintenanceCronLogger.logCronJobInitialization({
-            jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal'],
-            userId
-        }).catch(err => console.error('Logging error:', err));
+        // Defer initial logging so it doesn't run in parallel with DB startup
+        setTimeout(() => {
+            maintenanceCronLogger.logCronJobInitialization({
+                jobs: ['maintenance_schedule_generation', 'workflow_escalation', 'vendor_contract_renewal', 'wfat_sequence_backfill', 'wfscrap_sequence_backfill'],
+                userId
+            }).catch(err => console.error('Logging error:', err));
+        }, 2000);
         
-        // Schedule maintenance schedule generation every 24 hours at 12 AM
+        // Schedule maintenance first (paused; only runs on manual trigger)
         this.scheduleMaintenanceGeneration();
         
-        // Schedule workflow escalation every day at 9 AM
-        this.scheduleWorkflowEscalation();
+        // Stagger workflow (10s) and vendor (20s) so pool has time to recover between cron startups
+        setTimeout(() => {
+            this.scheduleWorkflowEscalation();
+        }, 10000);
         
-        // Schedule vendor contract renewal check every day at 8 AM
-        this.scheduleVendorContractRenewal();
-        
-        console.log('Cron jobs initialized successfully');
+        setTimeout(() => {
+            this.scheduleVendorContractRenewal();
+            console.log('Cron jobs initialized successfully');
+        }, 30000);
+
+        // Start WFAT sequence backfill after other jobs to reduce startup contention.
+        setTimeout(() => {
+            this.scheduleWfAtSeqBackfill();
+        }, 45000);
+
+        setTimeout(() => {
+            this.scheduleWfScrapSeqBackfill();
+        }, 60000);
+
+        setTimeout(() => {
+            this.scheduleWarrantyNotificationTrigger();
+        }, 75000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -53,9 +79,55 @@ class CronService {
             startVendorContractRenewalCron();
             console.log('📅 [CRON] Vendor Contract Renewal: Scheduled for every day at 8:00 AM (IST)');
             console.log('   → Checks vendor contract end dates and creates renewal workflows 10 days before expiry');
-            console.log('   → Deactivates vendors with expired contracts that haven\'t been renewed');
+            console.log('   → Blocks vendors with expired contracts (workflow not approved before contract_end_date)');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule vendor contract renewal:', error.message);
+        }
+    }
+
+    // Backfill missing default workflow sequences for any asset type/org without tblWFATSeqs
+    scheduleWfAtSeqBackfill() {
+        try {
+            startWfAtSeqBackfillCron();
+            console.log('📅 [CRON] WFAT Sequence Backfill: Scheduled for every day at 1:00 AM (IST)');
+            console.log('   → For each tblAssetTypes row with org_id missing tblWFATSeqs, inserts default Seq 10 / WFS-06');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule WFAT sequence backfill:', error.message);
+        }
+    }
+
+    /** tblWFScrapSeq: one-level scrap approval for asset types missing a row (default WFS-02, seq 10). */
+    scheduleWfScrapSeqBackfill() {
+        try {
+            startWfScrapSeqBackfillCron();
+            console.log('📅 [CRON] WF Scrap Sequence Backfill: Scheduled for every day at 3:30 AM (IST)');
+            console.log('   → For each tblAssetTypes row missing tblWFScrapSeq, inserts default Seq 10 / WFS-02');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule WF scrap sequence backfill:', error.message);
+        }
+    }
+
+    // Schedule warranty notifications for assets expiring within 10 days.
+    scheduleWarrantyNotificationTrigger() {
+        try {
+            cron.schedule('0 7 * * *', async () => {
+                const startedAt = new Date().toISOString();
+                try {
+                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 10 });
+                    console.log(
+                        `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
+                    );
+                } catch (error) {
+                    console.error('❌ [CRON] Warranty notification trigger failed:', error.message);
+                }
+            }, {
+                timezone: "Asia/Kolkata",
+            });
+
+            console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
+            console.log('   → Creates notifications for assets with warranty expiry within next 10 days');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
         }
     }
 
@@ -286,6 +358,28 @@ class CronService {
     }
 
     // Get cron job status
+    // Trigger inspection generation
+    async triggerInspection(orgId) {
+        console.log(`[CRON SERVICE] Triggering inspection generation for org ${orgId}`);
+        // Mock request object for controller function
+        const req = {
+            body: { org_id: orgId },
+            user: { org_id: orgId, userId: 'SYSTEM' }
+        };
+        
+        let responseData = null;
+        const mockRes = {
+            status: (code) => mockRes, // chainable
+            json: (data) => {
+                responseData = data;
+                return mockRes;
+            }
+        };
+
+        await generateInspectionSchedules(req, mockRes);
+        return responseData || { message: "Generated inspection schedules" };
+    }
+
     getCronStatus() {
         return {
             maintenanceGeneration: {
@@ -307,12 +401,21 @@ class CronService {
             vendorContractRenewal: {
                 name: 'Vendor Contract Renewal',
                 schedule: '0 8 * * *', // Every day at 8:00 AM
-                description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Deactivates vendors with expired contracts that haven\'t been renewed.',
+                description: 'Checks vendor contract end dates and creates renewal workflows 10 days before expiry. Blocks vendors with expired contracts (workflow not approved before contract_end_date).',
                 timezone: 'Asia/Kolkata',
                 nextRun: 'Daily at 8:00 AM IST',
                 status: 'ACTIVE',
                 canTrigger: true,
                 purpose: 'Automatically manages vendor contract renewals and deactivates expired vendors'
+            },
+            warrantyNotificationTrigger: {
+                name: 'Warranty Notification Trigger',
+                schedule: '0 7 * * *',
+                description: 'Creates warranty alerts for assets whose expiry_date falls within next 10 days.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 7:00 AM IST',
+                status: 'ACTIVE',
+                purpose: 'Proactively notify mapped job roles before warranty end date'
             }
         };
     }

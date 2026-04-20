@@ -22,6 +22,7 @@ const orgRoutes = require("./routes/orgRoutes");
 const propertiesRoutes = require("./routes/propertiesRoutes");
 const breakdownReasonCodesRoutes = require("./routes/breakdownReasonCodesRoutes");
 const maintenanceFrequencyRoutes = require("./routes/maintenanceFrequencyRoutes");
+const inspectionRoutes = require("./routes/inspectionRoutes");
 const uomRoutes = require("./routes/uomRoutes");
 const employeeRoutes = require("./routes/employeeRoutes");
 const maintTypeRoutes = require("./routes/maintTypeRoutes");
@@ -34,6 +35,7 @@ const checklistRoutes = require("./routes/checklistRoutes");
 const cronRoutes = require("./routes/cronRoutes");
 const navigationRoutes = require("./routes/navigationRoutes");
 const assetScrapRoutes = require("./routes/assetScrapRoutes");
+const scrapMaintenanceRoutes = require("./routes/scrapMaintenanceRoutes");
 const depreciationRoutes = require("./routes/depreciationRoutes");
 const cronJobRoutes = require("./routes/cronJobRoutes");
 const scrapAssetsByTypeRoutes = require("./routes/scrapAssetsByTypeRoutes");
@@ -57,6 +59,7 @@ const breakdownHistoryRoutes = require("./routes/breakdownHistoryRoutes");
 const assetSerialPrintRoutes = require("./routes/assetSerialPrintRoutes");
 const appEventsRoutes = require("./routes/appEventsRoutes");
 const auditLogRoutes = require("./routes/auditLogRoutes");
+const statusCodesRoutes = require("./routes/statusCodesRoutes");
 const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const columnAccessConfigRoutes = require("./routes/columnAccessConfigRoutes");
 const fcmRoutes = require("./routes/fcmRoutes");
@@ -66,6 +69,16 @@ const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
+const techCertRoutes = require("./routes/techCertRoutes");
+const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
+const inspectionChecklistRoutes = require("./routes/inspectionChecklistRoutes");
+const inspectionFrequencyRoutes = require("./routes/inspectionFrequencyRoutes");
+const costCenterTransferRoutes = require("./routes/costCenterTransferRoutes");
+const assetTypeChecklistMappingRoutes = require("./routes/assetTypeChecklistMappingRoutes");
+const internalRoutes = require("./routes/internalRoutes");
+const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
+const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
+const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 
@@ -87,32 +100,34 @@ app.set('query parser', (str) => {
   });
 });
 
-// Log every incoming API request and response
-app.use((req, res, next) => {
-  const startTime = Date.now();
-  const timestamp = new Date().toISOString();
-  
-  // Log incoming request
-  console.log(`[API REQUEST] [${timestamp}] ${req.method} ${req.originalUrl}`);
-  
-  // Store original res.json to intercept responses
-  const originalJson = res.json;
-  res.json = function(body) {
-    const duration = Date.now() - startTime;
-    console.log(`[API RESPONSE] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
-    return originalJson.call(this, body);
-  };
-  
-  // Handle response finish for status codes
-  res.on('finish', () => {
-    const duration = Date.now() - startTime;
-    if (res.statusCode >= 400) {
-      console.log(`[API ERROR] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
-    }
+// Log every incoming API request and response (disabled in production)
+if (process.env.NODE_ENV !== 'production') {
+  app.use((req, res, next) => {
+    const startTime = Date.now();
+    const timestamp = new Date().toISOString();
+    
+    // Log incoming request
+    console.log(`[API REQUEST] [${timestamp}] ${req.method} ${req.originalUrl}`);
+    
+    // Store original res.json to intercept responses
+    const originalJson = res.json;
+    res.json = function(body) {
+      const duration = Date.now() - startTime;
+      console.log(`[API RESPONSE] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+      return originalJson.call(this, body);
+    };
+    
+    // Handle response finish for status codes
+    res.on('finish', () => {
+      const duration = Date.now() - startTime;
+      if (res.statusCode >= 400) {
+        console.log(`[API ERROR] [${new Date().toISOString()}] ${req.method} ${req.originalUrl} - Status: ${res.statusCode} - Duration: ${duration}ms`);
+      }
+    });
+    
+    next();
   });
-  
-  next();
-});
+}
 
 // Enhanced CORS configuration to support subdomain-based multi-tenancy
 app.use(
@@ -181,6 +196,10 @@ app.use("/api/maintenance-details", require("./routes/maintenanceDetailsRoutes")
 app.use("/api/", vendorsRoutes);
 app.use("/api/", slaRoutes);
 app.use("/api/", prodServRoutes);
+
+app.use("/api", techCertRoutes);
+app.use("/api", employeeTechCertRoutes);
+
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
 app.use("/api/assets", assetRoutes);
 app.use("/api/asset-assignments", assetAssignmentRoutes);
@@ -191,6 +210,8 @@ app.use("/api/orgs", orgRoutes);
 app.use("/api/properties", propertiesRoutes);
 app.use("/api/breakdown-reason-codes", breakdownReasonCodesRoutes);
 app.use("/api/maintenance-frequencies", maintenanceFrequencyRoutes);
+app.use("/api/inspection", inspectionRoutes);
+app.use("/api/inspection-approval", require("./routes/inspectionApprovalRoutes"));
 app.use("/api/uom", uomRoutes);
 app.use("/api/employees", employeeRoutes);
 app.use("/api/vendor-prod-services", vendorProdServiceRoutes);
@@ -203,6 +224,7 @@ app.use("/api/checklist", checklistRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/navigation", navigationRoutes);
 app.use("/api/scrap-assets", assetScrapRoutes);
+app.use("/api/scrap-maintenance", scrapMaintenanceRoutes);
 app.use("/api/depreciation", depreciationRoutes);
 app.use("/api/cron-jobs", cronJobRoutes);
 app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
@@ -220,18 +242,27 @@ app.use("/api/vendor-renewals", vendorRenewalRoutes);
 app.use("/api/asset-maint-docs", assetMaintDocsRoutes);
 app.use("/api/scrap-sales-docs", scrapSalesDocsRoutes);
 app.use("/api/doc-type-objects", docTypeObjectRoutes);
+app.use("/api/status-codes", statusCodesRoutes);
 app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
+
+app.use("/api/inspection-checklists", inspectionChecklistRoutes);
+app.use("/api/inspection-frequencies", inspectionFrequencyRoutes);
+app.use("/api/asset-type-checklist-mapping", assetTypeChecklistMappingRoutes);
 app.use("/api/asset-serial-print", assetSerialPrintRoutes);
 app.use("/api/app-events", appEventsRoutes);
 app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/audit-log-configs", auditLogConfigRoutes);
 app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
-
+app.use("/api/cost-center-transfer", costCenterTransferRoutes);
+app.use("/api/internal", internalRoutes);
+app.use("/api/job-monitor", jobMonitorRoutes);
+  app.use("/api/org-settings", orgSettingsRoutes);
+  app.use("/api/text-messages", textMessagesRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
@@ -239,10 +270,21 @@ app.get("/", (req, res) => {
 
 
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
   
   // Initialize cron jobs after server starts
   const cronService = new CronService();
   cronService.initCronJobs();
 });
+
+// Graceful shutdown: stop accepting new connections, then exit (do NOT end the pool
+// so in-flight requests never see "Cannot use a pool after calling end")
+function gracefulShutdown() {
+  console.log('\n🛑 Shutting down (closing server)...');
+  server.close(() => {
+    process.exit(0);
+  });
+}
+process.on('SIGTERM', gracefulShutdown);
+process.on('SIGINT', gracefulShutdown);

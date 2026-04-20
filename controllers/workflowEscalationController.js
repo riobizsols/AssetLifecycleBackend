@@ -2,7 +2,8 @@ const {
   getOverdueWorkflows,
   getNextApprover,
   escalateWorkflow,
-  processWorkflowEscalations
+  processWorkflowEscalations,
+  getWorkflowStepsWithEscDays
 } = require('../models/workflowEscalationModel');
  const workflowEscalationLogger = require('../eventLoggers/workflowEscalationEventLogger');
 
@@ -312,10 +313,53 @@ const manualEscalateWorkflowController = async (req, res) => {
   }
 };
 
+/**
+ * Get escalation status: overdue count, whether escalation is applicable, and esc_no_days per step.
+ * GET /api/workflow-escalation/status
+ */
+const getEscalationStatusController = async (req, res) => {
+  const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+  try {
+    const [overdueWorkflows, stepsWithEscDays] = await Promise.all([
+      getOverdueWorkflows(orgId),
+      getWorkflowStepsWithEscDays(orgId)
+    ]);
+    res.status(200).json({
+      success: true,
+      data: {
+        overdueCount: overdueWorkflows.length,
+        willEscalate: overdueWorkflows.length > 0,
+        overdueSummary: overdueWorkflows.map((w) => ({
+          wfamsh_id: w.wfamsh_id,
+          wfamsd_id: w.wfamsd_id,
+          sequence: w.sequence,
+          step_deadline: w.step_deadline || w.cutoff_date_fallback,
+          esc_no_days: w.esc_no_days,
+          asset_type_name: w.asset_type_name
+        })),
+        stepsWithEscDays: stepsWithEscDays.map((s) => ({
+          wf_steps_id: s.wf_steps_id,
+          text: s.text,
+          esc_no_days: s.esc_no_days
+        })),
+        note: 'Cron runs daily at 9:00 AM to process escalations. Use POST /process to run manually.'
+      }
+    });
+  } catch (error) {
+    console.error('Error in getEscalationStatusController:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get escalation status',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getOverdueWorkflowsController,
   triggerEscalationProcessController,
   getNextApproverController,
-  manualEscalateWorkflowController
+  manualEscalateWorkflowController,
+  getEscalationStatusController
 };
 

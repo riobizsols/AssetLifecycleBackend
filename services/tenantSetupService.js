@@ -3,6 +3,7 @@ const bcrypt = require('bcrypt');
 const { registerTenant, deactivateTenant, testTenantConnection: testConnection } = require('./tenantService');
 const { initTenantRegistryPool } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
+const setupWizardService = require('./setupWizardService');
 const { generateCustomId } = require('../utils/idGenerator');
 const { sendWelcomeEmail } = require('../utils/mailer');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
@@ -1006,11 +1007,28 @@ async function createTenant(tenantData) {
       // This includes all tables, primary keys, foreign keys, indexes, and constraints
       let schemaCreated = false;
       try {
-        // Note: generateTenantSchemaSql may read schema structure from DATABASE_URL for reference
-        // but the actual SQL execution uses tenantClient (tenant database), never writes to DATABASE_URL
-        console.log(`[TenantSetup] 🔄 Generating tenant schema SQL (excluding tblRioAdmin)...`);
-        
-        const schemaSql = await tenantSchemaService.generateTenantSchemaSql();
+        let schemaSql;
+        let foreignKeysSql = '';
+        try {
+          // Prefer latest schema snapshot (with optional FK split) from setup wizard service.
+          console.log(`[TenantSetup] 🔄 Fetching latest schema from template source...`);
+          const schemaResult = await setupWizardService.getSchemaSql(false, true);
+          
+          // Handle both old string format and new object format
+          if (typeof schemaResult === 'string') {
+            schemaSql = schemaResult;
+          } else if (schemaResult && typeof schemaResult === 'object') {
+            schemaSql = schemaResult.schema;
+            foreignKeysSql = schemaResult.foreignKeys || '';
+            console.log(`[TenantSetup] 📋 Schema without FKs: ${schemaSql.length} chars`);
+            console.log(`[TenantSetup] 🔗 Foreign keys: ${foreignKeysSql.length} chars`);
+          }
+        } catch (schemaSourceError) {
+          console.warn(`[TenantSetup] Schema source fetch failed, using tenantSchemaService fallback: ${schemaSourceError.message}`);
+          // Fallback: generate tenant schema directly (still executed only on tenantClient).
+          schemaSql = await tenantSchemaService.generateTenantSchemaSql();
+          foreignKeysSql = '';
+        }
         
         if (!schemaSql || schemaSql.trim().length === 0) {
           throw new Error('Tenant schema SQL generation returned empty result');
@@ -1019,11 +1037,18 @@ async function createTenant(tenantData) {
         console.log(`[TenantSetup] Executing tenant schema SQL...`);
         console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
         
-        // Execute the schema SQL as a single transaction
+        // Execute the schema SQL (WITHOUT foreign keys to avoid constraint violations during seeding)
+        // Foreign keys will be added after data is inserted
         try {
           await tenantClient.query(schemaSql);
           schemaCreated = true;
-          console.log(`[TenantSetup] ✅ Tenant schema SQL executed successfully`);
+          console.log(`[TenantSetup] ✅ Full schema SQL executed successfully (foreign keys deferred)`);
+          
+          // Store foreign keys for later application
+          if (foreignKeysSql && foreignKeysSql.length > 0) {
+            console.log(`[TenantSetup] 📋 Foreign keys will be applied after data seeding (${foreignKeysSql.length} chars)`);
+            tenantClient._foreignKeysSql = foreignKeysSql;
+          }
         } catch (execError) {
           console.error(`[TenantSetup] Error executing schema SQL as single query:`, execError.message);
           // If single query fails, try executing statement by statement
@@ -1354,7 +1379,21 @@ async function createTenant(tenantData) {
       // Step 4: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
       console.log(`[TenantSetup] Seeding default tenant data...`);
       await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId, adminCredentials.employeeId);
-
+      
+      // Apply foreign key constraints after all data has been seeded
+      if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
+        console.log('[TenantSetup] 🔗 Applying foreign key constraints to tenant database...');
+        try {
+          await tenantClient.query(tenantClient._foreignKeysSql);
+          console.log('[TenantSetup] ✅ Foreign key constraints applied successfully to tenant database');
+        } catch (fkError) {
+          console.error('[TenantSetup] ⚠️ Warning: Some foreign key constraints failed to apply:', fkError.message);
+          // Note: Not throwing error here, allowing setup to complete
+          // User can verify and fix constraints later if needed
+        }
+      } else {
+        console.log('[TenantSetup] ℹ️ No foreign key constraints to apply (already in schema or none generated)');
+      }
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
       
       // CRITICAL: Final validation - verify tenant database was used throughout

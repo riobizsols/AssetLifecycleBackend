@@ -168,6 +168,44 @@ const getAllAssetGroups = async (req, res) => {
     }
 };
 
+// GET /api/asset-groups/by-asset-type/:asset_type_id - Get groups that contain only this asset type
+const getAssetGroupsByAssetType = async (req, res) => {
+    try {
+        const { asset_type_id } = req.params;
+        const org_id = req.user?.org_id;
+
+        if (!asset_type_id) {
+            return res.status(400).json({ success: false, message: "asset_type_id is required" });
+        }
+
+        // Get user's branch information
+        const userModel = require("../models/userModel");
+        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
+        const userBranchId = userWithBranch?.branch_id;
+
+        // Get branch_code from tblBranches
+        let userBranchCode = null;
+        if (userBranchId) {
+            const dbPool = req.db || require("../config/db");
+            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
+            if (branchResult.rows.length > 0) {
+                userBranchCode = branchResult.rows[0].branch_code;
+            }
+        }
+
+        if (!userBranchCode) {
+            return res.status(400).json({ success: false, message: "branch_code not found for current user" });
+        }
+
+        const result = await model.getAssetGroupsByAssetType(org_id, userBranchCode, asset_type_id);
+        return res.status(200).json({ success: true, count: result.rows.length, groups: result.rows });
+    } catch (error) {
+        console.error("Error fetching asset groups by asset type:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch asset groups", error: error.message });
+    }
+};
+
 // GET /api/asset-groups/:id - Get asset group by ID
 const getAssetGroupById = async (req, res) => {
     const startTime = Date.now();
@@ -387,6 +425,7 @@ const deleteAssetGroup = async (req, res) => {
 module.exports = {
     createAssetGroup,
     getAllAssetGroups,
+    getAssetGroupsByAssetType,
     getAssetGroupById,
     updateAssetGroup,
     deleteAssetGroup

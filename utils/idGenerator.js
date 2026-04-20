@@ -24,19 +24,48 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfs': 'WFS',
             'wfas': 'WFAS',
             'wfjr': 'WFJR',
+            'amsbr': 'AMSBR',
             'prop': 'PROP',
             'atbrrc': 'ATBRRC',
             'atmcl': 'ATMCL',
+            'aat_insp_checklist': 'AATIC',
             'job_role_nav': 'JRN',
-            'job_role': 'JR'
+            'job_role': 'JR',
+            'aat_insp_checklist': 'AATIC',
+            // Scrap workflow tables
+            'wfscrapseq': 'WFSCQ',
+            'wfscrap_h': 'WFSCH',
+            'wfscrap_d': 'WFSCD',
+            'asset_scrap': 'ASCP',
+            // Existing scrap details table (legacy, used by reports/UI)
+                'asset_scrap_det': 'ASD',
+                'etc': 'ETC'
         };
         
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
         
-        // Insert new entry with last_number = 0
+        // Insert new entry with last_number = 0 (or seed from existing table if needed)
+        let initialLastNumber = 0;
+        if (tableKey === 'asset_scrap_det') {
+            // tblAssetScrapDet already has data in most DBs (ASD0001, ASD0002, ...).
+            // Seed tblIDSequences to avoid generating duplicates and doing many retries.
+            try {
+                const r = await dbPool.query(
+                    `
+                      SELECT COALESCE(MAX(CAST(SUBSTRING(asd_id FROM 4) AS INTEGER)), 0) AS max_seq
+                      FROM "tblAssetScrapDet"
+                      WHERE asd_id LIKE 'ASD%'
+                    `
+                );
+                initialLastNumber = Number(r.rows?.[0]?.max_seq || 0);
+            } catch (e) {
+                initialLastNumber = 0;
+            }
+        }
+
         await dbPool.query(
             'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
-            [tableKey, prefix, 0]
+            [tableKey, prefix, initialLastNumber]
         );
         
         console.log(`✅ Created new ID sequence entry: ${tableKey} with prefix ${prefix}`);
@@ -98,11 +127,22 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfs': 'tblWFSteps',
         'wfas': 'tblWFATSeqs',
         'wfjr': 'tblWFJobRole',
+        'amsbr': 'tblAssetMaintSch_BR_Hist',
         'prop': 'tblProps',
         'atbrrc': 'tblATBRReasonCodes',
+        'aat_insp_checklist': 'tblAATInspCheckList',
         'atmcl': 'tblATMaintCheckList',
+        'IC': 'tblInspCheckList',
         'job_role_nav': 'tblJobRoleNav',
-        'job_role': 'tblJobRoles'
+        'job_role': 'tblJobRoles',
+        // Scrap workflow tables
+        'wfscrapseq': 'tblWFScrapSeq',
+        'wfscrap_h': 'tblWFScrap_H',
+        'wfscrap_d': 'tblWFScrap_D',
+        'asset_scrap': 'tblAssetScrap',
+        // Existing scrap details table (legacy)
+        'asset_scrap_det': 'tblAssetScrapDet',
+        'etc': 'tblEmpTechCert'
     };
 
     const targetTable = tableMap[tableKey];
@@ -136,24 +176,44 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfs': 'wf_steps_id',
             'wfas': 'wf_at_seqs_id',
             'wfjr': 'wf_job_role_id',
+            'amsbr': 'amsbr_id',
             'prop': 'prop_id',
             'atbrrc': 'atbrrc_id',
+            'aat_insp_checklist': 'aatic_id',
             'atmcl': 'at_main_checklist_id',
+            'IC': 'insp_check_id',
             'job_role_nav': 'job_role_nav_id',
-            'job_role': 'job_role_id'
+            'job_role': 'job_role_id',
+            // Scrap workflow tables
+            'wfscrapseq': 'id',
+            'wfscrap_h': 'id_d',
+            'wfscrap_d': 'id',
+            'asset_scrap': 'id',
+            // Existing scrap details table (legacy)
+              'asset_scrap_det': 'asd_id',
+              'etc': 'etc_id'
         };
 
         const columnName = columnMap[tableKey];
         if (columnName) {
-            const existingCheck = await dbPool.query(
-                `SELECT ${columnName} FROM "${targetTable}" WHERE ${columnName} = $1`,
-                [generatedId]
-            );
+            try {
+                const existingCheck = await dbPool.query(
+                    `SELECT ${columnName} FROM "${targetTable}" WHERE ${columnName} = $1`,
+                    [generatedId]
+                );
 
-            if (existingCheck.rows.length > 0) {
-                console.warn(`⚠️ Generated ID ${generatedId} already exists, generating new one...`);
-                // If ID exists, recursively generate a new one
-                return await exports.generateCustomId(tableKey, padLength);
+                if (existingCheck.rows.length > 0) {
+                    console.warn(`⚠️ Generated ID ${generatedId} already exists, generating new one...`);
+                    return await exports.generateCustomId(tableKey, padLength);
+                }
+            } catch (e) {
+                if (e.code === '42P01') {
+                    console.warn(
+                        `[idGenerator] Table "${targetTable}" missing; skip duplicate check for ${tableKey}`
+                    );
+                } else {
+                    throw e;
+                }
             }
         }
     }
@@ -168,16 +228,18 @@ exports.peekNextId = async (prefix, table, column, padding = 3) => {
     const dbPool = getDb();
     const result = await dbPool.query(
         `SELECT ${column} FROM ${table} 
-       ORDER BY CAST(SUBSTRING(${column} FROM '\\d+$') AS INTEGER) DESC 
+       ORDER BY CAST(SUBSTRING(${column} FROM '[0-9]+$') AS INTEGER) DESC 
        LIMIT 1`
     );
 
     let nextNum = 1;
     if (result.rows.length > 0) {
         const lastId = result.rows[0][column];
-        const match = lastId.match(/\d+/); // extract numeric part
+        const match = lastId.match(/[0-9]+/g); // extract all numeric parts
         if (match) {
-            nextNum = parseInt(match[0]) + 1;
+            // Pick the last numeric part for sequencing
+            const lastPart = match[match.length - 1];
+            nextNum = parseInt(lastPart) + 1;
         }
     }
 

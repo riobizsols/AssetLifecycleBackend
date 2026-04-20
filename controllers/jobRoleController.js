@@ -88,7 +88,7 @@ const getJobRoleNavigation = async (req, res) => {
 const addJobRole = async (req, res) => {
     try {
         const { org_id, user_id } = req.user;
-        const { text, job_function, navigationItems } = req.body;
+        const { text, job_function, navigationItems, notif_warranty, notif_scrap } = req.body;
 
         if (!text) {
             return res.status(400).json({ message: "Missing required fields (text)" });
@@ -104,7 +104,9 @@ const addJobRole = async (req, res) => {
             job_role_id,
             text,
             job_function: job_function || null,
-            created_by: user_id
+            created_by: user_id,
+            notif_warranty: !!notif_warranty,
+            notif_scrap: !!notif_scrap
         });
 
         // Insert navigation items into tblJobRoleNav if provided
@@ -137,7 +139,7 @@ const updateJobRole = async (req, res) => {
     try {
         const { jobRoleId } = req.params;
         const { org_id, user_id } = req.user;
-        const { text, job_function, int_status, navigationItems } = req.body;
+        const { text, job_function, int_status, navigationItems, notif_warranty, notif_scrap } = req.body;
 
         if (!text) {
             return res.status(400).json({ message: "Role name (text) is required" });
@@ -148,6 +150,8 @@ const updateJobRole = async (req, res) => {
             text,
             job_function: job_function || null,
             int_status: int_status !== undefined ? int_status : 1,
+            notif_warranty: !!notif_warranty,
+            notif_scrap: !!notif_scrap,
             changed_by: user_id
         }, org_id);
 

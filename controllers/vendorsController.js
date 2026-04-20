@@ -32,7 +32,15 @@ exports.getAllVendors = async (req, res) => {
       }
     }
     
-    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess);
+    // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
+    const type = req.query.type ? String(req.query.type).toLowerCase() : '';
+    if (type === 'product' || type === 'service') {
+      const vendors = await vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+      return res.json(vendors);
+    }
+    // Optional query param to request only service vendors (legacy, uses service_supply column if present)
+    const serviceOnly = req.query.serviceOnly === 'true' || req.query.serviceOnly === '1';
+    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
     res.json(vendors);
   } catch (error) {
     console.error("Get all vendors error:", error);
@@ -414,14 +422,14 @@ exports.updateVendor = async (req, res) => {
       changed_on,
     } = req.body;
 
-    // Validate int_status: 0 = Inactive, 1 = Active, 4 = Blacklist
+    // Validate int_status: 0 = Inactive, 1 = Active, 3 = CRApproved, 4 = Blocked
     if (int_status !== undefined && int_status !== null) {
-      const validStatuses = [0, 1, 4];
+      const validStatuses = [0, 1, 3, 4];
       if (!validStatuses.includes(parseInt(int_status))) {
         return res.status(400).json({
           success: false,
           error: "Invalid status",
-          message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 4 (Blacklist)`
+          message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 3 (CRApproved), 4 (Blocked)`
         });
       }
     }

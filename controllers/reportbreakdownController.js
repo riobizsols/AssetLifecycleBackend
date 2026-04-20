@@ -14,6 +14,33 @@ const {
     logDatabaseConnectionFailure
 } = require('../eventLoggers/reportsEventLogger');
 
+// POST /api/reportbreakdown/:id/confirm
+const confirmEmployeeReportBreakdown = async (req, res) => {
+  const userId = req.user?.user_id;
+  const orgId = req.user?.org_id || req.query.orgId;
+  const { id } = req.params;
+  try {
+    const result = await model.confirmEmployeeReportBreakdown(id, orgId, userId);
+    return res.status(200).json({ success: true, message: "Breakdown confirmed", data: result });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
+// POST /api/reportbreakdown/:id/reopen
+const reopenEmployeeReportBreakdown = async (req, res) => {
+  const userId = req.user?.user_id;
+  const orgId = req.user?.org_id || req.query.orgId;
+  const { id } = req.params;
+  const { notes } = req.body;
+  try {
+    const result = await model.reopenEmployeeReportBreakdown(id, orgId, userId, notes);
+    return res.status(200).json({ success: true, message: "Breakdown reopened", data: result });
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+};
+
 // GET /api/reportbreakdown/reports
 const getAllReports = async (req, res) => {
   const startTime = Date.now();
@@ -278,8 +305,8 @@ const createBreakdownReport = async (req, res) => {
       userId
     });
 
-    // Validate required fields
-    if (!asset_id || !atbrrc_id || !reported_by || !description || !decision_code) {
+    // Validate required fields (decision_code is optional)
+    if (!asset_id || !atbrrc_id || !reported_by || !description) {
       await logMissingParameters({
         appId: APP_ID,
         operation: 'Create Breakdown Report',
@@ -287,21 +314,20 @@ const createBreakdownReport = async (req, res) => {
           !asset_id && 'asset_id',
           !atbrrc_id && 'atbrrc_id',
           !reported_by && 'reported_by',
-          !description && 'description',
-          !decision_code && 'decision_code'
+          !description && 'description'
         ].filter(Boolean),
         userId,
         duration: Date.now() - startTime
       });
       
       return res.status(400).json({ 
-        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description, decision_code' 
+        error: 'Missing required fields: asset_id, atbrrc_id, reported_by, description' 
       });
     }
 
-    // Validate decision code
+    // Validate decision code (only if provided)
     const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
-    if (!validDecisionCodes.includes(decision_code)) {
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
       await logInvalidFilters({
         appId: APP_ID,
         reportType: 'Breakdown Report',
@@ -358,6 +384,15 @@ const createBreakdownReport = async (req, res) => {
     });
   } catch (err) {
     console.error('Error creating breakdown report:', err);
+    console.error('Error stack:', err.stack);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table,
+      column: err.column
+    });
     
     // Determine error level
     const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
@@ -390,7 +425,22 @@ const createBreakdownReport = async (req, res) => {
       });
     }
     
-    res.status(500).json({ error: 'Failed to create breakdown report' });
+    // Return more detailed error message in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? `Failed to create breakdown report: ${err.message}${err.detail ? ` - ${err.detail}` : ''}`
+      : 'Failed to create breakdown report';
+    
+    res.status(500).json({ 
+      error: errorMessage,
+      ...(process.env.NODE_ENV === 'development' && {
+        details: {
+          code: err.code,
+          constraint: err.constraint,
+          table: err.table,
+          column: err.column
+        }
+      })
+    });
   }
 };
 
@@ -422,28 +472,27 @@ const updateBreakdownReport = async (req, res) => {
       userId
     });
 
-    // Validate required fields
-    if (!atbrrc_id || !description || !decision_code) {
+    // Validate required fields (decision_code is optional/nullable)
+    if (!atbrrc_id || !description) {
       await logMissingParameters({
         appId: APP_ID,
         operation: 'Update Breakdown Report',
         missingParams: [
           !atbrrc_id && 'atbrrc_id',
-          !description && 'description',
-          !decision_code && 'decision_code'
+          !description && 'description'
         ].filter(Boolean),
         userId,
         duration: Date.now() - startTime
       });
       
       return res.status(400).json({ 
-        error: 'Missing required fields: atbrrc_id, description, decision_code' 
+        error: 'Missing required fields: atbrrc_id, description' 
       });
     }
 
-    // Validate decision code
+    // Validate decision code (only if provided)
     const validDecisionCodes = ['BF01', 'BF02', 'BF03'];
-    if (!validDecisionCodes.includes(decision_code)) {
+    if (decision_code && !validDecisionCodes.includes(decision_code)) {
       await logInvalidFilters({
         appId: APP_ID,
         reportType: 'Breakdown Report',
@@ -483,7 +532,7 @@ const updateBreakdownReport = async (req, res) => {
     });
   } catch (err) {
     console.error('Error updating breakdown report:', err);
-    
+
     // Determine error level
     const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
     
@@ -515,7 +564,137 @@ const updateBreakdownReport = async (req, res) => {
       });
     }
     
-    res.status(500).json({ error: 'Failed to update breakdown report' });
+    res.status(500).json({
+      error: 'Failed to update breakdown report',
+      details: {
+        message: err?.message,
+        code: err?.code,
+        detail: err?.detail,
+        constraint: err?.constraint,
+        table: err?.table,
+        column: err?.column,
+      },
+    });
+  }
+};
+
+// DELETE /api/reportbreakdown/:id
+const deleteBreakdownReport = async (req, res) => {
+  const startTime = Date.now();
+  const userId = req.user?.user_id;
+  const APP_ID = 'REPORTBREAKDOWN';
+  
+  try {
+    const { id } = req.params;
+
+    // Log API called
+    await logReportApiCall({
+      appId: APP_ID,
+      operation: 'Delete Breakdown Report',
+      method: req.method,
+      url: req.originalUrl,
+      requestData: { abr_id: id },
+      userId
+    });
+
+    // Validate required fields
+    if (!id) {
+      await logMissingParameters({
+        appId: APP_ID,
+        operation: 'Delete Breakdown Report',
+        missingParams: ['id'],
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.status(400).json({ 
+        success: false,
+        error: 'Missing required parameter: breakdown report ID' 
+      });
+    }
+
+    // Get org_id from authenticated user
+    const org_id = req.user?.org_id;
+    if (!org_id) {
+      await logUnauthorizedReportAccess({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        userId,
+        duration: Date.now() - startTime
+      });
+      
+      return res.status(401).json({ 
+        success: false,
+        error: 'Unauthorized - Missing organization ID' 
+      });
+    }
+
+    const result = await model.deleteBreakdownReport(id, org_id);
+    
+    // Log success
+    await logReportGenerationSuccess({
+      appId: APP_ID,
+      operation: 'Delete Breakdown Report',
+      requestData: { abr_id: id, org_id },
+      responseData: result,
+      duration: Date.now() - startTime,
+      userId
+    });
+    
+    res.status(200).json(result);
+  } catch (err) {
+    console.error('Error deleting breakdown report:', err);
+    console.error('Error stack:', err.stack);
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      detail: err.detail,
+      constraint: err.constraint,
+      table: err.table,
+      column: err.column
+    });
+    
+    // Determine error level
+    const isDbError = err.code && (err.code.startsWith('23') || err.code.startsWith('42') || err.code === 'ECONNREFUSED');
+    
+    if (err.code === 'ECONNREFUSED') {
+      await logDatabaseConnectionFailure({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else if (isDbError) {
+      await logDatabaseQueryError({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        query: 'deleteBreakdownReport',
+        error: err,
+        userId,
+        duration: Date.now() - startTime
+      });
+    } else {
+      await logReportGenerationError({
+        appId: APP_ID,
+        reportType: 'Breakdown Report Delete',
+        error: err,
+        filters: { id: req.params.id },
+        userId,
+        duration: Date.now() - startTime
+      });
+    }
+    
+    // Return appropriate error message
+    const errorMessage = err.message === 'Breakdown report not found or access denied'
+      ? err.message
+      : 'Failed to delete breakdown report';
+    
+    res.status(err.message === 'Breakdown report not found or access denied' ? 404 : 500).json({ 
+      success: false,
+      error: errorMessage,
+      details: err.message
+    });
   }
 };
 
@@ -524,7 +703,10 @@ module.exports = {
   getAllReports,
   getUpcomingMaintenanceDate,
   createBreakdownReport,
-  updateBreakdownReport
+  updateBreakdownReport,
+  deleteBreakdownReport,
+  confirmEmployeeReportBreakdown,
+  reopenEmployeeReportBreakdown
 };
 
 

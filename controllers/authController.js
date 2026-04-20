@@ -47,6 +47,7 @@ const generateToken = (user, useDefaultDb = false) => {
 const login = async (req, res) => {
     const startTime = Date.now();
     const { email, password } = req.body;
+    let tempLoginPool = null;
     
     try {
         // Step 1: Log API called
@@ -111,6 +112,17 @@ const login = async (req, res) => {
         } else {
             // No subdomain - use normal database login (from .env DATABASE_URL)
             logger.log(`[AuthController] ℹ️ Normal database login (no subdomain) - using default database from .env`);
+            // Use a fresh pool for each normal login request to isolate auth from
+            // shared pool lifecycle issues (e.g., stale/ended shared pool state).
+            const { Pool } = require('pg');
+            tempLoginPool = new Pool({
+                connectionString: process.env.DATABASE_URL,
+                max: 2,
+                idleTimeoutMillis: 10000,
+                connectionTimeoutMillis: 5000,
+                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+            });
+            dbPool = tempLoginPool;
             await logCheckingUserInDatabase({ email, orgId: null, subdomain: null });
             // dbPool is already set to defaultDb
         }
@@ -257,7 +269,6 @@ const login = async (req, res) => {
                     ra.email,
                     ra.phone,
                     ra.job_role_id,
-                    ra.int_status,
                     ra.dept_id,
                     ra.branch_id,
                     d.text as dept_name,
@@ -359,6 +370,14 @@ const login = async (req, res) => {
 
         console.error('Login error:', error);
         res.status(500).json({ message: 'Internal server error' });
+    } finally {
+        if (tempLoginPool) {
+            try {
+                await tempLoginPool.end();
+            } catch (_) {
+                // no-op
+            }
+        }
     }
 };
 
@@ -1008,7 +1027,6 @@ const tenantLogin = async (req, res) => {
                     ra.email,
                     ra.phone,
                     ra.job_role_id,
-                    ra.int_status,
                     ra.dept_id,
                     ra.branch_id,
                     d.text as dept_name,

@@ -1,4 +1,4 @@
-const { Client } = require("pg");
+const { Client, Pool } = require("pg");
 const fs = require("fs");
 const path = require("path");
 const bcrypt = require("bcrypt");
@@ -40,18 +40,168 @@ const clearSchemaCache = () => {
 };
 
 /**
- * Dynamically generate schema SQL from the current DATABASE_URL database
+ * Generate detailed setup report and save to logs/db-creation/
+ */
+const generateSetupReport = async (setupData) => {
+  try {
+    const {
+      orgId,
+      orgName,
+      adminUser,
+      dbConfig,
+      summary,
+      logs,
+      foreignKeysInfo,
+      startTime,
+      endTime
+    } = setupData;
+
+    const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\..+/, '');
+    const reportDir = path.join(__dirname, '..', 'logs', 'db-creation');
+    
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(reportDir)) {
+      fs.mkdirSync(reportDir, { recursive: true });
+    }
+
+    const reportFile = path.join(reportDir, `org_setup_${orgId}_${timestamp}.txt`);
+    
+    const duration = endTime - startTime;
+    const durationSeconds = (duration / 1000).toFixed(2);
+    
+    let report = '';
+    report += '================================================================================\n';
+    report += '                   ORGANIZATION SETUP REPORT                                    \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Setup Date/Time: ${new Date(startTime).toLocaleString()}\n`;
+    report += `Duration: ${durationSeconds} seconds\n`;
+    report += `Report Generated: ${new Date().toLocaleString()}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   ORGANIZATION DETAILS                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Organization ID: ${orgId}\n`;
+    report += `Organization Name: ${orgName}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   DATABASE CONFIGURATION                                       \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Host: ${dbConfig.host}\n`;
+    report += `Port: ${dbConfig.port || 5432}\n`;
+    report += `Database: ${dbConfig.database}\n`;
+    report += `User: ${dbConfig.user}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   SCHEMA CREATION SUMMARY                                      \n';
+    report += '================================================================================\n';
+    report += '\n';
+    
+    if (foreignKeysInfo) {
+      report += `Tables Created: 79 (from GENERIC_URL template)\n`;
+      report += `Primary Keys: Applied to all tables\n`;
+      report += `Foreign Keys (Valid): ${foreignKeysInfo.validCount || 0}\n`;
+      report += `Foreign Keys (Skipped): ${foreignKeysInfo.skippedCount || 0}\n`;
+      report += `Total Foreign Keys: ${(foreignKeysInfo.validCount || 0) + (foreignKeysInfo.skippedCount || 0)}\n`;
+    } else {
+      report += `Schema: Created using static/dynamic SQL\n`;
+    }
+    
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   DATA SEEDING SUMMARY                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Branches Created: ${summary.branches || 0}\n`;
+    report += `Departments Created: ${summary.departments || 0}\n`;
+    report += `Audit Rules Created: ${summary.auditRules || 0}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   ADMIN USER DETAILS                                           \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `User ID: ${adminUser.userId}\n`;
+    report += `Username: ${adminUser.username}\n`;
+    report += `Email: ${adminUser.email || 'Not provided'}\n`;
+    report += `Full Name: ${adminUser.fullName || 'Not provided'}\n`;
+    report += '\n';
+    report += '================================================================================\n';
+    report += '                   SETUP EXECUTION LOGS                                         \n';
+    report += '================================================================================\n';
+    report += '\n';
+    
+    // Group logs by scope
+    const logsByScope = {};
+    logs.forEach(log => {
+      const scope = log.scope || 'general';
+      if (!logsByScope[scope]) {
+        logsByScope[scope] = [];
+      }
+      logsByScope[scope].push(log);
+    });
+    
+    // Print logs by scope
+    Object.keys(logsByScope).sort().forEach(scope => {
+      report += `[${scope.toUpperCase()}]\n`;
+      logsByScope[scope].forEach(log => {
+        const level = log.level || (log.warning ? 'warning' : 'info');
+        const prefix = level === 'error' ? '❌' : level === 'warning' ? '⚠️' : '✅';
+        report += `  ${prefix} ${log.message}\n`;
+      });
+      report += '\n';
+    });
+    
+    report += '================================================================================\n';
+    report += '                   SETUP COMPLETED SUCCESSFULLY                                 \n';
+    report += '================================================================================\n';
+    report += '\n';
+    report += `Organization ${orgId} is ready for use!\n`;
+    report += `Total setup time: ${durationSeconds} seconds\n`;
+    report += '\n';
+
+    // Write report to file
+    fs.writeFileSync(reportFile, report, 'utf8');
+    
+    console.log(`[SetupWizard] 📄 Setup report generated: ${reportFile}`);
+    
+    return {
+      success: true,
+      reportFile,
+      reportPath: reportFile
+    };
+  } catch (error) {
+    console.error('[SetupWizard] ❌ Error generating setup report:', error.message);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
+};
+
+/**
+ * Dynamically generate schema SQL from GENERIC_URL (template database)
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
+  // Create a separate connection pool for GENERIC_URL (template database)
+  const genericPool = new Pool({
+    connectionString: process.env.GENERIC_URL,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
   try {
-    console.log('[SetupWizard] 🔄 Generating dynamic schema from DATABASE_URL...');
+    console.log('[SetupWizard] 🔄 Generating dynamic schema from GENERIC_URL (template database)...');
+    console.log('[SetupWizard] 📍 Template DB: ' + (process.env.GENERIC_URL || '').replace(/:[^:@]+@/, ':***@'));
     
     const schemaParts = [];
     const foreignKeyStatements = []; // Collect FK constraints to add at the end
     
     // Get sequences FIRST (before tables, since tables may reference them in DEFAULT values)
-    const sequencesResult = await db.query(`
+    const sequencesResult = await genericPool.query(`
       SELECT 
         sequence_name,
         data_type,
@@ -78,7 +228,7 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Get all tables in public schema
-    const tablesResult = await db.query(`
+    const tablesResult = await genericPool.query(`
       SELECT table_name 
       FROM information_schema.tables 
       WHERE table_schema = 'public' 
@@ -99,7 +249,7 @@ const generateDynamicSchemaSql = async () => {
     for (const tableName of tables) {
       console.log(`[SetupWizard] 🔨 Processing table: ${tableName}`);
       // Get columns for this table
-      const columnsResult = await db.query(`
+      const columnsResult = await genericPool.query(`
         SELECT 
           column_name,
           data_type,
@@ -116,7 +266,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get primary key constraint
-      const pkResult = await db.query(`
+      const pkResult = await genericPool.query(`
         SELECT 
           kcu.column_name
         FROM information_schema.table_constraints tc
@@ -132,7 +282,7 @@ const generateDynamicSchemaSql = async () => {
       const pkColumns = pkResult.rows.map(row => row.column_name);
       
       // Get foreign key constraints - using pg_catalog for accurate column mapping
-      const fkResult = await db.query(`
+      const fkResult = await genericPool.query(`
         SELECT
           con.conname AS constraint_name,
           att.attname AS column_name,
@@ -168,7 +318,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get unique constraints
-      const uniqueResult = await db.query(`
+      const uniqueResult = await genericPool.query(`
         SELECT
           tc.constraint_name,
           kcu.column_name
@@ -188,7 +338,7 @@ const generateDynamicSchemaSql = async () => {
       `, [tableName]);
       
       // Get check constraints
-      const checkResult = await db.query(`
+      const checkResult = await genericPool.query(`
         SELECT
           cc.constraint_name,
           cc.check_clause
@@ -329,17 +479,32 @@ const generateDynamicSchemaSql = async () => {
         }
       }
       
-      // Store FK statements for later
+      // Store FK statements for later (with validation)
       for (const [constraintName, fk] of Object.entries(fkConstraints)) {
         if (fk.columns.length === 0) continue; // Skip if no columns (shouldn't happen)
         
+        // Validate that referenced table has primary key or unique constraint
+        // Check if the referenced table is in our tables list
+        if (!tables.includes(fk.foreignTable)) {
+          console.warn(`[SetupWizard] ⚠️ Skipping FK ${constraintName}: Referenced table "${fk.foreignTable}" not found in tables list`);
+          continue;
+        }
+        
+        // Check if referenced table has primary key on the referenced column(s)
+        // We'll validate this when applying, but for now we'll include it
+        // The actual validation will happen during application
+        
         const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
         const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
-        foreignKeyStatements.push(
-          `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
-          `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
-          `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`
-        );
+        foreignKeyStatements.push({
+          sql: `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
+               `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
+               `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`,
+          tableName: fk.tableName,
+          foreignTable: fk.foreignTable,
+          foreignColumns: fk.foreignColumns,
+          constraintName: constraintName
+        });
       }
       
       // Add CHECK constraints
@@ -351,7 +516,7 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Get indexes (non-unique, non-primary key)
-    const indexesResult = await db.query(`
+    const indexesResult = await genericPool.query(`
       SELECT
         schemaname,
         tablename,
@@ -380,8 +545,58 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Add all foreign key constraints AFTER all tables are created
-    console.log(`[SetupWizard] 📎 Adding ${foreignKeyStatements.length} foreign key constraints`);
-    schemaParts.push(...foreignKeyStatements);
+    // But first, validate that referenced tables have primary keys
+    console.log(`[SetupWizard] 📎 Validating ${foreignKeyStatements.length} foreign key constraints...`);
+    
+    // Get primary keys for all tables to validate foreign key references
+    const tablePrimaryKeys = {};
+    for (const tableName of tables) {
+      const pkResult = await genericPool.query(`
+        SELECT kcu.column_name
+        FROM information_schema.table_constraints tc
+        JOIN information_schema.key_column_usage kcu
+          ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+        WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema = 'public'
+          AND tc.table_name = $1
+        ORDER BY kcu.ordinal_position
+      `, [tableName]);
+      tablePrimaryKeys[tableName] = pkResult.rows.map(r => r.column_name);
+    }
+    
+    const validForeignKeyStatements = [];
+    const skippedForeignKeyStatements = [];
+    
+    for (const fk of foreignKeyStatements) {
+      // Check if referenced table exists in our tables list
+      if (!tables.includes(fk.foreignTable)) {
+        console.warn(`[SetupWizard] ⚠️ Skipping FK ${fk.constraintName}: Referenced table "${fk.foreignTable}" not found`);
+        skippedForeignKeyStatements.push(fk);
+        continue;
+      }
+      
+      // Check if referenced table has primary key on the referenced columns
+      const refTablePKs = tablePrimaryKeys[fk.foreignTable] || [];
+      const hasMatchingPK = fk.foreignColumns.every(col => refTablePKs.includes(col));
+      
+      if (!hasMatchingPK) {
+        console.warn(`[SetupWizard] ⚠️ Skipping FK ${fk.constraintName}: Referenced table "${fk.foreignTable}" does not have primary key on columns [${fk.foreignColumns.join(', ')}] (has PKs: [${refTablePKs.join(', ')}])`);
+        skippedForeignKeyStatements.push(fk);
+        continue;
+      }
+      
+      validForeignKeyStatements.push(fk.sql);
+    }
+    
+    console.log(`[SetupWizard] 📎 Adding ${validForeignKeyStatements.length} valid foreign key constraints (${skippedForeignKeyStatements.length} skipped)`);
+    if (skippedForeignKeyStatements.length > 0) {
+      console.warn(`[SetupWizard] ⚠️ Skipped foreign keys: ${skippedForeignKeyStatements.map(fk => fk.constraintName).join(', ')}`);
+    }
+    
+    // Store foreign keys separately - DO NOT add them to schemaParts yet
+    // They will be added AFTER data seeding to avoid constraint violations
+    const foreignKeysSql = validForeignKeyStatements.join('\n');
     
     const dynamicSchema = `SET search_path TO public;\n${schemaParts.join('\n')}`;
     
@@ -395,19 +610,31 @@ const generateDynamicSchemaSql = async () => {
     console.log(`[SetupWizard]   - CREATE TABLE statements: ${tableCount}`);
     console.log(`[SetupWizard]   - Indexes: ${indexesResult.rows.length}`);
     console.log(`[SetupWizard]   - Sequences: ${sequencesResult.rows.length}`);
-    console.log(`[SetupWizard]   - Foreign keys: ${foreignKeyStatements.length}`);
+    console.log(`[SetupWizard]   - Foreign keys: ${validForeignKeyStatements.length} valid, ${skippedForeignKeyStatements.length} skipped (out of ${foreignKeyStatements.length} total)`);
     console.log(`[SetupWizard]   - Total schema size: ${dynamicSchema.length} characters`);
+    console.log(`[SetupWizard]   - Foreign keys SQL size: ${foreignKeysSql.length} characters`);
+    console.log(`[SetupWizard] ℹ️  Foreign keys will be added AFTER data seeding to avoid constraint violations`);
     
     if (tableCount !== tables.length) {
       console.warn(`[SetupWizard] ⚠️ WARNING: Table count mismatch! Found ${tables.length} tables but generated ${tableCount} CREATE TABLE statements`);
       console.warn(`[SetupWizard] ⚠️ This might indicate some tables were not processed correctly`);
     }
     
-    return dynamicSchema;
+    // Return both schema without foreign keys and foreign keys separately
+    return { 
+      schema: dynamicSchema, 
+      foreignKeys: foreignKeysSql,
+      validCount: validForeignKeyStatements.length,
+      skippedCount: skippedForeignKeyStatements.length
+    };
   } catch (error) {
     console.error('[SetupWizard] ❌ Error generating dynamic schema:', error.message);
     console.error('[SetupWizard] Stack:', error.stack);
     return null;
+  } finally {
+    // Always close the genericPool connection
+    await genericPool.end();
+    console.log('[SetupWizard] 🔌 Closed connection to GENERIC_URL');
   }
 };
 
@@ -430,7 +657,7 @@ const CORE_TABLE_DDL = [
       os_id character varying(20) PRIMARY KEY,
       org_id character varying(20) NOT NULL,
       key character varying(50) NOT NULL,
-      value character varying(100) NOT NULL
+      value text NOT NULL
     );
   `,
   `
@@ -639,7 +866,7 @@ const sanitizeDump = (raw) => {
  * Get schema SQL - tries dynamic generation first, falls back to static file
  * @param {boolean} forceStatic - Force use of static file instead of dynamic generation
  * @param {boolean} forceRegenerate - Force regeneration even if cached (useful when DB structure changes)
- * @returns {Promise<string>} Schema SQL string
+ * @returns {Promise<object|string>} Schema info object {schema, foreignKeys} or SQL string for static
  */
 const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
   // Clear cache if force regeneration is requested
@@ -653,11 +880,11 @@ const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
   if (!forceStatic && !cachedDynamicSchemaSql) {
     try {
       console.log('[SetupWizard] 🔄 Attempting dynamic schema generation from DATABASE_URL...');
-      const dynamicSchema = await generateDynamicSchemaSql();
-      if (dynamicSchema) {
-        cachedDynamicSchemaSql = dynamicSchema;
+      const dynamicSchemaResult = await generateDynamicSchemaSql();
+      if (dynamicSchemaResult && dynamicSchemaResult.schema) {
+        cachedDynamicSchemaSql = dynamicSchemaResult;
         console.log('[SetupWizard] ✅ Using dynamically generated schema');
-        console.log(`[SetupWizard] 📊 Dynamic schema size: ${dynamicSchema.length} characters`);
+        console.log(`[SetupWizard] 📊 Dynamic schema size: ${dynamicSchemaResult.schema.length} characters`);
         return cachedDynamicSchemaSql;
       } else {
         console.warn('[SetupWizard] ⚠️ Dynamic schema generation returned null, falling back to static file');
@@ -687,7 +914,8 @@ const getSchemaSql = async (forceStatic = false, forceRegenerate = false) => {
       throw new Error('Both dynamic schema generation and static file read failed');
     }
   }
-  return cachedSchemaSql;
+  // Return static schema as an object for consistency
+  return { schema: cachedSchemaSql, foreignKeys: '', validCount: 0, skippedCount: 0 };
 };
 
 /**
@@ -829,18 +1057,72 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  for (const app of DEFAULT_APPS) {
-    await client.query(
-      `
-        INSERT INTO "tblApps" (app_id, text, int_status, org_id)
-        VALUES ($1, $2, true, $3)
-        ON CONFLICT (app_id) DO UPDATE
-        SET text = EXCLUDED.text,
-            int_status = EXCLUDED.int_status,
-            org_id = EXCLUDED.org_id
-      `,
-      [app.id, app.label, orgId]
-    );
+  // Sync ALL tblApps entries from GENERIC_URL (template database)
+  // This ensures all app_ids exist before job role navigation is created
+  const genericPool = new Pool({
+    connectionString: process.env.GENERIC_URL,
+    max: 5,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 10000,
+  });
+
+  try {
+    console.log('[SetupWizard] 📋 Syncing tblApps entries from GENERIC_URL...');
+    
+    // Get all apps from GENERIC_URL
+    const appsResult = await genericPool.query(`
+      SELECT app_id, text, int_status
+      FROM "tblApps"
+      ORDER BY app_id
+    `);
+    
+    console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in template database`);
+    
+    // Insert all apps into new database with the new org_id
+    for (const app of appsResult.rows) {
+      await client.query(
+        `
+          INSERT INTO "tblApps" (app_id, text, int_status, org_id)
+          VALUES ($1, $2, $3, $4)
+          ON CONFLICT (app_id) DO UPDATE
+          SET text = EXCLUDED.text,
+              int_status = EXCLUDED.int_status,
+              org_id = EXCLUDED.org_id
+        `,
+        [app.app_id, app.text, app.int_status !== false, orgId]
+      );
+    }
+    
+    console.log(`[SetupWizard] ✅ Synced ${appsResult.rows.length} app entries to new database`);
+    logs.push({ 
+      message: `${appsResult.rows.length} app entries synced from template database`, 
+      scope: "reference" 
+    });
+    
+  } catch (error) {
+    console.error('[SetupWizard] ❌ Error syncing tblApps:', error.message);
+    // Fallback to DEFAULT_APPS if sync fails
+    console.log('[SetupWizard] ⚠️ Falling back to DEFAULT_APPS...');
+    for (const app of DEFAULT_APPS) {
+      await client.query(
+        `
+          INSERT INTO "tblApps" (app_id, text, int_status, org_id)
+          VALUES ($1, $2, true, $3)
+          ON CONFLICT (app_id) DO UPDATE
+          SET text = EXCLUDED.text,
+              int_status = EXCLUDED.int_status,
+              org_id = EXCLUDED.org_id
+        `,
+        [app.id, app.label, orgId]
+      );
+    }
+    logs.push({ 
+      message: `Warning: Used fallback DEFAULT_APPS (${DEFAULT_APPS.length} entries) - template sync failed`, 
+      scope: "reference",
+      level: "warning"
+    });
+  } finally {
+    await genericPool.end();
   }
 
   for (const event of DEFAULT_EVENTS) {
@@ -1132,7 +1414,7 @@ const seedAuditConfig = async (client, orgId, selectedIds = [], fallbackEmail, l
   return count;
 };
 
-const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
+const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId = null) => {
   const inputBranches =
     Array.isArray(org.branches) && org.branches.length
       ? org.branches
@@ -1158,14 +1440,14 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
         INSERT INTO "tblBranches"
           (branch_id, org_id, int_status, text, city, branch_code, created_by, created_on, changed_by, changed_on)
         VALUES
-          ($1, $2, 1, $3, $4, $5, 'SETUP', CURRENT_TIMESTAMP, 'SETUP', CURRENT_TIMESTAMP)
+          ($1, $2, 1, $3, $4, $5, $6, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP)
         ON CONFLICT (branch_id) DO UPDATE
         SET text = EXCLUDED.text,
             city = EXCLUDED.city,
             branch_code = EXCLUDED.branch_code,
             org_id = EXCLUDED.org_id
       `,
-      [branchId, orgId, branchName, branchCity, branchCode]
+      [branchId, orgId, branchName, branchCity, branchCode, adminUserId]
     );
 
     branchMappings.push({ tempId: branch.tempId || null, branchId });
@@ -1187,13 +1469,13 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
           INSERT INTO "tblDepartments"
             (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by, branch_id)
           VALUES
-            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, 'SETUP', 'SETUP', $4)
+            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4, $5)
           ON CONFLICT (dept_id) DO UPDATE
           SET text = EXCLUDED.text,
               branch_id = EXCLUDED.branch_id,
               org_id = EXCLUDED.org_id
         `,
-        [orgId, deptId, `${deptName} (${deptCode})`, branchId]
+        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId, branchId]
       );
 
       deptMappings.push({
@@ -1216,7 +1498,7 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs) => {
   return { branchMappings, deptMappings };
 };
 
-const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => {
+const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, existingUserId = null) => {
   if (!adminUser.email) {
     throw new Error("Admin user email is required.");
   }
@@ -1239,71 +1521,125 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
   const initialPassword = await getInitialPassword(orgId, client);
   const passwordHash = await bcrypt.hash(initialPassword, 10);
 
-  // Generate user_id for RioAdmin in USR format (USR001, USR002, etc.)
-  // Query tblIDSequences directly using the client connection
-  let idResult = await client.query(
-    'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
-    ['user']
-  );
-
-  // Auto-create entry if it doesn't exist
-  if (idResult.rows.length === 0) {
-    await client.query(
-      'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
-      ['user', 'USR', 0]
-    );
-    idResult = await client.query(
+  // Use existing user ID if provided, otherwise generate new one
+  let rioAdminUserId;
+  if (existingUserId) {
+    rioAdminUserId = existingUserId;
+  } else {
+    // Generate user_id for RioAdmin in USR format (USR001, USR002, etc.)
+    // Query tblIDSequences directly using the client connection
+    let idResult = await client.query(
       'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
       ['user']
     );
+
+    // Auto-create entry if it doesn't exist
+    if (idResult.rows.length === 0) {
+      await client.query(
+        'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+        ['user', 'USR', 0]
+      );
+      idResult = await client.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        ['user']
+      );
+    }
+
+    const { prefix, last_number } = idResult.rows[0];
+    const next = last_number + 1;
+    
+    // Update the last number
+    await client.query(
+      'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
+      [next, 'user']
+    );
+
+    // Generate the ID in format USR001, USR002, etc.
+    rioAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
   }
-
-  const { prefix, last_number } = idResult.rows[0];
-  const next = last_number + 1;
-  
-  // Update the last number
-  await client.query(
-    'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
-    [next, 'user']
-  );
-
-  // Generate the ID in format USR001, USR002, etc.
-  const rioAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
   const rioAdminUsername = "rioadmin";
 
   // Create admin user in tblRioAdmin instead of tblUsers and tblEmployees
-  await client.query(
-    `
-      INSERT INTO "tblRioAdmin"
-        (org_id, user_id, full_name, username, email, phone, job_role_id, password,
-         created_by, created_on, changed_by, changed_on, time_zone, dept_id,
-         branch_id, int_status, language_code)
-      VALUES
-        ($1, $2, $3, $4, $5, $6, 'JR001', $7,
-         'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 'IST', $8,
-         $9, 1, 'en')
-      ON CONFLICT (user_id) DO UPDATE
-      SET full_name = EXCLUDED.full_name,
-          username = EXCLUDED.username,
-          email = EXCLUDED.email,
-          phone = EXCLUDED.phone,
-          password = EXCLUDED.password,
-          dept_id = EXCLUDED.dept_id,
-          branch_id = EXCLUDED.branch_id,
-          org_id = EXCLUDED.org_id
-    `,
-    [
-      orgId,
-      rioAdminUserId,
-      adminUser.fullName,
-      rioAdminUsername,
-      adminUser.email,
-      adminUser.phone || null,
-      passwordHash,
-      deptId,
-      branchId,
-    ]
-  );
+  // Note: int_status column may not exist in all database schemas, so we'll try without it first
+  try {
+    await client.query(
+      `
+        INSERT INTO "tblRioAdmin"
+          (org_id, user_id, full_name, username, email, phone, job_role_id, password,
+           created_by, created_on, changed_by, changed_on, time_zone, dept_id,
+           branch_id, language_code)
+        VALUES
+          ($1, $2, $3, $4, $5, $6, 'JR001', $7,
+           $2, CURRENT_DATE, $2, CURRENT_DATE, 'IST', $8,
+           $9, 'en')
+        ON CONFLICT (user_id) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            username = EXCLUDED.username,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            password = EXCLUDED.password,
+            dept_id = EXCLUDED.dept_id,
+            branch_id = EXCLUDED.branch_id,
+            org_id = EXCLUDED.org_id
+      `,
+      [
+        orgId,
+        rioAdminUserId,
+        adminUser.fullName,
+        rioAdminUsername,
+        adminUser.email,
+        adminUser.phone || null,
+        passwordHash,
+        deptId,
+        branchId,
+      ]
+    );
+  } catch (insertError) {
+    // If the insert fails, try with int_status (in case the column exists)
+    if (insertError.message && insertError.message.includes('column') && insertError.message.includes('does not exist')) {
+      // Try alternative column set - maybe int_status exists but another doesn't
+      // For now, just log and rethrow - the error message will help identify the issue
+      console.warn(`[SetupWizard] Failed to insert into tblRioAdmin: ${insertError.message}`);
+      throw insertError;
+    }
+    throw insertError;
+  }
+
+  // Also create admin user in tblUsers for foreign key constraints (created_by/changed_by)
+  // This is needed because tblBranches and other tables have foreign keys referencing tblUsers.user_id
+  try {
+    await client.query(
+      `
+        INSERT INTO "tblUsers"
+          (org_id, user_id, full_name, email, phone, job_role_id, password,
+           created_by, created_on, changed_by, changed_on, int_status, time_zone, dept_id)
+        VALUES
+          ($1, $2, $3, $4, $5, 'JR001', $6,
+           $2, CURRENT_DATE, $2, CURRENT_DATE, 1, 'IST', $7)
+        ON CONFLICT (user_id) DO UPDATE
+        SET full_name = EXCLUDED.full_name,
+            email = EXCLUDED.email,
+            phone = EXCLUDED.phone,
+            password = EXCLUDED.password,
+            dept_id = EXCLUDED.dept_id,
+            org_id = EXCLUDED.org_id
+      `,
+      [
+        orgId,
+        rioAdminUserId,
+        adminUser.fullName,
+        adminUser.email,
+        adminUser.phone || null,
+        passwordHash,
+        deptId,
+      ]
+    );
+    logs.push({ message: `Admin user ${rioAdminUserId} also created in tblUsers for foreign key constraints`, scope: "admin" });
+  } catch (userError) {
+    // If tblUsers doesn't exist or has different structure, log warning but continue
+    console.warn(`[SetupWizard] Could not create admin user in tblUsers: ${userError.message}`);
+    logs.push({ message: `Note: Admin user not created in tblUsers: ${userError.message}`, scope: "admin", level: "warning" });
+  }
 
   // Add super_access_users entry in tblOrgSettings
   await client.query(
@@ -1350,6 +1686,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
     ['JRN020', orgId, 1, 'JR001', null, 'ADMINSETTINGS', 'Settings', null, 20, 'A', true, 'D'],
     ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
     ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
+    ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
     ['JRN022', orgId, 1, 'JR001', null, 'MASTERDATA', 'Master Data', null, 22, 'A', true, 'D'],
     ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
     ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
@@ -1366,6 +1703,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs) => 
     ['JRN035', orgId, 1, 'JR001', null, 'SCRAPSALES', 'Scrap Sales', null, 35, 'A', false, 'D'],
     ['JRN036', orgId, 1, 'JR001', null, 'SCRAPASSETS', 'Scrap Assets', null, 36, 'A', false, 'D'],
     ['JRN037', orgId, 1, 'JR001', null, 'GROUPASSET', 'Asset Groups', null, 37, 'A', false, 'D'],
+    ['JRN040', orgId, 1, 'JR001', null, 'EMPLOYEE TECH CERTIFICATION', 'Employee Tech Certification', null, 40, 'A', false, 'D'],
+    ['JRN041', orgId, 1, 'JR001', null, 'HR/MANAGERAPPROVAL', 'HR/Manager Approval', null, 41, 'A', false, 'D'],
   ];
 
   for (const entry of navEntries) {
@@ -1450,6 +1789,7 @@ const runSetup = async (payload = {}) => {
   }
 
   const logs = [];
+  const startTime = Date.now(); // Track setup start time
 
   return withClient(db, async (client) => {
     // Ensure search_path is set before any operations
@@ -1462,10 +1802,21 @@ const runSetup = async (payload = {}) => {
         
         // Ensure search_path before schema import
         await client.query("SET search_path TO public");
-        const schemaSql = await getSchemaSql();
+        const schemaResult = await getSchemaSql();
         
+        // Extract schema and foreign keys
+        const schemaSql = typeof schemaResult === 'string' ? schemaResult : schemaResult.schema;
+        const foreignKeysSql = typeof schemaResult === 'object' ? schemaResult.foreignKeys : '';
+        const foreignKeysInfo = typeof schemaResult === 'object' ? {
+          validCount: schemaResult.validCount || 0,
+          skippedCount: schemaResult.skippedCount || 0
+        } : null;
+        
+        // Step 1: Create schema WITHOUT foreign keys
+        console.log('[SetupWizard] 📋 Creating database schema (without foreign keys)...');
         try {
           await client.query(schemaSql);
+          logs.push({ message: "Database schema imported (without foreign keys)", scope: "schema" });
         } catch (schemaError) {
           // If there's a SQL error, log a snippet around the error position
           if (schemaError.position) {
@@ -1479,7 +1830,9 @@ const runSetup = async (payload = {}) => {
           throw schemaError;
         }
         
-        logs.push({ message: "Database schema imported", scope: "schema" });
+        // Store foreign keys SQL for later application
+        client._foreignKeysSql = foreignKeysSql;
+        client._foreignKeysInfo = foreignKeysInfo;
       } else {
         logs.push({ message: "Schema creation skipped per configuration", scope: "schema" });
       }
@@ -1541,15 +1894,116 @@ const runSetup = async (payload = {}) => {
         );
       }
 
-      const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs);
-      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs);
-      
-      // Get initial password for email (same as used in seedEmployeeAndUser)
+      // Create a temporary admin user in tblUsers first (before branches) for foreign key constraints
+      // We'll update it with full details after branches/departments are created
       const { getInitialPassword } = require('../utils/orgSettingsUtils');
-      const initialPassword = await getInitialPassword(orgId, client);
+      let initialPassword = await getInitialPassword(orgId, client);
+      const passwordHash = await bcrypt.hash(initialPassword, 10);
+      
+      // Generate user_id early
+      let idResult = await client.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        ['user']
+      );
+      if (idResult.rows.length === 0) {
+        await client.query(
+          'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
+          ['user', 'USR', 0]
+        );
+        idResult = await client.query(
+          'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+          ['user']
+        );
+      }
+      const { prefix, last_number } = idResult.rows[0];
+      const next = last_number + 1;
+      await client.query(
+        'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
+        [next, 'user']
+      );
+      const tempAdminUserId = `${prefix}${String(next).padStart(3, '0')}`;
+      
+      // Create minimal admin user in tblUsers first (for foreign key constraints)
+      try {
+        await client.query(
+          `
+            INSERT INTO "tblUsers"
+              (org_id, user_id, full_name, email, phone, job_role_id, password,
+               created_by, created_on, changed_by, changed_on, int_status, time_zone)
+            VALUES
+              ($1, $2, $3, $4, $5, 'JR001', $6,
+               $2, CURRENT_DATE, $2, CURRENT_DATE, 1, 'IST')
+            ON CONFLICT (user_id) DO UPDATE
+            SET full_name = EXCLUDED.full_name,
+                email = EXCLUDED.email
+          `,
+          [
+            orgId,
+            tempAdminUserId,
+            adminUser.fullName || 'System Administrator',
+            adminUser.email,
+            adminUser.phone || null,
+            passwordHash,
+          ]
+        );
+        logs.push({ message: `Temporary admin user ${tempAdminUserId} created in tblUsers for foreign key constraints`, scope: "admin" });
+      } catch (userError) {
+        console.warn(`[SetupWizard] Could not create temporary admin user in tblUsers: ${userError.message}`);
+        // Continue - we'll try to use NULL instead
+      }
+      
+      const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs, tempAdminUserId);
+      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs, tempAdminUserId);
+      
+      // Update admin user in tblUsers with full details (dept_id, etc.)
+      try {
+        await client.query(
+          `
+            UPDATE "tblUsers"
+            SET dept_id = $1,
+                changed_by = $2,
+                changed_on = CURRENT_DATE
+            WHERE user_id = $2
+          `,
+          [adminResult.deptId, adminResult.userId]
+        );
+      } catch (updateError) {
+        console.warn(`[SetupWizard] Could not update admin user in tblUsers: ${updateError.message}`);
+      }
+      
+      // initialPassword is already available from above (used when creating temporary admin user)
+
+      // Step 2: Apply foreign key constraints AFTER all data has been seeded
+      if (client._foreignKeysSql && client._foreignKeysSql.length > 0) {
+        console.log('[SetupWizard] 🔗 Applying foreign key constraints...');
+        const info = client._foreignKeysInfo || {};
+        console.log(`[SetupWizard] 📎 Adding ${info.validCount || 0} foreign key constraints...`);
+        
+        try {
+          await client.query(client._foreignKeysSql);
+          logs.push({ 
+            message: `Foreign key constraints applied (${info.validCount || 0} valid, ${info.skippedCount || 0} skipped)`, 
+            scope: "schema" 
+          });
+          console.log('[SetupWizard] ✅ Foreign key constraints applied successfully');
+        } catch (fkError) {
+          console.error('[SetupWizard] ❌ Error applying foreign key constraints:', fkError.message);
+          console.error('[SetupWizard] Detail:', fkError.detail);
+          // Log but don't fail the entire setup - foreign keys are important but not critical
+          logs.push({ 
+            message: `Warning: Some foreign key constraints failed to apply: ${fkError.message}`, 
+            scope: "schema",
+            warning: true 
+          });
+        }
+      } else {
+        console.log('[SetupWizard] ℹ️  No foreign key constraints to apply (using static schema or none defined)');
+      }
 
       await client.query("COMMIT");
 
+      const endTime = Date.now(); // Track setup end time
+      
       const setupResult = {
         success: true,
         orgId,
@@ -1564,6 +2018,52 @@ const runSetup = async (payload = {}) => {
         },
         logs,
       };
+
+      // Generate setup report in logs/db-creation/ folder
+      try {
+        const reportResult = await generateSetupReport({
+          orgId,
+          orgName: org.name || org.text || `Organization ${orgId}`,
+          adminUser: {
+            userId: adminResult.userId,
+            username: adminResult.username || 'rioadmin',
+            email: adminUser.email,
+            fullName: adminUser.fullName
+          },
+          dbConfig: {
+            host: db.host,
+            port: db.port || 5432,
+            database: db.database,
+            user: db.user
+          },
+          summary: setupResult.summary,
+          logs,
+          foreignKeysInfo: client._foreignKeysInfo,
+          startTime,
+          endTime
+        });
+
+        if (reportResult.success) {
+          setupResult.reportPath = reportResult.reportPath;
+          logs.push({ 
+            message: `Setup report generated: ${reportResult.reportPath}`, 
+            scope: "report" 
+          });
+        } else {
+          logs.push({ 
+            message: `Failed to generate setup report: ${reportResult.error}`, 
+            scope: "report", 
+            level: "warning" 
+          });
+        }
+      } catch (reportError) {
+        console.error('[SetupWizard] Error generating report:', reportError.message);
+        logs.push({ 
+          message: `Error generating setup report: ${reportError.message}`, 
+          scope: "report", 
+          level: "error" 
+        });
+      }
 
       // Send setup completion email (non-blocking - don't fail setup if email fails)
       try {

@@ -3,6 +3,13 @@ const {
   getMaintenanceNotificationsByUser, 
   getNotificationStats 
 } = require('../models/notificationModel');
+const {
+  getWarrantyNotificationsByUser,
+  markWarrantyNotificationOpen,
+  discardWarrantyNotification,
+  snoozeWarrantyNotification,
+  mapStatus,
+} = require('../models/assetWarrantyNotifyModel');
 
 // Get all maintenance notifications for an organization
 const getAllNotifications = async (req, res) => {
@@ -60,53 +67,133 @@ const getUserNotifications = async (req, res) => {
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const branchId = req.user?.branch_id;
     
+    console.log('🐛 [getUserNotifications] Starting...');
+    console.log('🐛 [getUserNotifications] userId:', userId);
+    console.log('🐛 [getUserNotifications] orgId:', orgId);
+    console.log('🐛 [getUserNotifications] branchId:', branchId);
+    console.log('🐛 [getUserNotifications] req.user:', req.user);
+    
     if (!userId) {
+      console.log('🐛 [getUserNotifications] ERROR: No userId provided');
       return res.status(400).json({
         success: false,
         message: 'Employee ID is required'
       });
     }
 
-    console.log(`Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
+    console.log(`🐛 [getUserNotifications] Fetching notifications for user: ${userId}, orgId: ${orgId}, branchId: ${branchId}`);
     
-    const notifications = await getMaintenanceNotificationsByUser(userId, orgId, branchId, req.user?.hasSuperAccess || false);
+    const notifications = await getMaintenanceNotificationsByUser(
+      userId,
+      orgId,
+      branchId,
+      req.user?.hasSuperAccess || false,
+      req.user?.job_role_id || null
+    );
+    const warrantyNotifications = await getWarrantyNotificationsByUser({
+      empIntId: userId,
+      orgId,
+      branchId,
+      hasSuperAccess: req.user?.hasSuperAccess || false,
+    });
     
-    console.log(`Found ${notifications.length} notifications for user ${userId}`);
+    console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);
+    console.log('🐛 [getUserNotifications] First 3 notifications:', notifications.slice(0, 3));
     
     // Format the response for frontend
     const formattedNotifications = notifications.map(notification => ({
-      id: notification.wfamsh_id, // Use wfamsh_id as unique identifier
+      // Common fields
+      id: notification.wfamsh_id, // Unique workflow identifier
       wfamshId: notification.wfamsh_id,
-      userId: notification.current_action_role_id, // ROLE-BASED: Use role ID instead of user ID
-      status: 'AP', // Current action user always has AP status
+      workflowId: notification.wfamsh_id,
+      workflowType: 
+        notification.maint_type_id === 'SCRAP' ? 'SCRAP' : 
+        notification.maint_type_id === 'INSPECTION' ? 'INSPECTION' : 
+        'MAINTENANCE',
+      route:
+        notification.maint_type_id === 'SCRAP'
+          ? `/scrap-approval-detail/${notification.wfamsh_id}?context=SCRAPMAINTENANCEAPPROVAL`
+          : notification.maint_type_id === 'INSPECTION'
+          ? `/inspection-approval-detail/${notification.wfamsh_id}`
+          : `/approval-detail/${notification.wfamsh_id}`,
+
+      // ROLE-BASED: Use role ID/name instead of a specific user
+      userId: notification.current_action_role_id,
+      userName: notification.current_action_role_name || 'Unassigned',
+      userEmail: null,
+      status: 'AP',
+
+      // Dates / urgency
       dueDate: notification.pl_sch_date,
-      assetId: notification.asset_id,
-      assetTypeName: notification.asset_type_name,
-      userName: notification.current_action_role_name || 'Unassigned', // ROLE-BASED: Show role name
-      userEmail: null, // Roles don't have emails
       cutoffDate: notification.cutoff_date,
       daysUntilDue: Math.floor(notification.days_until_due || 0),
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
-      isUrgent: notification.days_until_cutoff <= 2, // Show urgent when 2 days or less until cutoff
-      isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance', // Use actual maintenance type name from database
-      // Group asset maintenance information
+      isUrgent: Math.floor(notification.days_until_cutoff || 0) <= 2,
+      isOverdue: Math.floor(notification.days_until_due || 0) <= 0,
+
+      // Display labels
+      maintenanceType: notification.maint_type_name || 'Regular Maintenance',
+      assetId: notification.asset_id,
+      assetTypeName: notification.asset_type_name,
+
+      // Group info (also used for scrap group requests)
       groupId: notification.group_id || null,
       groupName: notification.group_name || null,
       groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,
       isGroupMaintenance: !!notification.group_id
     }));
+    const formattedWarrantyNotifications = warrantyNotifications.map((notification) => {
+      const status = mapStatus(notification.status);
+      const isVendorMaintained = !!notification.service_vendor_id;
+
+      return {
+        id: notification.notify_id,
+        wfamshId: null,
+        workflowId: notification.notify_id,
+        workflowType: "WARRANTY",
+        route: `/asset-detail/${notification.asset_id}`,
+        userId: userId,
+        userName: "Warranty Alert",
+        userEmail: null,
+        status,
+        dueDate: notification.warranty_period,
+        cutoffDate: notification.warranty_period,
+        daysUntilDue: Math.floor(
+          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
+        ),
+        daysUntilCutoff: Math.floor(
+          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
+        ),
+        isUrgent: true,
+        isOverdue: false,
+        maintenanceType: "Warranty Expiry",
+        assetId: notification.asset_id,
+        assetTypeName: notification.asset_type_name || "Asset",
+        isGroupMaintenance: false,
+        groupId: null,
+        groupName: null,
+        groupAssetCount: null,
+        notifyId: notification.notify_id,
+        notificationStatus: status,
+        title: notification.title || "Warranty Expiry",
+        body: notification.body || "",
+        canChangeVendor: isVendorMaintained,
+      };
+    });
+
+    console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);
+    console.log('🐛 [getUserNotifications] First 3 formatted notifications:', formattedNotifications.slice(0, 3));
 
     res.json({
       success: true,
       message: 'User maintenance notifications retrieved successfully',
-      data: formattedNotifications,
-      count: formattedNotifications.length,
+      data: [...formattedNotifications, ...formattedWarrantyNotifications],
+      count: formattedNotifications.length + formattedWarrantyNotifications.length,
       userId: userId,
       timestamp: new Date().toISOString()
     });
   } catch (error) {
-    console.error('Error in getUserNotifications:', error);
+    console.error('🐛 [getUserNotifications] ERROR in getUserNotifications:', error);
     console.error('Error details:', {
       message: error.message,
       stack: error.stack,
@@ -120,6 +207,62 @@ const getUserNotifications = async (req, res) => {
       error: error.message,
       userId: req.params.userId
     });
+  }
+};
+
+const openWarrantyNotification = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const updated = await markWarrantyNotificationOpen({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification opened", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const discardWarrantyNotificationAction = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const updated = await discardWarrantyNotification({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification resolved", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const snoozeWarrantyNotificationAction = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const snoozeDays = Number(req.body?.snooze_days);
+    if (!Number.isFinite(snoozeDays) || snoozeDays < 0) {
+      return res.status(400).json({ success: false, message: "Invalid snooze_days" });
+    }
+    const updated = await snoozeWarrantyNotification({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+      snoozeDays,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification snoozed", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -222,5 +365,8 @@ module.exports = {
   getAllNotifications,
   getUserNotifications,
   getNotificationStatistics,
-  getFilteredNotifications
+  getFilteredNotifications,
+  openWarrantyNotification,
+  discardWarrantyNotificationAction,
+  snoozeWarrantyNotificationAction,
 }; 

@@ -15,5 +15,11 @@ router.get("/filter-options", assetRegisterController.getAssetRegisterFilterOpti
 // GET /api/asset-register/summary - Get asset register summary statistics
 router.get("/summary", assetRegisterController.getAssetRegisterSummary);
 
+// GET /api/asset-register/property-values/:propertyName - Get distinct values for a property
+router.get("/property-values/:propertyName", assetRegisterController.getPropertyValues);
+
+// GET /api/asset-register/asset-properties/:assetId - Get properties for a specific asset
+router.get("/asset-properties/:assetId", assetRegisterController.getAssetProperties);
+
 module.exports = router;
     

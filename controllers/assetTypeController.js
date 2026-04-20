@@ -168,7 +168,8 @@ const getAllAssetTypes = async (req, res) => {
 // GET /api/asset-types/parents - Get all parent asset types
 const getParentAssetTypes = async (req, res) => {
     try {
-        const result = await model.getParentAssetTypes();
+        const org_id = req.user?.org_id;
+        const result = await model.getParentAssetTypes(org_id);
         res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching parent asset types:", err);
@@ -263,6 +264,7 @@ const updateAssetType = async (req, res) => {
             assignment_type,
             inspection_required,
             group_required,
+            require_scrap_approval,
             text,
             is_child,
             parent_asset_type_id,

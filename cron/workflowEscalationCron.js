@@ -13,13 +13,10 @@ const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogge
  * has not taken action.
  * 
  * HOW IT WORKS:
- * 1. Calculates cutoff date: Due Date - Lead Time (default 3-5 days)
- * 2. Identifies workflows where cutoff date has passed
- * 3. Checks if current approver still has status 'AP' (Approval Pending)
- * 4. Updates current approver status to 'UA' (Unapproved/Escalated)
- * 5. Updates next approver status from 'IN' (Inactive) to 'AP' (Approval Pending)
- * 6. Sends email notification to next approver
- * 7. Logs escalation in tblWorkflowEscalationLog
+ * 1. Overdue = current step (AP) exceeded its deadline. Deadline = (step became AP date) + esc_no_days from tblWFSteps (via tblWFATSeqs). If esc_no_days is null, fallback: Due Date - Lead Time.
+ * 2. Next approvers = all detail rows for the next sequence (per tblWFATSeqs), i.e. job roles from tblWFJobRole for that step.
+ * 3. Current approver stays 'AP'; all next-step rows are set to 'AP' (both must approve).
+ * 4. Sends email and push notification to each next approver (only those configured in tblWFJobRole).
  * 
  * SCHEDULE: 
  * - Default: Every day at 9:00 AM IST
@@ -79,7 +76,7 @@ const startWorkflowEscalationCron = () => {
           userId
         }).catch(err => console.error('Logging error:', err));
 
-        // Process escalations for the default organization
+        // Process escalations sequentially (model uses for...of + await; pool-friendly)
         const results = await processWorkflowEscalations('ORG001');
         
         maintenanceCronLogger.logWorkflowEscalationCronCompleted({

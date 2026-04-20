@@ -1,9 +1,12 @@
 const model = require("../models/employeeModel");
 const userJobRoleModel = require("../models/userJobRoleModel");
 const { sendWelcomeEmail, sendRoleAssignmentEmail } = require("../utils/mailer");
+const { getDbFromContext } = require("../utils/dbContext");
+
 // Helper function to get organization name from employee's department
 const getOrganizationNameFromEmployee = async (emp_int_id) => {
     try {
+        const dbPool = getDbFromContext();
         const result = await dbPool.query(`
             SELECT o.text as org_name 
             FROM "tblEmployees" e
@@ -69,6 +72,50 @@ const getAllEmployeesWithJobRoles = async (req, res) => {
     }
 };
 
+// PUT /api/employees/:emp_int_id/status - Update employee status (block/unblock)
+const updateEmployeeStatus = async (req, res) => {
+    try {
+        const { emp_int_id } = req.params;
+        const { int_status } = req.body || {};
+        const changed_by = req.user?.user_id || 'SYSTEM';
+
+        if (!emp_int_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Employee ID is required'
+            });
+        }
+
+        if (int_status === undefined || int_status === null) {
+            return res.status(400).json({
+                success: false,
+                error: 'int_status is required'
+            });
+        }
+
+        const updated = await model.updateEmployeeStatus(emp_int_id, int_status, changed_by);
+
+        if (!updated) {
+            return res.status(404).json({
+                success: false,
+                error: 'Employee not found'
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Employee status updated successfully',
+            data: updated
+        });
+    } catch (err) {
+        console.error('Error updating employee status:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update employee status'
+        });
+    }
+};
+
 // PUT /api/employees/:emp_int_id - Assign role to employee
 const assignRoleToEmployee = async (req, res) => {
     try {
@@ -130,7 +177,7 @@ const assignRoleToEmployee = async (req, res) => {
         }
 
         // Get role details for email
-        const dbPool = req.db || require("../config/db");
+        const dbPool = getDbFromContext();
 
         const roleDetails = await dbPool.query(
             `SELECT job_role_id, text as job_role_name 
@@ -198,9 +245,11 @@ const assignRoleToEmployee = async (req, res) => {
 
     } catch (err) {
         console.error("Error assigning role to employee:", err);
+        console.error("Error stack:", err.stack);
         res.status(500).json({ 
             success: false,
-            error: "Failed to assign role to employee" 
+            error: "Failed to assign role to employee",
+            details: err.message || "Internal server error"
         });
     }
 };
@@ -380,6 +429,7 @@ module.exports = {
     getEmployeeById,
     getEmployeesByDepartment,
     getAllEmployeesWithJobRoles,
+    updateEmployeeStatus,
     assignRoleToEmployee,
     getUserRoles,
     deleteUserRole,
