@@ -6,6 +6,11 @@
 
 const db = require('../config/db');
 
+const RESERVED_SUBDOMAINS = (process.env.RESERVED_SUBDOMAINS || 'web,www,api')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
 /**
  * Extract subdomain from request hostname
  * @param {string} hostname - The request hostname (e.g., "orgname.example.com")
@@ -23,13 +28,22 @@ function extractSubdomain(hostname) {
   // If we have at least 3 parts (subdomain.domain.tld), return the subdomain
   // For localhost or IP addresses, return null
   if (parts.length >= 3 && parts[0] !== 'localhost' && !/^\d+\.\d+\.\d+\.\d+$/.test(hostWithoutPort)) {
-    return parts[0].toLowerCase();
+    const sub = parts[0].toLowerCase();
+    // Reserved/main app subdomains should use default DB, not tenant lookup
+    if (RESERVED_SUBDOMAINS.includes(sub)) {
+      return null;
+    }
+    return sub;
   }
   
   // For development: check if hostname is localhost with subdomain pattern
   // e.g., orgname.localhost:3000
   if (hostWithoutPort.includes('localhost') && parts.length >= 2) {
-    return parts[0].toLowerCase();
+    const sub = parts[0].toLowerCase();
+    if (RESERVED_SUBDOMAINS.includes(sub)) {
+      return null;
+    }
+    return sub;
   }
   
   return null;
