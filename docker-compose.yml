@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   alm-backend:
-    container_name: alm-backend
+    container_name: alm-main-backend
     build:
       context: .
       dockerfile: Dockerfile
