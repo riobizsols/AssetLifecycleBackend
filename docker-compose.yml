@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  alm-backend:
+    container_name: alm-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.production
+    ports:
+      - "5002:5000"
+    restart: unless-stopped
+
