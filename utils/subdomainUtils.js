@@ -9,6 +9,11 @@
 const { initTenantRegistryPool } = require('../services/tenantService');
 const logger = require('./logger');
 
+const RESERVED_SUBDOMAINS = (process.env.RESERVED_SUBDOMAINS || 'web,www,api')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+
 /**
  * Extract subdomain from request hostname
  * @param {string} hostname - The request hostname (e.g., "orgname.example.com")
