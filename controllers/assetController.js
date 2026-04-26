@@ -1666,6 +1666,13 @@ const createAsset = async (req, res) => {
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
+        // purchase_vendor_id is NOT NULL in tblAssets.
+        if (!purchase_vendor_id) {
+            return res.status(400).json({
+                error: "Purchase vendor is required"
+            });
+        }
+
         // Enforce service vendor when asset type maintenance is vendor-managed.
         if (asset_type_id) {
             const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
@@ -1918,6 +1925,11 @@ if (useful_life_years && useful_life_years > 0) {
 
     } catch (err) {
         console.error("Error adding asset:", err);
+        if (err?.code === '23502' && err?.column === 'purchase_vendor_id') {
+            return res.status(400).json({
+                error: "Purchase vendor is required"
+            });
+        }
         res.status(500).json({
             error: "Internal server error",
             message: err.message,

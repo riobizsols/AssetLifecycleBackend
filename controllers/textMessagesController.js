@@ -56,9 +56,39 @@ async function upsertTranslations(req, res) {
   }
 }
 
+async function getMessageById(req, res) {
+  try {
+    const { tmdId } = req.params;
+    if (!tmdId) {
+      return res.status(400).json({ success: false, message: "tmdId is required" });
+    }
+
+    const userLang = req.user?.language_code || "en";
+    const messageRow = await textMessagesModel.getMessageByIdWithLanguageFallback(tmdId, userLang);
+
+    if (!messageRow) {
+      return res.status(404).json({ success: false, message: "Text message not found" });
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        tmd_id: messageRow.tmd_id,
+        text: messageRow.text,
+        lang_code: messageRow.resolved_lang_code,
+        requested_lang_code: String(userLang || "en").toLowerCase(),
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching text message by tmd_id:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch text message" });
+  }
+}
+
 module.exports = {
   getDefaults,
   getTranslationsByLang,
   upsertTranslations,
+  getMessageById,
 };
 

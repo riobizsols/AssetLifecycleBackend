@@ -1,15 +1,35 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
 
-/** Stored values for on-demand rows (columns must remain NOT NULL). */
-const ON_DEMAND_FREQUENCY = 0;
-const ON_DEMAND_UOM = 'On Demand';
+/** Stored values for on-demand rows. */
+const ON_DEMAND_FREQUENCY = null;
+const ON_DEMAND_UOM = null;
 const ON_DEMAND_TEXT = 'On Demand';
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => {
   const contextDb = getDbFromContext();
   return contextDb;
+};
+
+// Normalize UOM input to a valid UOM_id in tblUom.
+const resolveUomId = async (dbPool, rawUom) => {
+  const value = String(rawUom || '').trim();
+  if (!value) return null;
+
+  const byIdQuery = `SELECT UOM_id FROM "tblUom" WHERE UOM_id = $1 LIMIT 1`;
+  const byIdResult = await dbPool.query(byIdQuery, [value]);
+  if (byIdResult.rows.length > 0) {
+    return byIdResult.rows[0].uom_id || byIdResult.rows[0].UOM_id;
+  }
+
+  const byTextQuery = `SELECT UOM_id FROM "tblUom" WHERE UOM = $1 LIMIT 1`;
+  const byTextResult = await dbPool.query(byTextQuery, [value]);
+  if (byTextResult.rows.length > 0) {
+    return byTextResult.rows[0].uom_id || byTextResult.rows[0].UOM_id;
+  }
+
+  throw new Error(`Invalid UOM: "${value}". Please provide a valid UOM_id or UOM text.`);
 };
 
 class MaintenanceFrequencyModel {
@@ -143,34 +163,7 @@ class MaintenanceFrequencyModel {
       const atMainFreqId = await generateCustomId('atmf', 3);
       const dbPool = getDb();
       
-      // If uom is provided and it's an ID, look up the UOM text from tblUom
-      let uomText = null;
-      if (uom && uom.trim()) {
-        uomText = uom.trim();
-        
-        // Try to look up UOM text from UOM_id (if it's an ID)
-        try {
-          const uomQuery = `SELECT UOM FROM "tblUom" WHERE UOM_id = $1 LIMIT 1`;
-          const uomResult = await dbPool.query(uomQuery, [uomText]);
-          if (uomResult.rows.length > 0 && uomResult.rows[0].UOM) {
-            uomText = uomResult.rows[0].UOM;
-            console.log(`Found UOM text for ID ${uom}: ${uomText}`);
-          } else {
-            // If not found by ID, check if it's already a valid UOM text
-            const uomTextQuery = `SELECT UOM FROM "tblUom" WHERE UOM = $1 LIMIT 1`;
-            const uomTextResult = await dbPool.query(uomTextQuery, [uomText]);
-            if (uomTextResult.rows.length === 0) {
-              console.warn(`UOM "${uomText}" not found in tblUom. Using provided value.`);
-            } else {
-              console.log(`UOM text "${uomText}" exists in tblUom`);
-            }
-          }
-        } catch (uomError) {
-          // If lookup fails, use the provided value as-is
-          console.log('Could not look up UOM, using provided value:', uomText);
-          console.error('UOM lookup error:', uomError);
-        }
-      }
+      const uomId = isRecurring ? await resolveUomId(dbPool, uom) : ON_DEMAND_UOM;
       
       // Insert maintenance frequency
       const query = `
@@ -193,8 +186,8 @@ class MaintenanceFrequencyModel {
         atMainFreqId,
         assetTypeId,
         frequency,
-        uomText,
-        text?.trim() || (isRecurring && frequency && uomText ? `${frequency} ${uomText.trim()}` : 'On Demand'),
+        uomId,
+        text?.trim() || (isRecurring && frequency ? `${frequency}` : ON_DEMAND_TEXT),
         maintainedBy,
         maintTypeId,
         orgId,
@@ -234,34 +227,7 @@ class MaintenanceFrequencyModel {
       
       const dbPool = getDb();
       
-      // If uom is provided and it's an ID, look up the UOM text from tblUom
-      let uomText = null;
-      if (uom && uom.trim()) {
-        uomText = uom.trim();
-        
-        // Try to look up UOM text from UOM_id (if it's an ID)
-        try {
-          const uomQuery = `SELECT UOM FROM "tblUom" WHERE UOM_id = $1 LIMIT 1`;
-          const uomResult = await dbPool.query(uomQuery, [uomText]);
-          if (uomResult.rows.length > 0 && uomResult.rows[0].UOM) {
-            uomText = uomResult.rows[0].UOM;
-            console.log(`Found UOM text for ID ${uom}: ${uomText}`);
-          } else {
-            // If not found by ID, check if it's already a valid UOM text
-            const uomTextQuery = `SELECT UOM FROM "tblUom" WHERE UOM = $1 LIMIT 1`;
-            const uomTextResult = await dbPool.query(uomTextQuery, [uomText]);
-            if (uomTextResult.rows.length === 0) {
-              console.warn(`UOM "${uomText}" not found in tblUom. Using provided value.`);
-            } else {
-              console.log(`UOM text "${uomText}" exists in tblUom`);
-            }
-          }
-        } catch (uomError) {
-          // If lookup fails, use the provided value as-is
-          console.log('Could not look up UOM, using provided value:', uomText);
-          console.error('UOM lookup error:', uomError);
-        }
-      }
+      const uomId = isRecurring ? await resolveUomId(dbPool, uom) : ON_DEMAND_UOM;
       
       const query = `
         UPDATE "tblATMaintFreq"
@@ -279,8 +245,8 @@ class MaintenanceFrequencyModel {
       
       const result = await dbPool.query(query, [
         frequency,
-        uomText,
-        text?.trim() || (isRecurring && frequency && uomText ? `${frequency} ${uomText.trim()}` : 'On Demand'),
+        uomId,
+        text?.trim() || (isRecurring && frequency ? `${frequency}` : ON_DEMAND_TEXT),
         maintainedBy,
         maintTypeId,
         isRecurring,

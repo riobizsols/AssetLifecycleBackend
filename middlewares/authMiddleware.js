@@ -156,6 +156,7 @@ const protect = async (req, res, next) => {
                 job_role_id: decoded.job_role_id, // Keep for backward compatibility
                 email: decoded.email,
                 emp_int_id: decoded.emp_int_id,
+                language_code: (decoded.language_code || 'en').toLowerCase(),
                 roles: userRoles, // Current roles from tblUserJobRoles
                 branch_id: userWithBranch?.branch_id || null,
                 branch_name: userWithBranch?.branch_name || null,
