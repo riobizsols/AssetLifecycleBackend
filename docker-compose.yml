@@ -1,5 +1,10 @@
 version: "3.9"
 
+# DATABASE_URL like postgres://...@alm_db:5432/db only works if this container
+# shares a user-defined Docker network with the Postgres container named alm_db.
+# One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db
+# Then deploy/restart this compose stack so alm-main-backend joins alm-shared.
+
 services:
   alm-backend:
     container_name: alm-main-backend
@@ -11,4 +16,11 @@ services:
     ports:
       - "5002:5000"
     restart: unless-stopped
+    networks:
+      - default
+      - alm-shared
+
+networks:
+  alm-shared:
+    external: true
 
