@@ -1,0 +1,335 @@
+{
+  "scannedFiles": 219,
+  "changedFiles": 0,
+  "convertedCalls": 0,
+  "totalToastCallsBefore": 307,
+  "totalToastCallsAfter": 307,
+  "totalBackendCallsAfter": 859,
+  "changed": [],
+  "pendingFiles": [
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/AddAssetType.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/AddBranch.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/AddEntityForm.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/AllNotifications.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/AssignRoles.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/BulkPrintLabelScreen.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/CreateInspectionFrequency.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/CreateMaintenanceFrequency.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/EditVendorModal.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/InspectionApprovalDetail.jsx",
+      "remainingToastCalls": 11
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/MaintSupervisorApproval.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/MaintenanceApprovalDetail.jsx",
+      "remainingToastCalls": 11
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/MaintenanceDetails.jsx",
+      "remainingToastCalls": 10
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/MaintenanceFrequency.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/PrintLabelScreen.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/ProductSupplyForm.jsx",
+      "remainingToastCalls": 11
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/ScrapMaintenanceApprovalDetail.jsx",
+      "remainingToastCalls": 9
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/ServiceSupplyForm.jsx",
+      "remainingToastCalls": 12
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/UpdateAssetTypeModal.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/assetAssignment/AssetAssignmentList.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/assetAssignment/AssetSelection.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/assetAssignment/AssetsDetail.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/assets/AddAssetForm.jsx",
+      "remainingToastCalls": 13
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/assets/UpdateAssetModal.jsx",
+      "remainingToastCalls": 8
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/groupAsset/CreateGroupAsset.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/jobRoles/CreateJobRoleNavigation.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/maintenance/CreateManualMaintenanceModal.jsx",
+      "remainingToastCalls": 7
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/reportbreakdown/BreakdownDetails.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/reportbreakdown/BreakdownDetails2.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/reportbreakdown/BreakdownSelection2.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/reportbreakdown/EditBreakdownReport.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/scrapAssets/CreateScrapAsset.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/scrapSales/CreateScrapSales.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/components/scrapSales/EditScrapSales.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/Assets.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/CostCenterSelection.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/CostCenterTransfer.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/CreateManualInspection.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/CreateManualMaintenance.jsx",
+      "remainingToastCalls": 7
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/GroupAsset.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/InspectionExecutionDetail.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/InspectionView.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/MaintenanceApproval.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/MaintenanceSupervisor.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/ReportsBreakdown.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/ScrapGroupedAssets.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/ScrapSales.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/TechCertApprovals.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/TechnicianCertificates.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/adminSettings/Certifications.jsx",
+      "remainingToastCalls": 8
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/adminSettings/ColumnAccessConfig.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/adminSettings/InspectionChecklists.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/adminSettings/JobMonitor.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/adminSettings/OneTimeCron.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/auth/TenantLogin.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Branches.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/BreakdownReasonCodes.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/CreateAssetTypeChecklistMapping.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/CreateInspectionChecklist.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/CreateUser.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Departments.jsx",
+      "remainingToastCalls": 4
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/DepartmentsAdmin.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/DepartmentsAsset.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/JobRoles.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Organization.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/ProdServ.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Properties.jsx",
+      "remainingToastCalls": 8
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/UserRoles.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Users.jsx",
+      "remainingToastCalls": 5
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/masterData/Vendors.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/AssetValuation.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/BreakdownDetail.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/BreakdownReopenDetails.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/BulkSerialNumberPrint.jsx",
+      "remainingToastCalls": 2
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/QAAuditReport.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/ReopenedBreakdownsHistory.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/SerialNumberPrint.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/SerialNumberPrint_backup.jsx",
+      "remainingToastCalls": 3
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/reports/UsageBasedAssetReport.jsx",
+      "remainingToastCalls": 1
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/setup/SetupWizard.jsx",
+      "remainingToastCalls": 6
+    },
+    {
+      "file": "/Users/riobizsols/Desktop/Asset Life Cycle/AssetLifecycleWebFrontend/src/pages/tenant/TenantSetup.jsx",
+      "remainingToastCalls": 4
+    }
+  ]
+}

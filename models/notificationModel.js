@@ -195,6 +195,7 @@ const getMaintenanceNotificationsByUser = async (
   const tokenJobRoleParamIndex = paramIndex;
   params.push(tokenJobRoleId || null);
   paramIndex++;
+  const paramsWithoutTokenRole = params.slice(0, tokenJobRoleParamIndex - 1);
   
   const scrapBranchFilter = (!hasSuperAccess && branchId && branchIdParamIndex)
     ? ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = (SELECT branch_code FROM "tblBranches" WHERE branch_id = $${branchIdParamIndex}))`
@@ -435,7 +436,7 @@ const getMaintenanceNotificationsByUser = async (
 
     // Run inspection query (try/catch in case tables are missing)
     try {
-      const inspectionResult = await getDb().query(inspectionQuery, params);
+      const inspectionResult = await getDb().query(inspectionQuery, paramsWithoutTokenRole);
       if (inspectionResult.rows && inspectionResult.rows.length > 0) {
         allRows = [...allRows, ...inspectionResult.rows];
       }
@@ -447,7 +448,7 @@ const getMaintenanceNotificationsByUser = async (
     try {
       const scrapResult = await getDb().query(
         `SELECT * FROM (${scrapQuery}) s ORDER BY s.pl_sch_date ASC NULLS LAST`,
-        params
+        paramsWithoutTokenRole
       );
       if (scrapResult.rows && scrapResult.rows.length > 0) {
         allRows = [...allRows, ...scrapResult.rows];

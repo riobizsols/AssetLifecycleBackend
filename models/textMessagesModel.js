@@ -43,9 +43,44 @@ async function upsertTranslation({ tmd_id, lang_code, text }) {
   return res.rows[0];
 }
 
+async function getMessageByIdWithLanguageFallback(tmdId, langCode) {
+  const db = getDbFromContext();
+  const normalizedLang = String(langCode || "en").trim().toLowerCase();
+  const isEnglish = normalizedLang === "en";
+
+  const res = await db.query(
+    `
+      SELECT
+        d.tmd_id,
+        COALESCE(
+          CASE
+            WHEN $2 = TRUE THEN NULL
+            ELSE NULLIF(TRIM(o.text), '')
+          END,
+          d.text
+        ) AS text,
+        CASE
+          WHEN $2 = TRUE THEN 'en'
+          WHEN o.text IS NOT NULL AND NULLIF(TRIM(o.text), '') IS NOT NULL THEN o.lang_code
+          ELSE 'en'
+        END AS resolved_lang_code
+      FROM "tblTextMessagesDefault" d
+      LEFT JOIN "tblTextMessagesOtherLangs" o
+        ON o.tmd_id = d.tmd_id
+       AND LOWER(o.lang_code) = $1
+      WHERE d.tmd_id = $3
+      LIMIT 1;
+    `,
+    [normalizedLang, isEnglish, tmdId],
+  );
+
+  return res.rows[0] || null;
+}
+
 module.exports = {
   listDefaults,
   listOtherLangs,
   upsertTranslation,
+  getMessageByIdWithLanguageFallback,
 };
 

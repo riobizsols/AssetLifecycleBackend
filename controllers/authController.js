@@ -36,8 +36,20 @@ const generateToken = (user, useDefaultDb = false) => {
         email: user.email,
         job_role_id: user.job_role_id,
         emp_int_id: user.emp_int_id,
+        language_code: user.language_code || 'en',
         use_default_db: useDefaultDb // Flag to force default database usage
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
+};
+
+// Auth logs must never block login response flow.
+const safeAuthLog = (logFn) => {
+    Promise.resolve()
+        .then(logFn)
+        .catch((error) => {
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn('[AuthController] Non-blocking auth log failed:', error?.message || error);
+            }
+        });
 };
 
 // 🔑 Login (Supports both subdomain-based multi-tenant and normal database login)
@@ -50,11 +62,11 @@ const login = async (req, res) => {
     
     try {
         // Step 1: Log API called
-        await logLoginApiCalled({
+        safeAuthLog(() => logLoginApiCalled({
             email,
             method: req.method,
             url: req.originalUrl
-        });
+        }));
 
         // Step 2: Check if subdomain-based login or normal database login
         const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
@@ -82,7 +94,7 @@ const login = async (req, res) => {
             console.log(`[AuthController] Subdomain-based login: ${subdomain}, org_id: ${orgId}`);
             
             // Step 3: Log checking user in database
-            await logCheckingUserInDatabase({ email, orgId, subdomain });
+            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId, subdomain }));
             
             // Check if this is a tenant organization
             const tenantExists = await checkTenantExists(orgId);
@@ -107,7 +119,7 @@ const login = async (req, res) => {
             });
             dbPool = tempLoginPool;
             console.log(`[AuthController] Normal database login (no subdomain) - using default database from .env`);
-            await logCheckingUserInDatabase({ email, orgId: null, subdomain: null });
+            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId: null, subdomain: null }));
             // dbPool is already set to defaultDb
         }
         
@@ -116,13 +128,13 @@ const login = async (req, res) => {
         
         // For subdomain-based login, verify user belongs to the correct organization
         if (loginMode === 'subdomain' && user && user.org_id !== orgId) {
-            await logUserNotFound({ email, orgId, reason: 'User belongs to different organization' });
-            await logFailedLogin({
+            safeAuthLog(() => logUserNotFound({ email, orgId, reason: 'User belongs to different organization' }));
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found in this organization',
                 duration: Date.now() - startTime
-            });
+            }));
             return res.status(404).json({ message: 'User not found in this organization' });
         }
         
@@ -134,21 +146,21 @@ const login = async (req, res) => {
         
         if (!user) {
             // Step 3a: User not found
-            await logUserNotFound({ email });
+            safeAuthLog(() => logUserNotFound({ email }));
             
             // Log failed login attempt - user not found
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Step 3b: User found
-        await logUserFound({ 
+        safeAuthLog(() => logUserFound({ 
             email, 
             userId: user.user_id,
             userData: {
@@ -157,30 +169,30 @@ const login = async (req, res) => {
                 job_role_id: user.job_role_id,
                 emp_int_id: user.emp_int_id
             }
-        });
+        }));
 
         // Step 4: Log comparing password
-        await logComparingPassword({ email, userId: user.user_id });
+        safeAuthLog(() => logComparingPassword({ email, userId: user.user_id }));
         
         const isMatch = await bcrypt.compare(password, user.password);
         
         if (!isMatch) {
             // Step 5a: Password not matched
-            await logPasswordNotMatched({ email, userId: user.user_id });
+            safeAuthLog(() => logPasswordNotMatched({ email, userId: user.user_id }));
             
             // Log failed login attempt - invalid credentials
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: user.user_id,
                 reason: 'Invalid credentials',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
         // Step 5b: Password matched
-        await logPasswordMatched({ email, userId: user.user_id });
+        safeAuthLog(() => logPasswordMatched({ email, userId: user.user_id }));
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = user.source_table === 'tblRioAdmin';
@@ -267,14 +279,17 @@ const login = async (req, res) => {
         }
         
         // Step 6: Log generating token
-        await logGeneratingToken({ email, userId: user.user_id });
+        safeAuthLog(() => logGeneratingToken({ email, userId: user.user_id }));
         
         // Generate token with tenant information
         // If tenant exists, don't set use_default_db flag so middleware uses tenant database
-        const token = generateToken(user, !isTenant);
+        const token = generateToken(
+            { ...user, language_code },
+            !isTenant
+        );
         
         // Step 7: Log token generated
-        await logTokenGenerated({ 
+        safeAuthLog(() => logTokenGenerated({ 
             email, 
             userId: user.user_id,
             tokenPayload: {
@@ -287,12 +302,12 @@ const login = async (req, res) => {
                 subdomain: subdomain || null,
                 loginMode: loginMode
             }
-        });
+        }));
         
         const duration = Date.now() - startTime;
 
         // Step 8: Log successful login (final summary with response data)
-        await logSuccessfulLogin({
+        safeAuthLog(() => logSuccessfulLogin({
             email,
             userId: user.user_id,
             duration,
@@ -304,7 +319,7 @@ const login = async (req, res) => {
                 roles: userRoles,
                 language_code
             }
-        });
+        }));
 
         res.json({
             token,
@@ -329,11 +344,11 @@ const login = async (req, res) => {
         const duration = Date.now() - startTime;
         
         // Log CRITICAL error - system failure during login
-        await logLoginCriticalError({
+        safeAuthLog(() => logLoginCriticalError({
             email,
             error,
             duration
-        });
+        }));
 
         console.error('Login error:', error);
         res.status(500).json({ message: 'Internal server error' });
@@ -502,7 +517,8 @@ const refreshToken = async (req, res) => {
         // This ensures the token has the correct org_id for tenant lookup
         const refreshTokenUser = {
             ...user,
-            org_id: decoded.org_id // Use org_id from token (tenant org_id), not from user record
+            org_id: decoded.org_id, // Use org_id from token (tenant org_id), not from user record
+            language_code
         };
         const newToken = generateToken(refreshTokenUser, decoded.use_default_db || false);
         
@@ -646,11 +662,11 @@ const tenantLogin = async (req, res) => {
         }
 
         // Step 1: Log API called
-        await logLoginApiCalled({
+        safeAuthLog(() => logLoginApiCalled({
             email,
             method: req.method,
             url: req.originalUrl
-        });
+        }));
 
         // Step 1.5: Get tenant database credentials
         const { getTenantPool } = require('../services/tenantService');
@@ -658,38 +674,38 @@ const tenantLogin = async (req, res) => {
         try {
             tenantPool = await getTenantPool(org_id);
         } catch (tenantError) {
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: `Tenant lookup failed: ${tenantError.message}`,
                 duration: Date.now() - startTime
-            });
+            }));
             return res.status(404).json({ message: `Organization ${org_id} not found or inactive` });
         }
 
         // Step 2: Log checking user in database
-        await logCheckingUserInDatabase({ email });
+        safeAuthLog(() => logCheckingUserInDatabase({ email }));
         
         // Use tenant-specific database connection
         const user = await findUserByEmail(email, tenantPool);
 
         if (!user) {
             // Step 3a: User not found
-            await logUserNotFound({ email });
+            safeAuthLog(() => logUserNotFound({ email }));
             
             // Log failed login attempt - user not found
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Step 3b: User found
-        await logUserFound({ 
+        safeAuthLog(() => logUserFound({ 
             email, 
             userId: user.user_id,
             userData: {
@@ -698,30 +714,30 @@ const tenantLogin = async (req, res) => {
                 job_role_id: user.job_role_id,
                 emp_int_id: user.emp_int_id
             }
-        });
+        }));
 
         // Step 4: Log comparing password
-        await logComparingPassword({ email, userId: user.user_id });
+        safeAuthLog(() => logComparingPassword({ email, userId: user.user_id }));
         
         const isMatch = await bcrypt.compare(password, user.password);
         
         if (!isMatch) {
             // Step 5a: Password not matched
-            await logPasswordNotMatched({ email, userId: user.user_id });
+            safeAuthLog(() => logPasswordNotMatched({ email, userId: user.user_id }));
             
             // Log failed login attempt - invalid credentials
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: user.user_id,
                 reason: 'Invalid credentials',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
         // Step 5b: Password matched
-        await logPasswordMatched({ email, userId: user.user_id });
+        safeAuthLog(() => logPasswordMatched({ email, userId: user.user_id }));
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = user.source_table === 'tblRioAdmin';
@@ -808,7 +824,7 @@ const tenantLogin = async (req, res) => {
         }
         
         // Step 6: Log generating token
-        await logGeneratingToken({ email, userId: user.user_id });
+        safeAuthLog(() => logGeneratingToken({ email, userId: user.user_id }));
         
         // For tenant login (/tenant-login), use tenant database (set useDefaultDb = false)
         // IMPORTANT: Use the tenant org_id from the request (org_id), not user.org_id
@@ -818,12 +834,13 @@ const tenantLogin = async (req, res) => {
         console.log(`[TenantLogin] Using tenant org_id: ${tenantOrgId} (user.org_id from DB: ${user.org_id})`);
         const tokenUser = {
             ...user,
-            org_id: tenantOrgId // Use tenant org_id, not generated org_id from user record
+            org_id: tenantOrgId, // Use tenant org_id, not generated org_id from user record
+            language_code
         };
         const token = generateToken(tokenUser, false);
         
         // Step 7: Log token generated
-        await logTokenGenerated({ 
+        safeAuthLog(() => logTokenGenerated({ 
             email, 
             userId: user.user_id,
             tokenPayload: {
@@ -834,13 +851,13 @@ const tenantLogin = async (req, res) => {
                 emp_int_id: user.emp_int_id,
                 use_default_db: false
             }
-        });
+        }));
         
         const duration = Date.now() - startTime;
 
         // Step 8: Log successful login (final summary with response data)
         // Use tenant org_id (from request) for logging, not user.org_id (which is generated org_id)
-        await logSuccessfulLogin({
+        safeAuthLog(() => logSuccessfulLogin({
             email,
             userId: user.user_id,
             duration,
@@ -852,7 +869,7 @@ const tenantLogin = async (req, res) => {
                 roles: userRoles,
                 language_code
             }
-        });
+        }));
 
         res.json({
             token,
@@ -877,11 +894,11 @@ const tenantLogin = async (req, res) => {
         const duration = Date.now() - startTime;
         
         // Log CRITICAL error - system failure during login
-        await logLoginCriticalError({
+        safeAuthLog(() => logLoginCriticalError({
             email,
             error,
             duration
-        });
+        }));
 
         console.error('Tenant login error:', error);
         res.status(500).json({ message: 'Internal server error' });
