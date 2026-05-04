@@ -4,6 +4,7 @@ const { Pool } = require("pg");
 require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
 
 const FRONTEND_SRC = path.join(__dirname, "..", "..", "AssetLifecycleWebFrontend", "src");
+const FRONTEND_LOCALES = path.join(FRONTEND_SRC, "i18n", "locales");
 const FILE_EXTENSIONS = new Set([".js", ".jsx", ".ts", ".tsx"]);
 
 const MANUAL_DE_TRANSLATIONS = {
@@ -17,6 +18,19 @@ const MANUAL_DE_TRANSLATIONS = {
   "Failed to copy": "Kopieren fehlgeschlagen",
   "Failed to fetch jobs": "Jobs konnten nicht geladen werden",
   "Failed to fetch job history": "Job-Verlauf konnte nicht geladen werden",
+};
+
+const MANUAL_EN_BY_TMD_ID = {
+  TMD_FAILED_TO_CREATE_ASSET_67770EC0: "Failed to create asset",
+  TMD_FAILED_TO_DELETE_ASSETS_846A8366: "Failed to delete assets",
+  TMD_FAILED_TO_DELETE_ASSET_295BFB6A: "Failed to delete asset",
+  TMD_FAILED_TO_SUBMIT_QSN_PRINT_REQUEST_39D8A39B: "Failed to submit QSN print request",
+  TMD_FAILED_TO_UPDATE_ASSET_8578544F: "Failed to update asset",
+  TMD_I18N_ASSETS_NOPERMISSIONTOADDASSETS_254881D6: "No permission to add assets",
+  TMD_I18N_COMMON_EXPORTSUCCESS_0C579D38: "Export successful",
+  TMD_I18N_VENDORS_FAILEDTOFETCHVENDORS_00D2C278: "Failed to fetch vendors",
+  TMD_I18N_VENDORS_PLEASESAVEVENDORFIRST_4D3BFE9E: "Please save vendor first",
+  TMD_I18N_VENDORS_SAVEFAILED_08205C99: "Save failed",
 };
 
 function getAllSourceFiles(dir) {
@@ -65,6 +79,26 @@ function tmdIdFromText(text) {
   return `TMD_${shortSlug}_${hash}`;
 }
 
+function flattenLocale(localeObj, prefix = "", out = {}) {
+  if (!localeObj || typeof localeObj !== "object") return out;
+  for (const [key, value] of Object.entries(localeObj)) {
+    const nextKey = prefix ? `${prefix}.${key}` : key;
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      flattenLocale(value, nextKey, out);
+    } else if (typeof value === "string") {
+      out[nextKey] = value;
+    }
+  }
+  return out;
+}
+
+function loadLocaleMap(langCode) {
+  const filePath = path.join(FRONTEND_LOCALES, `${langCode}.json`);
+  if (!fs.existsSync(filePath)) return {};
+  const parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  return flattenLocale(parsed);
+}
+
 function extractToastMessages(content) {
   const matches = [];
   const regex = /toast\.(success|error)\(\s*(['"`])([\s\S]*?)\2\s*[,)]/g;
@@ -81,7 +115,33 @@ function extractToastMessages(content) {
   return matches;
 }
 
-function extractBackendTextMessages(content) {
+function resolveFallbackTextFromBlock(block, enLocale) {
+  const literalFallback = block.match(/fallbackText\s*:\s*(['"`])([\s\S]*?)\1/);
+  if (literalFallback) {
+    return literalFallback[2].trim().replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'");
+  }
+
+  // Handle fallbackText: t('some.key')
+  const i18nDirect = block.match(/fallbackText\s*:\s*t\(\s*(['"`])([^'"`]+)\1/);
+  if (i18nDirect) {
+    return enLocale[i18nDirect[2]] || "";
+  }
+
+  // Handle fallbackText: translateErrorMessage(...) || t('some.key') || 'literal'
+  const i18nFromExpression = block.match(/fallbackText\s*:[\s\S]*?\|\|\s*t\(\s*(['"`])([^'"`]+)\1/);
+  if (i18nFromExpression) {
+    return enLocale[i18nFromExpression[2]] || "";
+  }
+
+  const literalFromExpression = block.match(/fallbackText\s*:[\s\S]*?\|\|\s*(['"`])([\s\S]*?)\1/);
+  if (literalFromExpression) {
+    return literalFromExpression[2].trim().replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'");
+  }
+
+  return "";
+}
+
+function extractBackendTextMessages(content, enLocale) {
   const rows = [];
   const callRegex = /showBackendTextToast\(\s*\{([\s\S]*?)\}\s*\)/g;
   let match;
@@ -94,14 +154,11 @@ function extractBackendTextMessages(content) {
     const tmd_id = String(tmdMatch[2] || "").trim();
     if (!tmd_id) continue;
 
-    const fallbackMatch = block.match(/fallbackText\s*:\s*(['"`])([\s\S]*?)\1/);
-    const fallbackText = fallbackMatch
-      ? fallbackMatch[2].trim().replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'")
-      : "";
+    const fallbackText = resolveFallbackTextFromBlock(block, enLocale);
 
     rows.push({
       tmd_id,
-      text: fallbackText || tmd_id,
+      text: fallbackText || MANUAL_EN_BY_TMD_ID[tmd_id] || tmd_id,
     });
   }
 
@@ -114,6 +171,7 @@ async function run() {
   }
 
   const files = getAllSourceFiles(FRONTEND_SRC);
+  const enLocale = loadLocaleMap("en");
   const uniqueMessages = new Map();
 
   for (const filePath of files) {
@@ -128,7 +186,7 @@ async function run() {
       }
     }
 
-    const backendRows = extractBackendTextMessages(content);
+    const backendRows = extractBackendTextMessages(content, enLocale);
     for (const row of backendRows) {
       // Prefer readable fallback text when present.
       const existing = uniqueMessages.get(row.tmd_id);
@@ -171,7 +229,11 @@ async function run() {
           INSERT INTO "tblTextMessagesDefault" (tmd_id, text)
           VALUES ($1, $2)
           ON CONFLICT (tmd_id)
-          DO UPDATE SET text = EXCLUDED.text;
+          DO UPDATE SET text = CASE
+            WHEN "tblTextMessagesDefault".text = "tblTextMessagesDefault".tmd_id
+            THEN EXCLUDED.text
+            ELSE "tblTextMessagesDefault".text
+          END;
         `,
         [row.tmd_id, row.text],
       );
