@@ -8,6 +8,7 @@
 const { Client, Pool } = require('pg');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
+const { getPgSslOption } = require('../utils/pgSslOption');
 require('dotenv').config();
 
 // Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
@@ -27,7 +28,8 @@ function initTenantRegistryPool() {
       connectionString,
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: parseInt(process.env.TENANT_REGISTRY_CONNECT_TIMEOUT_MS || '15000', 10) || 15000,
+      ssl: getPgSslOption(),
     });
   }
   return tenantRegistryPool;
@@ -176,6 +178,7 @@ async function getTenantPool(orgId) {
     max: 10,
     idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000, // Increased timeout for better reliability
+      ssl: getPgSslOption(),
       // Handle pool errors
       errorHandler: (err, client) => {
         console.error(`[TenantService] ❌ Pool error for org_id ${orgId}:`, err);
@@ -218,6 +221,7 @@ async function getTenantClient(orgId) {
 
   const client = new Client({
     connectionString,
+    ssl: getPgSslOption(),
   });
 
   await client.connect();
@@ -372,6 +376,7 @@ async function testTenantConnection(orgId) {
     const credentials = await getTenantCredentials(orgId);
     const client = new Client({
       connectionString: getTenantConnectionString(credentials),
+      ssl: getPgSslOption(),
     });
 
     await client.connect();

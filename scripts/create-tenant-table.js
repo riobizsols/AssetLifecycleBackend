@@ -21,6 +21,7 @@ async function createTenantTable() {
 
   const client = new Client({
     connectionString,
+    connectionTimeoutMillis: 15000,
   });
 
   try {

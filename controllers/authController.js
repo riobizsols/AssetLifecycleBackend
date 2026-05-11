@@ -115,12 +115,13 @@ const login = async (req, res) => {
             // Use a fresh pool for each normal login request to isolate auth from
             // shared pool lifecycle issues (e.g., stale/ended shared pool state).
             const { Pool } = require('pg');
+            const { getPgSslOption } = require('../utils/pgSslOption');
             tempLoginPool = new Pool({
                 connectionString: process.env.DATABASE_URL,
                 max: 2,
                 idleTimeoutMillis: 10000,
                 connectionTimeoutMillis: 5000,
-                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+                ssl: getPgSslOption(),
             });
             dbPool = tempLoginPool;
             await logCheckingUserInDatabase({ email, orgId: null, subdomain: null });

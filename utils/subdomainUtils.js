@@ -166,7 +166,7 @@ async function isSubdomainAvailable(subdomain, excludeOrgId = null) {
     
     if (!pool) {
       logger.error('[SubdomainUtils] ❌ Tenant registry pool not initialized');
-      return false;
+      throw new Error('Database connection not available');
     }
     
     // Normalize subdomain (trim, lowercase)
@@ -194,7 +194,8 @@ async function isSubdomainAvailable(subdomain, excludeOrgId = null) {
     return true;
   } catch (error) {
     logger.error('[SubdomainUtils] Error checking subdomain availability:', error);
-    return false;
+    // Do not return false: that is interpreted as "subdomain taken" and hides outages/timeouts.
+    throw error;
   }
 }
 
@@ -213,34 +214,21 @@ async function generateUniqueSubdomain(orgName) {
   let subdomain = baseSubdomain;
   let counter = 1;
   
-  // Keep trying until we find an available subdomain
-  try {
-    const isAvailable = await isSubdomainAvailable(subdomain);
-    
-    if (isAvailable) {
-      // Base subdomain is available, use it without any suffix
+  const isAvailable = await isSubdomainAvailable(subdomain);
+
+  if (isAvailable) {
+    return subdomain;
+  }
+
+  while (counter <= 100) {
+    subdomain = `${baseSubdomain}-${counter}`;
+    if (await isSubdomainAvailable(subdomain)) {
       return subdomain;
     }
-    
-    // Base subdomain is taken, try with counter suffix
-    while (counter <= 100) {
-      subdomain = `${baseSubdomain}-${counter}`;
-      
-      if (await isSubdomainAvailable(subdomain)) {
-  return subdomain;
-      }
-      
-      counter++;
-    }
-    
-    // If we still can't find one after 100 tries, throw error
-    throw new Error(`Unable to generate unique subdomain for "${orgName}" after 100 attempts`);
-  } catch (error) {
-    console.error('[SubdomainUtils] Error generating unique subdomain:', error.message);
-    // If there's an error checking availability, return base subdomain and log warning
-    console.warn('[SubdomainUtils] ⚠️ Could not verify subdomain availability. Using base subdomain: ' + baseSubdomain);
-    return baseSubdomain;
+    counter++;
   }
+
+  throw new Error(`Unable to generate unique subdomain for "${orgName}" after 100 attempts`);
 }
 
 module.exports = {

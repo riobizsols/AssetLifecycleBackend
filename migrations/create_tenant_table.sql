@@ -11,11 +11,26 @@ CREATE TABLE IF NOT EXISTS "tenants" (
     db_password text NOT NULL, -- Encrypted password
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
-    is_active boolean DEFAULT true
+    is_active boolean DEFAULT true,
+    subdomain character varying(63) UNIQUE
 );
 
+-- Upgrade: add subdomain if table was created from an older migration without this column
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tenants'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'subdomain'
+    ) THEN
+        ALTER TABLE "tenants" ADD COLUMN subdomain character varying(63) UNIQUE;
+    END IF;
+END $$;
+
 -- Add unique constraint if it doesn't exist
-DO $$ 
+DO $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint WHERE conname = 'unique_org_id'
@@ -27,6 +42,7 @@ END $$;
 -- Create index for faster lookups
 CREATE INDEX IF NOT EXISTS idx_tenants_org_id ON "tenants"(org_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_is_active ON "tenants"(is_active);
+CREATE INDEX IF NOT EXISTS idx_tenants_subdomain ON "tenants"(subdomain);
 
 -- Add comment
 COMMENT ON TABLE "tenants" IS 'Stores database credentials for each organization in multi-tenant setup';
@@ -36,4 +52,4 @@ COMMENT ON COLUMN "tenants".db_port IS 'Database port number';
 COMMENT ON COLUMN "tenants".db_name IS 'Database name for this organization';
 COMMENT ON COLUMN "tenants".db_user IS 'Database username';
 COMMENT ON COLUMN "tenants".db_password IS 'Encrypted database password';
-
+COMMENT ON COLUMN "tenants".subdomain IS 'Subdomain for tenant URL (e.g., orgname.example.com)';

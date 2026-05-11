@@ -6,8 +6,17 @@ const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
 const { generateCustomId } = require('../utils/idGenerator');
 const { sendWelcomeEmail } = require('../utils/mailer');
+const { getPgSslOption, getPgClientConnectTimeoutMs } = require('../utils/pgSslOption');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
 require('dotenv').config();
+
+function pgClientOpts(base) {
+  return {
+    ...base,
+    ssl: getPgSslOption(),
+    connectionTimeoutMillis: getPgClientConnectTimeoutMs(),
+  };
+}
 
 /**
  * Parse database URL to extract connection details
@@ -66,13 +75,13 @@ async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
   }
   
   const tenantDbConfig = parseDatabaseUrl(tenantDbUrl);
-  const adminClient = new Client({
+  const adminClient = new Client(pgClientOpts({
     host: tenantDbConfig.host,
     port: tenantDbConfig.port,
     user: tenantDbConfig.user,
     password: tenantDbConfig.password,
     database: 'postgres',
-  });
+  }));
   
   try {
     await adminClient.connect();
@@ -626,13 +635,13 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     }
   }
   
-  const referenceClient = new Client({
+  const referenceClient = new Client(pgClientOpts({
     host: referenceDbConfig.host,
     port: referenceDbConfig.port,
     user: referenceDbConfig.user,
     password: referenceDbConfig.password,
     database: referenceDbConfig.database,
-  });
+  }));
 
   try {
     await referenceClient.connect();
@@ -935,13 +944,13 @@ async function createTenant(tenantData) {
   const dbConfig = parseDatabaseUrl(tenantDatabaseUrl);
   
   // Connect to postgres database to create new database
-  const adminClient = new Client({
+  const adminClient = new Client(pgClientOpts({
     host: dbConfig.host,
     port: dbConfig.port,
     user: dbConfig.user,
     password: dbConfig.password,
     database: 'postgres', // Connect to postgres database to create new DB
-  });
+  }));
 
   try {
     await adminClient.connect();
@@ -972,13 +981,13 @@ async function createTenant(tenantData) {
     });
 
     // Create all tables in the new database using DATABASE_URL credentials
-    const tenantClient = new Client({
+    const tenantClient = new Client(pgClientOpts({
       host: dbConfig.host,
       port: dbConfig.port,
       user: dbConfig.user,
       password: dbConfig.password,
       database: dbName,
-    });
+    }));
 
     try {
       await tenantClient.connect();

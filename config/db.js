@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { getPgSslOption } = require('../utils/pgSslOption');
 require('dotenv').config();
 
 if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
@@ -19,7 +20,7 @@ if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
       allowExitOnIdle: false,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+      ssl: getPgSslOption(),
     });
 
     pool.on('error', (err) => {
