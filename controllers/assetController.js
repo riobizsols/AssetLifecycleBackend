@@ -1,5 +1,25 @@
 const model = require("../models/assetModel");
+const { findConflictingAssetName } = require("../utils/assetTypeNameValidation");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
+
+const respondDuplicateAssetName = (res, existingName) =>
+  res.status(409).json({
+    error: "Similar asset name exists",
+    message: `An asset with a similar name already exists: "${existingName}"`,
+    existingName,
+  });
+
+const checkDuplicateAssetDescription = async (
+  description,
+  org_id,
+  excludeAssetId = null
+) => {
+  const trimmed = String(description || "").trim();
+  if (!trimmed || !org_id) return null;
+
+  const assets = await model.getAssetsByOrg(org_id);
+  return findConflictingAssetName(trimmed, assets.rows, excludeAssetId);
+};
 const {
     // Generic helpers
     logApiCall,
@@ -211,13 +231,23 @@ const addAsset = async (req, res) => {
             }
         }
 
+        const conflictingAssetName = await checkDuplicateAssetDescription(
+            description,
+            org_id
+        );
+        if (conflictingAssetName) {
+            return respondDuplicateAssetName(res, conflictingAssetName);
+        }
+
+        const trimmedDescription = String(description || "").trim();
+
         // Prepare asset data (now includes prod_serv_id)
         const assetData = {
             asset_type_id,
             asset_id: finalAssetId,
             text,
             serial_number,
-            description,
+            description: trimmedDescription || null,
             branch_id: branch_id || null,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
@@ -467,11 +497,27 @@ const updateAsset = async (req, res) => {
         });
       }
     }
+
+    const descriptionToValidate =
+      description !== undefined ? description : existingAssetRow.description;
+    const conflictingAssetName = await checkDuplicateAssetDescription(
+      descriptionToValidate,
+      finalOrgId,
+      asset_id
+    );
+    if (conflictingAssetName) {
+      return respondDuplicateAssetName(res, conflictingAssetName);
+    }
+
+    const trimmedDescription =
+      description !== undefined
+        ? String(description || "").trim()
+        : String(existingAssetRow.description || "").trim();
     
     const updatedAsset = await model.updateAsset(asset_id, {
       asset_type_id,
       serial_number,
-      description,
+      description: trimmedDescription || null,
       branch_id,
       purchase_vendor_id,
       service_vendor_id,
@@ -1763,6 +1809,16 @@ const createAsset = async (req, res) => {
                 return res.status(409).json({ error: "Asset with this serial number already exists" });
             }
         }
+
+        const conflictingAssetName = await checkDuplicateAssetDescription(
+            description,
+            org_id
+        );
+        if (conflictingAssetName) {
+            return respondDuplicateAssetName(res, conflictingAssetName);
+        }
+
+        const trimmedDescription = String(description || "").trim();
         
         // Get asset type's depreciation method to calculate correct rate
         let calculatedDepreciationRate = 0;
@@ -1844,7 +1900,7 @@ if (useful_life_years && useful_life_years > 0) {
             asset_id: finalAssetId,
             text,
             serial_number,
-            description,
+            description: trimmedDescription || null,
             branch_id: branch_id || userBranchId || null,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,

@@ -1,5 +1,6 @@
 const model = require("../models/assetTypeModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
 
 // Helper function to convert parent asset type text to ID
 const convertParentAssetTypeToId = async (parentValue, org_id) => {
@@ -49,10 +50,25 @@ const addAssetType = async (req, res) => {
         // Generate unique asset_type_id
         let asset_type_id = await generateCustomId("asset_type", 3);
 
+        const trimmedText = String(text || "").trim();
+
         // Validate required fields
-        if (!text) {
+        if (!trimmedText) {
             return res.status(400).json({ 
                 error: "Asset type name (text) is required" 
+            });
+        }
+
+        const existingTypes = await model.getAllAssetTypes(org_id);
+        const conflictingName = findConflictingAssetTypeName(
+            trimmedText,
+            existingTypes.rows
+        );
+        if (conflictingName) {
+            return res.status(409).json({
+                error: "Similar asset type name exists",
+                message: `An asset type with a similar name already exists: "${conflictingName}"`,
+                existingName: conflictingName,
             });
         }
 
@@ -94,7 +110,7 @@ const addAssetType = async (req, res) => {
                     inspection_required,
                     group_required,
                     created_by,
-                    text,
+                    trimmedText,
                     is_child,
                     parent_asset_type_id,
                     maint_type_id,
@@ -309,6 +325,32 @@ const updateAssetType = async (req, res) => {
             }
         }
 
+        const proposedText =
+            text !== undefined && text !== null
+                ? String(text).trim()
+                : String(existingAsset.rows[0].text || "").trim();
+
+        if (!proposedText) {
+            return res.status(400).json({
+                error: "Asset type name (text) is required",
+            });
+        }
+
+        const orgIdForCheck = org_id || existingAsset.rows[0].org_id;
+        const existingTypes = await model.getAllAssetTypes(orgIdForCheck);
+        const conflictingName = findConflictingAssetTypeName(
+            proposedText,
+            existingTypes.rows,
+            id
+        );
+        if (conflictingName) {
+            return res.status(409).json({
+                error: "Similar asset type name exists",
+                message: `An asset type with a similar name already exists: "${conflictingName}"`,
+                existingName: conflictingName,
+            });
+        }
+
         const updateData = {
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
@@ -316,7 +358,7 @@ const updateAssetType = async (req, res) => {
             assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
-            text: text !== undefined && text !== null ? text : existingAsset.rows[0].text,
+            text: proposedText,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),
             maint_type_id: maint_required === 0 || maint_required === false ? null : (maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id),
