@@ -25,10 +25,20 @@ async function getUserIdByEmpIntId(empIntId) {
 
 async function getUserRoleIds(userId) {
   const r = await getDb().query(
-    `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`,
+    `
+      SELECT ujr.job_role_id
+      FROM "tblUserJobRoles" ujr
+      WHERE ujr.user_id = $1
+      UNION
+      SELECT u.job_role_id
+      FROM "tblUsers" u
+      WHERE u.user_id = $1
+        AND u.job_role_id IS NOT NULL
+        AND btrim(u.job_role_id) <> ''
+    `,
     [userId]
   );
-  return r.rows.map((x) => x.job_role_id);
+  return [...new Set(r.rows.map((x) => x.job_role_id).filter(Boolean))];
 }
 
 async function getBranchCodeByBranchId(branchId) {
