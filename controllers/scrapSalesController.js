@@ -57,11 +57,12 @@ const createScrapSale = async (req, res) => {
         }).catch(err => console.error('Logging error:', err));
 
         // Validation
-        if (!text || !total_sale_value || !buyer_name || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
+        if (!text || !total_sale_value || !buyer_name || !String(buyer_company || '').trim() || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
             const missingFields = [];
             if (!text) missingFields.push('text');
             if (!total_sale_value) missingFields.push('total_sale_value');
             if (!buyer_name) missingFields.push('buyer_name');
+            if (!String(buyer_company || '').trim()) missingFields.push('buyer_company');
             if (!scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) missingFields.push('scrapAssets');
             
             scrapSalesLogger.logMissingRequiredFields({
@@ -74,7 +75,9 @@ const createScrapSale = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields",
-                message: "text, total_sale_value, buyer_name, and scrapAssets array are required"
+                message: missingFields.includes('buyer_company')
+                    ? "Company name is required"
+                    : "text, total_sale_value, buyer_name, buyer_company, and scrapAssets array are required"
             });
         }
 
@@ -150,7 +153,7 @@ const createScrapSale = async (req, res) => {
                 text,
                 total_sale_value,
                 buyer_name,
-                buyer_company: buyer_company || null,
+                buyer_company: String(buyer_company).trim(),
                 buyer_phone: buyer_phone || null,
                 created_by,
                 sale_date: sale_date || new Date().toISOString().split('T')[0],
@@ -624,11 +627,20 @@ const updateScrapSale = async (req, res) => {
         const changed_by = req.user?.user_id;
         
         // Validation
-        if (!text || !total_sale_value || !buyer_name || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
+        if (!text || !total_sale_value || !buyer_name || !String(buyer_company || '').trim() || !scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) {
+            const missingFields = [];
+            if (!text) missingFields.push('text');
+            if (!total_sale_value) missingFields.push('total_sale_value');
+            if (!buyer_name) missingFields.push('buyer_name');
+            if (!String(buyer_company || '').trim()) missingFields.push('buyer_company');
+            if (!scrapAssets || !Array.isArray(scrapAssets) || scrapAssets.length === 0) missingFields.push('scrapAssets');
+
             return res.status(400).json({
                 success: false,
                 error: "Missing required fields",
-                message: "text, total_sale_value, buyer_name, and scrapAssets array are required"
+                message: missingFields.includes('buyer_company')
+                    ? "Company name is required"
+                    : "text, total_sale_value, buyer_name, buyer_company, and scrapAssets array are required"
             });
         }
 
@@ -671,7 +683,7 @@ const updateScrapSale = async (req, res) => {
                 text,
                 total_sale_value,
                 buyer_name,
-                buyer_company: buyer_company || null,
+                buyer_company: String(buyer_company).trim(),
                 buyer_phone: buyer_phone || null,
                 sale_date: sale_date || null,
                 collection_date: collection_date || null,

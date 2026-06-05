@@ -1393,6 +1393,10 @@ async function createScrapRequest({
   // If approval is required, we MUST have workflow sequence configured.
   // Do NOT fall back to direct scrapping, because that would bypass approval.
   if (approvalRequired && !sequences.length) {
+    await seedScrapSequencesFromMaintenance(assetTypeId, orgId);
+    sequences = await getScrapSequences(assetTypeId, orgId);
+  }
+  if (approvalRequired && !sequences.length) {
     return {
       success: false,
       message: `Scrap approval is required but the scrap workflow sequence is not configured for asset type ${assetTypeId}.`,
