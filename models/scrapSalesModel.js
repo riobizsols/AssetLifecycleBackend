@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const { getStatusId } = require('../utils/workflowStatusCodes');
 const crypto = require('crypto');
 
 // Helper function to get database connection (tenant pool or default)
@@ -574,9 +575,7 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
 
     const createScrapWorkflowHeader = async (assetgroup_id, wfscrapseq_id, created_by, is_scrap_sales) => {
         const id_d = await generateCustomId('wfscrap_h', 3);
-        // Set status to 'IN' for both scrap sales and regular scrap workflows
-        // Status will change to 'IP' after first approval, then 'CO' after all approvals
-        const status = 'IN';
+        const statusId = await getStatusId('IN', client);
         const r = await client.query(
             `INSERT INTO "tblWFScrap_H" (
                 id_d, assetgroup_id, wfscrapseq_id,
@@ -584,7 +583,7 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
                 is_scrap_sales
             ) VALUES ($1, $2, $3, $6, $4, CURRENT_TIMESTAMP, NULL, NULL, $5)
             RETURNING *`,
-            [id_d, assetgroup_id, wfscrapseq_id, created_by, is_scrap_sales, status]
+            [id_d, assetgroup_id, wfscrapseq_id, created_by, is_scrap_sales, statusId]
         );
         return r.rows[0];
     };
@@ -603,15 +602,16 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
 
             for (const jr of jobRoles) {
                 const id = await generateCustomId('wfscrap_d', 3);
-                const status = Number(seq.seq_no) === minSeq ? 'AP' : 'IN';
-                const notes = status === 'AP' ? (initialNotes || null) : null;
+                const statusCode = Number(seq.seq_no) === minSeq ? 'AP' : 'IN';
+                const notes = statusCode === 'AP' ? (initialNotes || null) : null;
+                const statusId = await getStatusId(statusCode, client);
 
                 await client.query(
                     `INSERT INTO "tblWFScrap_D" (
                         id, wfscrap_h_id, job_role_id, dept_id, seq,
                         status, notes, created_by, created_on, changed_by, changed_on
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, NULL, NULL)`,
-                    [id, wfscrap_h_id, jr.job_role_id, null, Number(seq.seq_no), status, notes, created_by]
+                    [id, wfscrap_h_id, jr.job_role_id, null, Number(seq.seq_no), statusId, notes, created_by]
                 );
                 created += 1;
             }
