@@ -1,4 +1,5 @@
 const { getDb } = require('../utils/dbContext');
+const { statusInSql } = require('../utils/workflowStatusCodes');
 
 // Supports super access users who can view all branches
 const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperAccess = false) => {
@@ -21,7 +22,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
       at.text as asset_type_name,
       ag.text as group_name,
       (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
-      COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
+      wfh.maint_type_id as maint_type_id,
       mt.text as maint_type_name,
       jr.text as job_role_name,
       u.user_id,
@@ -45,7 +46,7 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
     LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
-    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
+    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = wfh.maint_type_id
     LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
     -- Join with all users who have this job role
     LEFT JOIN "tblUserJobRoles" ujr ON wfd.job_role_id = ujr.job_role_id
@@ -227,7 +228,7 @@ const getMaintenanceNotificationsByUser = async (
         WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
         ELSE COALESCE(at.text, 'Unknown Asset Type')
       END as asset_type_name,
-      COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
+      wfh.maint_type_id as maint_type_id,
       COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
       -- Get the current action role and users
       COALESCE(current_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
@@ -258,7 +259,7 @@ const getMaintenanceNotificationsByUser = async (
     LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id
-    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
+    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = wfh.maint_type_id
     -- Current step: prefer AP over IN when both exist (same wfamsh_id)
     LEFT JOIN (
       SELECT DISTINCT ON (wfd2.wfamsh_id)
@@ -360,7 +361,7 @@ const getMaintenanceNotificationsByUser = async (
         FROM "tblWFScrap_D" d
         LEFT JOIN "tblJobRoles" jr ON d.job_role_id = jr.job_role_id
         WHERE d.wfscrap_h_id = wh.id_d
-          AND d.status IN ('AP','IN')
+          AND ${statusInSql('d.status', ['AP', 'IN'])}
         ORDER BY d.seq ASC, d.created_on ASC
         LIMIT 1
       ) current_scrap_action_role ON true
@@ -369,12 +370,12 @@ const getMaintenanceNotificationsByUser = async (
           OR (agh.org_id = $1)
         )
         ${scrapBranchFilter}
-        AND wh.status IN ('IN','IP')
+        AND ${statusInSql('wh.status', ['IN', 'IP'])}
         AND EXISTS (
           SELECT 1
           FROM "tblWFScrap_D" d2
           WHERE d2.wfscrap_h_id = wh.id_d
-            AND d2.status IN ('IN','AP')
+            AND ${statusInSql('d2.status', ['IN', 'AP'])}
         )
         AND EXISTS (
           SELECT 1
@@ -384,7 +385,7 @@ const getMaintenanceNotificationsByUser = async (
           WHERE d3.wfscrap_h_id = wh.id_d
             AND u3.emp_int_id = $${empIntIdParamIndex}
             AND u3.int_status = 1
-            AND d3.status IN ('IN','AP')
+            AND ${statusInSql('d3.status', ['IN', 'AP'])}
         )
   `;
 

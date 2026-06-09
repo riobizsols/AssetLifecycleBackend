@@ -6,19 +6,17 @@ const db = require("../config/db");
  */
 
 /**
- * Get all asset types that require inspection
- * Uses maint_required flag (assuming inspection is required when maintenance is required)
- * TODO: Add separate insp_required column if needed
+ * Get all asset types that require inspection (inspection_required on tblAssetTypes)
  */
 const getAssetTypesRequiringInspection = async (org_id) => {
   const query = `
     SELECT 
       asset_type_id,
       text as asset_type_name,
-      maint_required as insp_required,
+      inspection_required as insp_required,
       org_id
     FROM "tblAssetTypes"
-    WHERE maint_required = true
+    WHERE inspection_required = true
       AND int_status = 1
       AND org_id = $1
     ORDER BY text

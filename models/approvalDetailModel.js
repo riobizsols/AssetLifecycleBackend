@@ -175,7 +175,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         v.cin_number,
         at.maint_lead_type,
         at.text as asset_type_name,
-        COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
+        wfh.maint_type_id as maint_type_id,
         mt.text as maint_type_name,
         COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
@@ -204,7 +204,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
       INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
+      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = wfh.maint_type_id
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
       WHERE wfd.org_id = $1 
@@ -2560,7 +2560,7 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         v.cin_number,
         at.maint_lead_type,
         at.text as asset_type_name,
-        at.maint_type_id,
+        wfh.maint_type_id,
         mt.text as maint_type_name,
         -- Calculate cutoff date: pl_sch_date - maint_lead_type
         (wfh.pl_sch_date - INTERVAL '1 day' * COALESCE(
@@ -2583,7 +2583,7 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
       FROM "tblWFAssetMaintSch_H" wfh
       INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-      LEFT JOIN "tblMaintTypes" mt ON at.maint_type_id = mt.maint_type_id
+      LEFT JOIN "tblMaintTypes" mt ON wfh.maint_type_id = mt.maint_type_id
       LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
       WHERE wfh.asset_id = $1 
         AND wfh.org_id = $2
@@ -2822,7 +2822,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor Contract Renewal'
           ELSE at.text
         END as asset_type_name,
-        COALESCE(wfh.maint_type_id, at.maint_type_id) as maint_type_id,
+        wfh.maint_type_id as maint_type_id,
         mt.text as maint_type_name,
         COALESCE(jr.text, 'Unassigned Role') as job_role_name,
         -- ROLE-BASED: Always show role name (user_id is not used)
@@ -2859,7 +2859,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
       LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
       LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = COALESCE(wfh.maint_type_id, at.maint_type_id)
+      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = wfh.maint_type_id
       LEFT JOIN "tblJobRoles" jr ON wfd.job_role_id = jr.job_role_id
       LEFT JOIN "tblVendors" v ON COALESCE(wfh.vendor_id, a.service_vendor_id) = v.vendor_id
       LEFT JOIN "tblAssetGroup_H" ag ON wfh.group_id = ag.assetgroup_h_id

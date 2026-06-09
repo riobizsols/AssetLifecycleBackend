@@ -318,12 +318,24 @@ const getUserRoles = async (user_id, tenantPool = null) => {
         const connection = tenantPool || getDb();
         
         const result = await connection.query(
-            `SELECT ujr.user_job_role_id, ujr.user_id, ujr.job_role_id, 
+            `SELECT ujr.user_job_role_id, ujr.user_id, ujr.job_role_id,
                     jr.text as job_role_name, jr.job_function
              FROM "tblUserJobRoles" ujr
              JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
              WHERE ujr.user_id = $1
-             ORDER BY ujr.user_job_role_id`,
+             UNION
+             SELECT NULL AS user_job_role_id, u.user_id, u.job_role_id,
+                    jr.text as job_role_name, jr.job_function
+             FROM "tblUsers" u
+             LEFT JOIN "tblJobRoles" jr ON jr.job_role_id = u.job_role_id
+             WHERE u.user_id = $1
+               AND u.job_role_id IS NOT NULL
+               AND btrim(u.job_role_id) <> ''
+               AND NOT EXISTS (
+                 SELECT 1 FROM "tblUserJobRoles" ujr2
+                 WHERE ujr2.user_id = u.user_id AND ujr2.job_role_id = u.job_role_id
+               )
+             ORDER BY job_role_id`,
             [user_id]
         );
         

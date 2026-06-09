@@ -37,6 +37,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfscrap_h': 'WFSCH',
             'wfscrap_d': 'WFSCD',
             'asset_scrap': 'ASCP',
+            'scrap_asset_hist': 'SCRAP',
             // Existing scrap details table (legacy, used by reports/UI)
                 'asset_scrap_det': 'ASD',
                 'etc': 'ETC'
@@ -140,6 +141,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfscrap_h': 'tblWFScrap_H',
         'wfscrap_d': 'tblWFScrap_D',
         'asset_scrap': 'tblAssetScrap',
+        'scrap_asset_hist': 'tblScrapAssetHist',
         // Existing scrap details table (legacy)
         'asset_scrap_det': 'tblAssetScrapDet',
         'etc': 'tblEmpTechCert'
@@ -189,6 +191,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfscrap_h': 'id_d',
             'wfscrap_d': 'id',
             'asset_scrap': 'id',
+            'scrap_asset_hist': 'scraphis_id',
             // Existing scrap details table (legacy)
               'asset_scrap_det': 'asd_id',
               'etc': 'etc_id'

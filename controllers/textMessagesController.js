@@ -63,8 +63,10 @@ async function getMessageById(req, res) {
       return res.status(400).json({ success: false, message: "tmdId is required" });
     }
 
-    const userLang = req.user?.language_code || "en";
-    const messageRow = await textMessagesModel.getMessageByIdWithLanguageFallback(tmdId, userLang);
+    const requestedLang = String(req.query.lang || req.user?.language_code || "en")
+      .trim()
+      .toLowerCase();
+    const messageRow = await textMessagesModel.getMessageByIdWithLanguageFallback(tmdId, requestedLang);
 
     if (!messageRow) {
       return res.status(404).json({ success: false, message: "Text message not found" });
@@ -76,7 +78,7 @@ async function getMessageById(req, res) {
         tmd_id: messageRow.tmd_id,
         text: messageRow.text,
         lang_code: messageRow.resolved_lang_code,
-        requested_lang_code: String(userLang || "en").toLowerCase(),
+        requested_lang_code: requestedLang,
       },
     });
   } catch (error) {
