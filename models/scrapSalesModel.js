@@ -533,21 +533,12 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
     const isScrapApprovalRequired = async (assetTypeId, orgId) => {
         try {
             const r = await dbPool.query(
-                `SELECT maint_required FROM "tblAssetTypes" WHERE asset_type_id = $1 AND org_id = $2`,
+                `SELECT 1 FROM "tblWFScrapSeq" WHERE asset_type_id = $1 AND org_id = $2 LIMIT 1`,
                 [assetTypeId, orgId]
             );
-            if (!r.rows.length) return true;
-            
-            const row = r.rows[0];
-            // If maint_required is false, no approval needed (bypass workflow)
-            if (row.maint_required === false || row.maint_required === 0 || row.maint_required === 'false' || row.maint_required === '0') {
-                return false;
-            }
-            
-            // Otherwise workflow is mandatory for all scrap operations
-            return true;
+            return r.rows.length > 0;
         } catch (e) {
-            return true;
+            return false;
         }
     };
 

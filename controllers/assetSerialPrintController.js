@@ -152,7 +152,6 @@ class AssetSerialPrintController {
           asset_type_id: item.asset_type_id,
           asset_type_name: item.asset_type_name,
           assignment_type: item.assignment_type,
-          maint_required: item.maint_required,
           inspection_required: item.inspection_required,
           group_required: item.group_required
         }
@@ -249,7 +248,6 @@ class AssetSerialPrintController {
           asset_type_id: item.asset_type_id,
           asset_type_name: item.asset_type_name,
           assignment_type: item.assignment_type,
-          maint_required: item.maint_required,
           inspection_required: item.inspection_required,
           group_required: item.group_required
         }
@@ -482,7 +480,6 @@ class AssetSerialPrintController {
           asset_type_id: result.asset_type_id,
           asset_type_name: result.asset_type_name,
           assignment_type: result.assignment_type,
-          maint_required: result.maint_required,
           inspection_required: result.inspection_required,
           group_required: result.group_required
         }

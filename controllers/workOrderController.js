@@ -69,13 +69,11 @@ const getAllWorkOrders = async (req, res) => {
             asset_type: {
                 asset_type_id: row.asset_type_id,
                 asset_type_name: row.asset_type_name,
-                maint_required: row.maint_required,
                 assignment_type: row.assignment_type,
                 inspection_required: row.inspection_required,
                 group_required: row.group_required,
                 is_child: row.is_child,
                 parent_asset_type_id: row.parent_asset_type_id,
-                maint_type_id: row.asset_type_maint_type_id,
                 maint_lead_type: row.maint_lead_type,
                 depreciation_type: row.depreciation_type,
                 checklist_items: row.checklist_items || []
@@ -188,13 +186,11 @@ const getWorkOrderById = async (req, res) => {
             asset_type: {
                 asset_type_id: workOrder.asset_type_id,
                 asset_type_name: workOrder.asset_type_name,
-                maint_required: workOrder.maint_required,
                 assignment_type: workOrder.assignment_type,
                 inspection_required: workOrder.inspection_required,
                 group_required: workOrder.group_required,
                 is_child: workOrder.is_child,
                 parent_asset_type_id: workOrder.parent_asset_type_id,
-                maint_type_id: workOrder.asset_type_maint_type_id,
                 maint_lead_type: workOrder.maint_lead_type,
                 depreciation_type: workOrder.depreciation_type,
                 checklist_items: workOrder.checklist_items || []

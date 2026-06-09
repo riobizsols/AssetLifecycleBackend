@@ -138,6 +138,10 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
     
     // Process each frequency for the group
     for (const frequency of frequencies) {
+        if (!model.isCronSchedulableFrequency(frequency)) {
+            console.log(`Skipping on-demand or invalid frequency (at_main_freq_id: ${frequency.at_main_freq_id}) for group ${group_id}`);
+            continue;
+        }
         console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for group ${group_id}`);
         
         // Calculate planned schedule date: dateToConsider + frequency
@@ -318,10 +322,10 @@ const generateMaintenanceSchedules = async (req, res) => {
             
             // Step 2b: Get maintenance frequency for this asset type
             const frequencyResult = await model.getMaintenanceFrequency(assetType.asset_type_id);
-            const frequencies = frequencyResult.rows;
+            const frequencies = frequencyResult.rows.filter(model.isCronSchedulableFrequency);
             
             if (frequencies.length === 0) {
-                console.log(`No maintenance frequency found for asset type ${assetType.asset_type_id}`);
+                console.log(`No cron-schedulable maintenance frequencies for asset type ${assetType.asset_type_id}`);
                 continue;
             }
             
@@ -443,6 +447,10 @@ const generateMaintenanceSchedules = async (req, res) => {
                 
                 // Process each frequency for this asset
                 for (const frequency of frequencies) {
+                    if (!model.isCronSchedulableFrequency(frequency)) {
+                        console.log(`Skipping on-demand or invalid frequency (at_main_freq_id: ${frequency.at_main_freq_id}) for asset ${asset.asset_id}`);
+                        continue;
+                    }
                     console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for asset ${asset.asset_id}`);
                     
                     const frequencyUom = (frequency.uom || '').toString().toLowerCase();
@@ -706,10 +714,10 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
             
             // Step 2b: Get maintenance frequency for this asset type
             const frequencyResult = await model.getMaintenanceFrequency(assetType.asset_type_id);
-            const frequencies = frequencyResult.rows;
+            const frequencies = frequencyResult.rows.filter(model.isCronSchedulableFrequency);
             
             if (frequencies.length === 0) {
-                console.log(`No maintenance frequency found for asset type ${assetType.asset_type_id}`);
+                console.log(`No cron-schedulable maintenance frequencies for asset type ${assetType.asset_type_id}`);
                 continue;
             }
             
@@ -765,6 +773,10 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                 
                 // Process each frequency for this asset
                 for (const frequency of frequencies) {
+                    if (!model.isCronSchedulableFrequency(frequency)) {
+                        console.log(`Skipping on-demand or invalid frequency (at_main_freq_id: ${frequency.at_main_freq_id}) for asset ${asset.asset_id}`);
+                        continue;
+                    }
                     console.log(`Processing frequency: ${frequency.frequency} ${frequency.uom} for asset ${asset.asset_id}`);
                     
                     // Calculate planned schedule date: dateToConsider + frequency

@@ -105,8 +105,6 @@ const getAllAssetTypes = async (req, res) => {
                 at.group_required,
                 COALESCE(at.is_child, false) AS is_child,
                 at.parent_asset_type_id,
-                at.maint_required,
-                at.maint_type_id,
                 at.maint_lead_type
             FROM "tblAssetTypes" at
             LEFT JOIN "tblDeptAssetTypes" dat
