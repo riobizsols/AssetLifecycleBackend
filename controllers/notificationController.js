@@ -145,6 +145,11 @@ const getUserNotifications = async (req, res) => {
     const formattedWarrantyNotifications = warrantyNotifications.map((notification) => {
       const status = mapStatus(notification.status);
       const isVendorMaintained = !!notification.service_vendor_id;
+      const daysUntilExpiry = Math.floor(
+        (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
+      );
+      const isExpired =
+        daysUntilExpiry < 0 || String(notification.title || "").toLowerCase() === "warranty expired";
 
       return {
         id: notification.notify_id,
@@ -158,15 +163,11 @@ const getUserNotifications = async (req, res) => {
         status,
         dueDate: notification.warranty_period,
         cutoffDate: notification.warranty_period,
-        daysUntilDue: Math.floor(
-          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        daysUntilCutoff: Math.floor(
-          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        isUrgent: true,
-        isOverdue: false,
-        maintenanceType: "Warranty Expiry",
+        daysUntilDue: daysUntilExpiry,
+        daysUntilCutoff: daysUntilExpiry,
+        isUrgent: isExpired || daysUntilExpiry <= 2,
+        isOverdue: isExpired,
+        maintenanceType: isExpired ? "Warranty Expired" : "Warranty Expiry",
         assetId: notification.asset_id,
         assetTypeName: notification.asset_type_name || "Asset",
         isGroupMaintenance: false,
@@ -175,7 +176,7 @@ const getUserNotifications = async (req, res) => {
         groupAssetCount: null,
         notifyId: notification.notify_id,
         notificationStatus: status,
-        title: notification.title || "Warranty Expiry",
+        title: notification.title || (isExpired ? "Warranty Expired" : "Warranty Expiry"),
         body: notification.body || "",
         canChangeVendor: isVendorMaintained,
       };

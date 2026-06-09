@@ -107,7 +107,7 @@ class CronService {
         }
     }
 
-    // Schedule warranty notifications for assets expiring within 10 days.
+    // Schedule warranty notifications for assets expiring within 10 days or already expired.
     scheduleWarrantyNotificationTrigger() {
         try {
             cron.schedule('0 7 * * *', async () => {
@@ -125,7 +125,7 @@ class CronService {
             });
 
             console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
-            console.log('   → Creates notifications for assets with warranty expiry within next 10 days');
+            console.log('   → Creates notifications for assets expiring within 10 days and for expired warranties');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
         }
@@ -411,11 +411,11 @@ class CronService {
             warrantyNotificationTrigger: {
                 name: 'Warranty Notification Trigger',
                 schedule: '0 7 * * *',
-                description: 'Creates warranty alerts for assets whose expiry_date falls within next 10 days.',
+                description: 'Creates warranty alerts for assets expiring within 10 days and for assets whose warranty has expired.',
                 timezone: 'Asia/Kolkata',
                 nextRun: 'Daily at 7:00 AM IST',
                 status: 'ACTIVE',
-                purpose: 'Proactively notify mapped job roles before warranty end date'
+                purpose: 'Notify mapped job roles before warranty end date and when warranty has expired'
             }
         };
     }
