@@ -18,6 +18,7 @@ const {
   DEFAULT_JOB_ROLES,
   DEFAULT_JOB_ROLE_NAV,
 } = require("../constants/setupDefaults");
+const { seedTextMessages } = require("../utils/seedTextMessages");
 
 const DUMP_FILE_PATH = path.join(
   __dirname,
@@ -1164,6 +1165,11 @@ const seedReferenceTables = async (client, orgId, logs) => {
       [type.id, orgId, type.name]
     );
   }
+
+  await seedTextMessages(client, {
+    genericUrl: process.env.GENERIC_URL,
+    logs,
+  });
 
   logs.push({ message: "Core reference tables prepared", scope: "reference" });
 };

@@ -154,6 +154,12 @@ const getUserNotifications = async (req, res) => {
       const status = mapStatus(notification.status);
       const isVendorMaintained = !!notification.service_vendor_id;
       const targetDate = notification[dateField];
+      const daysUntilExpiry = Math.floor(
+        (new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)
+      );
+      const isExpired =
+        workflowType === "WARRANTY" &&
+        (daysUntilExpiry < 0 || String(notification.title || "").toLowerCase() === "warranty expired");
 
       return {
         id: notification.notify_id,
@@ -167,15 +173,11 @@ const getUserNotifications = async (req, res) => {
         status,
         dueDate: targetDate,
         cutoffDate: targetDate,
-        daysUntilDue: Math.floor(
-          (new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        daysUntilCutoff: Math.floor(
-          (new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        isUrgent: Math.floor((new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)) <= 2,
-        isOverdue: Math.floor((new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)) <= 0,
-        maintenanceType,
+        daysUntilDue: daysUntilExpiry,
+        daysUntilCutoff: daysUntilExpiry,
+        isUrgent: isExpired || daysUntilExpiry <= 2,
+        isOverdue: workflowType === "WARRANTY" ? isExpired : daysUntilExpiry <= 0,
+        maintenanceType: isExpired ? "Warranty Expired" : maintenanceType,
         assetId: notification.asset_id,
         assetTypeName: notification.asset_type_name || "Asset",
         isGroupMaintenance: false,
@@ -184,7 +186,7 @@ const getUserNotifications = async (req, res) => {
         groupAssetCount: null,
         notifyId: notification.notify_id,
         notificationStatus: status,
-        title: notification.title || maintenanceType,
+        title: notification.title || (isExpired ? "Warranty Expired" : maintenanceType),
         body: notification.body || "",
         canChangeVendor: isVendorMaintained,
       };

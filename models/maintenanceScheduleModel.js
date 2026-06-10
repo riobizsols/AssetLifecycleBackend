@@ -60,13 +60,15 @@ async function resolveAbrFromWorkflowAndAsset(dbPool, asset_id, wfamsh_id, orgId
   return r.rows.length ? normalizeAbrId(r.rows[0].abr_id) : null;
 }
 
-// 1. Get asset types that require maintenance
+// 1. Get asset types that have maintenance frequencies configured (tblATMaintFreq)
 const getAssetTypesRequiringMaintenance = async () => {
   const query = `
-        SELECT asset_type_id, text, maint_required, org_id
-        FROM "tblAssetTypes"
-        WHERE maint_required = true AND int_status = 1
-        ORDER BY asset_type_id
+        SELECT DISTINCT at.asset_type_id, at.text, at.org_id
+        FROM "tblAssetTypes" at
+        INNER JOIN "tblATMaintFreq" mf
+          ON mf.asset_type_id = at.asset_type_id AND mf.org_id = at.org_id
+        WHERE at.int_status = 1
+        ORDER BY at.asset_type_id
     `;
 
   const dbPool = getDb();
@@ -230,6 +232,14 @@ const getLatestMaintenanceDateForGroup = async (group_id) => {
   return result.rows[0]?.latest_maintenance_date;
 };
 
+// On-demand rows (is_recurring=false) have null frequency/uom and are not cron-scheduled.
+const isCronSchedulableFrequency = (frequency) => {
+  if (!frequency) return false;
+  if (frequency.is_recurring === false) return false;
+  if (frequency.frequency == null || frequency.uom == null) return false;
+  return true;
+};
+
 // 3. Get maintenance frequency for asset type
 const getMaintenanceFrequency = async (asset_type_id) => {
   const query = `
@@ -238,7 +248,8 @@ const getMaintenanceFrequency = async (asset_type_id) => {
             asset_type_id,
             maint_type_id,
             frequency,
-            uom
+            uom,
+            is_recurring
         FROM "tblATMaintFreq"
         WHERE asset_type_id = $1
         ORDER BY at_main_freq_id
@@ -547,9 +558,13 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData, dbClient = nu
 
 // 12. Calculate planned schedule date based on frequency and UOM
 const calculatePlannedScheduleDate = (purchasedDate, frequency, uom) => {
+  if (frequency == null || uom == null) {
+    throw new Error('Cannot calculate planned schedule date: frequency and uom are required');
+  }
+
   const date = new Date(purchasedDate);
 
-  switch (uom.toLowerCase()) {
+  switch (String(uom).toLowerCase()) {
     case "days":
       date.setDate(date.getDate() + frequency);
       break;
@@ -1139,7 +1154,6 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
   try {
     await client.query("BEGIN");
 
-    // Get asset details with asset type's maint_required flag
     const assetQuery = `
             SELECT 
                 a.asset_id,
@@ -1148,11 +1162,9 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 a.org_id,
                 a.branch_id,
                 b.branch_code,
-                a.purchased_on,
-                COALESCE(at.maint_required, false) as maint_required
+                a.purchased_on
             FROM "tblAssets" a
             LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-            LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
             WHERE a.asset_id = $1 AND a.org_id = $2
         `;
     const assetResult = await client.query(assetQuery, [asset_id, org_id]);
@@ -1162,14 +1174,17 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     }
 
     const asset = assetResult.rows[0];
-    const maintRequired =
-      asset.maint_required === true ||
-      asset.maint_required === 1 ||
-      asset.maint_required === "true" ||
-      asset.maint_required === "1";
 
-    // If maint_required is false: insert directly into tblAssetMaintSch with status 'IN', no workflow
-    if (!maintRequired) {
+    const workflowSeqResult = await client.query(
+      `SELECT 1 FROM "tblWFATSeqs"
+       WHERE asset_type_id = $1 AND org_id = $2
+       LIMIT 1`,
+      [asset_type_id, org_id],
+    );
+    const hasWorkflow = workflowSeqResult.rows.length > 0;
+
+    // No workflow sequences: insert directly into tblAssetMaintSch (frequency from tblATMaintFreq)
+    if (!hasWorkflow) {
       const amsQuery = `
                 SELECT MAX(
                     CASE 
@@ -1184,17 +1199,19 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const nextId = (amsResult.rows[0].max_num || 0) + 1;
       const amsId = `ams${nextId.toString().padStart(3, "0")}`;
 
-      const maintTypeId = "MT002";
       const freqQuery = `
-                SELECT at_main_freq_id
+                SELECT at_main_freq_id, maint_type_id
                 FROM "tblATMaintFreq"
                 WHERE asset_type_id = $1 AND org_id = $2
                 ORDER BY at_main_freq_id ASC
                 LIMIT 1
             `;
       const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
-      const atMainFreqId =
-        freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
+      if (freqResult.rows.length === 0) {
+        throw new Error("No maintenance frequency configured for this asset type");
+      }
+      const atMainFreqId = freqResult.rows[0].at_main_freq_id;
+      const maintTypeId = freqResult.rows[0].maint_type_id || "MT002";
 
       // Lookup AT maintenance frequency to determine maintained_by and emp_int_id
       let empIntToSave = null;
@@ -1263,7 +1280,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       };
     }
 
-    // maint_required is true: use workflow
+    // Workflow sequences configured: use approval workflow
     // Check for workflow sequences
     const sequencesResult = await client.query(
       `SELECT wf_at_seqs_id, asset_type_id, wf_steps_id, seqs_no, org_id
@@ -1589,6 +1606,7 @@ module.exports = {
   getAssetsByGroupId,
   getGroupsByAssetType,
   getMaintenanceFrequency,
+  isCronSchedulableFrequency,
   checkExistingMaintenanceSchedules,
   checkExistingWorkflowMaintenanceSchedules,
   checkExistingWorkflowMaintenanceSchedulesForGroup,

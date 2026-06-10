@@ -1,5 +1,6 @@
 const model = require("../models/assetTypeModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
 
 // Helper function to convert parent asset type text to ID
 const convertParentAssetTypeToId = async (parentValue, org_id) => {
@@ -34,10 +35,8 @@ const addAssetType = async (req, res) => {
             int_status,            // from frontend (1 or 0)
             group_required,        // from frontend
             inspection_required,    // from frontend
-            maint_required,        // from frontend (1 or 0)
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
-            maint_type_id = null,  // from frontend
             maint_lead_type = null,  // from frontend
             depreciation_type = 'ND',  // from frontend
         } = req.body;
@@ -49,10 +48,25 @@ const addAssetType = async (req, res) => {
         // Generate unique asset_type_id
         let asset_type_id = await generateCustomId("asset_type", 3);
 
+        const trimmedText = String(text || "").trim();
+
         // Validate required fields
-        if (!text) {
+        if (!trimmedText) {
             return res.status(400).json({ 
                 error: "Asset type name (text) is required" 
+            });
+        }
+
+        const existingTypes = await model.getAllAssetTypes(org_id);
+        const conflictingName = findConflictingAssetTypeName(
+            trimmedText,
+            existingTypes.rows
+        );
+        if (conflictingName) {
+            return res.status(409).json({
+                error: "Similar asset type name exists",
+                message: `An asset type with a similar name already exists: "${conflictingName}"`,
+                existingName: conflictingName,
             });
         }
 
@@ -89,15 +103,13 @@ const addAssetType = async (req, res) => {
                     org_id,
                     asset_type_id,
                     int_status,
-                    maint_required,
                     assignment_type,
                     inspection_required,
                     group_required,
                     created_by,
-                    text,
+                    trimmedText,
                     is_child,
                     parent_asset_type_id,
-                    maint_type_id,
                     maint_lead_type,
                     depreciation_type
                 );
@@ -260,7 +272,6 @@ const updateAssetType = async (req, res) => {
         const {
             org_id,
             int_status,
-            maint_required,
             assignment_type,
             inspection_required,
             group_required,
@@ -268,7 +279,6 @@ const updateAssetType = async (req, res) => {
             text,
             is_child,
             parent_asset_type_id,
-            maint_type_id,
             maint_lead_type,
             depreciation_type,
         } = req.body;
@@ -309,18 +319,42 @@ const updateAssetType = async (req, res) => {
             }
         }
 
+        const proposedText =
+            text !== undefined && text !== null
+                ? String(text).trim()
+                : String(existingAsset.rows[0].text || "").trim();
+
+        if (!proposedText) {
+            return res.status(400).json({
+                error: "Asset type name (text) is required",
+            });
+        }
+
+        const orgIdForCheck = org_id || existingAsset.rows[0].org_id;
+        const existingTypes = await model.getAllAssetTypes(orgIdForCheck);
+        const conflictingName = findConflictingAssetTypeName(
+            proposedText,
+            existingTypes.rows,
+            id
+        );
+        if (conflictingName) {
+            return res.status(409).json({
+                error: "Similar asset type name exists",
+                message: `An asset type with a similar name already exists: "${conflictingName}"`,
+                existingName: conflictingName,
+            });
+        }
+
         const updateData = {
             org_id: org_id || existingAsset.rows[0].org_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
-            maint_required: maint_required !== undefined ? maint_required : existingAsset.rows[0].maint_required,
             assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
-            text: text !== undefined && text !== null ? text : existingAsset.rows[0].text,
+            text: proposedText,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),
-            maint_type_id: maint_required === 0 || maint_required === false ? null : (maint_type_id !== undefined ? maint_type_id : existingAsset.rows[0].maint_type_id),
-            maint_lead_type: maint_required === 0 || maint_required === false ? null : (maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type),
+            maint_lead_type: maint_lead_type !== undefined ? maint_lead_type : existingAsset.rows[0].maint_lead_type,
             depreciation_type: depreciation_type !== undefined ? depreciation_type : existingAsset.rows[0].depreciation_type
         };
 
@@ -701,14 +735,12 @@ const commitBulkUpload = async (req, res) => {
                     const updateData = {
                         org_id,
                         int_status: record.int_status,
-                        maint_required: (record.maint_required === 'true' || record.maint_required === true) ? 1 : 0,
                         assignment_type: record.assignment_type,
                         inspection_required: (record.inspection_required === 'true' || record.inspection_required === true),
                         group_required: (record.group_required === 'true' || record.group_required === true),
                         text: record.text,
                         is_child: (record.is_child === 'true' || record.is_child === true),
                         parent_asset_type_id: record.parent_asset_type_id || null,
-                        maint_type_id: record.maint_type_id || null,
                         maint_lead_type: record.maint_lead_type || null,
                         depreciation_type: record.depreciation_type || 'ND'
                     };
@@ -742,10 +774,10 @@ const commitBulkUpload = async (req, res) => {
                         try {
                             result = await model.insertAssetType(
                                 org_id, asset_type_id, record.int_status || 1,
-                                (record.maint_required === 'true' || record.maint_required === true) ? 1 : 0, record.assignment_type || 'user',
+                                record.assignment_type || 'user',
                                 (record.inspection_required === 'true' || record.inspection_required === true), (record.group_required === 'true' || record.group_required === true),
                                 created_by, record.text, (record.is_child === 'true' || record.is_child === true),
-                                record.parent_asset_type_id || null, record.maint_type_id || null,
+                                record.parent_asset_type_id || null,
                                 record.maint_lead_type || null, record.depreciation_type || 'ND'
                             );
                             break; // Success, exit the loop

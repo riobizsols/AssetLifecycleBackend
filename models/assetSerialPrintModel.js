@@ -76,7 +76,6 @@ class AssetSerialPrintModel {
           at.asset_type_id,
           at.text as asset_type_name,
           at.assignment_type,
-          at.maint_required,
           at.inspection_required,
           at.group_required
         FROM "tblPrintSerialNoQueue" psq
@@ -127,7 +126,6 @@ class AssetSerialPrintModel {
           at.asset_type_id,
           at.text as asset_type_name,
           at.assignment_type,
-          at.maint_required,
           at.inspection_required,
           at.group_required
         FROM "tblPrintSerialNoQueue" psq
@@ -218,7 +216,6 @@ class AssetSerialPrintModel {
           at.asset_type_id,
           at.text as asset_type_name,
           at.assignment_type,
-          at.maint_required,
           at.inspection_required,
           at.group_required
         FROM "tblPrintSerialNoQueue" psq
