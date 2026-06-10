@@ -576,7 +576,7 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
         const id_d = await generateCustomId('wfscrap_h', 3);
         // Set status to 'IN' for both scrap sales and regular scrap workflows
         // Status will change to 'IP' after first approval, then 'CO' after all approvals
-        const status = 'IN';
+        const status = 1; // tblStatusCodes: IN = Initiated
         const r = await client.query(
             `INSERT INTO "tblWFScrap_H" (
                 id_d, assetgroup_id, wfscrapseq_id,
@@ -603,8 +603,8 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
 
             for (const jr of jobRoles) {
                 const id = await generateCustomId('wfscrap_d', 3);
-                const status = Number(seq.seq_no) === minSeq ? 'AP' : 'IN';
-                const notes = status === 'AP' ? (initialNotes || null) : null;
+                const status = Number(seq.seq_no) === minSeq ? 6 : 1; // AP=6, IN=1
+                const notes = status === 6 ? (initialNotes || null) : null;
 
                 await client.query(
                     `INSERT INTO "tblWFScrap_D" (
