@@ -115,6 +115,24 @@ const getUserIdByEmpIntId = async (empIntId) => {
   return result.rows.length > 0 ? result.rows[0].user_id : null;
 };
 
+async function getUserRoleIds(userId) {
+  const result = await getDb().query(
+    `
+      SELECT ujr.job_role_id
+      FROM "tblUserJobRoles" ujr
+      WHERE ujr.user_id = $1
+      UNION
+      SELECT u.job_role_id
+      FROM "tblUsers" u
+      WHERE u.user_id = $1
+        AND u.job_role_id IS NOT NULL
+        AND btrim(u.job_role_id) <> ''
+    `,
+    [userId]
+  );
+  return [...new Set(result.rows.map((r) => r.job_role_id).filter(Boolean))];
+}
+
 const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
   console.log('=== getApprovalDetailByAssetId called ===');
   console.log('Asset ID:', assetId);
@@ -422,18 +440,10 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       }
     }
     
-    // ROLE-BASED WORKFLOW: Get user's roles
-    const userRolesQuery = `
-      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
-    `;
-    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
-    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
     }
-    
-    // isWfamshId is already declared above for vendor check
 
     // ROLE-BASED: Only users with the required role for the current AP step can approve (no System Admin bypass)
     let currentResult;
@@ -675,17 +685,11 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User not found with the provided employee ID');
     }
     
-    // ROLE-BASED WORKFLOW: Get user's roles
-    const userRolesQuery = `
-      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
-    `;
-    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
-    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
     }
-    
+
     // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
@@ -1259,17 +1263,17 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        return 'CO';
      }
     
-         // Check for cancellation (all users rejected OR no approved user to return to)
+         // Check for rejection (all users rejected OR no approved user to return to)
      if (parseInt(rejected_users) === parseInt(total_users)) {
        await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
-          SET status = 'CA', 
+          SET status = 'UR', 
               changed_by = 'system', 
               changed_on = NOW()::timestamp without time zone
           WHERE wfamsh_id = $1 AND org_id = $2`,
          [wfamshId, orgId]
        );
-       console.log('Workflow cancelled - All users rejected, Status set to CA');
+       console.log('Workflow rejected - All users rejected, Status set to UR');
 
        // Update tblAssetBRDet status to CA if this workflow is for a breakdown
        try {
@@ -1296,21 +1300,21 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          console.error('Error updating breakdown report status on rejection:', brErr);
        }
 
-       return 'CA';
+       return 'UR';
      }
      
-     // Check for cancellation when no approved users and no pending users
-     if (parseInt(approved_users) === 0 && parseInt(pending_users) === 0) {
+     // Rejected when no approved users and no pending users (e.g. first approver rejected)
+     if (parseInt(approved_users) === 0 && parseInt(pending_users) === 0 && parseInt(rejected_users) > 0) {
        await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
-          SET status = 'CA', 
+          SET status = 'UR', 
               changed_by = 'system', 
               changed_on = NOW()::timestamp without time zone
           WHERE wfamsh_id = $1 AND org_id = $2`,
          [wfamshId, orgId]
        );
-       console.log('Workflow cancelled - No approved users and no pending users, Status set to CA');
-       return 'CA';
+       console.log('Workflow rejected - No approved users and no pending users, Status set to UR');
+       return 'UR';
      }
      
      // Check if there are any pending users (AP status) - if yes, workflow continues
@@ -1355,10 +1359,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      const userId = userResult.rows[0].user_id;
      
-     const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
-     const rolesResult = await getDb().query(rolesQuery, [userId]);
      const userRoleIds = [...new Set([
-       ...rolesResult.rows.map(r => r.job_role_id),
+       ...(await getUserRoleIds(userId)),
        ...(tokenJobRoleId ? [String(tokenJobRoleId).trim()] : [])
      ].filter(Boolean))];
      
@@ -1433,8 +1435,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      }
 
      query += ` AND (
-           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA')) OR 
-           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA'))
+           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR')) OR 
+           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR'))
          )
          AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
          AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
@@ -1486,10 +1488,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
     
     const userId = userResult.rows[0].user_id;
     
-    const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
-    const rolesResult = await getDb().query(rolesQuery, [userId]);
-    const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       console.log('User has no assigned roles');
       return [];
