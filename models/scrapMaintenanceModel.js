@@ -543,7 +543,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         }],
       };
     } else {
-      // For individual asset scrap (SCRAP_INDIVIDUAL_*), fetch asset directly from tblAssets
+      // For individual asset scrap, resolve the exact asset from workflow history
       assetsResult = await getDb().query(
         `
           SELECT DISTINCT
@@ -554,17 +554,39 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
             a.current_status,
             a.branch_id
           FROM "tblAssets" a
-          INNER JOIN "tblWFScrap_H" wh2 ON wh2.assetgroup_id = $3
-          WHERE a.asset_type_id = $1
-            AND a.org_id = $2
-            AND (a.group_id IS NULL OR a.group_id = $3)
+          INNER JOIN "tblScrapAssetHist" hist
+            ON hist.asset_id = a.asset_id
+           AND hist.wfscrap_h_id = $1
+          WHERE a.org_id = $2
             AND UPPER(COALESCE(a.current_status, '')) != 'SCRAPPED'
-            AND wh2.id_d = $4
           ORDER BY a.asset_id ASC
-          LIMIT 10
         `,
-        [headerRow.asset_type_id, orgId, headerRow.assetgroup_id, wfscrap_h_id]
+        [wfscrap_h_id, orgId]
       );
+
+      if (!assetsResult.rows.length) {
+        assetsResult = await getDb().query(
+          `
+            SELECT DISTINCT
+              a.asset_id,
+              a.asset_type_id,
+              a.serial_number,
+              a.description AS asset_name,
+              a.current_status,
+              a.branch_id
+            FROM "tblAssets" a
+            INNER JOIN "tblWFScrap_H" wh2 ON wh2.assetgroup_id = $3
+            WHERE a.asset_type_id = $1
+              AND a.org_id = $2
+              AND (a.group_id IS NULL OR a.group_id = $3)
+              AND UPPER(COALESCE(a.current_status, '')) != 'SCRAPPED'
+              AND wh2.id_d = $4
+            ORDER BY a.asset_id ASC
+            LIMIT 10
+          `,
+          [headerRow.asset_type_id, orgId, headerRow.assetgroup_id, wfscrap_h_id]
+        );
+      }
 
       // Get branch_code from first asset's branch_id
       const firstAssetBranchId = assetsResult.rows[0]?.branch_id;

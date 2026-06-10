@@ -8,6 +8,7 @@ const {
   openWarrantyNotification,
   discardWarrantyNotificationAction,
   snoozeWarrantyNotificationAction,
+  scrapFromWarrantyNotification,
 } = require('../controllers/notificationController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -33,6 +34,7 @@ router.get('/filtered', getFilteredNotifications);
 router.put('/warranty/:notifyId/open', openWarrantyNotification);
 router.put('/warranty/:notifyId/discard', discardWarrantyNotificationAction);
 router.put('/warranty/:notifyId/snooze', snoozeWarrantyNotificationAction);
+router.put('/warranty/:notifyId/scrap', scrapFromWarrantyNotification);
 
 
 module.exports = router;

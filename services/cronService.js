@@ -10,6 +10,7 @@ const { generateMaintenanceSchedules } = require('../controllers/maintenanceSche
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
 const {
     ensureWarrantyNotificationsForWindowAllOrgs,
+    ensureAssetExpiryNotificationsForWindowAllOrgs,
 } = require('../models/assetWarrantyNotifyModel');
 
 class CronService {
@@ -60,6 +61,10 @@ class CronService {
         setTimeout(() => {
             this.scheduleWarrantyNotificationTrigger();
         }, 75000);
+
+        setTimeout(() => {
+            this.scheduleAssetExpiryNotificationTrigger();
+        }, 90000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -113,7 +118,7 @@ class CronService {
             cron.schedule('0 7 * * *', async () => {
                 const startedAt = new Date().toISOString();
                 try {
-                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 10 });
+                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 5 });
                     console.log(
                         `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
                     );
@@ -125,9 +130,33 @@ class CronService {
             });
 
             console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
-            console.log('   → Creates notifications for assets expiring within 10 days and for expired warranties');
+            console.log('   → Creates notifications for assets with warranty expiry within next 5 days');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
+        }
+    }
+
+    // Schedule asset expiry notifications for assets expiring within 5 days.
+    scheduleAssetExpiryNotificationTrigger() {
+        try {
+            cron.schedule('5 7 * * *', async () => {
+                const startedAt = new Date().toISOString();
+                try {
+                    const result = await ensureAssetExpiryNotificationsForWindowAllOrgs({ days: 5 });
+                    console.log(
+                        `✅ [CRON] Asset expiry notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
+                    );
+                } catch (error) {
+                    console.error('❌ [CRON] Asset expiry notification trigger failed:', error.message);
+                }
+            }, {
+                timezone: "Asia/Kolkata",
+            });
+
+            console.log('📅 [CRON] Asset Expiry Notification Trigger: Scheduled daily at 7:05 AM (IST)');
+            console.log('   → Creates notifications for assets with expiry_date within next 5 days');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule asset expiry notification trigger:', error.message);
         }
     }
 

@@ -266,8 +266,11 @@ const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
                 const currentAccess = combinedItems[appId].access_level;
                 const newAccess = item.access_level;
                 
-                // Access level hierarchy: A (Full) > D (Read) > NULL (No Access)
-                if (newAccess === 'A' || (newAccess === 'D' && currentAccess !== 'A')) {
+                // Access level hierarchy: A (Full) > D (Read) > V (View) > NULL (No Access)
+                const accessRank = { A: 3, D: 2, V: 1 };
+                const currentRank = accessRank[currentAccess] || 0;
+                const newRank = accessRank[newAccess] || 0;
+                if (newRank > currentRank) {
                     combinedItems[appId].access_level = newAccess;
                 }
                 
