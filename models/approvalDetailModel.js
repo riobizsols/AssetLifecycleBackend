@@ -6,6 +6,11 @@ const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
 const brHistModel = require('./assetMaintSchBrHistModel');
+const {
+  isInhouseMaintainedBy,
+  getInhouseVendorId,
+  resolveVendorIdForMaintRecord,
+} = require('../utils/inhouseVendorUtils');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -358,10 +363,9 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null) => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null) => {
   try {
-    // Convert emp_int_id to user_id
-    const userId = await getUserIdByEmpIntId(empIntId);
+    const userId = authenticatedUserId || await getUserIdByEmpIntId(empIntId);
     if (!userId) {
       throw new Error('User not found with the provided employee ID');
     }
@@ -419,7 +423,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       `;
       const maintByRes = await getDb().query(maintByQuery, [assetOrWfamshId, orgId]);
       if (maintByRes.rows.length > 0) {
-        isInhouse = (maintByRes.rows[0].maintained_by || '').toLowerCase() === 'inhouse';
+        isInhouse = isInhouseMaintainedBy(maintByRes.rows[0].maintained_by);
       }
     }
 
@@ -472,6 +476,15 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
+      if (isWfamshId) {
+        const completedCheck = await getDb().query(
+          `SELECT status FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
+          [assetOrWfamshId, orgId]
+        );
+        if (completedCheck.rows[0]?.status === 'CO') {
+          throw new Error('This maintenance approval has already been completed.');
+        }
+      }
       throw new Error('No workflow found for this asset or user does not have required role');
     }
     
@@ -495,7 +508,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       const updateValues = [];
       let paramIndex = 1;
       
-      if (vendorId !== null && vendorId !== undefined) {
+      if (vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
         updateFields.push(`vendor_id = $${paramIndex++}`);
         updateValues.push(vendorId);
         console.log(`Updating vendor_id to: ${vendorId}`);
@@ -526,7 +539,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
 
     // If a new vendor is explicitly chosen during approval,
     // persist it to tblAssets.service_vendor_id for this asset.
-    if (vendorId !== null && vendorId !== undefined) {
+    if (vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
       if (isWfamshId) {
         const updateAssetVendorByWorkflowQuery = `
           UPDATE "tblAssets" a
@@ -1194,7 +1207,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
         console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
       } catch (error) {
         console.error('Error creating maintenance record:', error);
-        throw error;
+        try {
+          const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
+          console.log('Maintenance record created on retry:', maintenanceRecordId);
+        } catch (retryErr) {
+          // Workflow is already CO — do not fail the approval API after the user approved
+          console.error('Maintenance record retry failed (approval still completed):', retryErr.message);
+        }
         }
       } else {
         console.log('Vendor contract renewal (MT005) approved - Creating vendor renewal record...');
@@ -1778,15 +1797,18 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
               AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%' OR d.notes ILIKE '%Breakdown%')
             LIMIT 1
           ) as bf01_notes,
-          -- Determine maintained_by based on service_vendor_id
-          CASE 
-            WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
-            ELSE 'Inhouse'
-          END as maintained_by
+          COALESCE(
+            atmf.maintained_by,
+            CASE 
+              WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
+              ELSE 'Inhouse'
+            END
+          ) as maintained_by
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
       `;
      
@@ -1800,6 +1822,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      }
      
      const workflowData = workflowResult.rows[0];
+     workflowData.vendor_id = await resolveVendorIdForMaintRecord(
+       workflowData.vendor_id,
+       workflowData.maintained_by,
+       orgId
+     );
      console.log('Workflow data:', workflowData);
      console.log('Maintained by will be set to:', workflowData.maintained_by);
      console.log('Service vendor ID:', workflowData.vendor_id);
@@ -1807,9 +1834,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Group ID:', workflowData.group_id);
 
     // Determine emp_int to save: only when maintenance is in-house
-    const _maintNorm = (workflowData.maintained_by || '').toString().toLowerCase().replace(/\s|-/g, '');
     let empIntToSave = null;
-    if (workflowData.emp_int_id && _maintNorm.includes('inhouse')) {
+    if (workflowData.emp_int_id && isInhouseMaintainedBy(workflowData.maintained_by)) {
       empIntToSave = workflowData.emp_int_id;
     }
      
@@ -2483,6 +2509,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Insert query params:', insertParams);
      console.log('Is Software Asset (will insert null wo_id):', isSoftwareAsset);
      console.log('Work Order ID to insert:', isSoftwareAsset ? null : workOrderId);
+     if (!workflowData.vendor_id) {
+       workflowData.vendor_id = await getInhouseVendorId(orgId);
+       insertParams[5] = workflowData.vendor_id;
+     }
+
      console.log('About to execute insert query...');
      
      await getDb().query(insertQuery, insertParams);

@@ -300,7 +300,7 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 5: Execute approval
-    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId);
 
     // Step 5.5: Check if approval failed due to vendor status
     if (!result.success) {
