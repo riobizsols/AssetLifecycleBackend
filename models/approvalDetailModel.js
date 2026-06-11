@@ -6,6 +6,11 @@ const fcmService = require('../services/fcmService');
 const { getAssetsByGroupId } = require('./maintenanceScheduleModel');
 const { insertVendorRenewal } = require('./vendorRenewalModel');
 const brHistModel = require('./assetMaintSchBrHistModel');
+const {
+  isInhouseMaintainedBy,
+  getInhouseVendorId,
+  resolveVendorIdForMaintRecord,
+} = require('../utils/inhouseVendorUtils');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -114,6 +119,24 @@ const getUserIdByEmpIntId = async (empIntId) => {
   );
   return result.rows.length > 0 ? result.rows[0].user_id : null;
 };
+
+async function getUserRoleIds(userId) {
+  const result = await getDb().query(
+    `
+      SELECT ujr.job_role_id
+      FROM "tblUserJobRoles" ujr
+      WHERE ujr.user_id = $1
+      UNION
+      SELECT u.job_role_id
+      FROM "tblUsers" u
+      WHERE u.user_id = $1
+        AND u.job_role_id IS NOT NULL
+        AND btrim(u.job_role_id) <> ''
+    `,
+    [userId]
+  );
+  return [...new Set(result.rows.map((r) => r.job_role_id).filter(Boolean))];
+}
 
 const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
   console.log('=== getApprovalDetailByAssetId called ===');
@@ -340,10 +363,9 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null) => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null) => {
   try {
-    // Convert emp_int_id to user_id
-    const userId = await getUserIdByEmpIntId(empIntId);
+    const userId = authenticatedUserId || await getUserIdByEmpIntId(empIntId);
     if (!userId) {
       throw new Error('User not found with the provided employee ID');
     }
@@ -401,7 +423,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       `;
       const maintByRes = await getDb().query(maintByQuery, [assetOrWfamshId, orgId]);
       if (maintByRes.rows.length > 0) {
-        isInhouse = (maintByRes.rows[0].maintained_by || '').toLowerCase() === 'inhouse';
+        isInhouse = isInhouseMaintainedBy(maintByRes.rows[0].maintained_by);
       }
     }
 
@@ -422,18 +444,10 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       }
     }
     
-    // ROLE-BASED WORKFLOW: Get user's roles
-    const userRolesQuery = `
-      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
-    `;
-    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
-    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
     }
-    
-    // isWfamshId is already declared above for vendor check
 
     // ROLE-BASED: Only users with the required role for the current AP step can approve (no System Admin bypass)
     let currentResult;
@@ -462,6 +476,15 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
+      if (isWfamshId) {
+        const completedCheck = await getDb().query(
+          `SELECT status FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
+          [assetOrWfamshId, orgId]
+        );
+        if (completedCheck.rows[0]?.status === 'CO') {
+          throw new Error('This maintenance approval has already been completed.');
+        }
+      }
       throw new Error('No workflow found for this asset or user does not have required role');
     }
     
@@ -485,7 +508,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       const updateValues = [];
       let paramIndex = 1;
       
-      if (vendorId !== null && vendorId !== undefined) {
+      if (vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
         updateFields.push(`vendor_id = $${paramIndex++}`);
         updateValues.push(vendorId);
         console.log(`Updating vendor_id to: ${vendorId}`);
@@ -516,7 +539,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
 
     // If a new vendor is explicitly chosen during approval,
     // persist it to tblAssets.service_vendor_id for this asset.
-    if (vendorId !== null && vendorId !== undefined) {
+    if (vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
       if (isWfamshId) {
         const updateAssetVendorByWorkflowQuery = `
           UPDATE "tblAssets" a
@@ -598,7 +621,9 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     const allStepsResult = await getDb().query(allWorkflowStepsQuery, [currentUserStep.wfamsh_id, orgId]);
     const allWorkflowSteps = allStepsResult.rows;
     
-    const nextUserStep = allWorkflowSteps.find(w => w.sequence > currentUserStep.sequence);
+    const nextUserStep = allWorkflowSteps.find(
+      w => w.sequence > currentUserStep.sequence && w.status === 'IN'
+    );
     if (nextUserStep) {
       // Update next user's status to AP (Approval Pending)
       await getDb().query(
@@ -675,17 +700,11 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User not found with the provided employee ID');
     }
     
-    // ROLE-BASED WORKFLOW: Get user's roles
-    const userRolesQuery = `
-      SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1
-    `;
-    const userRolesResult = await getDb().query(userRolesQuery, [userId]);
-    const userRoleIds = userRolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       throw new Error('User has no assigned roles');
     }
-    
+
     // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
@@ -762,163 +781,43 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     
     console.log(`Inserted history record: ${wfamhisId} - User ${empIntId} rejected workflow step`);
     
-    // Find the previous approved step and update their status back to AP
-    // ROLE-BASED: Find the most recent approved step (UA status) with lower sequence
-    const previousApprovedUserQuery = `
-      SELECT wfd.wfamsd_id, wfd.user_id, wfd.sequence, wfd.job_role_id, wfd.dept_id, wfd.wfamsh_id
-      FROM "tblWFAssetMaintSch_D" wfd
-      WHERE wfd.wfamsh_id = $1 
-        AND wfd.sequence < $2
-        AND wfd.status = 'UA'
-      ORDER BY wfd.sequence DESC
-      LIMIT 1
-    `;
-    
-    const previousApprovedResult = await getDb().query(previousApprovedUserQuery, [currentUserStep.wfamsh_id, currentUserStep.sequence]);
-    const previousApprovedUser = previousApprovedResult.rows[0];
+    // Any rejection terminates the workflow — do not revert to earlier approvers or advance later stages
+    await getDb().query(
+      `UPDATE "tblWFAssetMaintSch_H" 
+       SET status = 'UR', 
+           changed_by = $1, 
+           changed_on = NOW()::timestamp without time zone
+       WHERE wfamsh_id = $2 AND org_id = $3`,
+      [userId.substring(0, 20), currentUserStep.wfamsh_id, orgId]
+    );
+    console.log('Workflow terminated on rejection - header status set to UR');
 
-    if (previousApprovedUser) {
-      // Update previous user's status back to AP (Approval Pending)
-      await getDb().query(
-        `UPDATE "tblWFAssetMaintSch_D" 
-         SET status = $1, changed_by = $2, changed_on = ARRAY[NOW()::timestamp without time zone]
-         WHERE wfamsd_id = $3`,
-        ['AP', userId.substring(0, 20), previousApprovedUser.wfamsd_id]
-      );
-      
-      console.log(`Updated previous user ${previousApprovedUser.user_id} status back to AP`);
-      
-      // Insert history record for previous user status revert
-      const prevHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-      const prevHistoryIdResult = await getDb().query(prevHistoryIdQuery);
-      const prevNextHistoryId = (prevHistoryIdResult.rows[0].max_num || 0) + 1;
-      const prevWfamhisId = `WFAMHIS_${prevNextHistoryId.toString().padStart(2, '0')}`;
-      
-      await getDb().query(
-        `INSERT INTO "tblWFAssetMaintHist" (
-          wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
-        ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)`,
-        [prevWfamhisId, previousApprovedUser.wfamsh_id, previousApprovedUser.wfamsd_id, empIntId, 'AP', null, orgId]
-      );
-      
-      console.log(`Inserted history record: ${prevWfamhisId} for previous user ${previousApprovedUser.user_id} status revert`);
-      
-      // Notify previous approver about rejection and reversion
-      try {
-        // Get workflow header information for context
-        const workflowInfoQuery = `
-          SELECT 
-            wfh.wfamsh_id,
-            wfh.asset_id,
-            a.text as asset_name,
-            wfh.pl_sch_date
-          FROM "tblWFAssetMaintSch_H" wfh
-          INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
-          WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
-        `;
-        const workflowInfoResult = await getDb().query(workflowInfoQuery, [currentUserStep.wfamsh_id, orgId]);
-        const workflowInfo = workflowInfoResult.rows[0];
-        
-        // Get job role information for previous approver
-        const jobRoleQuery = `
-          SELECT job_role_id, text as job_role_name
-          FROM "tblJobRoles"
-          WHERE job_role_id = $1
-        `;
-        const jobRoleResult = await getDb().query(jobRoleQuery, [previousApprovedUser.job_role_id]);
-        const jobRoleInfo = jobRoleResult.rows[0];
-        
-        if (workflowInfo && jobRoleInfo) {
-          // Get the rejecting user's role name for context
-          const rejectingUserRoleQuery = `
-            SELECT text as job_role_name
-            FROM "tblJobRoles"
-            WHERE job_role_id = $1
-          `;
-          const rejectingUserRoleResult = await getDb().query(rejectingUserRoleQuery, [currentUserStep.job_role_id]);
-          const rejectingRoleName = rejectingUserRoleResult.rows[0]?.job_role_name || 'next approver';
-          
-          // Send notification with rejection/reversion content
-          const notificationResult = await workflowNotificationService.notifyRejectionReverted({
-            wfamsd_id: previousApprovedUser.wfamsd_id,
-            wfamsh_id: previousApprovedUser.wfamsh_id,
-            job_role_id: previousApprovedUser.job_role_id,
-            status: 'AP',
-            sequence: previousApprovedUser.sequence,
-            org_id: orgId,
-            asset_name: workflowInfo.asset_name,
-            asset_id: workflowInfo.asset_id,
-            rejection_reason: reason,
-            rejected_by_role: rejectingRoleName
-          });
-          
-          console.log(`Rejection reversion notification sent to previous approver role ${previousApprovedUser.job_role_id}:`, {
-            success: notificationResult.success,
-            totalUsers: notificationResult.totalUsers,
-            successCount: notificationResult.successCount,
-            failureCount: notificationResult.failureCount
-          });
-        }
-      } catch (notifyErr) {
-        console.error('Failed to send rejection reversion notification:', notifyErr);
-        // Don't throw error - notification failure shouldn't break rejection process
-      }
-    }
-    
-    // Check if all workflow steps have been rejected
-    // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
-    const rejectionCheckQuery = `
-      SELECT 
-        COUNT(DISTINCT wfd.sequence) as total_users,
-        COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users
-      FROM "tblWFAssetMaintSch_D" wfd
-      WHERE wfd.wfamsh_id = $1
-    `;
-    
-    const rejectionCheckResult = await getDb().query(rejectionCheckQuery, [currentUserStep.wfamsh_id]);
-    const { total_users, rejected_users } = rejectionCheckResult.rows[0];
-    
-    console.log(`Rejection check - Total: ${total_users}, Rejected: ${rejected_users}`);
-    
-    // If all users have rejected, end the workflow as CA
-    if (parseInt(rejected_users) === parseInt(total_users)) {
-      console.log('All users have rejected - ending workflow as CA');
-      await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
-    } else {
-      // Check if this rejection creates a deadlock (no more path forward)
-      // Use sequence-based counting instead of user_id (which is NULL in ROLE-BASED workflows)
-      const deadlockCheckQuery = `
-        SELECT 
-          COUNT(DISTINCT wfd.sequence) as total_users,
-          COUNT(DISTINCT CASE WHEN wfd.status = 'UR' THEN wfd.sequence END) as rejected_users,
-          COUNT(DISTINCT CASE WHEN wfd.status = 'UA' THEN wfd.sequence END) as approved_users,
-          COUNT(DISTINCT CASE WHEN wfd.status = 'AP' THEN wfd.sequence END) as pending_users
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1
+    // Update tblAssetBRDet status to CA if this workflow is for a breakdown
+    try {
+      const breakdownIdQuery = `
+        SELECT notes FROM "tblWFAssetMaintSch_D" 
+        WHERE wfamsh_id = $1 AND org_id = $2 
+        AND (notes ILIKE '%BF01-Breakdown%' OR notes ILIKE '%BF03-Breakdown%' OR notes ILIKE '%Breakdown%')
+        LIMIT 1
       `;
-    
-    const deadlockResult = await getDb().query(deadlockCheckQuery, [currentUserStep.wfamsh_id]);
-    const { total_users, rejected_users, approved_users, pending_users } = deadlockResult.rows[0];
-    
-    console.log(`Deadlock check - Total: ${total_users}, Rejected: ${rejected_users}, Approved: ${approved_users}, Pending: ${pending_users}`);
-    
-    // Check if all users have rejected OR if there's no approved user to return to
-    const allUsersRejected = parseInt(rejected_users) === parseInt(total_users);
-    const noApprovedUserToReturnTo = parseInt(approved_users) === 0;
-    const noPendingUsers = parseInt(pending_users) === 0;
-    
-    console.log(`Deadlock analysis - All users rejected: ${allUsersRejected}, No approved user to return to: ${noApprovedUserToReturnTo}, No pending users: ${noPendingUsers}`);
-    
-    // Mark as CA if all users have rejected or there's no path forward
-    if (allUsersRejected || (noApprovedUserToReturnTo && noPendingUsers)) {
-      console.log('No path forward - setting workflow to CA');
-      await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
-    } else {
-      console.log('Workflow can continue - there are approved users to return to');
+      const breakdownIdResult = await getDb().query(breakdownIdQuery, [currentUserStep.wfamsh_id, orgId]);
+      if (breakdownIdResult.rows.length > 0) {
+        const notes = breakdownIdResult.rows[0].notes;
+        const abrMatch = notes.match(/ABR[-\s]*([A-Z0-9]+)/i);
+        const breakdownId = abrMatch ? `ABR${abrMatch[1].toUpperCase()}` : null;
+        if (breakdownId) {
+          await getDb().query(
+            `UPDATE "tblAssetBRDet" SET status = 'CA' WHERE abr_id = $1 AND org_id = $2`,
+            [breakdownId, orgId]
+          );
+          console.log(`Linked breakdown report ${breakdownId} status updated to CA`);
+        }
+      }
+    } catch (brErr) {
+      console.error('Error updating breakdown report status on rejection:', brErr);
     }
-  }
     
-  return { success: true, message: 'Maintenance rejected successfully' };
+    return { success: true, message: 'Maintenance rejected successfully' };
   } catch (error) {
     console.error('Error in rejectMaintenance:', error);
     throw error;
@@ -1190,7 +1089,13 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
         console.log('Maintenance record created successfully with ID:', maintenanceRecordId);
       } catch (error) {
         console.error('Error creating maintenance record:', error);
-        throw error;
+        try {
+          const maintenanceRecordId = await createMaintenanceRecord(wfamshId, orgId);
+          console.log('Maintenance record created on retry:', maintenanceRecordId);
+        } catch (retryErr) {
+          // Workflow is already CO — do not fail the approval API after the user approved
+          console.error('Maintenance record retry failed (approval still completed):', retryErr.message);
+        }
         }
       } else {
         console.log('Vendor contract renewal (MT005) approved - Creating vendor renewal record...');
@@ -1259,17 +1164,17 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        return 'CO';
      }
     
-         // Check for cancellation (all users rejected OR no approved user to return to)
+         // Check for rejection (all users rejected OR no approved user to return to)
      if (parseInt(rejected_users) === parseInt(total_users)) {
        await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
-          SET status = 'CA', 
+          SET status = 'UR', 
               changed_by = 'system', 
               changed_on = NOW()::timestamp without time zone
           WHERE wfamsh_id = $1 AND org_id = $2`,
          [wfamshId, orgId]
        );
-       console.log('Workflow cancelled - All users rejected, Status set to CA');
+       console.log('Workflow rejected - All users rejected, Status set to UR');
 
        // Update tblAssetBRDet status to CA if this workflow is for a breakdown
        try {
@@ -1296,21 +1201,21 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
          console.error('Error updating breakdown report status on rejection:', brErr);
        }
 
-       return 'CA';
+       return 'UR';
      }
      
-     // Check for cancellation when no approved users and no pending users
-     if (parseInt(approved_users) === 0 && parseInt(pending_users) === 0) {
+     // Rejected when no approved users and no pending users (e.g. first approver rejected)
+     if (parseInt(approved_users) === 0 && parseInt(pending_users) === 0 && parseInt(rejected_users) > 0) {
        await getDb().query(
          `UPDATE "tblWFAssetMaintSch_H" 
-          SET status = 'CA', 
+          SET status = 'UR', 
               changed_by = 'system', 
               changed_on = NOW()::timestamp without time zone
           WHERE wfamsh_id = $1 AND org_id = $2`,
          [wfamshId, orgId]
        );
-       console.log('Workflow cancelled - No approved users and no pending users, Status set to CA');
-       return 'CA';
+       console.log('Workflow rejected - No approved users and no pending users, Status set to UR');
+       return 'UR';
      }
      
      // Check if there are any pending users (AP status) - if yes, workflow continues
@@ -1355,10 +1260,8 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      
      const userId = userResult.rows[0].user_id;
      
-     const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
-     const rolesResult = await getDb().query(rolesQuery, [userId]);
      const userRoleIds = [...new Set([
-       ...rolesResult.rows.map(r => r.job_role_id),
+       ...(await getUserRoleIds(userId)),
        ...(tokenJobRoleId ? [String(tokenJobRoleId).trim()] : [])
      ].filter(Boolean))];
      
@@ -1433,10 +1336,13 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      }
 
      query += ` AND (
-           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA')) OR 
-           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA'))
+           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR')) OR 
+           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR'))
          )
-         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
+         AND (
+           wfd.status IN ('AP', 'UA', 'UR')
+           OR wfh.status IN ('UR', 'CO', 'CA')
+         )
          AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
        ORDER BY wfh.wfamsh_id DESC, (CASE WHEN wfd.status = 'AP' THEN 0 ELSE 1 END), wfd.sequence DESC
        ) sub
@@ -1486,10 +1392,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
     
     const userId = userResult.rows[0].user_id;
     
-    const rolesQuery = `SELECT job_role_id FROM "tblUserJobRoles" WHERE user_id = $1`;
-    const rolesResult = await getDb().query(rolesQuery, [userId]);
-    const userRoleIds = rolesResult.rows.map(r => r.job_role_id);
-    
+    const userRoleIds = await getUserRoleIds(userId);
     if (userRoleIds.length === 0) {
       console.log('User has no assigned roles');
       return [];
@@ -1779,15 +1682,18 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
               AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%' OR d.notes ILIKE '%Breakdown%')
             LIMIT 1
           ) as bf01_notes,
-          -- Determine maintained_by based on service_vendor_id
-          CASE 
-            WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
-            ELSE 'Inhouse'
-          END as maintained_by
+          COALESCE(
+            atmf.maintained_by,
+            CASE 
+              WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
+              ELSE 'Inhouse'
+            END
+          ) as maintained_by
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+        LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
       `;
      
@@ -1801,6 +1707,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      }
      
      const workflowData = workflowResult.rows[0];
+     workflowData.vendor_id = await resolveVendorIdForMaintRecord(
+       workflowData.vendor_id,
+       workflowData.maintained_by,
+       orgId
+     );
      console.log('Workflow data:', workflowData);
      console.log('Maintained by will be set to:', workflowData.maintained_by);
      console.log('Service vendor ID:', workflowData.vendor_id);
@@ -1808,9 +1719,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Group ID:', workflowData.group_id);
 
     // Determine emp_int to save: only when maintenance is in-house
-    const _maintNorm = (workflowData.maintained_by || '').toString().toLowerCase().replace(/\s|-/g, '');
     let empIntToSave = null;
-    if (workflowData.emp_int_id && _maintNorm.includes('inhouse')) {
+    if (workflowData.emp_int_id && isInhouseMaintainedBy(workflowData.maintained_by)) {
       empIntToSave = workflowData.emp_int_id;
     }
      
@@ -2484,6 +2394,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      console.log('Insert query params:', insertParams);
      console.log('Is Software Asset (will insert null wo_id):', isSoftwareAsset);
      console.log('Work Order ID to insert:', isSoftwareAsset ? null : workOrderId);
+     if (!workflowData.vendor_id) {
+       workflowData.vendor_id = await getInhouseVendorId(orgId);
+       insertParams[5] = workflowData.vendor_id;
+     }
+
      console.log('About to execute insert query...');
      
      await getDb().query(insertQuery, insertParams);
@@ -2867,7 +2782,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       WHERE wfd.org_id = $1 
         AND wfd.wfamsh_id = $2
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
-        AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
+        AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR')
         AND wfd.job_role_id IS NOT NULL
       ORDER BY wfd.sequence ASC
     `;
@@ -2991,6 +2906,13 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         user: { id: 'system', name: 'System' }
       });
       
+      const headerRejected = firstRecord.header_status === 'UR';
+      const rejectedAtSequence = headerRejected
+        ? approvalDetails.reduce((min, d) => (
+            d.detail_status === 'UR' && (min == null || d.sequence < min) ? d.sequence : min
+          ), null)
+        : null;
+
       // Step 2+: Users in sequence order
       approvalDetails.forEach((detail, index) => {
         const stepNumber = index + 2; // Start from step 2
@@ -3023,6 +2945,17 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           stepStatus = 'pending';
           stepTitle = 'Awaiting';
           stepDescription = `Waiting for approval from any ${detail.job_role_name}`;
+        }
+
+        if (
+          headerRejected &&
+          rejectedAtSequence != null &&
+          detail.sequence > rejectedAtSequence &&
+          detail.detail_status === 'IN'
+        ) {
+          stepStatus = 'cancelled';
+          stepTitle = 'Skipped';
+          stepDescription = 'Workflow stopped due to rejection at an earlier stage';
         }
         
         const changedOn = detail.changed_on ? new Date(detail.changed_on) : null;
@@ -3109,6 +3042,7 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         userId: firstRecord.user_id || null,
         userEmail: firstRecord.email || null,
         status: firstRecord.detail_status,
+        headerStatus: firstRecord.header_status,
         sequence: firstRecord.sequence,
         daysUntilDue: Math.floor(firstRecord.days_until_due || 0),
         daysUntilCutoff: Math.floor(firstRecord.days_until_cutoff || 0),

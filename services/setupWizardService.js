@@ -1681,6 +1681,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN008', orgId, 1, 'JR001', null, 'SUPERVISORAPPROVAL', 'Maintenance List', null, 8, 'A', false, 'D'],
     ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
     ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
+    ['JRN042', orgId, 1, 'JR001', null, 'EMPLOYEE REPORT BREAKDOWN', 'Employee Report Breakdown', null, 11, 'A', false, 'D'],
     ['JRN012', orgId, 1, 'JR001', null, 'REPORTS', 'Reports', null, 12, 'A', true, 'D'],
     ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
     ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],

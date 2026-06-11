@@ -1,6 +1,7 @@
 const vendorsModel = require("../models/vendorsModel");
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
+const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -152,7 +153,7 @@ exports.createVendor = async (req, res) => {
     const created_on = new Date();
     const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
 
-    const vendorData = {
+    const vendorData = sanitizeVendorPayload({
       vendor_id, // use generated
       org_id: org_id, // Use internal org_id from req.user (already set by authMiddleware)
       branch_code,
@@ -176,7 +177,7 @@ exports.createVendor = async (req, res) => {
       created_on,
       changed_by,
       changed_on,
-    };
+    });
 
     const newVendor = await vendorsModel.createVendor(vendorData);
 
@@ -400,6 +401,7 @@ exports.updateVendor = async (req, res) => {
     // Use internal org_id from req.user (already set by authMiddleware from tblOrgs)
     const org_id = req.user.org_id; // This is now the internal org_id from tblOrgs
     
+    const sanitized = sanitizeVendorPayload(req.body);
     const {
       vendor_name,
       int_status,
@@ -420,7 +422,7 @@ exports.updateVendor = async (req, res) => {
       contract_end_date,
       changed_by,
       changed_on,
-    } = req.body;
+    } = sanitized;
 
     // Validate int_status: 0 = Inactive, 1 = Active, 3 = CRApproved, 4 = Blocked
     if (int_status !== undefined && int_status !== null) {

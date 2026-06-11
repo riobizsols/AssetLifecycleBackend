@@ -120,7 +120,7 @@ class CronService {
             cron.schedule('0 7 * * *', async () => {
                 const startedAt = new Date().toISOString();
                 try {
-                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 10 });
+                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 5 });
                     console.log(
                         `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
                     );
@@ -132,7 +132,7 @@ class CronService {
             });
 
             console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
-            console.log('   → Creates notifications for assets expiring within 10 days and for expired warranties');
+            console.log('   → Creates notifications for assets with warranty expiry within next 5 days');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
         }
