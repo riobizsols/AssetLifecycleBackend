@@ -54,6 +54,12 @@ const {
   resolveWarrantyNotificationsByAsset,
   createWarrantyNotificationsForAsset,
 } = require("../models/assetWarrantyNotifyModel");
+const {
+  resolveExpiryNotification,
+  resolveExpiryNotificationsByAsset,
+  createExpiryNotificationsForAsset,
+  DEFAULT_ALERT_DAYS,
+} = require("../models/assetExpiryNotifyModel");
 
 const addAsset = async (req, res) => {
     const startTime = Date.now();
@@ -431,38 +437,50 @@ const updateAsset = async (req, res) => {
     const userBranchId = userWithBranch?.branch_id;
     
     console.log("User branch ID for update:", userBranchId);
-    
+
+    const body = req.body || {};
+    const pickField = (key) =>
+      Object.prototype.hasOwnProperty.call(body, key)
+        ? body[key]
+        : existingAssetRow[key];
+
     const {
-      asset_type_id,
-      serial_number,
-      description,
-      branch_id = userBranchId, // Use user's branch if not provided
-      purchase_vendor_id,
-      service_vendor_id,
-      prod_serv_id,
-      maintsch_id,
-      purchased_cost,
-      purchased_on,
-      purchased_by,
-      expiry_date,
-      current_status,
-      warranty_period,
-      parent_asset_id,
-      group_id,
-      org_id,
-      properties,
-      // New fields for update
-      cost_center_code,
-      location,
-      insurance_policy_no,
-      insurer,
-      insured_value,
-      insurance_start_date,
-      insurance_end_date,
-      comprehensive_insurance
-      ,
-      warranty_notify_id
-    } = req.body;
+      warranty_notify_id,
+      expiry_notify_id,
+    } = body;
+
+    const asset_type_id = pickField('asset_type_id');
+    const serial_number = pickField('serial_number');
+    const description = Object.prototype.hasOwnProperty.call(body, 'description')
+      ? body.description
+      : existingAssetRow.description;
+    const branch_id = Object.prototype.hasOwnProperty.call(body, 'branch_id')
+      ? body.branch_id
+      : existingAssetRow.branch_id;
+    const purchase_vendor_id = pickField('purchase_vendor_id');
+    const service_vendor_id = pickField('service_vendor_id');
+    const prod_serv_id = pickField('prod_serv_id');
+    const maintsch_id = pickField('maintsch_id');
+    const purchased_cost = pickField('purchased_cost');
+    const purchased_on = pickField('purchased_on');
+    const purchased_by = pickField('purchased_by');
+    const expiry_date = pickField('expiry_date');
+    const current_status = pickField('current_status');
+    const warranty_period = pickField('warranty_period');
+    const parent_asset_id = pickField('parent_asset_id');
+    const group_id = pickField('group_id');
+    const org_id = pickField('org_id');
+    const properties = Object.prototype.hasOwnProperty.call(body, 'properties')
+      ? body.properties
+      : undefined;
+    const cost_center_code = pickField('cost_center_code');
+    const location = pickField('location');
+    const insurance_policy_no = pickField('insurance_policy_no');
+    const insurer = pickField('insurer');
+    const insured_value = pickField('insured_value');
+    const insurance_start_date = pickField('insurance_start_date');
+    const insurance_end_date = pickField('insurance_end_date');
+    const comprehensive_insurance = pickField('comprehensive_insurance');
 
     // Log API called
     await logApiCall({
@@ -489,7 +507,7 @@ const updateAsset = async (req, res) => {
     let finalOrgId = org_id || req.user?.org_id || existingAssetRow.org_id;
 
     // Enforce service vendor when asset type maintenance is vendor-managed.
-    if (asset_type_id) {
+    if (Object.prototype.hasOwnProperty.call(body, 'asset_type_id')) {
       const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, finalOrgId);
       if (vendorMaintained && !service_vendor_id) {
         return res.status(400).json({
@@ -499,7 +517,9 @@ const updateAsset = async (req, res) => {
     }
 
     const descriptionToValidate =
-      description !== undefined ? description : existingAssetRow.description;
+      Object.prototype.hasOwnProperty.call(body, 'description')
+        ? description
+        : existingAssetRow.description;
     const conflictingAssetName = await checkDuplicateAssetDescription(
       descriptionToValidate,
       finalOrgId,
@@ -510,7 +530,7 @@ const updateAsset = async (req, res) => {
     }
 
     const trimmedDescription =
-      description !== undefined
+      Object.prototype.hasOwnProperty.call(body, 'description')
         ? String(description || "").trim()
         : String(existingAssetRow.description || "").trim();
     
@@ -598,7 +618,7 @@ const updateAsset = async (req, res) => {
       // Don't fail the request if notification fails
     }
 
-    if (typeof warranty_period !== "undefined") {
+    if (typeof warranty_period !== "undefined" && Object.prototype.hasOwnProperty.call(body, 'warranty_period')) {
       try {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
@@ -632,6 +652,41 @@ const updateAsset = async (req, res) => {
         }
       } catch (warrantyResolveError) {
         console.error("Failed to evaluate warranty notification update:", warrantyResolveError.message);
+      }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'expiry_date')) {
+      try {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const riskWindowEnd = new Date(now);
+        riskWindowEnd.setDate(riskWindowEnd.getDate() + DEFAULT_ALERT_DAYS);
+
+        const parsedExpiryDate =
+          expiry_date && !Number.isNaN(new Date(expiry_date).getTime())
+            ? new Date(expiry_date)
+            : null;
+        if (parsedExpiryDate) parsedExpiryDate.setHours(0, 0, 0, 0);
+
+        if (parsedExpiryDate && parsedExpiryDate <= riskWindowEnd) {
+          await createExpiryNotificationsForAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        } else {
+          if (expiry_notify_id) {
+            await resolveExpiryNotification({
+              notifyId: expiry_notify_id,
+              orgId: finalOrgId || req.user?.org_id,
+            });
+          }
+          await resolveExpiryNotificationsByAsset({
+            assetId: asset_id,
+            orgId: finalOrgId || req.user?.org_id,
+          });
+        }
+      } catch (expiryResolveError) {
+        console.error("Failed to evaluate asset expiry notification update:", expiryResolveError.message);
       }
     }
 

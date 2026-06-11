@@ -8,6 +8,9 @@ const {
   openWarrantyNotification,
   discardWarrantyNotificationAction,
   snoozeWarrantyNotificationAction,
+  openExpiryNotification,
+  discardExpiryNotificationAction,
+  snoozeExpiryNotificationAction,
 } = require('../controllers/notificationController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -33,6 +36,10 @@ router.get('/filtered', getFilteredNotifications);
 router.put('/warranty/:notifyId/open', openWarrantyNotification);
 router.put('/warranty/:notifyId/discard', discardWarrantyNotificationAction);
 router.put('/warranty/:notifyId/snooze', snoozeWarrantyNotificationAction);
+
+router.put('/expiry/:notifyId/open', openExpiryNotification);
+router.put('/expiry/:notifyId/discard', discardExpiryNotificationAction);
+router.put('/expiry/:notifyId/snooze', snoozeExpiryNotificationAction);
 
 
 module.exports = router;
