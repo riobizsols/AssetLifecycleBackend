@@ -707,25 +707,28 @@ const saveInspectionRecord = async (req, res) => {
       recordsToSave = [];
     }
 
+    let checklistItems = [];
+    try {
+      const checklistRes = await inspectionModel.getInspectionChecklistByAssetType(insp.asset_type_id, org_id);
+      checklistItems = checklistRes.rows || [];
+    } catch (err) {
+      console.error('Error fetching checklist for inspection validation:', err);
+      return res.status(500).json({ success: false, message: 'Failed to validate checklist items' });
+    }
+
+    const checklistById = new Map(
+      checklistItems.map((ci) => [String(ci.insp_check_id), ci])
+    );
+
     // Validation: For inhouse inspections, technician must provide values for all checklist items
     if (!isVendor) {
-      try {
-        const checklistRes = await inspectionModel.getInspectionChecklistByAssetType(insp.asset_type_id, org_id);
-        const checklistItems = checklistRes.rows || [];
+      const provided = new Set(recordsToSave.map((r) => String(r.insp_check_id)));
+      const missing = checklistItems
+        .map((ci) => String(ci.insp_check_id))
+        .filter((id) => !provided.has(id));
 
-        // Build set of provided insp_check_id
-        const provided = new Set(recordsToSave.map(r => String(r.insp_check_id)));
-
-        const missing = checklistItems
-          .map(ci => String(ci.insp_check_id))
-          .filter(id => !provided.has(id));
-
-        if (missing.length > 0) {
-          return res.status(400).json({ success: false, message: 'Missing checklist values for in-house inspection', missing });
-        }
-      } catch (err) {
-        console.error('Error validating checklist for inhouse inspection:', err);
-        return res.status(500).json({ success: false, message: 'Failed to validate checklist items' });
+      if (missing.length > 0) {
+        return res.status(400).json({ success: false, message: 'Missing checklist values for in-house inspection', missing });
       }
     }
 
@@ -733,6 +736,40 @@ const saveInspectionRecord = async (req, res) => {
     for (const r of recordsToSave) {
       if (r.recorded_value === undefined || r.recorded_value === null || String(r.recorded_value).trim() === '') {
         return res.status(400).json({ success: false, message: 'Empty recorded value in records', record: r });
+      }
+
+      const checklistItem = checklistById.get(String(r.insp_check_id));
+      if (checklistItem?.response_type === 'QN') {
+        const numValue = parseFloat(r.recorded_value);
+        if (Number.isNaN(numValue)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Invalid numeric value',
+            insp_check_id: r.insp_check_id,
+          });
+        }
+
+        const min = checklistItem.min_range != null && checklistItem.min_range !== ''
+          ? parseFloat(checklistItem.min_range)
+          : null;
+        const max = checklistItem.max_range != null && checklistItem.max_range !== ''
+          ? parseFloat(checklistItem.max_range)
+          : null;
+
+        if (Number.isFinite(min) && numValue < min) {
+          return res.status(400).json({
+            success: false,
+            message: 'Value is outside the expected range',
+            insp_check_id: r.insp_check_id,
+          });
+        }
+        if (Number.isFinite(max) && numValue > max) {
+          return res.status(400).json({
+            success: false,
+            message: 'Value is outside the expected range',
+            insp_check_id: r.insp_check_id,
+          });
+        }
       }
     }
 
