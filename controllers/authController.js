@@ -174,7 +174,23 @@ const login = async (req, res) => {
         // Step 4: Log comparing password
         safeAuthLog(() => logComparingPassword({ email, userId: user.user_id }));
         
-        const isMatch = await bcrypt.compare(password, user.password);
+        let loginUser = user;
+        let isMatch = await bcrypt.compare(password, user.password);
+
+        // Setup wizard stores admin in both tblRioAdmin and tblUsers; if hashes diverge, try tblUsers
+        if (!isMatch && user.source_table === 'tblRioAdmin' && String(email || '').includes('@')) {
+            const fallbackResult = await dbPool.query(
+                `SELECT *, 'tblUsers' as source_table FROM "tblUsers" WHERE email = $1`,
+                [email]
+            );
+            if (fallbackResult.rows[0]) {
+                const fallbackMatch = await bcrypt.compare(password, fallbackResult.rows[0].password);
+                if (fallbackMatch) {
+                    loginUser = fallbackResult.rows[0];
+                    isMatch = true;
+                }
+            }
+        }
         
         if (!isMatch) {
             // Step 5a: Password not matched
@@ -192,14 +208,14 @@ const login = async (req, res) => {
         }
 
         // Step 5b: Password matched
-        safeAuthLog(() => logPasswordMatched({ email, userId: user.user_id }));
+        safeAuthLog(() => logPasswordMatched({ email, userId: loginUser.user_id }));
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
-        const isRioAdmin = user.source_table === 'tblRioAdmin';
+        const isRioAdmin = loginUser.source_table === 'tblRioAdmin';
         
         // Check if password matches the initial password from org settings
-        const initialPassword = await getInitialPassword(user.org_id, dbPool);
-        const isInitialPassword = await bcrypt.compare(initialPassword, user.password);
+        const initialPassword = await getInitialPassword(loginUser.org_id, dbPool);
+        const isInitialPassword = await bcrypt.compare(initialPassword, loginUser.password);
         
         // Update last_accessed field in the appropriate table
         if (isRioAdmin) {
@@ -207,31 +223,31 @@ const login = async (req, res) => {
                 `UPDATE "tblRioAdmin" 
                  SET last_accessed = CURRENT_DATE 
                  WHERE org_id = $1 AND user_id = $2`,
-                [user.org_id, user.user_id]
+                [loginUser.org_id, loginUser.user_id]
             );
         } else {
             await dbPool.query(
                 `UPDATE "tblUsers" 
                  SET last_accessed = CURRENT_DATE 
                  WHERE org_id = $1 AND user_id = $2`,
-                [user.org_id, user.user_id]
+                [loginUser.org_id, loginUser.user_id]
             );
         }
 
         // Fetch all user roles from tblUserJobRoles (RioAdmin might not have roles, so handle gracefully)
         let userRoles = [];
         try {
-            userRoles = await getUserRoles(user.user_id, dbPool);
+            userRoles = await getUserRoles(loginUser.user_id, dbPool);
         } catch (roleError) {
             // If RioAdmin doesn't have roles, that's okay - they have admin access by default
-            console.log(`[AuthController] No roles found for user ${user.user_id}, continuing...`);
+            console.log(`[AuthController] No roles found for user ${loginUser.user_id}, continuing...`);
         }
         
         // For RioAdmin, create a default admin role if no roles exist
         if (isRioAdmin && userRoles.length === 0) {
             userRoles = [{
                 user_job_role_id: 'UJR_RIOADMIN',
-                user_id: user.user_id,
+                user_id: loginUser.user_id,
                 job_role_id: 'JR001', // System Administrator
                 job_role_name: 'System Administrator'
             }];
@@ -260,18 +276,18 @@ const login = async (req, res) => {
                 LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
                 WHERE ra.user_id = $1
             `;
-            const branchResult = await dbPool.query(branchQuery, [user.user_id]);
+            const branchResult = await dbPool.query(branchQuery, [loginUser.user_id]);
             userWithBranch = branchResult.rows[0];
         } else {
-            userWithBranch = await getUserWithBranch(user.user_id, dbPool);
+            userWithBranch = await getUserWithBranch(loginUser.user_id, dbPool);
         }
         
         // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
-        let language_code = user.language_code || 'en'; // default language
-        if (!isRioAdmin && user.emp_int_id) {
+        let language_code = loginUser.language_code || 'en'; // default language
+        if (!isRioAdmin && loginUser.emp_int_id) {
             const employeeResult = await dbPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
-                [user.emp_int_id]
+                [loginUser.emp_int_id]
             );
             if (employeeResult.rows.length > 0) {
                 language_code = employeeResult.rows[0].language_code || 'en';
@@ -279,25 +295,25 @@ const login = async (req, res) => {
         }
         
         // Step 6: Log generating token
-        safeAuthLog(() => logGeneratingToken({ email, userId: user.user_id }));
+        safeAuthLog(() => logGeneratingToken({ email, userId: loginUser.user_id }));
         
         // Generate token with tenant information
         // If tenant exists, don't set use_default_db flag so middleware uses tenant database
         const token = generateToken(
-            { ...user, language_code },
+            { ...loginUser, language_code },
             !isTenant
         );
         
         // Step 7: Log token generated
         safeAuthLog(() => logTokenGenerated({ 
             email, 
-            userId: user.user_id,
+            userId: loginUser.user_id,
             tokenPayload: {
-                org_id: user.org_id,
-                user_id: user.user_id,
-                email: user.email,
-                job_role_id: user.job_role_id,
-                emp_int_id: user.emp_int_id,
+                org_id: loginUser.org_id,
+                user_id: loginUser.user_id,
+                email: loginUser.email,
+                job_role_id: loginUser.job_role_id,
+                emp_int_id: loginUser.emp_int_id,
                 use_default_db: !isTenant,
                 subdomain: subdomain || null,
                 loginMode: loginMode
@@ -309,11 +325,11 @@ const login = async (req, res) => {
         // Step 8: Log successful login (final summary with response data)
         safeAuthLog(() => logSuccessfulLogin({
             email,
-            userId: user.user_id,
+            userId: loginUser.user_id,
             duration,
             responseData: {
-                full_name: user.full_name,
-                org_id: user.org_id,
+                full_name: loginUser.full_name,
+                org_id: loginUser.org_id,
                 branch_id: userWithBranch?.branch_id,
                 branch_name: userWithBranch?.branch_name,
                 roles: userRoles,
@@ -325,12 +341,12 @@ const login = async (req, res) => {
             token,
             requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
             user: {
-                full_name: user.full_name,
-                email: user.email,
-                org_id: user.org_id,
-                user_id: user.user_id,
-                job_role_id: user.job_role_id, // Keep for backward compatibility
-                emp_int_id: user.emp_int_id,
+                full_name: loginUser.full_name,
+                email: loginUser.email,
+                org_id: loginUser.org_id,
+                user_id: loginUser.user_id,
+                job_role_id: loginUser.job_role_id, // Keep for backward compatibility
+                emp_int_id: loginUser.emp_int_id,
                 roles: userRoles, // Add all roles
                 branch_id: userWithBranch?.branch_id || null,
                 branch_name: userWithBranch?.branch_name || null,
