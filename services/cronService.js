@@ -10,8 +10,10 @@ const { generateMaintenanceSchedules } = require('../controllers/maintenanceSche
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
 const {
     ensureWarrantyNotificationsForWindowAllOrgs,
-    ensureAssetExpiryNotificationsForWindowAllOrgs,
 } = require('../models/assetWarrantyNotifyModel');
+const {
+    ensureExpiryNotificationsForWindowAllOrgs,
+} = require('../models/assetExpiryNotifyModel');
 
 class CronService {
     constructor() {
@@ -136,13 +138,13 @@ class CronService {
         }
     }
 
-    // Schedule asset expiry notifications for assets expiring within 5 days.
+    // Schedule asset lifecycle expiry notifications (7 days before expiry or already expired).
     scheduleAssetExpiryNotificationTrigger() {
         try {
-            cron.schedule('5 7 * * *', async () => {
+            cron.schedule('0 7 * * *', async () => {
                 const startedAt = new Date().toISOString();
                 try {
-                    const result = await ensureAssetExpiryNotificationsForWindowAllOrgs({ days: 5 });
+                    const result = await ensureExpiryNotificationsForWindowAllOrgs({ days: 7 });
                     console.log(
                         `✅ [CRON] Asset expiry notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
                     );
@@ -153,8 +155,8 @@ class CronService {
                 timezone: "Asia/Kolkata",
             });
 
-            console.log('📅 [CRON] Asset Expiry Notification Trigger: Scheduled daily at 7:05 AM (IST)');
-            console.log('   → Creates notifications for assets with expiry_date within next 5 days');
+            console.log('📅 [CRON] Asset Expiry Notification Trigger: Scheduled daily at 7:00 AM (IST)');
+            console.log('   → Creates notifications for assets expiring within 7 days and for expired assets');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule asset expiry notification trigger:', error.message);
         }
@@ -445,6 +447,15 @@ class CronService {
                 nextRun: 'Daily at 7:00 AM IST',
                 status: 'ACTIVE',
                 purpose: 'Notify mapped job roles before warranty end date and when warranty has expired'
+            },
+            assetExpiryNotificationTrigger: {
+                name: 'Asset Expiry Notification Trigger',
+                schedule: '0 7 * * *',
+                description: 'Creates asset lifecycle expiry alerts for assets expiring within 7 days and for expired assets.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 7:00 AM IST',
+                status: 'ACTIVE',
+                purpose: 'Notify job roles with notif_scrap before asset expiry_date and when expired'
             }
         };
     }

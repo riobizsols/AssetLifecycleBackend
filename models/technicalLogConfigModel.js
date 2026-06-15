@@ -3,6 +3,8 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
 
+const logConfigCache = new Map();
+const LOG_CONFIG_CACHE_MS = parseInt(process.env.TECH_LOG_CONFIG_CACHE_MS || '60000', 10);
 
 class TechnicalLogConfigModel {
     /**
@@ -11,6 +13,11 @@ class TechnicalLogConfigModel {
      * @returns {Promise<Object|null>} Log configuration object
      */
     static async getLogConfig(appId) {
+        const cached = logConfigCache.get(appId);
+        if (cached && Date.now() - cached.at < LOG_CONFIG_CACHE_MS) {
+            return cached.value;
+        }
+
         try {
             const query = `
                 SELECT id, app_id, log_level, enabled, created_on, updated_on
@@ -28,7 +35,9 @@ class TechnicalLogConfigModel {
                 const defaultDb = require('../config/db');
                 result = await defaultDb.query(query, [appId]);
             }
-            return result.rows[0] || null;
+            const value = result.rows[0] || null;
+            logConfigCache.set(appId, { value, at: Date.now() });
+            return value;
         } catch (error) {
             const isPoolEnded = error && /pool after calling end/i.test(String(error.message));
             if (isPoolEnded) {
@@ -38,6 +47,11 @@ class TechnicalLogConfigModel {
             console.error('Error getting technical log config:', error);
             throw error;
         }
+    }
+
+    static clearLogConfigCache(appId = null) {
+        if (appId) logConfigCache.delete(appId);
+        else logConfigCache.clear();
     }
 
     /**
@@ -91,6 +105,7 @@ class TechnicalLogConfigModel {
                 throw new Error(`App ID '${app_id}' not found in technical log configuration`);
             }
             
+            logConfigCache.delete(app_id);
             return result.rows[0];
         } catch (error) {
             console.error('Error updating technical log config:', error);
@@ -122,6 +137,7 @@ class TechnicalLogConfigModel {
 
             
             const result = await dbPool.query(query, [app_id, log_level, enabled]);
+            logConfigCache.delete(app_id);
             return result.rows[0];
         } catch (error) {
             console.error('Error upserting technical log config:', error);

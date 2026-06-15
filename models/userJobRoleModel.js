@@ -314,7 +314,6 @@ const getEmployeeJobRoles = async (emp_int_id) => {
 // If tenantPool is provided, use it; otherwise use default db
 const getUserRoles = async (user_id, tenantPool = null) => {
     try {
-        console.log(`Fetching roles for user_id: ${user_id}`);
         const connection = tenantPool || getDb();
         
         const result = await connection.query(
@@ -339,7 +338,6 @@ const getUserRoles = async (user_id, tenantPool = null) => {
             [user_id]
         );
         
-        console.log(`Found ${result.rows.length} roles for user ${user_id}`);
         return result.rows;
     } catch (error) {
         console.error(`Error in getUserRoles for user_id ${user_id}:`, error);
