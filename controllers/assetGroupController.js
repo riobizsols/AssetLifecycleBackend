@@ -1,4 +1,6 @@
 const model = require("../models/assetGroupModel");
+const operationalCache = require('../utils/operationalCache');
+const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const assetGroupLogger = require("../eventLoggers/assetGroupEventLogger");
 
 // POST /api/asset-groups - Create new asset group
@@ -10,30 +12,7 @@ const createAssetGroup = async (req, res) => {
         const { text, asset_ids } = req.body;
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
-        
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-        
-        console.log('=== Asset Group Creation Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
-        
-        // Get branch_code from tblBranches
-        let userBranchCode = null;
-        if (userBranchId) {
-            const dbPool = req.db || require("../config/db");
-            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-
-            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-            if (branchResult.rows.length > 0) {
-                userBranchCode = branchResult.rows[0].branch_code;
-                console.log('User branch_code:', userBranchCode);
-            } else {
-                console.log('Branch not found for branch_id:', userBranchId);
-            }
-        }
+        const userBranchCode = branchCodeFromReq(req);
 
         // Log API call
         assetGroupLogger.logCreateAssetGroupApiCalled({
@@ -77,6 +56,7 @@ const createAssetGroup = async (req, res) => {
 
         // Create asset group with transaction
         const result = await model.createAssetGroup(org_id, userBranchCode, text, asset_ids, created_by);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
 
         // Log success
         assetGroupLogger.logAssetGroupCreated({
@@ -112,50 +92,30 @@ const getAllAssetGroups = async (req, res) => {
     
     try {
         const org_id = req.user.org_id;
-        
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-        
-        console.log('=== Asset Group Listing Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
-        
-        // Get branch_code from tblBranches
-        let userBranchCode = null;
-        if (userBranchId) {
-            const dbPool = req.db || require("../config/db");
-            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
+        const userBranchCode = branchCodeFromReq(req);
 
-            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-            if (branchResult.rows.length > 0) {
-                userBranchCode = branchResult.rows[0].branch_code;
-                console.log('User branch_code:', userBranchCode);
-            } else {
-                console.log('Branch not found for branch_id:', userBranchId);
-            }
-        }
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'asset-groups',
+            'list',
+            async () => {
+                const result = await model.getAllAssetGroups(org_id, userBranchCode);
+                return result.rows;
+            },
+        );
         
-        // Log API call
         assetGroupLogger.logGetAllAssetGroupsApiCalled({
             requestData: { operation: 'get_all_asset_groups' },
             userId,
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
 
-        // Log querying step
-        assetGroupLogger.logQueryingAssetGroups({ userId }).catch(err => console.error('Logging error:', err));
-        
-        const result = await model.getAllAssetGroups(org_id, userBranchCode);
-        
-        // Log success
         assetGroupLogger.logAssetGroupsRetrieved({
-            count: result.rows.length,
+            count: rows.length,
             userId
         }).catch(err => console.error('Logging error:', err));
         
-        res.status(200).json(result.rows);
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching asset groups:", err);
         
@@ -178,28 +138,22 @@ const getAssetGroupsByAssetType = async (req, res) => {
             return res.status(400).json({ success: false, message: "asset_type_id is required" });
         }
 
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
+        const userBranchCode = branchCodeFromReq(req);
 
-        // Get branch_code from tblBranches
-        let userBranchCode = null;
-        if (userBranchId) {
-            const dbPool = req.db || require("../config/db");
-            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-            if (branchResult.rows.length > 0) {
-                userBranchCode = branchResult.rows[0].branch_code;
-            }
-        }
-
-        if (!userBranchCode) {
+        if (!userBranchCode && !req.user?.hasSuperAccess) {
             return res.status(400).json({ success: false, message: "branch_code not found for current user" });
         }
 
-        const result = await model.getAssetGroupsByAssetType(org_id, userBranchCode, asset_type_id);
-        return res.status(200).json({ success: true, count: result.rows.length, groups: result.rows });
+        const { data: groups } = await operationalCache.cachedList(
+            req,
+            'asset-groups',
+            operationalCache.hashQuery({ asset_type_id, branch: userBranchCode || 'all' }),
+            async () => {
+                const result = await model.getAssetGroupsByAssetType(org_id, userBranchCode, asset_type_id);
+                return result.rows;
+            },
+        );
+        return res.status(200).json({ success: true, count: groups.length, groups });
     } catch (error) {
         console.error("Error fetching asset groups by asset type:", error);
         return res.status(500).json({ success: false, message: "Failed to fetch asset groups", error: error.message });
@@ -329,6 +283,7 @@ const updateAssetGroup = async (req, res) => {
 
         // Update asset group
         const result = await model.updateAssetGroup(id, text, asset_ids, changed_by);
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
         // Log success
         assetGroupLogger.logAssetGroupUpdated({
@@ -396,6 +351,7 @@ const deleteAssetGroup = async (req, res) => {
 
         // Delete asset group
         const result = await model.deleteAssetGroup(id);
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
         // Log success
         assetGroupLogger.logAssetGroupDeleted({

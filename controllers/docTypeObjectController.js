@@ -1,4 +1,5 @@
 const model = require("../models/docTypeObjectModel");
+const operationalCache = require('../utils/operationalCache');
 
 // GET /api/doc-type-objects - Get all document type objects
 const getAllDocTypeObjects = async (req, res) => {
@@ -77,15 +78,20 @@ const getDocTypeObjectsByObjectType = async (req, res) => {
         // Get org_id from authenticated user if available, otherwise null
         const org_id = req.user ? req.user.org_id : null;
         
-        const result = await model.getDocTypeObjectsByObjectType(object_type, org_id);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'doc-type-objects',
+            `object-type:${object_type}`,
+            () => model.getDocTypeObjectsByObjectType(object_type, org_id).then((result) => result.rows),
+        );
         
         res.status(200).json({
             success: true,
             message: "Document type objects retrieved successfully",
-            data: result.rows,
-            count: result.rows.length,
+            data: rows,
+            count: rows.length,
             object_type: object_type,
-            includes_common: result.rows.some(row => row.object_type === '*'),
+            includes_common: rows.some(row => row.object_type === '*'),
             note: "Results include both specific object type and common (*) document types"
         });
         

@@ -1,10 +1,16 @@
 const branchModel = require('../models/branchModel');
+const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 
 const getBranches = async (req, res) => {
     try {
         const org_id = req.user.org_id;
-        const branches = await branchModel.getAllBranches(org_id);
+        const { data: branches } = await operationalCache.cachedList(
+            req,
+            'branches',
+            'list',
+            () => branchModel.getAllBranches(org_id),
+        );
         res.json(branches);
     } catch (error) {
         console.error("Error fetching branches:", error);

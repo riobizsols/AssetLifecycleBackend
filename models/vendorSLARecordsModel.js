@@ -3,6 +3,8 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
+const isUndefinedTable = (err) => err && err.code === '42P01';
+
 // Get vendor SLA records by maintenance schedule ID
 // Returns a single row with all SLA columns
 const getVendorSLARecordsByMaintenance = async (amsId) => {
@@ -50,13 +52,22 @@ const getVendorSLARecordsByMaintenance = async (amsId) => {
     LIMIT 1
   `;
   
-  const result = await dbPool.query(query, [amsId]);
-  return result.rows[0] || null;
+  try {
+    const result = await dbPool.query(query, [amsId]);
+    return result.rows[0] || null;
+  } catch (e) {
+    if (isUndefinedTable(e)) {
+      console.warn('[vendorSLARecordsModel] tblvendorslarecs is missing; skipping SLA records read.');
+      return null;
+    }
+    throw e;
+  }
 };
 
 // Create or update vendor SLA records for a maintenance schedule
 // Takes records array and transforms to single row with columns
 const upsertVendorSLARecords = async (recordsData) => {
+  try {
   const dbPool = getDb();
   const { vendor_id, ams_id, records, user_id, org_id } = recordsData;
   
@@ -309,6 +320,13 @@ const upsertVendorSLARecords = async (recordsData) => {
     
     const result = await dbPool.query(insertQuery, values);
     return result.rows[0];
+  }
+  } catch (e) {
+    if (isUndefinedTable(e)) {
+      console.warn('[vendorSLARecordsModel] tblvendorslarecs is missing; skipping SLA records write.');
+      return null;
+    }
+    throw e;
   }
 };
 

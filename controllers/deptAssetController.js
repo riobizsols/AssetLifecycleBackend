@@ -1,5 +1,6 @@
 // controllers/deptAssetController.js
 const model = require("../models/deptAssetsModel");
+const assignmentCache = require("../utils/assignmentCache");
 const { generateCustomId } = require("../utils/idGenerator");
 
 
@@ -97,7 +98,19 @@ const getAllAssetTypes = async (req, res) => {
             return res.status(400).json({ error: "Organization context missing" });
         }
 
-        let query = `
+        const cacheKey = assignmentCache.scopeKey(
+            req,
+            'assignment',
+            'asset-types',
+            'all',
+            assignment_type || 'any',
+        );
+
+        const { data: rows } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                let query = `
             SELECT DISTINCT
                 at.asset_type_id,
                 at.text,
@@ -117,24 +130,22 @@ const getAllAssetTypes = async (req, res) => {
               AND at.org_id = $1
         `;
 
-        const params = [org_id];
-        // Asset types must be visible across all branches within the same org.
-        // Keep only org-level filtering here.
-        console.log(`Filtering asset types for org ${org_id} with no branch restriction`);
+                const params = [org_id];
 
-        if (assignment_type) {
-            params.push(assignment_type);
-            query += ` AND at.assignment_type = $${params.length}`;
-            console.log(`Applying assignment_type filter: ${assignment_type}`);
-        }
+                if (assignment_type) {
+                    params.push(assignment_type);
+                    query += ` AND at.assignment_type = $${params.length}`;
+                }
 
-        query += ` ORDER BY at.text`;
+                query += ` ORDER BY at.text`;
 
-        // Use tenant database from request if available, otherwise use default
-        const dbPool = req.db || db;
-        const result = await dbPool.query(query, params);
-        console.log(`Found ${result.rows.length} asset types for org ${org_id}`);
-        res.status(200).json(result.rows);
+                const dbPool = req.db || db;
+                const result = await dbPool.query(query, params);
+                return result.rows;
+            },
+        );
+
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);
         res.status(500).json({ error: "Failed to fetch asset types" });
@@ -172,7 +183,6 @@ const getAssetTypesByDepartment = async (req, res) => {
     try {
         const { dept_id } = req.params;
         
-        // Validation
         if (!dept_id) {
             return res.status(400).json({ 
                 error: "Department ID is required",
@@ -180,34 +190,51 @@ const getAssetTypesByDepartment = async (req, res) => {
             });
         }
 
-        // Use tenant database from request context (set by middleware)
-        const dbPool = req.db || db;
-        // Check if department exists
-        const deptCheck = await dbPool.query(
-            `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
-            [dept_id]
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'asset-types', 'dept', dept_id);
+        const { data: payload } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const dbPool = req.db || db;
+                const deptCheck = await dbPool.query(
+                    `SELECT text FROM "tblDepartments" WHERE dept_id = $1`,
+                    [dept_id]
+                );
+
+                if (deptCheck.rows.length === 0) {
+                    return {
+                        status: 404,
+                        body: {
+                            error: "Department not found",
+                            message: "The specified department does not exist"
+                        },
+                    };
+                }
+
+                const result = await model.getAssetTypesByDepartment(dept_id);
+
+                return {
+                    status: 200,
+                    body: {
+                        success: true,
+                        message: "Asset types retrieved successfully",
+                        data: result.rows,
+                        count: result.rows.length,
+                        department: {
+                            dept_id: dept_id,
+                            dept_name: deptCheck.rows[0].text
+                        },
+                        timestamp: new Date().toISOString()
+                    },
+                };
+            },
         );
 
-        if (deptCheck.rows.length === 0) {
-            return res.status(404).json({ 
-                error: "Department not found",
-                message: "The specified department does not exist" 
-            });
+        if (payload.status === 404) {
+            return res.status(404).json(payload.body);
         }
 
-        const result = await model.getAssetTypesByDepartment(dept_id);
-        
-        res.status(200).json({
-            success: true,
-            message: "Asset types retrieved successfully",
-            data: result.rows,
-            count: result.rows.length,
-            department: {
-                dept_id: dept_id,
-                dept_name: deptCheck.rows[0].text
-            },
-            timestamp: new Date().toISOString()
-        });
+        res.status(200).json(payload.body);
     } catch (err) {
         console.error("Error fetching asset types by department:", err);
         res.status(500).json({ 

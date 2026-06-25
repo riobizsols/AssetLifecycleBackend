@@ -1,4 +1,5 @@
 const AuditLogConfigModel = require('../models/auditLogConfigModel');
+const operationalCache = require('../utils/operationalCache');
 
 class AuditLogConfigController {
   // Get all audit log configurations
@@ -12,7 +13,12 @@ class AuditLogConfigController {
         });
       }
       
-      const configs = await AuditLogConfigModel.getAll(orgId);
+      const { data: configs } = await operationalCache.cachedList(
+        req,
+        'audit-log-config',
+        'list',
+        () => AuditLogConfigModel.getAll(orgId),
+      );
       
       res.status(200).json({
         success: true,
@@ -100,9 +106,11 @@ class AuditLogConfigController {
       }
 
       // Update reporting email if provided
-      if (reporting_email) {
+      if (typeof reporting_email === 'string' && reporting_email) {
         updatedConfig = await AuditLogConfigModel.updateReportingEmail(alcId, reporting_email);
       }
+
+      operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
       res.status(200).json({
         success: true,

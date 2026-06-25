@@ -1,11 +1,17 @@
 const model = require("../models/maintTypeModel");
+const operationalCache = require('../utils/operationalCache');
 
 // GET /api/maint-types - Get all maintenance types
 const getAllMaintTypes = async (req, res) => {
     try {
         const orgId = req.user?.org_id;
-        const result = await model.getAllMaintTypes(orgId);
-        res.status(200).json(result.rows);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'maint-types',
+            'list',
+            () => model.getAllMaintTypes(orgId).then((result) => result.rows),
+        );
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching maintenance types:", err);
         res.status(500).json({ error: "Failed to fetch maintenance types" });

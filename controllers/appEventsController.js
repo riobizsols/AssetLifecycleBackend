@@ -1,4 +1,5 @@
 const AppEventsModel = require('../models/appEventsModel');
+const operationalCache = require('../utils/operationalCache');
 
 class AppEventsController {
     /**
@@ -150,7 +151,12 @@ class AppEventsController {
      */
     static async getAllApps(req, res) {
         try {
-            const apps = await AppEventsModel.getAllApps();
+            const { data: apps } = await operationalCache.cachedList(
+                req,
+                'app-events',
+                'apps',
+                () => AppEventsModel.getAllApps(),
+            );
 
             const response = {
                 success: true,
@@ -185,7 +191,12 @@ class AppEventsController {
      */
     static async getAllEvents(req, res) {
         try {
-            const events = await AppEventsModel.getAllEvents();
+            const { data: events } = await operationalCache.cachedList(
+                req,
+                'app-events',
+                'events',
+                () => AppEventsModel.getAllEvents(),
+            );
 
             const response = {
                 success: true,

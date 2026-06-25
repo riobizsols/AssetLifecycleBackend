@@ -378,19 +378,66 @@ async function cleanupGroupAfterScrap(client, { assetgroup_id, asset_ids, change
   }
 }
 
-async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, hasSuperAccess = false) {
-  const userId = await getUserIdByEmpIntId(empIntId);
-  if (!userId) return [];
-
-  const roleIds = await getUserRoleIds(userId);
-  // If the user is NOT a super-access user, approvals are primarily role-based.
-  // Additionally, the request creator should be able to see their own pending requests.
+async function getScrapMaintenanceApprovals({
+  orgId,
+  userId,
+  roleIds = [],
+  userBranchCode = null,
+  hasSuperAccess = false,
+} = {}) {
+  if (!orgId || !userId) return [];
 
   const params = [orgId];
   let idx = 2;
 
-  let query = `
-    SELECT DISTINCT
+  let branchFilter = '';
+  if (!hasSuperAccess && userBranchCode) {
+    branchFilter = ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = $${idx})`;
+    params.push(userBranchCode);
+    idx += 1;
+  }
+
+  let existsRoleFilter = '';
+  if (!hasSuperAccess) {
+    if (roleIds.length) {
+      existsRoleFilter = ` AND (wd.job_role_id = ANY($${idx}::varchar[]) OR wh.created_by = $${idx + 1})`;
+      params.push(roleIds, userId);
+      idx += 2;
+    } else {
+      existsRoleFilter = ` AND wh.created_by = $${idx}`;
+      params.push(userId);
+      idx += 1;
+    }
+  }
+
+  const query = `
+    WITH scrap_asset_agg AS (
+      SELECT
+        asset_scrap.asset_group_id,
+        COUNT(*)::int AS asset_count,
+        STRING_AGG(a.description, ', ' ORDER BY a.asset_id) AS asset_names
+      FROM "tblAssetScrap" asset_scrap
+      INNER JOIN "tblAssets" a ON a.asset_id = asset_scrap.asset_id
+      GROUP BY asset_scrap.asset_group_id
+    ),
+    group_asset_agg AS (
+      SELECT
+        d.assetgroup_h_id,
+        COUNT(*)::int AS asset_count,
+        STRING_AGG(a.description, ', ' ORDER BY d.assetgroup_d_id) AS asset_names
+      FROM "tblAssetGroup_D" d
+      INNER JOIN "tblAssets" a ON a.asset_id = d.asset_id
+      GROUP BY d.assetgroup_h_id
+    ),
+    pending_seq AS (
+      SELECT
+        wd.wfscrap_h_id::varchar AS wfscrap_h_id,
+        MIN(wd.seq)::int AS current_seq
+      FROM "tblWFScrap_D" wd
+      WHERE ${statusEqualsSql('wd.status', 'AP')}
+      GROUP BY wd.wfscrap_h_id
+    )
+    SELECT
       wh.id_d AS wfscrap_h_id,
       wh.assetgroup_id,
       COALESCE(agh.text, 'Individual Asset') AS asset_group_name,
@@ -401,74 +448,41 @@ async function getScrapMaintenanceApprovals(empIntId, orgId, userBranchCode, has
       wh.is_scrap_sales,
       seq.asset_type_id,
       at.text AS asset_type_name,
+      COALESCE(
+        CASE
+          WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%'
+          THEN sa.asset_count
+          ELSE ga.asset_count
+        END,
+        0
+      ) AS asset_count,
       CASE
-        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
-          SELECT COUNT(*)::int
-          FROM "tblAssetScrap" a
-          WHERE a.asset_group_id = wh.assetgroup_id
-        )
-        ELSE (
-          SELECT COUNT(*)::int
-          FROM "tblAssetGroup_D" d
-          WHERE d.assetgroup_h_id = wh.assetgroup_id
-        )
-      END AS asset_count,
-      CASE
-        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%' THEN (
-          SELECT STRING_AGG(a.description, ', ' ORDER BY a.asset_id)
-          FROM "tblAssetScrap" asset_scrap
-          INNER JOIN "tblAssets" a ON a.asset_id = asset_scrap.asset_id
-          WHERE asset_scrap.asset_group_id = wh.assetgroup_id
-        )
-        ELSE (
-          SELECT STRING_AGG(a.description, ', ' ORDER BY d.assetgroup_d_id)
-          FROM "tblAssetGroup_D" d
-          INNER JOIN "tblAssets" a ON a.asset_id = d.asset_id
-          WHERE d.assetgroup_h_id = wh.assetgroup_id
-        )
+        WHEN wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%'
+        THEN sa.asset_names
+        ELSE ga.asset_names
       END AS asset_names,
-      (
-        SELECT MIN(d2.seq)::int
-        FROM "tblWFScrap_D" d2
-        WHERE d2.wfscrap_h_id::varchar = wh.id_d::varchar
-          AND ${statusEqualsSql('d2.status', 'AP')}
-      ) AS current_seq
+      ps.current_seq
     FROM "tblWFScrap_H" wh
     LEFT JOIN "tblStatusCodes" hsc ON hsc.id = wh.status
     LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
     INNER JOIN "tblWFScrapSeq" seq ON seq.id::varchar = wh.wfscrapseq_id::varchar
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
-    INNER JOIN "tblWFScrap_D" wd ON wd.wfscrap_h_id::varchar = wh.id_d::varchar
+    LEFT JOIN scrap_asset_agg sa ON sa.asset_group_id = wh.assetgroup_id
+    LEFT JOIN group_asset_agg ga ON ga.assetgroup_h_id = wh.assetgroup_id
+    LEFT JOIN pending_seq ps ON ps.wfscrap_h_id = wh.id_d::varchar
     WHERE (
         ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') AND seq.org_id = $1)
         OR (agh.org_id = $1)
       )
       AND ${statusInSql('wh.status', ['IN', 'IP'])}
-      AND ${statusEqualsSql('wd.status', 'AP')}
-  `;
-
-  if (!hasSuperAccess && userBranchCode) {
-    query += ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = $${idx})`;
-    params.push(userBranchCode);
-    idx += 1;
-  }
-
-  // Role filter (skip for super-access users)
-  if (!hasSuperAccess) {
-    // If the user has roles, show approvals assigned to those roles.
-    // Always allow the creator to see their own pending requests.
-    if (roleIds.length) {
-      query += ` AND (wd.job_role_id = ANY($${idx}::varchar[]) OR wh.created_by = $${idx + 1})`;
-      params.push(roleIds, userId);
-      idx += 2;
-    } else {
-      query += ` AND wh.created_by = $${idx}`;
-      params.push(userId);
-      idx += 1;
-    }
-  }
-
-  query += `
+      AND EXISTS (
+        SELECT 1
+        FROM "tblWFScrap_D" wd
+        WHERE wd.wfscrap_h_id::varchar = wh.id_d::varchar
+          AND ${statusEqualsSql('wd.status', 'AP')}
+          ${existsRoleFilter}
+      )
+      ${branchFilter}
     ORDER BY wh.created_on DESC
   `;
 

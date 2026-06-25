@@ -73,6 +73,13 @@ function decryptPassword(encryptedPassword) {
  * Check if a tenant exists for the given org_id
  */
 async function checkTenantExists(orgId) {
+  const cacheService = require('./cacheService');
+  const cacheKey = cacheService.buildKey('tenant', 'exists', orgId);
+  const cached = await cacheService.get(cacheKey);
+  if (cached !== null && cached !== undefined) {
+    return !!cached.exists;
+  }
+
   const pool = initTenantRegistryPool();
   
   try {
@@ -80,9 +87,13 @@ async function checkTenantExists(orgId) {
       `SELECT org_id FROM "tenants" WHERE org_id = $1 AND is_active = true`,
       [orgId]
     );
-    return result.rows.length > 0;
+    const exists = result.rows.length > 0;
+    await cacheService.set(cacheKey, { exists }, cacheService.getTenantExistsCacheTtlMs());
+    return exists;
   } catch (error) {
     console.error('[TenantService] Error checking tenant existence:', error);
+    // Cache negative result so unreachable tenant registry does not add ~2s to every API call
+    await cacheService.set(cacheKey, { exists: false }, cacheService.getTenantExistsCacheTtlMs());
     return false;
   }
 }

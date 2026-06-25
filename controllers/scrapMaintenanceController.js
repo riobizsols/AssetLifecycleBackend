@@ -1,7 +1,14 @@
 const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
+const scrapApprovalCache = require('../utils/scrapApprovalCache');
+const assetsDashboardCache = require('../utils/assetsDashboardCache');
+
+function bustScrapCaches(req, orgId) {
+  const oid = orgId || req.user?.org_id;
+  scrapApprovalCache.invalidateOrgCaches(oid).catch(() => {});
+  assetsDashboardCache.invalidateOrgApiCache(oid).catch(() => {});
+}
 
 // POST /api/scrap-maintenance/create
-// Body: { asset_id?: string, assetgroup_id?: string, is_scrap_sales?: 'Y'|'N' }
 const createScrapRequest = async (req, res) => {
   try {
     const orgId = req.user?.org_id;
@@ -28,6 +35,7 @@ const createScrapRequest = async (req, res) => {
       return res.status(400).json(result);
     }
 
+    bustScrapCaches(req, orgId);
     return res.status(200).json(result);
   } catch (error) {
     console.error('Error in createScrapRequest:', error);
@@ -36,7 +44,6 @@ const createScrapRequest = async (req, res) => {
 };
 
 // POST /api/scrap-maintenance/create-from-group-selection
-// Body: { assetgroup_id: string, asset_ids: string[], is_scrap_sales?: 'Y'|'N', notes?: string }
 const createScrapRequestFromGroupSelection = async (req, res) => {
   try {
     const orgId = req.user?.org_id;
@@ -63,6 +70,7 @@ const createScrapRequestFromGroupSelection = async (req, res) => {
       return res.status(400).json(result);
     }
 
+    bustScrapCaches(req, orgId);
     return res.status(200).json(result);
   } catch (error) {
     console.error('Error in createScrapRequestFromGroupSelection:', error);
@@ -70,37 +78,53 @@ const createScrapRequestFromGroupSelection = async (req, res) => {
   }
 };
 
+function collectUserRoleIds(user) {
+  const ids = new Set();
+  (user?.roles || []).forEach((role) => {
+    if (role?.job_role_id) ids.add(role.job_role_id);
+  });
+  if (user?.job_role_id) ids.add(user.job_role_id);
+  return [...ids];
+}
+
 // GET /api/scrap-maintenance/approvals
 const getScrapMaintenanceApprovals = async (req, res) => {
   try {
-    const empIntId = req.user?.emp_int_id;
+    const userId = req.user?.user_id;
     const orgId = req.user?.org_id;
     let userBranchCode = req.user?.branch_code || req.user?.branchCode || null;
     const hasSuperAccess = req.user?.hasSuperAccess || false;
     const branchId = req.user?.branch_id;
+    const roleIds = collectUserRoleIds(req.user);
 
-    if (!empIntId || !orgId) {
-      return res.status(400).json({ success: false, message: 'emp_int_id/org_id missing in user context' });
+    if (!userId || !orgId) {
+      return res.status(400).json({ success: false, message: 'user_id/org_id missing in user context' });
     }
 
-    if (!hasSuperAccess && !userBranchCode && branchId) {
-      userBranchCode = await scrapMaintenanceModel.getBranchCodeByBranchId(branchId);
-    }
-
-    const rows = await scrapMaintenanceModel.getScrapMaintenanceApprovals(
-      empIntId,
-      orgId,
-      userBranchCode,
-      hasSuperAccess
+    const cacheKey = scrapApprovalCache.scopeKey(
+      req,
+      'scrap-approval',
+      'list',
+      userId,
+      hasSuperAccess ? 'all' : (userBranchCode || branchId || 'none'),
     );
 
-    console.log('[ScrapMaintenanceApprovals] fetched:', {
-      empIntId,
-      orgId,
-      userBranchCode,
-      hasSuperAccess,
-      count: rows.length,
-    });
+    const { data: rows } = await scrapApprovalCache.getOrSet(
+      cacheKey,
+      scrapApprovalCache.getTtlMs(),
+      async () => {
+        if (!hasSuperAccess && !userBranchCode && branchId) {
+          userBranchCode = await scrapMaintenanceModel.getBranchCodeByBranchId(branchId);
+        }
+        return scrapMaintenanceModel.getScrapMaintenanceApprovals({
+          orgId,
+          userId,
+          roleIds,
+          userBranchCode,
+          hasSuperAccess,
+        });
+      },
+    );
 
     return res.status(200).json({ success: true, count: rows.length, approvals: rows });
   } catch (error) {
@@ -115,7 +139,13 @@ const getScrapApprovalDetail = async (req, res) => {
     const orgId = req.user?.org_id;
     const { id } = req.params;
 
-    const detail = await scrapMaintenanceModel.getScrapApprovalDetailByHeaderId(id, orgId);
+    const cacheKey = scrapApprovalCache.scopeKey(req, 'scrap-approval', 'detail', id);
+    const { data: detail } = await scrapApprovalCache.getOrSet(
+      cacheKey,
+      scrapApprovalCache.getTtlMs(),
+      async () => scrapMaintenanceModel.getScrapApprovalDetailByHeaderId(id, orgId),
+    );
+
     if (!detail) {
       return res.status(404).json({ success: false, message: 'Scrap workflow not found' });
     }
@@ -146,6 +176,7 @@ const approveScrap = async (req, res) => {
       return res.status(400).json(result);
     }
 
+    bustScrapCaches(req, orgId);
     return res.status(200).json(result);
   } catch (error) {
     console.error('Error in approveScrap:', error);
@@ -172,6 +203,7 @@ const rejectScrap = async (req, res) => {
       return res.status(400).json(result);
     }
 
+    bustScrapCaches(req, orgId);
     return res.status(200).json(result);
   } catch (error) {
     console.error('Error in rejectScrap:', error);
@@ -188,24 +220,29 @@ const getWorkflowHistory = async (req, res) => {
     if (!wfscrapHId) {
       return res.status(400).json({
         success: false,
-        message: 'Workflow ID (wfscrap_h_id) is required'
+        message: 'Workflow ID (wfscrap_h_id) is required',
       });
     }
 
-    const history = await scrapMaintenanceModel.getWorkflowHistoryByWfscrapHId(wfscrapHId, orgId);
+    const cacheKey = scrapApprovalCache.scopeKey(req, 'scrap-approval', 'history', wfscrapHId);
+    const { data: history } = await scrapApprovalCache.getOrSet(
+      cacheKey,
+      scrapApprovalCache.getTtlMs(),
+      async () => scrapMaintenanceModel.getWorkflowHistoryByWfscrapHId(wfscrapHId, orgId),
+    );
 
     return res.status(200).json({
       success: true,
       message: 'Workflow history retrieved successfully',
       data: history,
-      count: history.length
+      count: history.length,
     });
   } catch (error) {
     console.error('Error in getWorkflowHistory:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to retrieve workflow history',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -216,25 +253,36 @@ const getScrapAssetHistory = async (req, res) => {
     const { asset_id, ssh_id, scrap_type } = req.query;
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
 
-    const history = await scrapMaintenanceModel.getScrapAssetHistory({
-      asset_id: asset_id || null,
-      ssh_id: ssh_id || null,
-      scrap_type: scrap_type || null,
-      orgId
-    });
+    const cacheKey = scrapApprovalCache.scopeKey(
+      req,
+      'scrap-approval',
+      'asset-history',
+      scrapApprovalCache.hashQuery({ asset_id, ssh_id, scrap_type }),
+    );
+
+    const { data: history } = await scrapApprovalCache.getOrSet(
+      cacheKey,
+      scrapApprovalCache.getTtlMs(),
+      async () => scrapMaintenanceModel.getScrapAssetHistory({
+        asset_id: asset_id || null,
+        ssh_id: ssh_id || null,
+        scrap_type: scrap_type || null,
+        orgId,
+      }),
+    );
 
     return res.status(200).json({
       success: true,
       message: 'Scrap asset history retrieved successfully',
       data: history,
-      count: history.length
+      count: history.length,
     });
   } catch (error) {
     console.error('Error in getScrapAssetHistory:', error);
     return res.status(500).json({
       success: false,
       message: 'Failed to retrieve scrap asset history',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -249,4 +297,3 @@ module.exports = {
   getWorkflowHistory,
   getScrapAssetHistory,
 };
-

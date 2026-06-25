@@ -1,4 +1,5 @@
 const inspectionModel = require("../models/inspectionScheduleModel");
+const operationalCache = require("../utils/operationalCache");
 
 /**
  * Inspection Schedule Controller
@@ -545,8 +546,16 @@ const getInspections = async (req, res) => {
   try {
     const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
     const empIntId = req.user?.emp_int_id || null;
-    const result = await inspectionModel.getInspectionList(org_id, empIntId);
-    return res.json({ success: true, count: result.rows.length, data: result.rows });
+    const { data: rows } = await operationalCache.cachedList(
+      req,
+      'inspection-view',
+      empIntId || 'none',
+      async () => {
+        const result = await inspectionModel.getInspectionList(org_id, empIntId);
+        return result.rows;
+      },
+    );
+    return res.json({ success: true, count: rows.length, data: rows });
   } catch (error) {
     console.error('Error fetching inspections:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch inspections' });

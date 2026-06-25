@@ -1,0 +1,84 @@
+{
+  "timestamp": "2026-06-12T12:44:54.343Z",
+  "scenario": "assets-screen-load",
+  "target": "http://localhost:4000",
+  "concurrency": 50,
+  "iterations": 1,
+  "includeAssetDetail": false,
+  "totalScreenLoads": 50,
+  "screenSuccessCount": 50,
+  "screenFailureCount": 0,
+  "screenSuccessRatePct": 100,
+  "totalWallTimeMs": 8072,
+  "screenThroughputRps": 6.19,
+  "screenWallTimeMs": {
+    "min": 7934,
+    "max": 8060,
+    "avg": 8008,
+    "p50": 8007,
+    "p95": 8048,
+    "p99": 8060
+  },
+  "endpoints": {
+    "/api/assets": {
+      "requests": 50,
+      "successCount": 50,
+      "failureCount": 0,
+      "successRatePct": 100,
+      "latencyMs": {
+        "min": 7650,
+        "max": 7887,
+        "avg": 7769,
+        "p50": 7770,
+        "p95": 7863,
+        "p99": 7887
+      },
+      "avgResponseBytes": 79826
+    },
+    "/api/asset-types": {
+      "requests": 50,
+      "successCount": 50,
+      "failureCount": 0,
+      "successRatePct": 100,
+      "latencyMs": {
+        "min": 6931,
+        "max": 7581,
+        "avg": 7275,
+        "p50": 7272,
+        "p95": 7464,
+        "p99": 7581
+      },
+      "avgResponseBytes": 16073
+    },
+    "/api/column-access-config": {
+      "requests": 50,
+      "successCount": 50,
+      "failureCount": 0,
+      "successRatePct": 100,
+      "latencyMs": {
+        "min": 7933,
+        "max": 8060,
+        "avg": 8008,
+        "p50": 8007,
+        "p95": 8048,
+        "p99": 8060
+      },
+      "avgResponseBytes": 75
+    },
+    "/api/navigation/user/navigation": {
+      "requests": 50,
+      "successCount": 50,
+      "failureCount": 0,
+      "successRatePct": 100,
+      "latencyMs": {
+        "min": 6989,
+        "max": 7561,
+        "avg": 7269,
+        "p50": 7258,
+        "p95": 7472,
+        "p99": 7561
+      },
+      "avgResponseBytes": 59
+    }
+  }
+}

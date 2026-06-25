@@ -1,4 +1,5 @@
 const model = require('../models/maintenanceHistoryModel');
+const reportsCache = require('../utils/reportsCache');
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -116,61 +117,68 @@ const getMaintenanceHistory = async (req, res) => {
             userId
         });
 
-        // Get maintenance history and count
-        const [historyResult, countResult] = await Promise.all([
-            model.getMaintenanceHistory(filters, orgId),
-            model.getMaintenanceHistoryCount(filters, orgId)
-        ]);
+        const cacheFilters = { ...filters, orgId };
 
-        const totalCount = parseInt(countResult.rows[0].total_count);
-        const totalPages = Math.ceil(totalCount / limitNum);
-        const recordCount = historyResult.rows?.length || 0;
+        const { data: cachedPayload } = await reportsCache.cachedList(
+            req,
+            'maintenance-history',
+            cacheFilters,
+            async () => {
+                const [historyResult, countResult] = await Promise.all([
+                    model.getMaintenanceHistory(filters, orgId),
+                    model.getMaintenanceHistoryCount(filters, orgId),
+                ]);
 
-        // Format the response
-        const formattedData = historyResult.rows.map(record => ({
-            // Maintenance Schedule Information
-            ams_id: record.ams_id,
-            wo_id: record.wo_id,
-            asset_id: record.asset_id,
-            maint_type_id: record.maint_type_id,
-            vendor_id: record.vendor_id,
-            act_maint_st_date: record.act_maint_st_date,
-            act_main_end_date: record.act_main_end_date,
-            notes: record.notes,
-            status: record.status,
-            maintained_by: record.maintained_by,
-            po_number: record.po_number,
-            invoice: record.invoice,
-            technician_name: record.technician_name,
-            technician_email: record.technician_email,
-            technician_phno: record.technician_phno,
-            created_by: record.created_by,
-            created_on: record.created_on,
-            changed_by: record.changed_by,
-            changed_on: record.changed_on,
-            org_id: record.org_id,
-            
-            // Asset Information
-            serial_number: record.serial_number,
-            asset_description: record.asset_description,
-            asset_status: record.asset_status,
-            purchased_on: record.purchased_on,
-            purchased_cost: record.purchased_cost,
-            
-            // Asset Type Information
-            asset_type_id: record.asset_type_id,
-            asset_type_name: record.asset_type_name,
-            
-            // Maintenance Type Information
-            maintenance_type_name: record.maintenance_type_name,
-            
-            // Vendor Information
-            vendor_name: record.vendor_name,
-            vendor_contact_person: record.contact_person_name,
-            vendor_email: record.vendor_email,
-            vendor_phone: record.vendor_phone,
-            vendor_address: record.vendor_address
-        }));
+                const totalCount = parseInt(countResult.rows[0].total_count, 10);
+                const formattedData = historyResult.rows.map((record) => ({
+                    ams_id: record.ams_id,
+                    wo_id: record.wo_id,
+                    asset_id: record.asset_id,
+                    maint_type_id: record.maint_type_id,
+                    vendor_id: record.vendor_id,
+                    act_maint_st_date: record.act_maint_st_date,
+                    act_main_end_date: record.act_main_end_date,
+                    notes: record.notes,
+                    status: record.status,
+                    maintained_by: record.maintained_by,
+                    po_number: record.po_number,
+                    invoice: record.invoice,
+                    technician_name: record.technician_name,
+                    technician_email: record.technician_email,
+                    technician_phno: record.technician_phno,
+                    created_by: record.created_by,
+                    created_on: record.created_on,
+                    changed_by: record.changed_by,
+                    changed_on: record.changed_on,
+                    org_id: record.org_id,
+                    serial_number: record.serial_number,
+                    asset_description: record.asset_description,
+                    asset_status: record.asset_status,
+                    purchased_on: record.purchased_on,
+                    purchased_cost: record.purchased_cost,
+                    asset_type_id: record.asset_type_id,
+                    asset_type_name: record.asset_type_name,
+                    maintenance_type_name: record.maintenance_type_name,
+                    vendor_name: record.vendor_name,
+                    vendor_contact_person: record.contact_person_name,
+                    vendor_email: record.vendor_email,
+                    vendor_phone: record.vendor_phone,
+                    vendor_address: record.vendor_address,
+                }));
+
+                return {
+                    formattedData,
+                    totalCount,
+                    pageNum,
+                    limitNum,
+                };
+            },
+        );
+
+        const formattedData = cachedPayload.formattedData;
+        const totalCount = cachedPayload.totalCount;
+        const totalPages = Math.ceil(totalCount / cachedPayload.limitNum);
+        const recordCount = formattedData?.length || 0;
 
         // Log no data or success
         if (recordCount === 0) {
@@ -474,8 +482,21 @@ const getFilterOptions = async (req, res) => {
     try {
         const orgId = req.query.orgId || 'ORG001';
 
-        const result = await model.getFilterOptions(orgId);
-        const options = result.rows[0];
+        const { data: options } = await reportsCache.cachedFilterOptions(
+            req,
+            'maintenance-history',
+            async () => {
+                const result = await model.getFilterOptions(orgId);
+                const row = result.rows[0];
+                return {
+                    asset_options: row.asset_options || [],
+                    vendor_options: row.vendor_options || [],
+                    work_order_options: row.work_order_options || [],
+                    maintenance_type_options: row.maintenance_type_options || [],
+                    status_options: row.status_options || [],
+                };
+            },
+        );
 
         res.json({
             success: true,

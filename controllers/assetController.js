@@ -1,4 +1,7 @@
 const model = require("../models/assetModel");
+const assetsDashboardCache = require("../utils/assetsDashboardCache");
+const operationalCache = require("../utils/operationalCache");
+const assignmentCache = require("../utils/assignmentCache");
 const { findConflictingAssetName } = require("../utils/assetTypeNameValidation");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 
@@ -339,6 +342,8 @@ const addAsset = async (req, res) => {
             asset: result.rows[0]
         });
 
+        assetsDashboardCache.invalidateOrgApiCache(org_id || req.user?.org_id).catch(() => {});
+
     } catch (err) {
         console.error("Error adding asset:", err);
         
@@ -380,19 +385,17 @@ const getAllAssets = async (req, res) => {
   const userId = req.user?.user_id;
   
   try {
-    // Get user's organization and branch information
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
+    const userOrgId = req.user?.org_id;
+    const userBranchId = req.user?.branch_id;
+    const hasSuperAccess = req.user?.hasSuperAccess || false;
 
-    // Use user context filtering - filter by user's org and branch
-    // Pass tenant database connection from request (req.db) to use tenant-specific database
-    // Pass hasSuperAccess flag from req.user (set automatically in middleware)
-    // If hasSuperAccess is true, user can see all branches (no branch filter applied)
-    const assets = await model.getAssetsByUserContext(userOrgId, userBranchId, req.db, req.user?.hasSuperAccess || false);
+    const { data: assets } = await operationalCache.cachedList(
+      req,
+      'assets',
+      'list',
+      () => model.getAssetsByUserContext(userOrgId, userBranchId, req.db, hasSuperAccess),
+    );
     
-    // INFO: Assets retrieved successfully with user context filtering
     await logAssetsRetrieved({
         operation: 'getAllAssets',
         count: assets.rows?.length || 0,
@@ -691,6 +694,7 @@ const updateAsset = async (req, res) => {
     }
 
     res.json(updatedAsset);
+    assetsDashboardCache.invalidateOrgApiCache(finalOrgId || req.user?.org_id).catch(() => {});
   } catch (err) {
     console.error("Error updating asset:", err);
     
@@ -768,12 +772,17 @@ const getPrinterAssets = async (req, res) => {
             });
         }
         
-        const result = await model.getPrinterAssets(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+        const { data: printerRows } = await operationalCache.cachedList(
+            req,
+            'printer-assets',
+            'list',
+            () => model.getPrinterAssets(userOrgId, userBranchId, req.user?.hasSuperAccess || false).then((result) => result.rows || []),
+        );
         res.status(200).json({
             success: true,
             message: "Printer assets retrieved successfully",
-            data: result.rows || [],
-            count: result.rows ? result.rows.length : 0,
+            data: printerRows,
+            count: printerRows.length,
             timestamp: new Date().toISOString()
         });
     } catch (err) {
@@ -1097,35 +1106,50 @@ const getInactiveAssetsByAssetType = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const userOrgId = req.user?.org_id;
+        const userBranchId = req.user?.branch_id || null;
         
-        // Determine assignment_type based on context
-        // For department assignments, filter by 'department' assignment_type
-        // For employee assignments, filter by 'user' assignment_type
         let assignmentType = null;
         if (context === 'DEPTASSIGNMENT') {
             assignmentType = 'department';
         } else if (context === 'EMPASSIGNMENT') {
             assignmentType = 'user';
         }
-        
-        console.log('=== Inactive Assets Controller Debug ===');
-        console.log('asset_type_id:', asset_type_id);
-        console.log('User org_id:', userOrgId);
-        console.log('User branch_id:', userBranchId);
-        console.log('Context:', context);
-        console.log('Assignment Type Filter:', assignmentType);
-        
-        const result = await model.getInactiveAssetsByAssetType(asset_type_id, userOrgId, userBranchId, assignmentType);
-        
-        const count = result.rows.length;
+
+        const isAssignmentContext = context === 'DEPTASSIGNMENT' || context === 'EMPASSIGNMENT';
+
+        const fetchInactiveRows = async () => {
+            const result = await model.getInactiveAssetsByAssetType(
+                asset_type_id,
+                userOrgId,
+                userBranchId,
+                assignmentType,
+            );
+            return result.rows;
+        };
+
+        let rows;
+        if (isAssignmentContext) {
+            const cacheKey = assignmentCache.scopeKey(
+                req,
+                'assignment',
+                'inactive',
+                context,
+                asset_type_id,
+            );
+            const { data } = await assignmentCache.getOrSet(
+                cacheKey,
+                assignmentCache.getTtlMs(),
+                fetchInactiveRows,
+            );
+            rows = data;
+        } else {
+            rows = await fetchInactiveRows();
+        }
+
+        const count = rows.length;
         const message = count > 0 ? `Inactive Assets : ${count}` : "No inactive assets found for this asset type";
         
-        // STEP 4: Log assets viewed (non-blocking, context-aware)
         if (deptAssignmentLogger) {
             deptAssignmentLogger.logAvailableAssetsViewed({
                 deptId: req.query.dept_id || 'unknown',
@@ -1146,7 +1170,7 @@ const getInactiveAssetsByAssetType = async (req, res) => {
             message: message,
             count: count,
             asset_type_id: asset_type_id,
-            data: result.rows
+            data: rows
         });
     } catch (err) {
         console.error("Error fetching inactive assets by asset type:", err);
@@ -1191,28 +1215,19 @@ const getAssetsWithFilters = async (req, res) => {
     try {
         const { 
             asset_type_id, 
-            branch_id, 
             vendor_id, 
             status, 
-            org_id,
             search,
-            exclude_in_maintenance 
+            exclude_in_maintenance,
+            page: pageParam,
+            limit: limitParam,
+            all: allParam,
         } = req.query;
 
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(userId);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const userOrgId = req.user?.org_id;
+        const userBranchId = req.user?.branch_id || null;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
 
-        console.log('🔍 User context filtering:', {
-            userId,
-            userOrgId,
-            userBranchId,
-            queryParams: { asset_type_id, branch_id, vendor_id, status, org_id, search, exclude_in_maintenance }
-        });
-
-        // Always apply user context filtering first, then apply additional filters
         const additionalFilters = {
             asset_type_id,
             status,
@@ -1221,43 +1236,93 @@ const getAssetsWithFilters = async (req, res) => {
             exclude_in_maintenance: exclude_in_maintenance === 'true' || exclude_in_maintenance === true
         };
 
-        // Remove null/undefined values
         Object.keys(additionalFilters).forEach(key => {
             if (additionalFilters[key] === null || additionalFilters[key] === undefined || additionalFilters[key] === false) {
                 delete additionalFilters[key];
             }
         });
 
-        const result = await model.getAssetsByUserContextWithFilters(
-            userOrgId, 
-            userBranchId, 
-            additionalFilters,
-            req.db,  // Pass database connection
-            req.user?.hasSuperAccess || false  // Pass hasSuperAccess flag (set automatically in middleware)
+        const wantsAll = allParam === 'true' || allParam === true;
+        const wantsPagination = !wantsAll && (pageParam != null || limitParam != null);
+        const page = Math.max(1, parseInt(pageParam, 10) || 1);
+        const limit = Math.min(200, Math.max(1, parseInt(limitParam, 10) || 50));
+        const offset = (page - 1) * limit;
+
+        const cacheKey = assetsDashboardCache.scopeKey(
+            req,
+            'assets',
+            'list',
+            assetsDashboardCache.hashQuery({
+                asset_type_id,
+                vendor_id,
+                status,
+                search,
+                exclude_in_maintenance,
+                wantsAll,
+                wantsPagination,
+                page,
+                limit,
+            }),
         );
 
-        // INFO: Assets retrieved successfully with user context filtering
-        await logAssetsRetrieved({
+        const { data: responseBody } = await assetsDashboardCache.getOrSet(
+            cacheKey,
+            assetsDashboardCache.getAssetsListTtlMs(),
+            async () => {
+                const modelArgs = [
+                    userOrgId,
+                    userBranchId,
+                    additionalFilters,
+                    req.db,
+                    hasSuperAccess,
+                ];
+
+                if (wantsPagination) {
+                    const [result, totalCount] = await Promise.all([
+                        model.getAssetsByUserContextWithFilters(
+                            ...modelArgs,
+                            { limit, offset },
+                        ),
+                        model.countAssetsByUserContextWithFilters(...modelArgs),
+                    ]);
+                    return {
+                        rows: result.rows,
+                        pagination: {
+                            page,
+                            limit,
+                            total_count: totalCount,
+                            total_pages: Math.ceil(totalCount / limit) || 1,
+                        },
+                    };
+                }
+
+                const result = await model.getAssetsByUserContextWithFilters(...modelArgs);
+                return result.rows;
+            },
+        );
+
+        const rows = wantsPagination ? responseBody.rows : responseBody;
+
+        logAssetsRetrieved({
             operation: 'getAssetsWithFilters',
-            count: result.rows?.length || 0,
+            count: rows?.length || 0,
             userId,
             duration: Date.now() - startTime,
             userOrgId,
             userBranchId,
-            additionalFilters
-        });
+            additionalFilters,
+        }).catch(() => {});
 
-        res.status(200).json(result.rows);
+        res.status(200).json(responseBody);
     } catch (err) {
         console.error("Error fetching assets with filters:", err);
         
-        // ERROR: Failed to fetch assets
-        await logAssetRetrievalError({
+        logAssetRetrievalError({
             operation: 'getAssetsWithFilters',
             error: err,
             userId,
             duration: Date.now() - startTime
-        });
+        }).catch(() => {});
         
         res.status(500).json({ error: "Failed to fetch assets" });
     }
@@ -1303,6 +1368,8 @@ const deleteAsset = async (req, res) => {
       message: "Asset deleted successfully",
       deletedAsset: result.rows[0]
     });
+
+    assetsDashboardCache.invalidateOrgApiCache(existingAsset.rows[0]?.org_id || req.user?.org_id).catch(() => {});
   } catch (err) {
     console.error("Error deleting asset:", err);
 
@@ -1712,12 +1779,7 @@ const createAsset = async (req, res) => {
         console.log("Received asset data:", req.body);
         console.log("User info:", req.user);
         
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-        
-        console.log("User branch ID:", userBranchId);
+        const userBranchId = req.user?.branch_id;
         
         const {
             asset_type_id,
@@ -2026,6 +2088,8 @@ if (useful_life_years && useful_life_years > 0) {
                 message: "Asset added successfully",
                 asset: result.rows[0]
             });
+
+            assetsDashboardCache.invalidateOrgApiCache(org_id || req.user?.org_id).catch(() => {});
             
         } catch (error) {
             await client.query('ROLLBACK');
@@ -2294,28 +2358,24 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
 // GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
 const getDashboardSummary = async (req, res) => {
   try {
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
+    const userOrgId = req.user?.org_id;
+    const userBranchId = req.user?.branch_id || null;
     const hasSuperAccess = req.user?.hasSuperAccess || false;
-    
-    // Comprehensive query to get all metrics and overlaps
-    const summaryQuery = `
+
+    const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'summary');
+    const { data: payload } = await assetsDashboardCache.getOrSet(
+      cacheKey,
+      assetsDashboardCache.getDashboardTtlMs(),
+      async () => {
+        const summaryQuery = `
       WITH asset_status AS (
         SELECT DISTINCT a.asset_id,
-          -- Check if assigned
           CASE WHEN aa.asset_id IS NOT NULL AND aa.action = 'A' AND aa.latest_assignment_flag = true 
                THEN 1 ELSE 0 END as is_assigned,
-          -- Check if under maintenance
           CASE WHEN (ams.asset_id IS NOT NULL 
                     OR wfh.asset_id IS NOT NULL 
                     OR a.current_status = 'Under Maintenance')
                THEN 1 ELSE 0 END as is_under_maintenance,
-          -- Check if decommissioned
           CASE WHEN (a.current_status = 'Decommissioned' 
                     OR a.current_status = 'SCRAPPED' 
                     OR asd.asd_id IS NOT NULL)
@@ -2346,34 +2406,36 @@ const getDashboardSummary = async (req, res) => {
         SUM(CASE WHEN is_assigned = 0 AND is_under_maintenance = 0 AND is_decommissioned = 0 THEN 1 ELSE 0 END) as none
       FROM asset_status
     `;
-    const params = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
-    
-    // Use tenant database from request context (set by middleware)
-    const dbPool = req.db || require("../config/db");
-    const result = await dbPool.query(summaryQuery, params);
-    const summary = result.rows[0];
+        const params = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
+        const dbPool = req.db || require("../config/db");
+        const result = await dbPool.query(summaryQuery, params);
+        const summary = result.rows[0];
 
-    res.json({
-      success: true,
-      summary: {
-        total_assets: parseInt(summary.total_assets) || 0,
-        assigned: parseInt(summary.assigned_count) || 0,
-        under_maintenance: parseInt(summary.under_maintenance_count) || 0,
-        decommissioned: parseInt(summary.decommissioned_count) || 0,
-        overlaps: {
-          assigned_and_maintenance: parseInt(summary.assigned_and_maintenance) || 0,
-          assigned_and_decommissioned: parseInt(summary.assigned_and_decommissioned) || 0,
-          maintenance_and_decommissioned: parseInt(summary.maintenance_and_decommissioned) || 0,
-          all_three: parseInt(summary.all_three) || 0
-        },
-        none: parseInt(summary.none) || 0
+        return {
+          success: true,
+          summary: {
+            total_assets: parseInt(summary.total_assets) || 0,
+            assigned: parseInt(summary.assigned_count) || 0,
+            under_maintenance: parseInt(summary.under_maintenance_count) || 0,
+            decommissioned: parseInt(summary.decommissioned_count) || 0,
+            overlaps: {
+              assigned_and_maintenance: parseInt(summary.assigned_and_maintenance) || 0,
+              assigned_and_decommissioned: parseInt(summary.assigned_and_decommissioned) || 0,
+              maintenance_and_decommissioned: parseInt(summary.maintenance_and_decommissioned) || 0,
+              all_three: parseInt(summary.all_three) || 0
+            },
+            none: parseInt(summary.none) || 0
+          },
+          message: "Dashboard summary retrieved successfully",
+          userContext: {
+            orgId: userOrgId,
+            branchId: userBranchId
+          }
+        };
       },
-      message: "Dashboard summary retrieved successfully",
-      userContext: {
-        orgId: userOrgId,
-        branchId: userBranchId
-      }
-    });
+    );
+
+    res.json(payload);
   } catch (err) {
     console.error("Error fetching dashboard summary:", err);
     res.status(500).json({ 
@@ -2463,24 +2525,19 @@ const getDecommissionedAssetsCount = async (req, res) => {
 const getDepartmentWiseAssetDistribution = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
+    const userOrgId = req.user?.org_id;
+    const userBranchId = req.user?.branch_id || null;
     const hasSuperAccess = req.user?.hasSuperAccess || false;
-    
-    // Query to get asset count by department
-    // Start from departments to show all departments, even those with 0 assets
-    // Only count assets that are currently assigned (action = 'A' and latest_assignment_flag = true)
-    // Filter departments by user's org_id and branch_id to only show relevant departments
-    const params = [userOrgId];
-    let paramIndex = 2;
-    
-    // Build query with proper parameter indexing - start from departments
-    let query = `
+
+    const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'dept-dist');
+    const { data: payload } = await assetsDashboardCache.getOrSet(
+      cacheKey,
+      assetsDashboardCache.getDashboardTtlMs(),
+      async () => {
+        const params = [userOrgId];
+        let paramIndex = 2;
+
+        let query = `
       SELECT 
         COALESCE(d.text, 'Unknown') as department_name,
         COUNT(DISTINCT CASE WHEN a.asset_id IS NOT NULL THEN a.asset_id END) as asset_count
@@ -2491,32 +2548,28 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
       LEFT JOIN "tblAssets" a ON aa.asset_id = a.asset_id
         AND a.org_id = $1
     `;
-    
-    // Apply branch filter for assets only if user doesn't have super access
-    if (!hasSuperAccess && userBranchId) {
-      params.push(userBranchId);
-      query += ` AND a.branch_id = $${paramIndex}`;
-      paramIndex++;
-    }
-    
-    query += `
+
+        if (!hasSuperAccess && userBranchId) {
+          params.push(userBranchId);
+          query += ` AND a.branch_id = $${paramIndex}`;
+          paramIndex++;
+        }
+
+        query += `
       WHERE d.org_id = $1
         AND d.int_status = 1
     `;
-    
-    // Apply branch filter for departments only if user doesn't have super access
-    if (!hasSuperAccess && userBranchId) {
-      // Note: branch_id was already added to params above
-      query += ` AND d.branch_id = $${paramIndex - 1}`;
-    }
-    
-    query += `
+
+        if (!hasSuperAccess && userBranchId) {
+          query += ` AND d.branch_id = $${paramIndex - 1}`;
+        }
+
+        query += `
       GROUP BY d.dept_id, d.text
       ORDER BY asset_count DESC, d.text ASC
     `;
-    
-    // Also get unassigned assets count (assets not assigned to any department)
-    let unassignedQuery = `
+
+        let unassignedQuery = `
       SELECT COUNT(DISTINCT a.asset_id) as unassigned_count
       FROM "tblAssets" a
       LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id 
@@ -2525,42 +2578,44 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
       WHERE a.org_id = $1
         AND (aa.asset_id IS NULL OR aa.dept_id IS NULL)
     `;
-    
-    const unassignedParams = [userOrgId];
-    let unassignedParamIndex = 2;
-    
-    // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && userBranchId) {
-      unassignedQuery += ` AND a.branch_id = $${unassignedParamIndex}`;
-      unassignedParams.push(userBranchId);
-    }
 
-    const result = await dbPool.query(query, params);
-    const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
-    
-    const departments = result.rows.map(row => ({
-      name: row.department_name,
-      value: parseInt(row.asset_count) || 0
-    }));
-    
-    // Add unassigned assets if there are any
-    const unassignedCount = parseInt(unassignedResult.rows[0]?.unassigned_count || 0);
-    if (unassignedCount > 0) {
-      departments.push({
-        name: 'Unassigned',
-        value: unassignedCount
-      });
-    }
+        const unassignedParams = [userOrgId];
+        let unassignedParamIndex = 2;
 
-    res.json({
-      success: true,
-      data: departments,
-      message: "Department-wise asset distribution retrieved successfully",
-      userContext: {
-        orgId: userOrgId,
-        branchId: userBranchId
-      }
-    });
+        if (!hasSuperAccess && userBranchId) {
+          unassignedQuery += ` AND a.branch_id = $${unassignedParamIndex}`;
+          unassignedParams.push(userBranchId);
+        }
+
+        const result = await dbPool.query(query, params);
+        const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
+
+        const departments = result.rows.map(row => ({
+          name: row.department_name,
+          value: parseInt(row.asset_count) || 0
+        }));
+
+        const unassignedCount = parseInt(unassignedResult.rows[0]?.unassigned_count || 0);
+        if (unassignedCount > 0) {
+          departments.push({
+            name: 'Unassigned',
+            value: unassignedCount
+          });
+        }
+
+        return {
+          success: true,
+          data: departments,
+          message: "Department-wise asset distribution retrieved successfully",
+          userContext: {
+            orgId: userOrgId,
+            branchId: userBranchId
+          }
+        };
+      },
+    );
+
+    res.json(payload);
   } catch (err) {
     console.error("Error fetching department-wise asset distribution:", err);
     res.status(500).json({ 
@@ -2575,21 +2630,19 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
 const getTop5AssetTypes = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
+    const userOrgId = req.user?.org_id;
+    const userBranchId = req.user?.branch_id || null;
     const hasSuperAccess = req.user?.hasSuperAccess || false;
-    
-    // Query to get top 5 asset types by count
-    // Filter by user's org_id and branch_id
-    const params = [userOrgId];
-    let paramIndex = 2;
-    
-    let query = `
+
+    const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'top5');
+    const { data: payload } = await assetsDashboardCache.getOrSet(
+      cacheKey,
+      assetsDashboardCache.getDashboardTtlMs(),
+      async () => {
+        const params = [userOrgId];
+        let paramIndex = 2;
+
+        let query = `
       SELECT 
         at.asset_type_id,
         at.text as asset_type_name,
@@ -2598,42 +2651,45 @@ const getTop5AssetTypes = async (req, res) => {
       LEFT JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
         AND a.org_id = $1
     `;
-    
-    // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && userBranchId) {
-      params.push(userBranchId);
-      query += ` AND a.branch_id = $${paramIndex}`;
-      paramIndex++;
-    }
-    
-    query += `
+
+        if (!hasSuperAccess && userBranchId) {
+          params.push(userBranchId);
+          query += ` AND a.branch_id = $${paramIndex}`;
+          paramIndex++;
+        }
+
+        query += `
       WHERE at.org_id = $1
         AND at.int_status = 1
     `;
-    
-    query += `
+
+        query += `
       GROUP BY at.asset_type_id, at.text
       ORDER BY asset_count DESC, at.text ASC
       LIMIT 5
     `;
 
-    const result = await dbPool.query(query, params);
-    
-    const assetTypes = result.rows.map(row => ({
-      asset_type_id: row.asset_type_id,
-      name: row.asset_type_name,
-      count: parseInt(row.asset_count) || 0
-    }));
+        const result = await dbPool.query(query, params);
 
-    res.json({
-      success: true,
-      data: assetTypes,
-      message: "Top 5 asset types retrieved successfully",
-      userContext: {
-        orgId: userOrgId,
-        branchId: userBranchId
-      }
-    });
+        const assetTypes = result.rows.map(row => ({
+          asset_type_id: row.asset_type_id,
+          name: row.asset_type_name,
+          count: parseInt(row.asset_count) || 0
+        }));
+
+        return {
+          success: true,
+          data: assetTypes,
+          message: "Top 5 asset types retrieved successfully",
+          userContext: {
+            orgId: userOrgId,
+            branchId: userBranchId
+          }
+        };
+      },
+    );
+
+    res.json(payload);
   } catch (err) {
     console.error("Error fetching top 5 asset types:", err);
     res.status(500).json({ 

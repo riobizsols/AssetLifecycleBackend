@@ -1,7 +1,13 @@
 const model = require("../models/maintenanceScheduleModel");
+const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
+
+function bustMaintenanceSupervisorCaches(req, orgId) {
+  const oid = orgId || req.user?.org_id;
+  maintenanceSupervisorCache.invalidateOrgCaches(oid).catch(() => {});
+}
 
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
 
@@ -1016,30 +1022,33 @@ const getAllMaintenanceSchedules = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAllMaintenanceSchedules(orgId, branchId, req.user?.hasSuperAccess || false);
-        
-        // Format the data for frontend - include all columns from tblAssetMaintSch plus joined data
-        const formattedData = result.rows.map(record => {
-            // Get all columns from tblAssetMaintSch
-            const baseRecord = {};
-            Object.keys(record).forEach(key => {
-                if (!['asset_type_id', 'serial_number', 'asset_description', 'asset_type_name', 'maintenance_type_name', 'vendor_name', 'days_until_due'].includes(key)) {
-                    baseRecord[key] = record[key];
-                }
-            });
-            
-            // Add joined data
-            return {
-                ...baseRecord,
-                asset_type_id: record.asset_type_id,
-                serial_number: record.serial_number,
-                asset_description: record.asset_description,
-                asset_type_name: record.asset_type_name,
-                maintenance_type_name: record.maintenance_type_name,
-                vendor_name: record.vendor_name,
-                days_until_due: record.days_until_due
-            };
-        });
+        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'list');
+
+        const { data: formattedData } = await maintenanceSupervisorCache.getOrSet(
+            cacheKey,
+            maintenanceSupervisorCache.getTtlMs(),
+            async () => {
+                const result = await model.getAllMaintenanceSchedules(orgId, branchId, req.user?.hasSuperAccess || false);
+                return result.rows.map((record) => {
+                    const baseRecord = {};
+                    Object.keys(record).forEach((key) => {
+                        if (!['asset_type_id', 'serial_number', 'asset_description', 'asset_type_name', 'maintenance_type_name', 'vendor_name', 'days_until_due'].includes(key)) {
+                            baseRecord[key] = record[key];
+                        }
+                    });
+                    return {
+                        ...baseRecord,
+                        asset_type_id: record.asset_type_id,
+                        serial_number: record.serial_number,
+                        asset_description: record.asset_description,
+                        asset_type_name: record.asset_type_name,
+                        maintenance_type_name: record.maintenance_type_name,
+                        vendor_name: record.vendor_name,
+                        days_until_due: record.days_until_due,
+                    };
+                });
+            },
+        );
 
         // Log success (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -1124,9 +1133,19 @@ const getMaintenanceScheduleById = async (req, res) => {
             });
         }
         
-        const result = await model.getMaintenanceScheduleById(id, orgId, branchId, req.user?.hasSuperAccess || false);
-        
-        if (result.rows.length === 0) {
+        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'detail', id);
+
+        const { data: formattedData } = await maintenanceSupervisorCache.getOrSet(
+            cacheKey,
+            maintenanceSupervisorCache.getTtlMs(),
+            async () => {
+                const result = await model.getMaintenanceScheduleById(id, orgId, branchId, req.user?.hasSuperAccess || false);
+                if (!result.rows.length) return null;
+                return { ...result.rows[0] };
+            },
+        );
+
+        if (!formattedData) {
             if (context === 'SUPERVISORAPPROVAL') {
                 supervisorApprovalLogger.logApprovalNotFound({
                     wfamshId: id,
@@ -1134,17 +1153,12 @@ const getMaintenanceScheduleById = async (req, res) => {
                     duration: Date.now() - startTime
                 }).catch(err => console.error('Logging error:', err));
             }
-            
+
             return res.status(404).json({
                 success: false,
                 message: 'Maintenance schedule not found'
             });
         }
-        
-        const record = result.rows[0];
-        
-        // Format the data for frontend - include all columns from tblAssetMaintSch
-        const formattedData = { ...record };
 
         // Log success (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -1257,6 +1271,8 @@ const updateMaintenanceSchedule = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
 
+        bustMaintenanceSupervisorCaches(req, orgId);
+
         res.status(200).json({ success: true, message: 'Maintenance schedule updated successfully', data: result.rows[0] });
     } catch (error) {
         console.error('Error in updateMaintenanceSchedule:', error);
@@ -1304,6 +1320,8 @@ const createManualMaintenanceSchedule = async (req, res) => {
             org_id: orgId,
             created_by: userId || 'system',
         });
+
+        bustMaintenanceSupervisorCaches(req, orgId);
 
         return res.status(201).json({
             success: true,

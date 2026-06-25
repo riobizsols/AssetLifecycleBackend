@@ -1,8 +1,14 @@
 const textMessagesModel = require("../models/textMessagesModel");
+const operationalCache = require("../utils/operationalCache");
 
 async function getDefaults(req, res) {
   try {
-    const rows = await textMessagesModel.listDefaults();
+    const { data: rows } = await operationalCache.cachedList(
+      req,
+      'text-messages',
+      'default',
+      () => textMessagesModel.listDefaults(),
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Error fetching default text messages:", error);
@@ -16,7 +22,12 @@ async function getTranslationsByLang(req, res) {
     if (!langCode) {
       return res.status(400).json({ success: false, message: "langCode is required" });
     }
-    const rows = await textMessagesModel.listOtherLangs(langCode);
+    const { data: rows } = await operationalCache.cachedList(
+      req,
+      'text-messages',
+      `translations:${String(langCode).trim().toLowerCase()}`,
+      () => textMessagesModel.listOtherLangs(langCode),
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error("Error fetching text message translations:", error);
@@ -48,6 +59,8 @@ async function upsertTranslations(req, res) {
       });
       results.push(saved);
     }
+
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
     return res.json({ success: true, data: results });
   } catch (error) {

@@ -1,4 +1,5 @@
 const model = require("../models/workOrderModel");
+const operationalCache = require("../utils/operationalCache");
 
 // Get all work orders
 const getAllWorkOrders = async (req, res) => {
@@ -16,19 +17,16 @@ const getAllWorkOrders = async (req, res) => {
         console.log('Final userBranchId:', userBranchId);
         console.log('=== END CONTROLLER DEBUG ===');
         
-        const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
-        
-        if (result.rows.length === 0) {
-            return res.status(200).json({
-                success: true,
-                message: "No work orders found with status 'IN' and maintained_by 'Vendor'",
-                data: [],
-                count: 0
-            });
-        }
-        
-        // Format the response data with separated asset and vendor details
-        const formattedData = result.rows.map(row => ({
+        const { data: formattedData } = await operationalCache.cachedList(
+            req,
+            'work-orders',
+            'all',
+            async () => {
+                const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
+                if (result.rows.length === 0) {
+                    return [];
+                }
+                return result.rows.map(row => ({
             // Work Order Details
             ams_id: row.ams_id,
             wo_id: row.wo_id,
@@ -91,6 +89,17 @@ const getAllWorkOrders = async (req, res) => {
             // Breakdown Details (if applicable)
             breakdown_info: row.breakdown_info || null
         }));
+            },
+        );
+        
+        if (formattedData.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: "No work orders found with status 'IN' and maintained_by 'Vendor'",
+                data: [],
+                count: 0
+            });
+        }
         
         console.log(`Successfully fetched ${formattedData.length} work orders with status 'IN' and maintained_by 'Vendor'`);
         

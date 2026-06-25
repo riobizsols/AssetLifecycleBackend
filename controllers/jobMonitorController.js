@@ -6,10 +6,16 @@ const {
   addHistory,
   cleanupOldestWarrantyNotifications,
 } = require('../models/jobMonitorModel');
+const operationalCache = require('../utils/operationalCache');
 
 const getJobs = async (req, res) => {
   try {
-    const jobs = await listJobs();
+    const { data: jobs } = await operationalCache.cachedList(
+      req,
+      'job-monitor',
+      'jobs',
+      () => listJobs(),
+    );
     return res.json({ success: true, data: jobs });
   } catch (error) {
     console.error('Error in getJobs:', error);
@@ -37,6 +43,8 @@ const updateJobConfig = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Job not found' });
     }
 
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
+
     return res.json({ success: true, data: updated });
   } catch (error) {
     console.error('Error in updateJobConfig:', error);
@@ -52,6 +60,7 @@ const runJob = async (req, res) => {
       req.user?.user_id || 'SYSTEM',
       req.user?.org_id || 'ORG001',
     );
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     return res.json({
       success: true,
       message: 'Job executed successfully',
@@ -71,7 +80,12 @@ const runJob = async (req, res) => {
 const getHistory = async (req, res) => {
   try {
     const { jobId } = req.params;
-    const rows = await getJobHistory(jobId, 100);
+    const { data: rows } = await operationalCache.cachedList(
+      req,
+      'job-monitor',
+      `history:${jobId}`,
+      () => getJobHistory(jobId, 100),
+    );
     return res.json({ success: true, data: rows });
   } catch (error) {
     console.error('Error in getHistory:', error);
@@ -96,6 +110,8 @@ const cleanupWarrantyNotifications = async (req, res) => {
         deletedCount: deleted.deletedCount,
       },
     });
+
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
     return res.json({
       success: true,

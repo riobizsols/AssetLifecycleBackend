@@ -1,4 +1,6 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
+const operationalCache = require('../utils/operationalCache');
+const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const {
     // Generic helpers
     logApiCall,
@@ -732,30 +734,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-    
-    // Get user's branch information to get branch_code
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
-    
-    console.log('=== Maintenance Approval Controller Debug ===');
-    console.log('User org_id:', orgId);
-    console.log('User branch_id:', userBranchId);
-    
-    // Get branch_code from tblBranches
-    let userBranchCode = null;
-    if (userBranchId) {
-      const dbPool = req.db || require("../config/db");
-      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-
-      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-      if (branchResult.rows.length > 0) {
-        userBranchCode = branchResult.rows[0].branch_code;
-        console.log('User branch_code:', userBranchCode);
-      } else {
-        console.log('Branch not found for branch_id:', userBranchId);
-      }
-    }
+    const userBranchCode = branchCodeFromReq(req);
 
     // Log API called
     await logApiCall({
@@ -783,36 +762,42 @@ const getMaintenanceApprovalsController = async (req, res) => {
       });
     }
 
-    const maintenanceApprovals = await getMaintenanceApprovals(
-      empIntId,
-      orgId,
-      userBranchCode,
-      req.user?.hasSuperAccess || false,
-      req.user?.job_role_id || null
-    );
+    const { data: formattedData } = await operationalCache.cachedList(
+      req,
+      'maintenance-approval',
+      empIntId || 'none',
+      async () => {
+        const maintenanceApprovals = await getMaintenanceApprovals(
+          empIntId,
+          orgId,
+          userBranchCode,
+          req.user?.hasSuperAccess || false,
+          req.user?.job_role_id || null
+        );
 
-    // Format the data for frontend
-    const formattedData = maintenanceApprovals.map(record => ({
-      wfamsh_id: record.wfamsh_id,
-      asset_id: record.asset_id,
-      asset_type_id: record.asset_type_id,
-      asset_type_name: record.asset_type_name,
-      serial_number: record.serial_number,
-      asset_description: record.asset_description,
-      scheduled_date: record.scheduled_date,
-      actual_date: record.act_sch_date,
-      vendor: record.vendor_name || '-',
-      department: record.department_name || '-',
-      employee: record.employee_name || '-',
-      maintenance_type: record.maintenance_type_name || '-',
-      status: record.header_status,
-      days_until_due: record.days_until_due,
-      days_until_cutoff: record.days_until_cutoff,
-      maintenance_created_on: record.maintenance_created_on,
-      maintenance_changed_on: record.maintenance_changed_on,
-      branch_code: record.branch_code,
-      org_id: orgId
-    }));
+        return maintenanceApprovals.map(record => ({
+          wfamsh_id: record.wfamsh_id,
+          asset_id: record.asset_id,
+          asset_type_id: record.asset_type_id,
+          asset_type_name: record.asset_type_name,
+          serial_number: record.serial_number,
+          asset_description: record.asset_description,
+          scheduled_date: record.scheduled_date,
+          actual_date: record.act_sch_date,
+          vendor: record.vendor_name || '-',
+          department: record.department_name || '-',
+          employee: record.employee_name || '-',
+          maintenance_type: record.maintenance_type_name || '-',
+          status: record.header_status,
+          days_until_due: record.days_until_due,
+          days_until_cutoff: record.days_until_cutoff,
+          maintenance_created_on: record.maintenance_created_on,
+          maintenance_changed_on: record.maintenance_changed_on,
+          branch_code: record.branch_code,
+          org_id: orgId
+        }));
+      },
+    );
 
     // Log success
     await logApprovalsRetrieved({
@@ -864,30 +849,7 @@ const getVendorRenewalApprovalsController = async (req, res) => {
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-    
-    // Get user's branch information to get branch_code
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
-    
-    console.log('=== Vendor Renewal Approval Controller Debug ===');
-    console.log('User org_id:', orgId);
-    console.log('User branch_id:', userBranchId);
-    
-    // Get branch_code from tblBranches
-    let userBranchCode = null;
-    if (userBranchId) {
-      const dbPool = req.db || require("../config/db");
-      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-
-      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-      if (branchResult.rows.length > 0) {
-        userBranchCode = branchResult.rows[0].branch_code;
-        console.log('User branch_code:', userBranchCode);
-      } else {
-        console.log('Branch not found for branch_id:', userBranchId);
-      }
-    }
+    const userBranchCode = branchCodeFromReq(req);
 
     // Log API called
     await logApiCall({

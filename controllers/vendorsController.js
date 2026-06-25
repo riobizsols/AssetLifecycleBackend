@@ -1,4 +1,6 @@
 const vendorsModel = require("../models/vendorsModel");
+const operationalCache = require('../utils/operationalCache');
+const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
@@ -7,41 +9,23 @@ exports.getAllVendors = async (req, res) => {
   try {
     const org_id = req.user.org_id;
     
-    // Get user's branch information
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
-    
-    console.log('=== Vendor Listing Debug ===');
-    console.log('User org_id:', org_id);
-    console.log('User branch_id:', userBranchId);
-    
-    // Get branch_code from tblBranches
-    let userBranchCode = null;
+    const userBranchCode = branchCodeFromReq(req);
     const hasSuperAccess = req.user?.hasSuperAccess || false;
-    
-    if (!hasSuperAccess && userBranchId) {
-      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-      const dbPool = req.db || require("../config/db");
-
-      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-      if (branchResult.rows.length > 0) {
-        userBranchCode = branchResult.rows[0].branch_code;
-        console.log('User branch_code:', userBranchCode);
-      } else {
-        console.log('Branch not found for branch_id:', userBranchId);
-      }
-    }
     
     // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
     const type = req.query.type ? String(req.query.type).toLowerCase() : '';
-    if (type === 'product' || type === 'service') {
-      const vendors = await vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
-      return res.json(vendors);
-    }
-    // Optional query param to request only service vendors (legacy, uses service_supply column if present)
     const serviceOnly = req.query.serviceOnly === 'true' || req.query.serviceOnly === '1';
-    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+    const { data: vendors } = await operationalCache.cachedList(
+      req,
+      'vendors',
+      operationalCache.hashQuery({ type, serviceOnly }),
+      () => {
+        if (type === 'product' || type === 'service') {
+          return vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+        }
+        return vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+      },
+    );
     res.json(vendors);
   } catch (error) {
     console.error("Get all vendors error:", error);
