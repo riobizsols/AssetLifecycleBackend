@@ -12,6 +12,34 @@ require('dotenv').config();
 // Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
 let tenantRegistryPool = null;
 
+// Cached tenant DB pools — one pool per org (never create per request)
+const tenantPools = new Map();
+
+function tenantPoolMax() {
+  const parsed = Number(process.env.TENANT_DB_POOL_MAX);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+}
+
+function tenantRegistryPoolMax() {
+  const parsed = Number(process.env.TENANT_REGISTRY_POOL_MAX);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+}
+
+function credentialsFingerprint(credentials) {
+  return `${credentials.host}:${credentials.port}:${credentials.database}:${credentials.user}`;
+}
+
+async function evictTenantPool(orgId) {
+  const entry = tenantPools.get(orgId);
+  if (!entry) return;
+  tenantPools.delete(orgId);
+  try {
+    await entry.pool.end();
+  } catch {
+    // pool may already be closed
+  }
+}
+
 /**
  * Initialize tenant registry database connection pool
  * Uses TENANT_DATABASE_URL if set, otherwise falls back to DATABASE_URL
@@ -24,7 +52,7 @@ function initTenantRegistryPool() {
     }
     tenantRegistryPool = new Pool({
       connectionString,
-      max: 10,
+      max: tenantRegistryPoolMax(),
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
     });
@@ -102,6 +130,11 @@ async function checkTenantExists(orgId) {
  * Get tenant database credentials by org_id
  */
 async function getTenantCredentials(orgId) {
+  const cacheService = require('./cacheService');
+  const cacheKey = cacheService.buildKey('tenant', 'credentials', orgId);
+  const cached = await cacheService.get(cacheKey);
+  if (cached) return cached;
+
   const pool = initTenantRegistryPool();
   
   try {
@@ -117,11 +150,9 @@ async function getTenantCredentials(orgId) {
     }
 
     const tenant = result.rows[0];
-    
-    // Decrypt password
     const decryptedPassword = decryptPassword(tenant.db_password);
 
-    return {
+    const credentials = {
       orgId: tenant.org_id,
       host: tenant.db_host,
       port: tenant.db_port,
@@ -129,6 +160,8 @@ async function getTenantCredentials(orgId) {
       user: tenant.db_user,
       password: decryptedPassword,
     };
+    await cacheService.set(cacheKey, credentials, cacheService.getTenantExistsCacheTtlMs());
+    return credentials;
   } catch (error) {
     console.error('[TenantService] Error getting tenant credentials:', error);
     throw error;
@@ -147,14 +180,26 @@ function getTenantConnectionString(credentials) {
  */
 async function getTenantPool(orgId) {
   const credentials = await getTenantCredentials(orgId);
-  const connectionString = getTenantConnectionString(credentials);
+  const fingerprint = credentialsFingerprint(credentials);
 
-  return new Pool({
+  const existing = tenantPools.get(orgId);
+  if (existing && existing.fingerprint === fingerprint) {
+    return existing.pool;
+  }
+
+  if (existing) {
+    await evictTenantPool(orgId);
+  }
+
+  const connectionString = getTenantConnectionString(credentials);
+  const pool = new Pool({
     connectionString,
-    max: 10,
+    max: tenantPoolMax(),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
   });
+  tenantPools.set(orgId, { pool, fingerprint });
+  return pool;
 }
 
 /**
@@ -242,6 +287,11 @@ async function registerTenant(orgId, dbConfig) {
       console.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
     }
 
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'exists', orgId));
+
     return true;
   } catch (error) {
     console.error('[TenantService] Error registering tenant:', error);
@@ -277,6 +327,10 @@ async function updateTenant(orgId, dbConfig) {
       ]
     );
 
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
+
     return true;
   } catch (error) {
     console.error('[TenantService] Error updating tenant:', error);
@@ -298,6 +352,11 @@ async function deactivateTenant(orgId) {
        WHERE org_id = $1`,
       [orgId]
     );
+
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'exists', orgId));
 
     return true;
   } catch (error) {
