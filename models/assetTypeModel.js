@@ -8,6 +8,25 @@ const getDb = () => {
   return contextDb;
 };
 
+/** Template DBs may still have maint_required NOT NULL; migrated DBs drop it. */
+let hasLegacyMaintRequiredColumn = null;
+
+const assetTypesHasMaintRequiredColumn = async (dbPool) => {
+  if (hasLegacyMaintRequiredColumn !== null) {
+    return hasLegacyMaintRequiredColumn;
+  }
+  const result = await dbPool.query(`
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tblAssetTypes'
+      AND column_name = 'maint_required'
+    LIMIT 1
+  `);
+  hasLegacyMaintRequiredColumn = result.rows.length > 0;
+  return hasLegacyMaintRequiredColumn;
+};
+
 const insertAssetType = async (
     org_id,
     asset_type_id,
@@ -22,7 +41,20 @@ const insertAssetType = async (
     maint_lead_type = null,
     depreciation_type = 'ND'
 ) => {
-    const query = `
+    const dbPool = getDb();
+    const hasLegacyMaintRequired = await assetTypesHasMaintRequiredColumn(dbPool);
+
+    const query = hasLegacyMaintRequired
+        ? `
+        INSERT INTO "tblAssetTypes" (
+            org_id, asset_type_id, int_status,
+            assignment_type, inspection_required, group_required, created_by,
+            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
+            maint_required, maint_lead_type, last_gen_seq_no, depreciation_type
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $7, CURRENT_TIMESTAMP, $8, $9, $10, false, $11, 0, $12)
+        RETURNING *
+    `
+        : `
         INSERT INTO "tblAssetTypes" (
             org_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
@@ -31,15 +63,14 @@ const insertAssetType = async (
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $7, CURRENT_TIMESTAMP, $8, $9, $10, $11, 0, $12)
         RETURNING *
     `;
-    
+
     const values = [
         org_id, asset_type_id, int_status,
         assignment_type, inspection_required, group_required,
         created_by, text,
         is_child, parent_asset_type_id, maint_lead_type, depreciation_type
     ];
-    
-    const dbPool = getDb();
+
     return await dbPool.query(query, values);
 };
 
@@ -227,6 +258,33 @@ const getAssetTypesByMaintRequired = async (org_id = null) => {
         FROM "tblAssetTypes" at
         INNER JOIN "tblATMaintFreq" mf
           ON mf.asset_type_id = at.asset_type_id AND mf.org_id = at.org_id
+        WHERE at.int_status = 1
+    `;
+
+    if (org_id) {
+        query += ` AND at.org_id = $1`;
+        params.push(org_id);
+    }
+
+    query += ` ORDER BY at.text`;
+
+    const dbPool = getDb();
+    return await dbPool.query(query, params);
+};
+
+const getAssetTypesByInspectionRequired = async (org_id = null) => {
+    const params = [];
+    let query = `
+        SELECT DISTINCT
+            at.org_id, at.asset_type_id, at.int_status,
+            at.assignment_type, at.inspection_required, at.group_required, at.created_by,
+            at.created_on, at.changed_by, at.changed_on, at.text, at.is_child, at.parent_asset_type_id,
+            at.maint_lead_type, at.last_gen_seq_no, at.depreciation_type
+        FROM "tblAssetTypes" at
+        INNER JOIN "tblAATInspCheckList" cl
+          ON cl.at_id = at.asset_type_id AND cl.org_id = at.org_id
+        INNER JOIN "tblAAT_Insp_Freq" aif
+          ON aif.aatic_id = cl.aatic_id AND aif.org_id = at.org_id AND aif.int_status = 1
         WHERE at.int_status = 1
     `;
 
@@ -600,6 +658,7 @@ module.exports = {
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
     getAssetTypesByMaintRequired,
+    getAssetTypesByInspectionRequired,
     mapAssetTypeToProperties,
     getAssetTypeProperties,
     getAllProperties,

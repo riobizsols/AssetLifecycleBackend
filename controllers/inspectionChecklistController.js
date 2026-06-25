@@ -1,11 +1,17 @@
 const InspectionChecklistModel = require('../models/inspectionChecklistModel');
+const operationalCache = require('../utils/operationalCache');
 
 const getAllChecklists = async (req, res) => {
   try {
     const orgId = req.user?.org_id || 'default';
     console.log(`[InspectionChecklistController] Fetching checklists for org: ${orgId}`);
     
-    const checklists = await InspectionChecklistModel.getAllChecklists(orgId);
+    const { data: checklists } = await operationalCache.cachedList(
+      req,
+      'inspection-checklists',
+      'list',
+      () => InspectionChecklistModel.getAllChecklists(orgId),
+    );
     
     console.log(`[InspectionChecklistController] Found ${checklists.length} checklists`);
     
@@ -29,7 +35,12 @@ const getResponseTypes = async (req, res) => {
   try {
     console.log('[InspectionChecklistController] Fetching response types');
     
-    const responseTypes = await InspectionChecklistModel.getResponseTypes();
+    const { data: responseTypes } = await operationalCache.cachedList(
+      req,
+      'inspection-checklists',
+      'response-types',
+      () => InspectionChecklistModel.getResponseTypes(),
+    );
     
     return res.status(200).json({
       success: true,
@@ -110,6 +121,7 @@ const createChecklist = async (req, res) => {
     };
     
     const newChecklist = await InspectionChecklistModel.createChecklist(checklistData);
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     
     console.log('[InspectionChecklistController] Checklist created successfully:', newChecklist);
     
@@ -170,6 +182,7 @@ const updateChecklist = async (req, res) => {
     }
     
     console.log('[InspectionChecklistController] Checklist updated successfully:', updatedChecklist);
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     
     return res.status(200).json({
       success: true,
@@ -203,6 +216,7 @@ const deleteChecklist = async (req, res) => {
     }
     
     console.log('[InspectionChecklistController] Checklist deleted successfully');
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     
     return res.status(200).json({
       success: true,

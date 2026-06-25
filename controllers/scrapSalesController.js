@@ -1,4 +1,6 @@
 const model = require("../models/scrapSalesModel");
+const operationalCache = require('../utils/operationalCache');
+const { branchCodeFromReq } = require('../utils/reqUserBranch');
 // Import scrap sales logger
 const scrapSalesLogger = require('../eventLoggers/scrapSalesEventLogger');
 
@@ -23,30 +25,7 @@ const createScrapSale = async (req, res) => {
 
         const org_id = req.user?.org_id;
         const created_by = req.user?.user_id;
-        
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-        
-        console.log('=== Scrap Sales Creation Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
-        
-        // Get branch_code from tblBranches
-        let userBranchCode = null;
-        if (userBranchId) {
-            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const dbPool = req.db || require("../config/db");
-
-            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-            if (branchResult.rows.length > 0) {
-                userBranchCode = branchResult.rows[0].branch_code;
-                console.log('User branch_code:', userBranchCode);
-            } else {
-                console.log('Branch not found for branch_id:', userBranchId);
-            }
-        }
+        const userBranchCode = branchCodeFromReq(req);
 
         // Log API called
         scrapSalesLogger.logCreateScrapSaleApiCalled({
@@ -242,6 +221,8 @@ const createScrapSale = async (req, res) => {
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
         
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(201).json({
             success: true,
             message: "Scrap sale created successfully",
@@ -278,51 +259,30 @@ const getAllScrapSales = async (req, res) => {
     
     try {
         const org_id = req.user.org_id;
-        
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-        
-        console.log('=== Scrap Sales Listing Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
-        
-        // Get branch_code from tblBranches
-        let userBranchCode = null;
+        const userBranchCode = branchCodeFromReq(req);
         const hasSuperAccess = req.user?.hasSuperAccess || false;
-        
-        if (!hasSuperAccess && userBranchId) {
-            const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-            const dbPool = req.db || require("../config/db");
 
-            const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-            if (branchResult.rows.length > 0) {
-                userBranchCode = branchResult.rows[0].branch_code;
-                console.log('User branch_code:', userBranchCode);
-            } else {
-                console.log('Branch not found for branch_id:', userBranchId);
-            }
-        }
-        
-        // Log API called
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'scrap-sales',
+            'list',
+            () => model.getAllScrapSales(org_id, userBranchCode, hasSuperAccess).then((result) => result.rows),
+        );
+
         scrapSalesLogger.logGetAllScrapSalesApiCalled({
             method: req.method,
             url: req.originalUrl,
             userId
         }).catch(err => console.error('Logging error:', err));
         
-        const result = await model.getAllScrapSales(org_id, userBranchCode, hasSuperAccess);
-        
-        // Log success
-        if (result.rows.length === 0) {
+        if (rows.length === 0) {
             scrapSalesLogger.logNoScrapSalesFound({
                 userId,
                 duration: Date.now() - startTime
             }).catch(err => console.error('Logging error:', err));
         } else {
             scrapSalesLogger.logScrapSalesRetrieved({
-                count: result.rows.length,
+                count: rows.length,
                 userId,
                 duration: Date.now() - startTime
             }).catch(err => console.error('Logging error:', err));
@@ -330,9 +290,9 @@ const getAllScrapSales = async (req, res) => {
         
         res.status(200).json({
             success: true,
-            message: `Found ${result.rows.length} scrap sales`,
-            count: result.rows.length,
-            scrap_sales: result.rows
+            message: `Found ${rows.length} scrap sales`,
+            count: rows.length,
+            scrap_sales: rows
         });
     } catch (err) {
         console.error("Error fetching scrap sales:", err);
@@ -572,6 +532,8 @@ const deleteScrapSale = async (req, res) => {
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
 
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
+
         res.json({
             success: true,
             message: "Scrap sale deleted successfully",
@@ -700,6 +662,8 @@ const updateScrapSale = async (req, res) => {
         // Update scrap sale
         const result = await model.updateScrapSale(id, saleData);
         
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: "Scrap sale updated successfully",

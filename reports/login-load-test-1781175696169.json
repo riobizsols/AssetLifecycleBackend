@@ -1,0 +1,28 @@
+{
+  "timestamp": "2026-06-11T11:01:36.168Z",
+  "target": "http://localhost:4000/api/auth/login",
+  "concurrency": 100,
+  "iterations": 1,
+  "totalRequests": 100,
+  "successCount": 55,
+  "failureCount": 45,
+  "successRatePct": 55,
+  "wallTimeMs": 7728,
+  "throughputRps": 12.94,
+  "latencyMs": {
+    "min": 824,
+    "max": 7727,
+    "avg": 3706,
+    "p50": 4482,
+    "p90": 7323,
+    "p95": 7444,
+    "p99": 7708
+  },
+  "statusCounts": {
+    "200": 55,
+    "500": 45
+  },
+  "sampleErrors": [
+    "500: Internal server error"
+  ]
+}

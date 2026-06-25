@@ -16,9 +16,24 @@ services:
     ports:
       - "5002:5000"
     restart: unless-stopped
+    depends_on:
+      - alm-redis
     networks:
       - default
       - alm-shared
+
+  alm-redis:
+    image: redis:7-alpine
+    container_name: alm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - alm-shared
+
+volumes:
+  redis-data:
 
 networks:
   alm-shared:

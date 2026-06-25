@@ -623,11 +623,6 @@ const getAllMaintenanceSchedules = async (
   branchId,
   hasSuperAccess = false,
 ) => {
-  console.log("=== Maintenance Schedule Model Debug ===");
-  console.log("orgId:", orgId);
-  console.log("branchId:", branchId);
-  console.log("hasSuperAccess:", hasSuperAccess);
-
   let query = `
         SELECT 
             ams.*,
@@ -663,7 +658,6 @@ const getAllMaintenanceSchedules = async (
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
-  console.log("Query executed successfully, found rows:", result.rows.length);
   return result;
 };
 

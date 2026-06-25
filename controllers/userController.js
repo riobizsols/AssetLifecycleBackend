@@ -1,14 +1,17 @@
 const userModel = require("../models/userModel");
+const operationalCache = require('../utils/operationalCache');
 
 exports.getAllUsers = async (req, res) => {
     try {
         console.log('getAllUsers controller called');
         const orgId = req.user?.org_id;
         
-        // Use the new function that includes branch information
-        const users = orgId 
-            ? await userModel.getAllUsersWithBranch(orgId)
-            : await userModel.getAllUsers();
+        const { data: users } = await operationalCache.cachedList(
+            req,
+            'users',
+            'list',
+            () => (orgId ? userModel.getAllUsersWithBranch(orgId) : userModel.getAllUsers()),
+        );
             
         console.log('Users from model:', users.length);
         

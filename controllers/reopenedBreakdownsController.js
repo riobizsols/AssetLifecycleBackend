@@ -1,8 +1,7 @@
 const brHistModel = require('../models/assetMaintSchBrHistModel');
+const reportsCache = require('../utils/reportsCache');
 
 // GET /api/breakdown-history/reopened-breakdowns
-// Returns breakdown maintenance schedules reopened more than once (RO count > 1).
-// Optional query filters: assetId, assetTypeId, userId, deptId
 async function getReopenedBreakdowns(req, res) {
   try {
     const org_id = req.query.orgId || req.user?.org_id;
@@ -10,8 +9,7 @@ async function getReopenedBreakdowns(req, res) {
       return res.status(400).json({ success: false, message: 'orgId is required' });
     }
 
-    // Now drive the report from tblAssetMaintSch_BR_Hist (history) where status='RO'
-    const rows = await brHistModel.getReopenedBreakdownsFromHistory({
+    const filters = {
       org_id,
       asset_id: req.query.assetId || null,
       asset_type_id: req.query.assetTypeId || null,
@@ -20,7 +18,23 @@ async function getReopenedBreakdowns(req, res) {
       reopen_count_min: req.query.reopenCountMin || null,
       last_reopened_on_from: req.query.lastReopenedOnFrom || null,
       last_reopened_on_to: req.query.lastReopenedOnTo || null,
-    });
+    };
+
+    const { data: rows } = await reportsCache.cachedList(
+      req,
+      'reopened-breakdowns',
+      filters,
+      () => brHistModel.getReopenedBreakdownsFromHistory({
+        org_id,
+        asset_id: filters.asset_id,
+        asset_type_id: filters.asset_type_id,
+        user_id: filters.user_id,
+        dept_id: filters.dept_id,
+        reopen_count_min: filters.reopen_count_min,
+        last_reopened_on_from: filters.last_reopened_on_from,
+        last_reopened_on_to: filters.last_reopened_on_to,
+      }),
+    );
 
     return res.json({ success: true, data: rows });
   } catch (e) {
@@ -34,7 +48,6 @@ async function getReopenedBreakdowns(req, res) {
 }
 
 // GET /api/breakdown-history/reopened-breakdowns/filter-options
-// Filter options for the Reopened Breakdowns report when driven from history (tblAssetMaintSch_BR_Hist).
 async function getReopenedBreakdownsFilterOptions(req, res) {
   try {
     const org_id = req.query.orgId || req.user?.org_id;
@@ -42,9 +55,11 @@ async function getReopenedBreakdownsFilterOptions(req, res) {
       return res.status(400).json({ success: false, message: 'orgId is required' });
     }
 
-    const filter_options = await brHistModel.getReopenedBreakdownsFilterOptionsFromHistory({
-      org_id,
-    });
+    const { data: filter_options } = await reportsCache.cachedFilterOptions(
+      req,
+      'reopened-breakdowns',
+      () => brHistModel.getReopenedBreakdownsFilterOptionsFromHistory({ org_id }),
+    );
 
     return res.json({ success: true, filter_options });
   } catch (e) {
@@ -69,10 +84,12 @@ async function getReopenedBreakdownBrHist(req, res) {
       return res.status(400).json({ success: false, message: 'amsId is required' });
     }
 
-    const rows = await brHistModel.getBrHistRowsForAmsId({
-      org_id,
-      ams_id: amsId,
-    });
+    const { data: rows } = await reportsCache.cachedList(
+      req,
+      'reopened-breakdowns-history',
+      { org_id, ams_id: amsId },
+      () => brHistModel.getBrHistRowsForAmsId({ org_id, ams_id: amsId }),
+    );
 
     return res.json({ success: true, data: rows });
   } catch (e) {
@@ -90,4 +107,3 @@ module.exports = {
   getReopenedBreakdownsFilterOptions,
   getReopenedBreakdownBrHist,
 };
-

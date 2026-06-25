@@ -1,4 +1,6 @@
 const model = require("../models/employeeModel");
+const assignmentCache = require("../utils/assignmentCache");
+const operationalCache = require('../utils/operationalCache');
 const userJobRoleModel = require("../models/userJobRoleModel");
 const { sendWelcomeEmail, sendRoleAssignmentEmail } = require("../utils/mailer");
 const { getDbFromContext } = require("../utils/dbContext");
@@ -24,8 +26,16 @@ const getOrganizationNameFromEmployee = async (emp_int_id) => {
 // GET /api/employees - Get all employees
 const getAllEmployees = async (req, res) => {
     try {
-        const result = await model.getAllEmployees();
-        res.status(200).json(result.rows);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'employees',
+            'list',
+            async () => {
+                const result = await model.getAllEmployees();
+                return result.rows;
+            },
+        );
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching employees:", err);
         res.status(500).json({ error: "Failed to fetch employees" });
@@ -53,8 +63,16 @@ const getEmployeeById = async (req, res) => {
 const getEmployeesByDepartment = async (req, res) => {
     try {
         const { dept_id } = req.params;
-        const result = await model.getEmployeesByDepartment(dept_id);
-        res.status(200).json(result.rows);
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'employees', dept_id);
+        const { data } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const result = await model.getEmployeesByDepartment(dept_id);
+                return result.rows;
+            },
+        );
+        res.status(200).json(data);
     } catch (err) {
         console.error("Error fetching employees by department:", err);
         res.status(500).json({ error: "Failed to fetch employees by department" });
@@ -64,8 +82,16 @@ const getEmployeesByDepartment = async (req, res) => {
 // GET /api/employees/with-roles - Get all employees with their current job roles
 const getAllEmployeesWithJobRoles = async (req, res) => {
     try {
-        const result = await model.getAllEmployeesWithJobRoles();
-        res.status(200).json(result.rows);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'employees',
+            'with-roles',
+            async () => {
+                const result = await model.getAllEmployeesWithJobRoles();
+                return result.rows;
+            },
+        );
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching employees with job roles:", err);
         res.status(500).json({ error: "Failed to fetch employees with job roles" });

@@ -1,10 +1,16 @@
 const InspectionFrequencyModel = require('../models/inspectionFrequencyModel');
+const operationalCache = require('../utils/operationalCache');
 
 class InspectionFrequencyController {
   static async getAllInspectionFrequencies(req, res) {
     try {
       const orgId = req.user.org_id;
-      const frequencies = await InspectionFrequencyModel.getAllInspectionFrequencies(orgId);
+      const { data: frequencies } = await operationalCache.cachedList(
+        req,
+        'inspection-frequencies',
+        'list',
+        () => InspectionFrequencyModel.getAllInspectionFrequencies(orgId),
+      );
       
       res.json({
         success: true,
@@ -34,6 +40,7 @@ class InspectionFrequencyController {
       }
       
       const frequency = await InspectionFrequencyModel.createInspectionFrequency(data, orgId, userId);
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
       
       res.json({
         success: true,
@@ -66,6 +73,8 @@ class InspectionFrequencyController {
         });
       }
       
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         data: frequency,
@@ -95,6 +104,8 @@ class InspectionFrequencyController {
         });
       }
       
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         message: 'Inspection frequency deleted successfully'

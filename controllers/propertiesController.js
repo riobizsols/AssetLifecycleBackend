@@ -1,5 +1,6 @@
 const PropertiesModel = require('../models/propertiesModel');
 const { generateCustomId } = require('../utils/idGenerator');
+const operationalCache = require('../utils/operationalCache');
 
 class PropertiesController {
   // Get properties for a specific asset type
@@ -255,11 +256,12 @@ class PropertiesController {
     try {
       const orgId = req.user.org_id;
 
-      console.log(`Fetching all properties with values for org: ${orgId}`);
-
-      const properties = await PropertiesModel.getAllPropertiesWithValues(orgId);
-      
-      console.log(`Found ${properties.length} properties with values`);
+      const { data: properties } = await operationalCache.cachedList(
+        req,
+        'properties',
+        'with-values',
+        () => PropertiesModel.getAllPropertiesWithValues(orgId),
+      );
 
       res.json({
         success: true,
@@ -293,6 +295,8 @@ class PropertiesController {
       const newProperty = await PropertiesModel.createProperty(property, orgId);
       
       console.log(`Successfully created property:`, newProperty);
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       res.status(201).json({
         success: true,
@@ -338,6 +342,8 @@ class PropertiesController {
       const result = await PropertiesModel.createPropertyWithValues(property, listValues || [], orgId);
       
       console.log(`Successfully created property with ${result.listValues.length} values`);
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       res.status(201).json({
         success: true,
@@ -389,6 +395,8 @@ class PropertiesController {
         });
       }
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         data: updatedProperty,
@@ -431,6 +439,8 @@ class PropertiesController {
         });
       }
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         message: 'Property deleted successfully'
@@ -462,6 +472,8 @@ class PropertiesController {
 
       const newValue = await PropertiesModel.addListValueToProperty(propId, value, orgId);
       
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.status(201).json({
         success: true,
         data: newValue,
@@ -493,6 +505,8 @@ class PropertiesController {
           message: 'Property value not found'
         });
       }
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       res.json({
         success: true,

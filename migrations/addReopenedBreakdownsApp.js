@@ -86,7 +86,7 @@ const addReopenedBreakdownsApp = async () => {
           TARGET_LABEL,
           false,
           nextSeq,
-          "V",
+          "D",
           "D",
           1,
           jobRole.org_id,

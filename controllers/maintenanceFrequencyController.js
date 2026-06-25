@@ -1,5 +1,6 @@
 const MaintenanceFrequencyModel = require('../models/maintenanceFrequencyModel');
 const AssetTypeModel = require('../models/assetTypeModel');
+const operationalCache = require('../utils/operationalCache');
 
 class MaintenanceFrequencyController {
   // Get all maintenance frequencies
@@ -7,11 +8,12 @@ class MaintenanceFrequencyController {
     try {
       const orgId = req.user.org_id;
 
-      console.log(`Fetching all maintenance frequencies for org: ${orgId}`);
-
-      const frequencies = await MaintenanceFrequencyModel.getAllMaintenanceFrequencies(orgId);
-      
-      console.log(`Found ${frequencies.length} maintenance frequencies`);
+      const { data: frequencies } = await operationalCache.cachedList(
+        req,
+        'maintenance-frequencies',
+        'list',
+        () => MaintenanceFrequencyModel.getAllMaintenanceFrequencies(orgId),
+      );
 
       res.json({
         success: true,
@@ -33,11 +35,12 @@ class MaintenanceFrequencyController {
       const { assetTypeId } = req.params;
       const orgId = req.user.org_id;
 
-      console.log(`Fetching maintenance frequencies for asset type: ${assetTypeId}, org: ${orgId}`);
-
-      const frequencies = await MaintenanceFrequencyModel.getMaintenanceFrequenciesByAssetType(assetTypeId, orgId);
-      
-      console.log(`Found ${frequencies.length} maintenance frequencies for asset type ${assetTypeId}`);
+      const { data: frequencies } = await operationalCache.cachedList(
+        req,
+        'maintenance-frequencies',
+        `asset-type:${assetTypeId}`,
+        () => MaintenanceFrequencyModel.getMaintenanceFrequenciesByAssetType(assetTypeId, orgId),
+      );
 
       res.json({
         success: true,
@@ -166,6 +169,8 @@ class MaintenanceFrequencyController {
       
       console.log(`Successfully created maintenance frequency:`, newFrequency);
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.status(201).json({
         success: true,
         data: newFrequency,
@@ -252,6 +257,8 @@ class MaintenanceFrequencyController {
         });
       }
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         data: updatedFrequency,
@@ -283,6 +290,8 @@ class MaintenanceFrequencyController {
           message: 'Maintenance frequency not found'
         });
       }
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       res.json({
         success: true,

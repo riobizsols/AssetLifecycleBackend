@@ -1,5 +1,6 @@
 const inspectionApprovalModel = require('../models/inspectionApprovalModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
+const operationalCache = require('../utils/operationalCache');
 
 /**
  * CHUNK 2.1 & 2.2: INSPECTION APPROVALS (CONTROLLER)
@@ -34,7 +35,12 @@ async function getPendingApprovals(req, res) {
     // Remove duplicates and nulls
     jobRoles = [...new Set(jobRoles)].filter(Boolean);
 
-    const approvals = await inspectionApprovalModel.getPendingInspectionApprovals(orgId, jobRoles);
+    const { data: approvals } = await operationalCache.cachedList(
+      req,
+      'inspection-approval',
+      operationalCache.hashQuery(jobRoles),
+      () => inspectionApprovalModel.getPendingInspectionApprovals(orgId, jobRoles),
+    );
     
     return res.json({ success: true, count: approvals.length, data: approvals });
   } catch (error) {
@@ -312,6 +318,8 @@ async function processApprovalAction(req, res) {
       }
     }
     
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
     return res.json({
       success: true,
       message: `Action ${normalizedAction} processed successfully. ${nextStepMessage}`,

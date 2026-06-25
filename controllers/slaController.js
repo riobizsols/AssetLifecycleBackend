@@ -24,11 +24,13 @@ const getSLADescriptions = async (req, res) => {
     });
   } catch (error) {
     console.error("[SLAController] Error fetching SLA descriptions:", error);
-    console.error("[SLAController] Error stack:", error.stack);
-    res.status(500).json({ 
-      success: false, 
+    if (error.code === "42P01") {
+      return res.json({ success: true, data: [] });
+    }
+    res.status(500).json({
+      success: false,
       error: "Failed to fetch SLA descriptions",
-      message: error.message 
+      message: error.message,
     });
   }
 };

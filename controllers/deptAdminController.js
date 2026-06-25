@@ -1,4 +1,5 @@
 const DeptAdminModel = require('../models/deptAdminModel');
+const assignmentCache = require('../utils/assignmentCache');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 
@@ -8,7 +9,12 @@ const fetchDepartments = async (req, res) => {
     try {
         const org_id = req.user.org_id;
         const branch_id = req.user.branch_id;
-        const data = await DeptAdminModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false);
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'departments');
+        const { data } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => DeptAdminModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false),
+        );
         res.json(data);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch departments' });

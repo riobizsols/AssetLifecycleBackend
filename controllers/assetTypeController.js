@@ -1,4 +1,5 @@
 const model = require("../models/assetTypeModel");
+const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
 
@@ -169,8 +170,16 @@ const getAllAssetTypes = async (req, res) => {
     try {
         // Filter by user's org_id to show only asset types from their database
         const org_id = req.user?.org_id;
-        const result = await model.getAllAssetTypes(org_id);
-        res.status(200).json(result.rows);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'asset-types',
+            'list',
+            async () => {
+                const result = await model.getAllAssetTypes(org_id);
+                return result.rows;
+            },
+        );
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching asset types:", err);
         res.status(500).json({ error: "Failed to fetch asset types" });
@@ -227,15 +236,20 @@ const getAssetTypesByGroupRequired = async (req, res) => {
     }
 };
 
-// GET /api/asset-types/maint-required - Get asset types where maint_required is true
+// GET /api/asset-types/maint-required - Get asset types with maintenance frequency configured
 const getAssetTypesByMaintRequired = async (req, res) => {
     try {
-        const result = await model.getAssetTypesByMaintRequired();
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'asset-types',
+            'maint-required',
+            () => model.getAssetTypesByMaintRequired().then((result) => result.rows),
+        );
         res.status(200).json({
             success: true,
             message: "Asset types with maintenance required retrieved successfully",
-            data: result.rows,
-            count: result.rows.length,
+            data: rows,
+            count: rows.length,
             timestamp: new Date().toISOString()
         });
     } catch (err) {
@@ -244,6 +258,27 @@ const getAssetTypesByMaintRequired = async (req, res) => {
             success: false,
             message: "Failed to fetch asset types by maintenance required",
             error: err.message 
+        });
+    }
+};
+
+// GET /api/asset-types/inspection-required - Get asset types with inspection frequency configured
+const getAssetTypesByInspectionRequired = async (req, res) => {
+    try {
+        const result = await model.getAssetTypesByInspectionRequired();
+        res.status(200).json({
+            success: true,
+            message: "Asset types with inspection configured retrieved successfully",
+            data: result.rows,
+            count: result.rows.length,
+            timestamp: new Date().toISOString()
+        });
+    } catch (err) {
+        console.error("Error fetching asset types by inspection required:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch asset types by inspection required",
+            error: err.message
         });
     }
 };
@@ -843,6 +878,7 @@ module.exports = {
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
     getAssetTypesByMaintRequired,
+    getAssetTypesByInspectionRequired,
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,

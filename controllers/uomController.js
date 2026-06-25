@@ -1,4 +1,5 @@
 const UOMModel = require('../models/uomModel');
+const operationalCache = require('../utils/operationalCache');
 
 class UOMController {
   // Get all UOM values
@@ -6,11 +7,12 @@ class UOMController {
     try {
       const orgId = req.user.org_id;
 
-      console.log(`Fetching all UOM values for org: ${orgId}`);
-
-      const uomValues = await UOMModel.getAllUOM(orgId);
-      
-      console.log(`Found ${uomValues.length} UOM values`);
+      const { data: uomValues } = await operationalCache.cachedList(
+        req,
+        'uom',
+        'list',
+        () => UOMModel.getAllUOM(orgId),
+      );
 
       res.json({
         success: true,

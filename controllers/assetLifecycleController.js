@@ -1,4 +1,5 @@
 const assetLifecycleModel = require("../models/assetLifecycleModel");
+const reportsCache = require("../utils/reportsCache");
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -108,11 +109,24 @@ const getAssetLifecycle = async (req, res) => {
       userId
     });
 
-    // Get data and count
-    const [data, count] = await Promise.all([
-      assetLifecycleModel.getAssetLifecycleData(filters),
-      assetLifecycleModel.getAssetLifecycleCount(filters)
-    ]);
+    // Get data and count (cached per org/branch/filter)
+    const { data: cachedPayload } = await reportsCache.cachedList(
+      req,
+      'asset-lifecycle',
+      filters,
+      async () => {
+        const [data, count] = await Promise.all([
+          assetLifecycleModel.getAssetLifecycleData(filters),
+          assetLifecycleModel.getAssetLifecycleCount(filters),
+        ]);
+        return {
+          rows: data.rows,
+          count: parseInt(count, 10),
+        };
+      },
+    );
+    const data = { rows: cachedPayload.rows };
+    const count = cachedPayload.count;
 
     const recordCount = data.rows?.length || 0;
 
@@ -207,7 +221,11 @@ const getAssetLifecycle = async (req, res) => {
 // Get filter options for asset lifecycle
 const getAssetLifecycleFilterOptions = async (req, res) => {
   try {
-    const options = await assetLifecycleModel.getAssetLifecycleFilterOptions();
+    const { data: options } = await reportsCache.cachedFilterOptions(
+      req,
+      'asset-lifecycle',
+      () => assetLifecycleModel.getAssetLifecycleFilterOptions(),
+    );
     
     res.status(200).json({
       success: true,

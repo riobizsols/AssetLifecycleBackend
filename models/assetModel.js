@@ -1372,18 +1372,7 @@ const getAssetsByUserContext = async (
   return await dbPool.query(query, params);
 };
 
-// Get assets with user context filtering and additional filters - automatically respects super access
-// If hasSuperAccess is true, branch filter is not applied (user sees all branches)
-const getAssetsByUserContextWithFilters = async (
-  userOrgId,
-  userBranchId,
-  additionalFilters = {},
-  dbConnection = null,
-  hasSuperAccess = false,
-) => {
-  const dbPool = getDb(dbConnection);
-
-  let query = `
+const ASSETS_LIST_SELECT = `
     SELECT 
       a.asset_id, a.asset_type_id, a.text, a.serial_number, a.description,
       a.branch_id, a.purchase_vendor_id, a.service_vendor_id, a.prod_serv_id, a.maintsch_id, 
@@ -1397,48 +1386,45 @@ const getAssetsByUserContextWithFilters = async (
     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
-    WHERE a.org_id = $1
-  `;
+`;
 
+function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters = {}, hasSuperAccess = false) {
+  let clause = ` WHERE a.org_id = $1`;
   const params = [userOrgId];
   let paramIndex = 2;
 
-  // Apply branch filter only if user doesn't have super access
-  // If hasSuperAccess is true, user can see all branches (no filter applied)
   if (!hasSuperAccess && userBranchId) {
-    query += ` AND a.branch_id = $${paramIndex}`;
+    clause += ` AND a.branch_id = $${paramIndex}`;
     params.push(userBranchId);
     paramIndex++;
   }
 
-  // Apply additional filters
   if (additionalFilters.asset_type_id) {
-    query += ` AND a.asset_type_id = $${paramIndex}`;
+    clause += ` AND a.asset_type_id = $${paramIndex}`;
     params.push(additionalFilters.asset_type_id);
     paramIndex++;
   }
 
   if (additionalFilters.status) {
-    query += ` AND a.current_status = $${paramIndex}`;
+    clause += ` AND a.current_status = $${paramIndex}`;
     params.push(additionalFilters.status);
     paramIndex++;
   }
 
   if (additionalFilters.vendor_id) {
-    query += ` AND (a.purchase_vendor_id = $${paramIndex} OR a.service_vendor_id = $${paramIndex})`;
+    clause += ` AND (a.purchase_vendor_id = $${paramIndex} OR a.service_vendor_id = $${paramIndex})`;
     params.push(additionalFilters.vendor_id);
     paramIndex++;
   }
 
   if (additionalFilters.search) {
-    query += ` AND (a.text ILIKE $${paramIndex} OR a.serial_number ILIKE $${paramIndex} OR a.description ILIKE $${paramIndex})`;
+    clause += ` AND (a.text ILIKE $${paramIndex} OR a.serial_number ILIKE $${paramIndex} OR a.description ILIKE $${paramIndex})`;
     params.push(`%${additionalFilters.search}%`);
     paramIndex++;
   }
 
-  // Exclude assets that are already in maintenance (if exclude_in_maintenance is true)
   if (additionalFilters.exclude_in_maintenance) {
-    query += ` AND NOT EXISTS (
+    clause += ` AND NOT EXISTS (
       SELECT 1 FROM "tblAssetMaintSch" ams
       WHERE ams.asset_id = a.asset_id 
         AND ams.org_id = a.org_id
@@ -1451,9 +1437,56 @@ const getAssetsByUserContextWithFilters = async (
     )`;
   }
 
-  query += ` ORDER BY a.created_on DESC`;
+  return { clause, params, paramIndex };
+}
 
-  return await dbPool.query(query, params);
+// Get assets with user context filtering and additional filters - automatically respects super access
+// If hasSuperAccess is true, branch filter is not applied (user sees all branches)
+const getAssetsByUserContextWithFilters = async (
+  userOrgId,
+  userBranchId,
+  additionalFilters = {},
+  dbConnection = null,
+  hasSuperAccess = false,
+  pagination = null,
+) => {
+  const dbPool = getDb(dbConnection);
+  const { clause, params, paramIndex } = buildAssetsListFilterClause(
+    userOrgId,
+    userBranchId,
+    additionalFilters,
+    hasSuperAccess,
+  );
+
+  let query = `${ASSETS_LIST_SELECT}${clause} ORDER BY a.created_on DESC`;
+  const queryParams = [...params];
+
+  if (pagination?.limit != null) {
+    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+    queryParams.push(pagination.limit, pagination.offset || 0);
+  }
+
+  return await dbPool.query(query, queryParams);
+};
+
+const countAssetsByUserContextWithFilters = async (
+  userOrgId,
+  userBranchId,
+  additionalFilters = {},
+  dbConnection = null,
+  hasSuperAccess = false,
+) => {
+  const dbPool = getDb(dbConnection);
+  const { clause, params } = buildAssetsListFilterClause(
+    userOrgId,
+    userBranchId,
+    additionalFilters,
+    hasSuperAccess,
+  );
+
+  const query = `SELECT COUNT(*)::int AS total_count FROM "tblAssets" a${clause}`;
+  const result = await dbPool.query(query, params);
+  return result.rows[0]?.total_count || 0;
 };
 
 module.exports = {
@@ -1489,6 +1522,7 @@ module.exports = {
   getAssetsByExpiryDate,
   getAssetsByUserContext,
   getAssetsByUserContextWithFilters,
+  countAssetsByUserContextWithFilters,
 
   getAssetsCount,
 };

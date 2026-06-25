@@ -1,6 +1,11 @@
 const model = require("../models/assetAssignmentModel");
+const assignmentCache = require("../utils/assignmentCache");
 const deptAssignmentLogger = require("../eventLoggers/deptAssignmentEventLogger");
 const empAssignmentLogger = require("../eventLoggers/empAssignmentEventLogger");
+
+function bustAssignmentCaches(req, orgId) {
+    assignmentCache.invalidateOrgCaches(orgId || req.user?.org_id).catch(() => {});
+}
 
 // POST /api/asset-assignments - Add new asset assignment
 const addAssetAssignment = async (req, res) => {
@@ -174,6 +179,8 @@ const addAssetAssignment = async (req, res) => {
             assignment_type: assignmentType
         });
 
+        bustAssignmentCaches(req, org_id);
+
     } catch (err) {
         console.error("Error adding asset assignment:", err);
         deptAssignmentLogger.logAssignmentError({
@@ -318,6 +325,8 @@ const addEmployeeAssetAssignment = async (req, res) => {
             assignment: result.rows[0]
         });
 
+        bustAssignmentCaches(req, org_id);
+
     } catch (err) {
         console.error("Error adding employee asset assignment:", err);
         empAssignmentLogger.logAssignmentError({
@@ -393,22 +402,28 @@ const getAssetAssignmentsByDept = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 2: Log querying history from database (non-blocking)
         deptAssignmentLogger.logQueryingDeptAssignments({
             deptId: dept_id,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getAssetAssignmentsByDept(dept_id);
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'dept-history', dept_id);
+        const { data: rows } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const result = await model.getAssetAssignmentsByDept(dept_id);
+                return result.rows;
+            },
+        );
 
-        // STEP 3: Log history retrieved (non-blocking)
         deptAssignmentLogger.logAssignmentHistoryViewed({
             deptId: dept_id,
             userId,
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
 
-        res.status(200).json(result.rows);
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching asset assignments by department:", err);
         deptAssignmentLogger.logAssignmentRetrievalError({
@@ -429,7 +444,6 @@ const getAssetAssignmentsByEmployee = async (req, res) => {
     try {
         const { employee_id } = req.params;
 
-        // STEP 1: Log history API called (non-blocking)
         empAssignmentLogger.logApiCall({
             operation: 'getEmployeeAssignmentHistory',
             method: req.method,
@@ -438,22 +452,28 @@ const getAssetAssignmentsByEmployee = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 2: Log querying history from database (non-blocking)
         empAssignmentLogger.logQueryingEmpAssignments({
             employeeId: employee_id,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getAssetAssignmentsByEmployee(employee_id);
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'emp-history', employee_id);
+        const { data: rows } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const result = await model.getAssetAssignmentsByEmployee(employee_id);
+                return result.rows;
+            },
+        );
 
-        // STEP 3: Log history retrieved (non-blocking)
         empAssignmentLogger.logAssignmentHistoryViewed({
             employeeIntId: employee_id,
             userId,
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
 
-        res.status(200).json(result.rows);
+        res.status(200).json(rows);
     } catch (err) {
         console.error("Error fetching asset assignments by employee:", err);
         empAssignmentLogger.logAssignmentRetrievalError({
@@ -474,7 +494,6 @@ const getActiveAssetAssignmentsByEmployee = async (req, res) => {
     try {
         const { employee_id } = req.params;
 
-        // STEP 1: Log API called (non-blocking)
         empAssignmentLogger.logEmpSelectionApiCalled({
             method: req.method,
             url: req.originalUrl,
@@ -482,64 +501,80 @@ const getActiveAssetAssignmentsByEmployee = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 2: Log querying database (non-blocking)
         empAssignmentLogger.logQueryingEmpAssignments({
             employeeId: employee_id,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getActiveAssetAssignmentsByEmployeeWithDetails(employee_id);
-        
-        const count = result.assignments.length;
-        const message = count > 0 ? `Active AssetAssignment : ${count}` : "No active asset assignments found";
-        
-        // Check if employee exists
-        if (!result.employee) {
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'emp-active', employee_id);
+        const { data: payload } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const result = await model.getActiveAssetAssignmentsByEmployeeWithDetails(employee_id);
+                const count = result.assignments.length;
+
+                if (!result.employee) {
+                    return {
+                        status: 404,
+                        body: {
+                            error: "Employee not found",
+                            message: "Employee not found",
+                            count: 0,
+                            data: [],
+                            employee: null,
+                            department: null
+                        },
+                    };
+                }
+
+                const message = count > 0 ? `Active AssetAssignment : ${count}` : "No active asset assignments found";
+
+                return {
+                    status: 200,
+                    body: {
+                        message,
+                        count,
+                        data: result.assignments,
+                        employee: {
+                            emp_int_id: result.employee.emp_int_id,
+                            employee_id: result.employee.employee_id,
+                            employee_name: result.employee.employee_name,
+                            dept_id: result.employee.dept_id
+                        },
+                        department: {
+                            dept_id: result.employee.dept_id,
+                            department_name: result.employee.department_name
+                        }
+                    },
+                    count,
+                };
+            },
+        );
+
+        if (payload.status === 404) {
             empAssignmentLogger.logInvalidEmployee({
                 employeeId: employee_id,
                 userId,
                 duration: Date.now() - startTime
             }).catch(err => console.error('Logging error:', err));
-            return res.status(404).json({ 
-                error: "Employee not found",
-                message: "Employee not found",
-                count: 0,
-                data: [],
-                employee: null,
-                department: null
-            });
+            return res.status(404).json(payload.body);
         }
 
-        // STEP 3: Log processing data (non-blocking)
         empAssignmentLogger.logProcessingEmpAssignmentData({
             employeeId: employee_id,
-            count: count,
+            count: payload.count,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 4: Log successful retrieval (non-blocking)
         empAssignmentLogger.logEmpAssignmentsRetrieved({
             employeeId: employee_id,
-            count: count,
+            count: payload.count,
             userId,
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
-        
-        res.status(200).json({
-            message: message,
-            count: count,
-            data: result.assignments,
-            employee: {
-                emp_int_id: result.employee.emp_int_id,
-                employee_id: result.employee.employee_id,
-                employee_name: result.employee.employee_name,
-                dept_id: result.employee.dept_id
-            },
-            department: {
-                dept_id: result.employee.dept_id,
-                department_name: result.employee.department_name
-            }
-        });
+
+        res.status(200).json(payload.body);
     } catch (err) {
         console.error("Error fetching active asset assignments by employee:", err);
         empAssignmentLogger.logAssignmentRetrievalError({
@@ -692,6 +727,8 @@ const updateAssetAssignment = async (req, res) => {
             assignment: result.rows[0]
         });
 
+        bustAssignmentCaches(req, org_id || existingAssignment.rows[0]?.org_id);
+
     } catch (err) {
         console.error("Error updating asset assignment:", err);
         
@@ -757,8 +794,9 @@ const updateAssetAssignmentByAssetId = async (req, res) => {
             assignment: result.rows[0]
         });
 
+        bustAssignmentCaches(req, validAssignment.org_id);
+
     } catch (err) {
-        console.error("Error updating asset assignment by asset_id:", err);
         res.status(500).json({ error: "Internal server error", err });
     }
 };
@@ -782,8 +820,9 @@ const deleteAssetAssignment = async (req, res) => {
             assignment: result.rows[0]
         });
 
+        bustAssignmentCaches(req, existingAssignment.rows[0]?.org_id);
+
     } catch (err) {
-        console.error("Error deleting asset assignment:", err);
         res.status(500).json({ error: "Internal server error", err });
     }
 };
@@ -807,8 +846,9 @@ const deleteMultipleAssetAssignments = async (req, res) => {
             deleted_assignments: result.rows
         });
 
+        bustAssignmentCaches(req);
+
     } catch (err) {
-        console.error("Error deleting multiple asset assignments:", err);
         res.status(500).json({ error: "Internal server error" });
     }
 };
@@ -823,7 +863,6 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
     try {
         const { dept_id } = req.params;
 
-        // STEP 1: Log API called (non-blocking)
         deptAssignmentLogger.logDeptSelectionApiCalled({
             method: req.method,
             url: req.originalUrl,
@@ -831,67 +870,87 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 2: Log querying database (non-blocking)
         deptAssignmentLogger.logQueryingDeptAssignments({
             deptId: dept_id,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        const result = await model.getDepartmentWiseAssetAssignments(dept_id, org_id, branch_id, req.user?.hasSuperAccess || false);
-        
-        // Check if department exists
-        if (!result.department) {
+        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'dept', dept_id);
+        const { data: payload } = await assignmentCache.getOrSet(
+            cacheKey,
+            assignmentCache.getTtlMs(),
+            async () => {
+                const result = await model.getDepartmentWiseAssetAssignments(
+                    dept_id,
+                    org_id,
+                    branch_id,
+                    req.user?.hasSuperAccess || false,
+                );
+
+                if (!result.department) {
+                    return {
+                        status: 404,
+                        body: {
+                            error: "Department not found",
+                            message: "Department not found",
+                            department: null,
+                            assignedAssets: [],
+                            assetCount: 0,
+                            employeeCount: 0
+                        },
+                    };
+                }
+
+                const assetCount = result.assignedAssets.length;
+                const employeeCount = result.employees.length;
+                const message = assetCount > 0
+                    ? `Department has ${assetCount} assigned assets and ${employeeCount} employees`
+                    : `Department has no assigned assets and ${employeeCount} employees`;
+
+                return {
+                    status: 200,
+                    body: {
+                        message,
+                        department: {
+                            dept_id: result.department.dept_id,
+                            department_name: result.department.department_name,
+                            employee_count: employeeCount,
+                            org_id: result.department.org_id,
+                            branch_id: result.department.branch_id
+                        },
+                        assetCount,
+                        employeeCount,
+                        assignedAssets: result.assignedAssets,
+                        employees: result.employees
+                    },
+                    assetCount,
+                };
+            },
+        );
+
+        if (payload.status === 404) {
             deptAssignmentLogger.logInvalidDepartment({
                 deptId: dept_id,
                 userId,
                 duration: Date.now() - startTime
             }).catch(err => console.error('Logging error:', err));
-            return res.status(404).json({ 
-                error: "Department not found",
-                message: "Department not found",
-                department: null,
-                assignedAssets: [],
-                assetCount: 0,
-                employeeCount: 0
-            });
+            return res.status(404).json(payload.body);
         }
-        
-        const assetCount = result.assignedAssets.length;
-        const employeeCount = result.employees.length;
-        
-        const message = assetCount > 0 
-            ? `Department has ${assetCount} assigned assets and ${employeeCount} employees`
-            : `Department has no assigned assets and ${employeeCount} employees`;
-        
-        // STEP 3: Log processing data (non-blocking)
+
         deptAssignmentLogger.logProcessingAssignmentData({
             deptId: dept_id,
-            count: assetCount,
+            count: payload.assetCount,
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // STEP 4: Log successful retrieval (non-blocking)
         deptAssignmentLogger.logDeptAssignmentsRetrieved({
             deptId: dept_id,
-            count: assetCount,
+            count: payload.assetCount,
             userId,
             duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
-        
-        res.status(200).json({
-            message: message,
-            department: {
-                dept_id: result.department.dept_id,
-                department_name: result.department.department_name,
-                employee_count: employeeCount,
-                org_id: result.department.org_id,
-                branch_id: result.department.branch_id
-            },
-            assetCount: assetCount,
-            employeeCount: employeeCount,
-            assignedAssets: result.assignedAssets,
-            employees: result.employees
-        });
+
+        res.status(200).json(payload.body);
     } catch (err) {
         console.error("Error fetching department-wise asset assignments:", err);
         deptAssignmentLogger.logAssignmentRetrievalError({

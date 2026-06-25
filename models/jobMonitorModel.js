@@ -3,6 +3,7 @@ const CronService = require('../services/cronService');
 const { backfillMissingWorkflowSequences } = require('../cron/wfAtSeqBackfillCron');
 const { backfillMissingScrapWorkflowSequences } = require('../cron/wfScrapSeqBackfillCron');
 const { ensureWarrantyNotificationsForWindowAllOrgs } = require('./assetWarrantyNotifyModel');
+const { ensureExpiryNotificationsForWindowAllOrgs } = require('./assetExpiryNotifyModel');
 
 const getDb = () => getDbFromContext();
 
@@ -13,6 +14,7 @@ const DEFAULT_JOBS = [
   { job_id: 'JOB004', job_name: 'scrap seq setting', frequency: 'manual', status: 'DISABLED', file_path: 'cron/wfScrapSeqBackfillCron' },
   { job_id: 'JOB005', job_name: 'maint seq setting', frequency: 'manual', status: 'DISABLED', file_path: 'cron/wfAtSeqBackfillCron' },
   { job_id: 'JOB006', job_name: 'warranty notification trigger', frequency: '0 7 * * *', status: 'DISABLED', file_path: 'cron/warrantyNotificationTrigger' },
+  { job_id: 'JOB007', job_name: 'asset expiry notification trigger', frequency: '0 7 * * *', status: 'DISABLED', file_path: 'cron/assetExpiryNotificationTrigger' },
 ];
 
 const ensureDefaultJobs = async () => {
@@ -161,6 +163,8 @@ const executeJob = async (jobId, userId, orgId) => {
       output = await backfillMissingWorkflowSequences();
     } else if (jobId === 'JOB006') {
       output = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 10 });
+    } else if (jobId === 'JOB007') {
+      output = await ensureExpiryNotificationsForWindowAllOrgs({ days: 7 });
     } else {
       throw new Error('Unsupported job mapping');
     }

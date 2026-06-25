@@ -1,4 +1,5 @@
 const model = require('../models/reportbreakdownModel');
+const operationalCache = require('../utils/operationalCache');
 const {
     logReportApiCall,
     logReportGenerationSuccess,
@@ -21,6 +22,7 @@ const confirmEmployeeReportBreakdown = async (req, res) => {
   const { id } = req.params;
   try {
     const result = await model.confirmEmployeeReportBreakdown(id, orgId, userId);
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     return res.status(200).json({ success: true, message: "Breakdown confirmed", data: result });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -35,6 +37,7 @@ const reopenEmployeeReportBreakdown = async (req, res) => {
   const { notes } = req.body;
   try {
     const result = await model.reopenEmployeeReportBreakdown(id, orgId, userId, notes);
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     return res.status(200).json({ success: true, message: "Breakdown reopened", data: result });
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -81,7 +84,12 @@ const getAllReports = async (req, res) => {
       userId
     });
 
-    const reports = await model.getAllReports(orgId, branchId, hasSuperAccess);
+    const { data: reports } = await operationalCache.cachedList(
+      req,
+      'report-breakdown',
+      'list',
+      () => model.getAllReports(orgId, branchId, hasSuperAccess),
+    );
     const recordCount = reports?.length || 0;
     
     // Log no data or success
@@ -630,6 +638,7 @@ const deleteBreakdownReport = async (req, res) => {
     }
 
     const result = await model.deleteBreakdownReport(id, org_id);
+    operationalCache.invalidateOrgCaches(org_id).catch(() => {});
     
     // Log success
     await logReportGenerationSuccess({

@@ -1,5 +1,6 @@
 const AssetSerialPrintModel = require('../models/assetSerialPrintModel');
 const serialPrintLogger = require('../eventLoggers/serialNumberPrintEventLogger');
+const operationalCache = require('../utils/operationalCache');
 
 class AssetSerialPrintController {
   // Add serial number to print queue
@@ -214,9 +215,40 @@ class AssetSerialPrintController {
         userId
       }).catch(err => console.error('Logging error:', err));
 
-      const printQueue = await AssetSerialPrintModel.getPrintQueueByStatus(orgId, status, branchId, hasSuperAccess);
+      const { data: formattedData } = await operationalCache.cachedList(
+        req,
+        'serial-print',
+        `status:${status}`,
+        async () => {
+          const printQueue = await AssetSerialPrintModel.getPrintQueueByStatus(orgId, status, branchId, hasSuperAccess);
+          return printQueue.map(item => ({
+            psnq_id: item.psnq_id,
+            serial_no: item.serial_no,
+            status: item.status,
+            reason: item.reason,
+            created_by: item.created_by,
+            created_on: item.created_on,
+            org_id: item.org_id,
+            asset_details: {
+              asset_id: item.asset_id,
+              asset_name: item.asset_name,
+              asset_serial_number: item.asset_serial_number,
+              purchased_on: item.purchased_on,
+              expiry_date: item.expiry_date,
+              current_status: item.current_status
+            },
+            asset_type_details: {
+              asset_type_id: item.asset_type_id,
+              asset_type_name: item.asset_type_name,
+              assignment_type: item.assignment_type,
+              inspection_required: item.inspection_required,
+              group_required: item.group_required
+            }
+          }));
+        },
+      );
 
-      const count = printQueue.length;
+      const count = formattedData.length;
 
       // Log if queue is empty (WARNING)
       if (count === 0) {
@@ -226,32 +258,6 @@ class AssetSerialPrintController {
           duration: Date.now() - startTime
         }).catch(err => console.error('Logging error:', err));
       }
-
-      // Format response with asset and asset type details
-      const formattedData = printQueue.map(item => ({
-        psnq_id: item.psnq_id,
-        serial_no: item.serial_no,
-        status: item.status,
-        reason: item.reason,
-        created_by: item.created_by,
-        created_on: item.created_on,
-        org_id: item.org_id,
-        asset_details: {
-          asset_id: item.asset_id,
-          asset_name: item.asset_name,
-          asset_serial_number: item.asset_serial_number,
-          purchased_on: item.purchased_on,
-          expiry_date: item.expiry_date,
-          current_status: item.current_status
-        },
-        asset_type_details: {
-          asset_type_id: item.asset_type_id,
-          asset_type_name: item.asset_type_name,
-          assignment_type: item.assignment_type,
-          inspection_required: item.inspection_required,
-          group_required: item.group_required
-        }
-      }));
 
       // STEP 3: Log print queue retrieved (non-blocking)
       serialPrintLogger.logPrintQueueRetrieved({

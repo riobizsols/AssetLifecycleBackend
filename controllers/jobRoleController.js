@@ -8,6 +8,7 @@ const {
     deleteNavigationByJobRole,
     insertNavigationForJobRole
 } = require("../models/jobRoleModel");
+const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 
 /**
@@ -17,9 +18,12 @@ const fetchJobRoles = async (req, res) => {
     try {
         console.log("fetchJobRoles called, user:", req.user);
         const { org_id } = req.user;
-        console.log("Fetching job roles for org_id:", org_id);
-        const roles = await getJobRolesByOrg(org_id);
-        console.log("Job roles fetched successfully:", roles.length);
+        const { data: roles } = await operationalCache.cachedList(
+            req,
+            'job-roles',
+            'list',
+            () => getJobRolesByOrg(org_id),
+        );
         res.json({ roles });
     } catch (error) {
         console.error("Error fetching job roles:", error);
