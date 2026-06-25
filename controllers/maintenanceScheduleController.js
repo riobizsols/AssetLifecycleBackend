@@ -11,6 +11,15 @@ function bustMaintenanceSupervisorCaches(req, orgId) {
 
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
 
+/** First workflow sequence (lowest seqs_no) is approval-pending (AP); others start IN. */
+const getInitialWorkflowDetailStatus = (sequences, seqNo) => {
+    const nums = (sequences || [])
+        .map((s) => parseInt(s.seqs_no, 10))
+        .filter((n) => !Number.isNaN(n));
+    const minSeq = nums.length ? Math.min(...nums) : 10;
+    return seqNo === minSeq ? 'AP' : 'IN';
+};
+
 const USAGE_BASED_UOMS = new Set([
     'km',
     'kms',
@@ -199,8 +208,9 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
         }
         
         let totalDetailsCreated = 0;
+        const sequenceRows = workflowSequences.rows;
         
-        for (const sequence of workflowSequences.rows) {
+        for (const sequence of sequenceRows) {
             const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
             
             if (workflowJobRoles.rows.length === 0) {
@@ -210,8 +220,8 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
             for (const jobRole of workflowJobRoles.rows) {
                 const wfamsdId = await model.getNextWFAMSDId();
                 
-                const seqNo = parseInt(sequence.seqs_no);
-                const status = seqNo === 10 ? 'AP' : 'IN';
+                const seqNo = parseInt(sequence.seqs_no, 10);
+                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
                 
                 const scheduleDetailData = {
                     wfamsd_id: wfamsdId,
@@ -549,8 +559,9 @@ const generateMaintenanceSchedules = async (req, res) => {
                     }
                     
                     let totalDetailsCreated = 0;
+                    const sequenceRows = workflowSequences.rows;
                     
-                    for (const sequence of workflowSequences.rows) {
+                    for (const sequence of sequenceRows) {
                         console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
                         
                         const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
@@ -564,9 +575,8 @@ const generateMaintenanceSchedules = async (req, res) => {
                         for (const jobRole of workflowJobRoles.rows) {
                             const wfamsdId = await model.getNextWFAMSDId();
                             
-                            // Set status based on sequence number
-                            const seqNo = parseInt(sequence.seqs_no);
-                            const status = seqNo === 10 ? 'AP' : 'IN';
+                            const seqNo = parseInt(sequence.seqs_no, 10);
+                            const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
                             
                             console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                             
@@ -842,8 +852,9 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                         }
                         
                         let totalDetailsCreated = 0;
+                        const sequenceRows = workflowSequences.rows;
                         
-                        for (const sequence of workflowSequences.rows) {
+                        for (const sequence of sequenceRows) {
                             console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
                             
                             const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
@@ -857,9 +868,8 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                             for (const jobRole of workflowJobRoles.rows) {
                                 const wfamsdId = await model.getNextWFAMSDId();
                                 
-                                // Set status based on sequence number
-                                const seqNo = parseInt(sequence.seqs_no);
-                                const status = seqNo === 10 ? 'AP' : 'IN';
+                                const seqNo = parseInt(sequence.seqs_no, 10);
+                                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
                                 
                                 console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                                 

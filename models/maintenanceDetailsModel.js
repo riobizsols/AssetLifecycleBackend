@@ -4,6 +4,27 @@ const { generateCustomId } = require('../utils/idGenerator');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
+// Role-based workflow no longer requires department on tblWFJobRole; legacy schemas have NOT NULL dept_id.
+let wfJobRoleDeptNullableEnsured = false;
+const ensureWfJobRoleDeptNullable = async () => {
+    if (wfJobRoleDeptNullableEnsured) {
+        return;
+    }
+    const dbPool = getDb();
+    const result = await dbPool.query(`
+        SELECT is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tblWFJobRole'
+          AND column_name = 'dept_id'
+        LIMIT 1
+    `);
+    if (result.rows.length > 0 && result.rows[0].is_nullable === 'NO') {
+        await dbPool.query(`ALTER TABLE "tblWFJobRole" ALTER COLUMN dept_id DROP NOT NULL`);
+    }
+    wfJobRoleDeptNullableEnsured = true;
+};
+
 // Compatibility: some DBs may not have esc_no_days yet.
 const hasEscNoDaysColumn = async () => {
     const query = `
@@ -266,7 +287,8 @@ const checkJobRoleExists = async (wf_steps_id, job_role_id, org_id, exclude_wf_j
 };
 
 // Create workflow job role
-const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_id) => {
+const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_id, dept_id = null) => {
+    await ensureWfJobRoleDeptNullable();
     const wf_job_role_id = await generateCustomId('wfjr', 3);
     
     const query = `
@@ -275,13 +297,21 @@ const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_i
             wf_steps_id,
             job_role_id,
             emp_int_id,
+            dept_id,
             org_id
-        ) VALUES ($1, $2, $3, $4, $5)
+        ) VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING *
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, org_id]);
+    return await dbPool.query(query, [
+        wf_job_role_id,
+        wf_steps_id,
+        job_role_id,
+        emp_int_id,
+        dept_id,
+        org_id,
+    ]);
 };
 
 // Update workflow job role
