@@ -7,6 +7,7 @@
 
 const { Client, Pool } = require('pg');
 const crypto = require('crypto');
+const { buildPoolConfig, pgSslOptions } = require('../utils/pgSsl');
 require('dotenv').config();
 
 // Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
@@ -50,12 +51,13 @@ function initTenantRegistryPool() {
     if (!connectionString) {
       throw new Error('Neither TENANT_DATABASE_URL nor DATABASE_URL environment variable is set');
     }
-    tenantRegistryPool = new Pool({
-      connectionString,
+    tenantRegistryPool = new Pool(
+      buildPoolConfig(connectionString, {
       max: tenantRegistryPoolMax(),
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 2000,
-    });
+      }),
+    );
   }
   return tenantRegistryPool;
 }
@@ -192,12 +194,13 @@ async function getTenantPool(orgId) {
   }
 
   const connectionString = getTenantConnectionString(credentials);
-  const pool = new Pool({
-    connectionString,
+  const pool = new Pool(
+    buildPoolConfig(connectionString, {
     max: tenantPoolMax(),
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
-  });
+    }),
+  );
   tenantPools.set(orgId, { pool, fingerprint });
   return pool;
 }
@@ -211,6 +214,7 @@ async function getTenantClient(orgId) {
 
   const client = new Client({
     connectionString,
+    ssl: pgSslOptions(connectionString),
   });
 
   await client.connect();

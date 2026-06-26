@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+const { buildPoolConfig } = require('../utils/pgSsl');
 require('dotenv').config();
 
 if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
@@ -12,15 +13,15 @@ if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
   }
 
   function createPool(connectionString) {
-    const pool = new Pool({
-      connectionString,
+    const pool = new Pool(
+      buildPoolConfig(connectionString, {
       max: parseInt(process.env.DB_POOL_MAX, 10) || 20,
       min: parseInt(process.env.DB_POOL_MIN, 10) || 2,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 10000,
       allowExitOnIdle: false,
-      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-    });
+      }),
+    );
 
     pool.on('error', (err) => {
       console.error('❌ [DB POOL] Unexpected error on idle client:', err.message);

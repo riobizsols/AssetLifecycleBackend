@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js",
+    "dev": "NODE_ENV=development PORT=4000 nodemon server.js",
     "build": "echo 'No build step needed for Node.js'"
   },
   "keywords": [],
