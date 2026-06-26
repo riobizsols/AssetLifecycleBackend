@@ -8,10 +8,12 @@ const {
   deleteTenant,
   testTenantConnection,
   checkOrgIdAvailability,
+  checkSubdomainAvailability,
 } = require('../controllers/tenantSetupController');
 
 // All routes are public for now (can add auth middleware later if needed)
 router.post('/check-org-id', checkOrgIdAvailability);
+router.post('/check-subdomain', checkSubdomainAvailability);
 router.post('/create', createTenant);
 router.get('/list', getAllTenants);
 router.get('/:orgId', getTenantById);

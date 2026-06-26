@@ -4,7 +4,9 @@ const { registerTenant, deactivateTenant, testTenantConnection: testConnection }
 const { initTenantRegistryPool } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
-const { generateCustomId } = require('../utils/idGenerator');
+const { seedTextMessages } = require('../utils/seedTextMessages');
+const { generateCustomIdForClient } = require('../utils/idGenerator');
+const { DEFAULT_ID_SEQUENCES } = require('../constants/setupDefaults');
 const { sendWelcomeEmail } = require('../utils/mailer');
 const { getPgSslOption, getPgClientConnectTimeoutMs } = require('../utils/pgSslOption');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
@@ -56,14 +58,20 @@ async function checkOrgIdExists(orgId) {
   }
 }
 
+async function checkSubdomainExists(subdomain) {
+  const { isSubdomainAvailable } = require('../utils/subdomainUtils');
+  const available = await isSubdomainAvailable(subdomain);
+  return !available;
+}
+
 /**
  * Generate unique database name based on org details
  */
-async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
+async function generateUniqueDatabaseName(orgId, subdomain) {
   const pool = initTenantRegistryPool();
   
-  // Base name from org code or org id
-  const baseName = (orgCode || orgId).toLowerCase().replace(/[^a-z0-9]/g, '_');
+  // Base name from subdomain or org id
+  const baseName = (subdomain || orgId).toLowerCase().replace(/[^a-z0-9]/g, '_');
   let dbName = `${baseName}_db`;
   let counter = 1;
   
@@ -120,6 +128,24 @@ async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
 }
 
 /**
+ * Seed default ID sequences from setupDefaults before creating branch/department.
+ * Uses ON CONFLICT DO NOTHING so reference DB copies can still merge later.
+ */
+async function seedDefaultIdSequences(client) {
+  for (const entry of DEFAULT_ID_SEQUENCES) {
+    await client.query(
+      `
+        INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (table_key) DO NOTHING
+      `,
+      [entry.tableKey, entry.prefix, entry.lastNumber]
+    );
+  }
+  console.log(`[TenantSetup] ✅ Default ID sequences seeded (${DEFAULT_ID_SEQUENCES.length} entries)`);
+}
+
+/**
  * Ensure branch and department exist before creating admin user
  * Creates branch and department with correct ID formats if they don't exist
  * CRITICAL: This function ONLY uses the tenant client passed as parameter
@@ -144,7 +170,7 @@ async function ensureBranchAndDepartment(client, orgId) {
   await client.query('SET search_path TO public');
   
   // 1. Ensure branch exists
-  let branchId = 'BRANCH001';
+  let branchId;
   try {
     const existingBranch = await client.query(`
       SELECT branch_id FROM public."tblBranches" WHERE org_id = $1 LIMIT 1
@@ -154,23 +180,13 @@ async function ensureBranchAndDepartment(client, orgId) {
       branchId = existingBranch.rows[0].branch_id;
       console.log(`[TenantSetup] Using existing branch: ${branchId}`);
     } else {
-      // Get next branch ID from sequence or use BRANCH001
-      const branchSeq = await client.query(`
-        SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = 'branch'
-      `);
-      
-      if (branchSeq.rows.length > 0) {
-        const { prefix, last_number } = branchSeq.rows[0];
-        const next = last_number + 1;
-        branchId = `${prefix}${String(next).padStart(3, "0")}`;
-        await client.query(`UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = 'branch'`, [next]);
-      }
-      
+      branchId = await generateCustomIdForClient(client, 'branch', 3);
+
       await client.query(`
         INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
-        VALUES ($1, $2, 'Main Branch', 'Default City', $3, 1, 'SYSTEM', NOW())
+        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW())
         ON CONFLICT (branch_id) DO NOTHING
-      `, [orgId, branchId, branchId]);
+      `, [orgId, branchId]);
       console.log(`[TenantSetup] ✅ Created branch: ${branchId}`);
     }
   } catch (err) {
@@ -179,7 +195,7 @@ async function ensureBranchAndDepartment(client, orgId) {
   }
   
   // 2. Ensure department exists with DPT format
-  let deptId = 'DPT001';
+  let deptId;
   try {
     const existingDept = await client.query(`
       SELECT dept_id FROM public."tblDepartments" WHERE dept_id LIKE 'DPT%' AND org_id = $1 ORDER BY dept_id LIMIT 1
@@ -189,30 +205,8 @@ async function ensureBranchAndDepartment(client, orgId) {
       deptId = existingDept.rows[0].dept_id;
       console.log(`[TenantSetup] Using existing department: ${deptId}`);
     } else {
-      // Get next dept ID from sequence or use DPT001
-      const deptSeq = await client.query(`
-        SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = 'department'
-      `);
-      
-      if (deptSeq.rows.length > 0) {
-        const { prefix, last_number } = deptSeq.rows[0];
-        const next = last_number + 1;
-        deptId = `${prefix}${String(next).padStart(3, "0")}`;
-        await client.query(`UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = 'department'`, [next]);
-      } else {
-        // If no sequence exists, try to find existing DPT format or use DPT001
-        const existingDeptCheck = await client.query(`
-          SELECT dept_id FROM "tblDepartments" WHERE dept_id LIKE 'DPT%' ORDER BY dept_id DESC LIMIT 1
-        `);
-        if (existingDeptCheck.rows.length > 0) {
-          const match = existingDeptCheck.rows[0].dept_id.match(/\d+/);
-          if (match) {
-            const nextNum = parseInt(match[0]) + 1;
-            deptId = `DPT${String(nextNum).padStart(3, "0")}`;
-          }
-        }
-      }
-      
+      deptId = await generateCustomIdForClient(client, 'department', 3);
+
       await client.query(`
         INSERT INTO public."tblDepartments" (org_id, dept_id, text, branch_id, int_status)
         VALUES ($1, $2, 'Administration', $3, 1)
@@ -670,22 +664,16 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
         console.log(`[TenantSetup] ⚠️ tblIDSequences table does not exist in reference database, skipping...`);
         console.log(`[TenantSetup] Creating default ID sequences in tenant database...`);
         
-        // Create default sequences if they don't exist
-        const defaultSequences = [
-          { table_key: 'employee', prefix: 'EMP', last_number: 1 },
-          { table_key: 'user', prefix: 'USR', last_number: 1 },
-          { table_key: 'branch', prefix: 'BRANCH', last_number: 1 },
-          { table_key: 'department', prefix: 'DPT', last_number: 1 },
-        ];
-        
-        for (const seq of defaultSequences) {
+        for (const entry of DEFAULT_ID_SEQUENCES) {
           await tenantClient.query(`
             INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
             VALUES ($1, $2, $3)
-            ON CONFLICT (table_key) DO NOTHING
-          `, [seq.table_key, seq.prefix, seq.last_number]);
+            ON CONFLICT (table_key) DO UPDATE
+            SET prefix = EXCLUDED.prefix,
+                last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+          `, [entry.tableKey, entry.prefix, entry.lastNumber]);
         }
-        console.log(`[TenantSetup] ✅ Created ${defaultSequences.length} default ID sequences`);
+        console.log(`[TenantSetup] ✅ Created ${DEFAULT_ID_SEQUENCES.length} default ID sequences`);
       } else {
         const idSequences = await referenceClient.query('SELECT * FROM "tblIDSequences"');
         for (const seq of idSequences.rows) {
@@ -829,6 +817,32 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No technical log config copied (table may be empty or columns don't match)`);
     }
 
+    // 12. Copy multilingual text messages (tblTextMessagesDefault + tblTextMessagesOtherLangs)
+    console.log(`[TenantSetup] Copying text messages from reference database...`);
+    const textMsgDefaultResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblTextMessagesDefault',
+      orgId,
+    );
+    if (textMsgDefaultResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${textMsgDefaultResult.copied} default text messages`);
+    } else if (!textMsgDefaultResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No default text messages copied (table may be empty or columns don't match)`);
+    }
+
+    const textMsgOtherResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblTextMessagesOtherLangs',
+      orgId,
+    );
+    if (textMsgOtherResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${textMsgOtherResult.copied} translated text messages`);
+    } else if (!textMsgOtherResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {
@@ -876,6 +890,14 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     // Copy all data from reference database (GENERIC_URL)
     // CRITICAL: copyDataFromReferenceDatabase uses GENERIC_URL, never DATABASE_URL
     await copyDataFromReferenceDatabase(client, orgId);
+
+    const textMsgCount = await client.query(
+      'SELECT COUNT(*)::int AS count FROM "tblTextMessagesDefault"',
+    );
+    if ((textMsgCount.rows[0]?.count || 0) === 0) {
+      console.log('[TenantSetup] No text messages found after reference copy; running text message seed...');
+      await seedTextMessages(client, { genericUrl: process.env.GENERIC_URL });
+    }
     
     console.log(`[TenantSetup] ✅ Default data seeding process completed`);
     
@@ -905,7 +927,7 @@ async function createTenant(tenantData) {
   const {
     orgId,
     orgName,
-    orgCode,
+    subdomain: subdomainInput,
     orgCity,
     adminUser,
   } = tenantData;
@@ -915,24 +937,36 @@ async function createTenant(tenantData) {
     throw new Error('Missing required fields: orgId, orgName');
   }
 
+  if (!subdomainInput) {
+    throw new Error('Sub-domain name is required');
+  }
+
   if (!adminUser || !adminUser.email) {
     throw new Error('Admin user email is required');
   }
 
+  const { validateSubdomain } = require('../utils/subdomainUtils');
+  const subdomain = validateSubdomain(subdomainInput);
+
   // Check if org_id already exists
-  const orgIdUpper = orgId.toUpperCase();
+  const orgIdUpper = orgId.toUpperCase().trim();
+  if (orgIdUpper.length > 10) {
+    throw new Error('Organization ID must be 10 characters or less.');
+  }
   const orgExists = await checkOrgIdExists(orgIdUpper);
   if (orgExists) {
     throw new Error(`Organization ID ${orgIdUpper} already exists. Please choose a different ID.`);
   }
 
-  // Generate unique subdomain from organization name
-  const { generateUniqueSubdomain } = require('../utils/subdomainUtils');
-  const subdomain = await generateUniqueSubdomain(orgName);
-  console.log(`[TenantSetup] Generated subdomain: ${subdomain} for organization: ${orgName}`);
+  const subdomainExists = await checkSubdomainExists(subdomain);
+  if (subdomainExists) {
+    throw new Error(`Sub-domain name "${subdomain}" is already taken. Please choose a different one.`);
+  }
+
+  console.log(`[TenantSetup] Using user-specified subdomain: ${subdomain}`);
 
   // Generate unique database name
-  const dbName = await generateUniqueDatabaseName(orgIdUpper, orgCode, orgName);
+  const dbName = await generateUniqueDatabaseName(orgIdUpper, subdomain);
 
   // CRITICAL: Use TENANT_DATABASE_URL for all tenant database operations
   // This ensures we never accidentally use the default DATABASE_URL
@@ -1240,91 +1274,11 @@ async function createTenant(tenantData) {
         // This is not critical, continue
       }
 
-      // Step 1: Generate org_id for tblOrgs (ORG001 format)
-      // Query tblIDSequences to get the next org_id
+      // Step 1: Create organization record in tblOrgs using the user-specified org_id
       await tenantClient.query('SET search_path TO public');
+      console.log(`[TenantSetup] Using user-specified org_id across tenant database: ${orgIdUpper}`);
       
-      let generatedOrgId;
-      try {
-        // Check if tblIDSequences exists and has 'org' entry
-        const seqCheck = await tenantClient.query(`
-          SELECT EXISTS (
-            SELECT 1 FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name = 'tblIDSequences'
-          )
-        `);
-        
-        if (seqCheck.rows[0].exists) {
-          // Check if 'org' entry exists in tblIDSequences
-          const orgSeqCheck = await tenantClient.query(`
-            SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = 'org'
-          `);
-          
-          if (orgSeqCheck.rows.length > 0) {
-            // Use existing sequence
-            const { prefix, last_number } = orgSeqCheck.rows[0];
-            const next = last_number + 1;
-            generatedOrgId = `${prefix}${String(next).padStart(3, "0")}`;
-            
-            // Update the sequence
-            await tenantClient.query(`
-              UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = 'org'
-            `, [next]);
-          } else {
-            // Create 'org' entry in tblIDSequences
-            await tenantClient.query(`
-              INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-              VALUES ('org', 'ORG', 0)
-            `);
-            generatedOrgId = 'ORG001';
-          }
-        } else {
-          // tblIDSequences doesn't exist, use default
-          generatedOrgId = 'ORG001';
-        }
-        
-        // Check if generated org_id already exists in tblOrgs
-        const existingCheck = await tenantClient.query(`
-          SELECT org_id FROM public."tblOrgs" WHERE org_id = $1
-        `, [generatedOrgId]);
-        
-        if (existingCheck.rows.length > 0) {
-          // If exists, find the next available
-          const allOrgs = await tenantClient.query(`
-            SELECT org_id FROM public."tblOrgs" WHERE org_id LIKE 'ORG%' ORDER BY org_id DESC LIMIT 1
-          `);
-          if (allOrgs.rows.length > 0) {
-            const lastOrgId = allOrgs.rows[0].org_id;
-            const match = lastOrgId.match(/\d+/);
-            if (match) {
-              const nextNum = parseInt(match[0]) + 1;
-              generatedOrgId = `ORG${String(nextNum).padStart(3, "0")}`;
-            }
-          }
-        }
-      } catch (seqError) {
-        console.warn('[TenantSetup] Could not generate org_id from sequence, using default:', seqError.message);
-        // Fallback: use ORG001 or find next available
-        const fallbackCheck = await tenantClient.query(`
-          SELECT org_id FROM public."tblOrgs" WHERE org_id LIKE 'ORG%' ORDER BY org_id DESC LIMIT 1
-        `);
-        if (fallbackCheck.rows.length > 0) {
-          const lastOrgId = fallbackCheck.rows[0].org_id;
-          const match = lastOrgId.match(/\d+/);
-          if (match) {
-            const nextNum = parseInt(match[0]) + 1;
-            generatedOrgId = `ORG${String(nextNum).padStart(3, "0")}`;
-          } else {
-            generatedOrgId = 'ORG001';
-          }
-        } else {
-          generatedOrgId = 'ORG001';
-        }
-      }
-      
-      console.log(`[TenantSetup] Generated org_id for tblOrgs: ${generatedOrgId} (tenant org_id: ${orgIdUpper})`);
-      
-      // Create organization record in tblOrgs with generated org_id and subdomain
+      // Create organization record in tblOrgs with user-specified org_id and subdomain
       // Check if subdomain column exists before inserting
       const subdomainColumnCheck = await tenantClient.query(`
         SELECT EXISTS (
@@ -1346,7 +1300,7 @@ async function createTenant(tenantData) {
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city,
               subdomain = EXCLUDED.subdomain
-        `, [generatedOrgId, orgName, orgCode || orgIdUpper, orgCity || '', subdomain]);
+        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '', subdomain]);
       } else {
         await tenantClient.query(`
           INSERT INTO public."tblOrgs" (org_id, text, org_code, org_city, int_status)
@@ -1355,18 +1309,19 @@ async function createTenant(tenantData) {
           SET text = EXCLUDED.text,
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city
-        `, [generatedOrgId, orgName, orgCode || orgIdUpper, orgCity || '']);
+        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '']);
       }
-      console.log(`[TenantSetup] Organization record created in tblOrgs: ${generatedOrgId} with subdomain: ${subdomain}`);
+      console.log(`[TenantSetup] Organization record created in tblOrgs: ${orgIdUpper} with subdomain: ${subdomain}`);
 
-      // Step 2: Ensure branch and department exist (required before creating admin user)
+      // Step 2: Seed ID sequences, then ensure branch and department exist
+      console.log(`[TenantSetup] Seeding default ID sequences...`);
+      await seedDefaultIdSequences(tenantClient);
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
-      await ensureBranchAndDepartment(tenantClient, generatedOrgId);
+      await ensureBranchAndDepartment(tenantClient, orgIdUpper);
       
       // Step 3: Create admin user and add to tblUsers in the created database
-      // Use generatedOrgId (ORG001 format) for the admin user, not tenant orgId
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
-      const adminCredentials = await createAdminUser(tenantClient, generatedOrgId, adminUser);
+      const adminCredentials = await createAdminUser(tenantClient, orgIdUpper, adminUser);
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
       // Send welcome email with initial password and role information
@@ -1387,7 +1342,7 @@ async function createTenant(tenantData) {
 
       // Step 4: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
       console.log(`[TenantSetup] Seeding default tenant data...`);
-      await seedTenantDefaultData(tenantClient, generatedOrgId, adminCredentials.userId, adminCredentials.employeeId);
+      await seedTenantDefaultData(tenantClient, orgIdUpper, adminCredentials.userId, adminCredentials.employeeId);
       
       // Apply foreign key constraints after all data has been seeded
       if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
@@ -1455,12 +1410,10 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
       
       return {
-        orgId: orgIdUpper, // Tenant org_id (for login/tenant identification)
-        generatedOrgId: generatedOrgId, // Generated org_id for tblOrgs (ORG001 format)
+        orgId: orgIdUpper,
         orgName,
-        orgCode,
         orgCity,
-        subdomain, // Add subdomain to response
+        subdomain,
         subdomainUrl: finalSubdomainUrl, // Add subdomain URL to response
         database: dbName,
         host: dbConfig.host,
@@ -1605,4 +1558,5 @@ module.exports = {
   deleteTenant,
   testTenantConnection,
   checkOrgIdExists,
+  checkSubdomainExists,
 };

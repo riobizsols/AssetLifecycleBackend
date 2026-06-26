@@ -204,6 +204,37 @@ async function isSubdomainAvailable(subdomain, excludeOrgId = null) {
  * @param {string} orgName - The organization name
  * @returns {Promise<string>} - A unique subdomain
  */
+/**
+ * Validate and normalize a user-provided subdomain.
+ * @returns {string} normalized subdomain
+ */
+function validateSubdomain(subdomain) {
+  if (!subdomain || typeof subdomain !== 'string') {
+    throw new Error('Sub-domain name is required');
+  }
+
+  const normalized = subdomain.trim().toLowerCase();
+
+  if (normalized.length < 3) {
+    throw new Error('Sub-domain name must be at least 3 characters');
+  }
+
+  if (normalized.length > 63) {
+    throw new Error('Sub-domain name must be 63 characters or less');
+  }
+
+  const subdomainRegex = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+  if (!subdomainRegex.test(normalized)) {
+    throw new Error('Sub-domain name must use lowercase letters, numbers, and hyphens only');
+  }
+
+  if (RESERVED_SUBDOMAINS.includes(normalized)) {
+    throw new Error(`Sub-domain name "${normalized}" is reserved`);
+  }
+
+  return normalized;
+}
+
 async function generateUniqueSubdomain(orgName) {
   let baseSubdomain = generateSubdomain(orgName);
   
@@ -235,6 +266,7 @@ module.exports = {
   extractSubdomain,
   getOrgIdFromSubdomain,
   generateSubdomain,
+  validateSubdomain,
   isSubdomainAvailable,
   generateUniqueSubdomain,
 };
