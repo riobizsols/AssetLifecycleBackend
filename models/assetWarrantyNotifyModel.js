@@ -1,6 +1,40 @@
 const { getDb } = require("../utils/dbContext");
+const fcmService = require("../services/fcmService");
 
 const OPEN_STATUSES = ["NEW", "OPEN", "SNOOZED", "UNREAD"];
+const TITLE_EXPIRING = "Warranty Expiry";
+const TITLE_EXPIRED = "Warranty Expired";
+
+const toDateOnly = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setHours(0, 0, 0, 0);
+  return date;
+};
+
+const getWarrantyPhase = (warrantyPeriod) => {
+  const warrantyDate = toDateOnly(warrantyPeriod);
+  if (!warrantyDate) return null;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  if (warrantyDate < today) {
+    return {
+      isExpired: true,
+      title: TITLE_EXPIRED,
+      bodyPrefix: "warranty expired on",
+      notifGroupIdSuffix: "EXPIRED",
+    };
+  }
+
+  return {
+    isExpired: false,
+    title: TITLE_EXPIRING,
+    bodyPrefix: "warranty expires on",
+    notifGroupIdSuffix: "EXPIRING",
+  };
+};
 
 const mapStatus = (status) => {
   if (!status) return "NEW";
@@ -13,6 +47,71 @@ const makeNotifyId = () => {
   const ts = Date.now().toString(36).toUpperCase();
   const rnd = Math.random().toString(36).slice(2, 8).toUpperCase();
   return `AWN${ts}${rnd}`;
+};
+
+const makePreferenceId = () => `PREF${Math.random().toString(36).slice(2, 15).toUpperCase()}`;
+
+const ensureWarrantyPushPreference = async (userId, notificationType) => {
+  const db = getDb();
+  const existing = await db.query(
+    `
+      SELECT preference_id, push_enabled
+      FROM "tblNotificationPreferences"
+      WHERE user_id = $1 AND notification_type = $2
+    `,
+    [userId, notificationType]
+  );
+
+  if (existing.rows.length === 0) {
+    await db.query(
+      `
+        INSERT INTO "tblNotificationPreferences" (
+          preference_id, user_id, notification_type,
+          is_enabled, email_enabled, push_enabled
+        ) VALUES ($1, $2, $3, true, true, true)
+      `,
+      [makePreferenceId(), userId, notificationType]
+    );
+    return true;
+  }
+
+  return !!existing.rows[0].push_enabled;
+};
+
+const sendWarrantyPushNotification = async ({
+  userId,
+  title,
+  body,
+  notifyId,
+  assetId,
+  isExpired,
+}) => {
+  const notificationType = isExpired ? "warranty_expired" : "warranty_expiry";
+
+  try {
+    await ensureWarrantyPushPreference(userId, notificationType);
+    const result = await fcmService.sendNotificationToUser({
+      userId,
+      title,
+      body,
+      data: {
+        asset_id: assetId,
+        notify_id: notifyId,
+        notification_type: notificationType,
+        type: notificationType,
+        route: `/asset-detail/${assetId}`,
+      },
+      notificationType,
+    });
+
+    if (!result.success) {
+      console.log(
+        `[WarrantyPush] Skipped mobile push for user ${userId}: ${result.reason || "unknown"}`
+      );
+    }
+  } catch (error) {
+    console.error(`[WarrantyPush] Failed for user ${userId}:`, error.message);
+  }
 };
 
 const getEligibleWarrantyRoles = async (orgId) => {
@@ -70,9 +169,20 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
       return { created: 0, skipped: true };
     }
 
+    const phase = getWarrantyPhase(asset.warranty_period);
+    if (!phase) {
+      await client.query("COMMIT");
+      return { created: 0, skipped: true };
+    }
+
+    const expiryDateStr = toDateOnly(asset.warranty_period).toISOString().slice(0, 10);
+    const title = phase.title;
+    const body = `Asset ${asset.asset_id} (${asset.text || "Unnamed Asset"}) ${phase.bodyPrefix} ${expiryDateStr}.`;
+    const notifGroupId = `AWNG_${assetId}_${phase.notifGroupIdSuffix}`;
+
     const recipientsRes = await client.query(
       `
-        SELECT DISTINCT u.emp_int_id
+        SELECT DISTINCT u.user_id, u.emp_int_id
         FROM "tblJobRoles" jr
         INNER JOIN "tblUserJobRoles" ujr ON ujr.job_role_id = jr.job_role_id
         INNER JOIN "tblUsers" u ON u.user_id = ujr.user_id
@@ -85,7 +195,23 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
     );
 
     let created = 0;
+    const pushTargets = [];
     for (const recipient of recipientsRes.rows) {
+      if (phase.isExpired) {
+        await client.query(
+          `
+            UPDATE "tblAssetWarrantyNotify"
+            SET status = 'RESOLVED', last_seen_on = CURRENT_TIMESTAMP
+            WHERE org_id = $1
+              AND asset_id = $2
+              AND emp_int_id = $3
+              AND title = $4
+              AND UPPER(status) = ANY($5::text[])
+          `,
+          [orgId, assetId, recipient.emp_int_id, TITLE_EXPIRING, OPEN_STATUSES]
+        );
+      }
+
       const existingRes = await client.query(
         `
           SELECT notify_id
@@ -93,32 +219,31 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
           WHERE org_id = $1
             AND asset_id = $2
             AND emp_int_id = $3
-            AND UPPER(status) = ANY($4::text[])
+            AND title = $4
+            AND UPPER(status) = ANY($5::text[])
           ORDER BY created_on DESC
           LIMIT 1
         `,
-        [orgId, assetId, recipient.emp_int_id, OPEN_STATUSES]
+        [orgId, assetId, recipient.emp_int_id, title, OPEN_STATUSES]
       );
 
       if (existingRes.rows.length > 0) {
         continue;
       }
 
-      const title = "Warranty Expiry";
-      const body = `Asset ${asset.asset_id} (${asset.text || "Unnamed Asset"}) warranty expires on ${new Date(asset.warranty_period).toISOString().slice(0, 10)}.`;
-
       let inserted = false;
+      let notifyId = null;
       for (let attempt = 0; attempt < 5 && !inserted; attempt += 1) {
-        const notifyId = makeNotifyId();
+        notifyId = makeNotifyId();
         try {
           await client.query(
             `
               INSERT INTO "tblAssetWarrantyNotify"
-                (notify_id, notif_group_id, asset_id, org_id, status, title, body, snooze_days, emp_int_id, created_on)
+                (notify_id, notif_group_id, asset_id, org_id, status, title, body, snooze_days, emp_int_id, created_on, notify_type)
               VALUES
-                ($1, $2, $3, $4, 'NEW', $5, $6, 0, $7, CURRENT_TIMESTAMP)
+                ($1, $2, $3, $4, 'NEW', $5, $6, 0, $7, CURRENT_TIMESTAMP, 'WARRANTY')
             `,
-            [notifyId, `AWNG_${assetId}`, assetId, orgId, title, body, recipient.emp_int_id]
+            [notifyId, notifGroupId, assetId, orgId, title, body, recipient.emp_int_id]
           );
           inserted = true;
         } catch (error) {
@@ -131,10 +256,23 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
         throw new Error("Failed to generate unique warranty notify_id");
       }
       created += 1;
+      pushTargets.push({
+        userId: recipient.user_id,
+        title,
+        body,
+        notifyId,
+        assetId,
+        isExpired: phase.isExpired,
+      });
     }
 
     await client.query("COMMIT");
-    return { created, skipped: false };
+
+    for (const target of pushTargets) {
+      sendWarrantyPushNotification(target);
+    }
+
+    return { created, skipped: false, pushQueued: pushTargets.length };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -241,6 +379,7 @@ const getWarrantyNotificationsByUser = async ({
         AND n.org_id = $2
         AND UPPER(n.status) <> 'RESOLVED'
         AND UPPER(n.status) <> 'CLOSED'
+        AND COALESCE(n.notify_type, 'WARRANTY') = 'WARRANTY'
         ${branchFilter}
       ORDER BY n.created_on DESC
       LIMIT 200
@@ -248,7 +387,11 @@ const getWarrantyNotificationsByUser = async ({
     params
   );
 
-  return res.rows.filter((row) => {
+  return filterSnoozedNotifications(res.rows);
+};
+
+const filterSnoozedNotifications = (rows) =>
+  rows.filter((row) => {
     if ((row.snooze_days || 0) <= 0 || !row.last_seen_on) {
       return true;
     }
@@ -256,6 +399,217 @@ const getWarrantyNotificationsByUser = async ({
     availableOn.setDate(availableOn.getDate() + Number(row.snooze_days || 0));
     return availableOn <= new Date();
   });
+
+const createAssetExpiryNotificationsForAsset = async ({ assetId, orgId }) => {
+  const db = getDb();
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+
+    const assetRes = await client.query(
+      `
+        SELECT a.asset_id, a.text, a.expiry_date, a.asset_type_id
+        FROM "tblAssets" a
+        WHERE a.asset_id = $1 AND a.org_id = $2
+      `,
+      [assetId, orgId]
+    );
+
+    if (!assetRes.rows.length) {
+      throw new Error("Asset not found");
+    }
+
+    const asset = assetRes.rows[0];
+    if (!asset.expiry_date) {
+      await client.query("COMMIT");
+      return { created: 0, skipped: true };
+    }
+
+    const recipientsRes = await client.query(
+      `
+        SELECT DISTINCT u.emp_int_id
+        FROM "tblJobRoles" jr
+        INNER JOIN "tblUserJobRoles" ujr ON ujr.job_role_id = jr.job_role_id
+        INNER JOIN "tblUsers" u ON u.user_id = ujr.user_id
+        WHERE jr.org_id = $1
+          AND COALESCE(jr.notif_warranty, FALSE) = TRUE
+          AND u.int_status = 1
+          AND u.emp_int_id IS NOT NULL
+      `,
+      [orgId]
+    );
+
+    let created = 0;
+    for (const recipient of recipientsRes.rows) {
+      const existingRes = await client.query(
+        `
+          SELECT notify_id
+          FROM "tblAssetWarrantyNotify"
+          WHERE org_id = $1
+            AND asset_id = $2
+            AND emp_int_id = $3
+            AND notify_type = 'ASSET_EXPIRY'
+            AND UPPER(status) = ANY($4::text[])
+          ORDER BY created_on DESC
+          LIMIT 1
+        `,
+        [orgId, assetId, recipient.emp_int_id, OPEN_STATUSES]
+      );
+
+      if (existingRes.rows.length > 0) {
+        continue;
+      }
+
+      const title = "Asset Expiry";
+      const body = `Asset ${asset.asset_id} (${asset.text || "Unnamed Asset"}) expires on ${new Date(asset.expiry_date).toISOString().slice(0, 10)}.`;
+
+      let inserted = false;
+      for (let attempt = 0; attempt < 5 && !inserted; attempt += 1) {
+        const notifyId = makeNotifyId();
+        try {
+          await client.query(
+            `
+              INSERT INTO "tblAssetWarrantyNotify"
+                (notify_id, notif_group_id, asset_id, org_id, status, title, body, snooze_days, emp_int_id, created_on, notify_type)
+              VALUES
+                ($1, $2, $3, $4, 'NEW', $5, $6, 0, $7, CURRENT_TIMESTAMP, 'ASSET_EXPIRY')
+            `,
+            [notifyId, `AEXG_${assetId}`, assetId, orgId, title, body, recipient.emp_int_id]
+          );
+          inserted = true;
+        } catch (error) {
+          if (error.code !== "23505") {
+            throw error;
+          }
+        }
+      }
+      if (!inserted) {
+        throw new Error("Failed to generate unique asset expiry notify_id");
+      }
+      created += 1;
+    }
+
+    await client.query("COMMIT");
+    return { created, skipped: false };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const ensureAssetExpiryNotificationsForWindow = async ({ orgId, days = 5 }) => {
+  const eligibility = await getEligibleWarrantyRoles(orgId);
+  const assetsRes = await getDb().query(
+    `
+      SELECT asset_id
+      FROM "tblAssets"
+      WHERE org_id = $1
+        AND expiry_date IS NOT NULL
+        AND expiry_date <= (CURRENT_DATE + ($2::int * INTERVAL '1 day'))
+        AND expiry_date >= CURRENT_DATE
+    `,
+    [orgId, days]
+  );
+
+  let created = 0;
+  for (const row of assetsRes.rows) {
+    const result = await createAssetExpiryNotificationsForAsset({
+      assetId: row.asset_id,
+      orgId,
+    });
+    created += Number(result.created || 0);
+  }
+
+  return {
+    scanned: assetsRes.rows.length,
+    created,
+    eligible_roles: eligibility.roles,
+    eligible_users_count: eligibility.totalUsers,
+  };
+};
+
+const ensureAssetExpiryNotificationsForWindowAllOrgs = async ({ days = 5 }) => {
+  const orgsRes = await getDb().query(
+    `
+      SELECT DISTINCT org_id
+      FROM "tblAssets"
+      WHERE org_id IS NOT NULL
+        AND expiry_date IS NOT NULL
+        AND expiry_date <= (CURRENT_DATE + ($1::int * INTERVAL '1 day'))
+        AND expiry_date >= CURRENT_DATE
+    `,
+    [days]
+  );
+
+  let scanned = 0;
+  let created = 0;
+  const orgBreakdown = [];
+
+  for (const row of orgsRes.rows) {
+    const result = await ensureAssetExpiryNotificationsForWindow({
+      orgId: row.org_id,
+      days,
+    });
+    orgBreakdown.push({
+      org_id: row.org_id,
+      scanned: result.scanned,
+      created: result.created,
+      eligible_roles: result.eligible_roles,
+      eligible_users_count: result.eligible_users_count,
+    });
+    scanned += Number(result.scanned || 0);
+    created += Number(result.created || 0);
+  }
+
+  return { orgs: orgsRes.rows.length, scanned, created, org_breakdown: orgBreakdown };
+};
+
+const getAssetExpiryNotificationsByUser = async ({
+  empIntId,
+  orgId,
+  branchId,
+  hasSuperAccess = false,
+}) => {
+  const params = [empIntId, orgId];
+  let branchFilter = "";
+  if (!hasSuperAccess && branchId) {
+    params.push(branchId);
+    branchFilter = ` AND (a.branch_id = $${params.length} OR a.branch_id IS NULL)`;
+  }
+
+  const res = await getDb().query(
+    `
+      SELECT
+        n.notify_id,
+        n.asset_id,
+        n.status,
+        n.title,
+        n.body,
+        n.created_on,
+        n.last_seen_on,
+        n.snooze_days,
+        a.expiry_date,
+        a.service_vendor_id,
+        a.asset_type_id,
+        at.text AS asset_type_name
+      FROM "tblAssetWarrantyNotify" n
+      INNER JOIN "tblAssets" a ON a.asset_id = n.asset_id AND a.org_id = n.org_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      WHERE n.emp_int_id = $1
+        AND n.org_id = $2
+        AND n.notify_type = 'ASSET_EXPIRY'
+        AND UPPER(n.status) <> 'RESOLVED'
+        AND UPPER(n.status) <> 'CLOSED'
+        ${branchFilter}
+      ORDER BY n.created_on DESC
+      LIMIT 200
+    `,
+    params
+  );
+
+  return filterSnoozedNotifications(res.rows);
 };
 
 const markWarrantyNotificationOpen = async ({ notifyId, orgId, empIntId }) => {
@@ -335,9 +689,13 @@ const resolveWarrantyNotificationsByAsset = async ({ assetId, orgId }) => {
 module.exports = {
   mapStatus,
   createWarrantyNotificationsForAsset,
+  createAssetExpiryNotificationsForAsset,
   ensureWarrantyNotificationsForWindow,
   ensureWarrantyNotificationsForWindowAllOrgs,
+  ensureAssetExpiryNotificationsForWindow,
+  ensureAssetExpiryNotificationsForWindowAllOrgs,
   getWarrantyNotificationsByUser,
+  getAssetExpiryNotificationsByUser,
   markWarrantyNotificationOpen,
   discardWarrantyNotification,
   snoozeWarrantyNotification,

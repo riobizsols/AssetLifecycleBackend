@@ -14,21 +14,21 @@ class UOMModel {
       // Query UOM table - try with org_id first, fallback to simple query
       let query = `
         SELECT 
-          UOM_id,
-          UOM
+          uom_id AS "UOM_id",
+          uom AS "UOM"
         FROM "tblUom"
-        ORDER BY UOM
+        ORDER BY uom
       `;
       
       try {
         // Try query with org_id filter
         query = `
           SELECT 
-            UOM_id,
-            UOM
+            uom_id AS "UOM_id",
+            uom AS "UOM"
           FROM "tblUom"
           WHERE org_id = $1 OR org_id IS NULL
-          ORDER BY UOM
+          ORDER BY uom
         `;
         const result = await dbPool.query(query, [orgId]);
         return result.rows;
@@ -37,10 +37,10 @@ class UOMModel {
         if (err.code === '42703' || (err.message && err.message.includes('org_id'))) {
           const result = await dbPool.query(`
             SELECT 
-              UOM_id,
-              UOM
+              uom_id AS "UOM_id",
+              uom AS "UOM"
             FROM "tblUom"
-            ORDER BY UOM
+            ORDER BY uom
           `);
           return result.rows;
         }
@@ -61,10 +61,10 @@ class UOMModel {
         // Try query with org_id filter
         const query = `
           SELECT 
-            UOM_id,
-            UOM
+            uom_id AS "UOM_id",
+            uom AS "UOM"
           FROM "tblUom"
-          WHERE UOM_id = $1 
+          WHERE uom_id = $1 
           AND (org_id = $2 OR org_id IS NULL)
         `;
         const result = await dbPool.query(query, [uomId, orgId]);
@@ -74,10 +74,10 @@ class UOMModel {
         if (err.code === '42703' || (err.message && err.message.includes('org_id'))) {
           const query = `
             SELECT 
-              UOM_id,
-              UOM
+              uom_id AS "UOM_id",
+              uom AS "UOM"
             FROM "tblUom"
-            WHERE UOM_id = $1
+            WHERE uom_id = $1
           `;
           const result = await dbPool.query(query, [uomId]);
           return result.rows[0] || null;

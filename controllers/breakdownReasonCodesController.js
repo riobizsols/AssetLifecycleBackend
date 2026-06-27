@@ -1,4 +1,5 @@
 const BreakdownReasonCodesModel = require('../models/breakdownReasonCodesModel');
+const operationalCache = require('../utils/operationalCache');
 
 class BreakdownReasonCodesController {
   // Get all breakdown reason codes
@@ -6,11 +7,12 @@ class BreakdownReasonCodesController {
     try {
       const orgId = req.user.org_id;
 
-      console.log(`Fetching all breakdown reason codes for org: ${orgId}`);
-
-      const reasonCodes = await BreakdownReasonCodesModel.getAllReasonCodes(orgId);
-      
-      console.log(`Found ${reasonCodes.length} breakdown reason codes`);
+      const { data: reasonCodes } = await operationalCache.cachedList(
+        req,
+        'breakdown-reason-codes',
+        'list',
+        () => BreakdownReasonCodesModel.getAllReasonCodes(orgId),
+      );
 
       res.json({
         success: true,
@@ -78,6 +80,8 @@ class BreakdownReasonCodesController {
       
       console.log(`Successfully created breakdown reason code:`, newReasonCode);
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.status(201).json({
         success: true,
         data: newReasonCode,
@@ -118,6 +122,8 @@ class BreakdownReasonCodesController {
         });
       }
 
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
       res.json({
         success: true,
         data: updatedReasonCode,
@@ -149,6 +155,8 @@ class BreakdownReasonCodesController {
           message: 'Breakdown reason code not found'
         });
       }
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       res.json({
         success: true,

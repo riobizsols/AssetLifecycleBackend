@@ -11,6 +11,7 @@ const {
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
     getAssetTypesByMaintRequired,
+    getAssetTypesByInspectionRequired,
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,
@@ -56,6 +57,9 @@ router.get('/group-required', getAssetTypesByGroupRequired);
 
 // Get asset types where maint_required is true
 router.get('/maint-required', getAssetTypesByMaintRequired);
+
+// Get asset types with inspection frequency configured
+router.get('/inspection-required', getAssetTypesByInspectionRequired);
 
 // Get all properties
 router.get('/properties', getAllProperties);

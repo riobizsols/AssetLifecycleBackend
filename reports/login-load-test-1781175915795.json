@@ -1,0 +1,25 @@
+{
+  "timestamp": "2026-06-11T11:05:15.794Z",
+  "target": "http://localhost:4000/api/auth/login",
+  "concurrency": 100,
+  "iterations": 1,
+  "totalRequests": 100,
+  "successCount": 100,
+  "failureCount": 0,
+  "successRatePct": 100,
+  "wallTimeMs": 6239,
+  "throughputRps": 16.03,
+  "latencyMs": {
+    "min": 1756,
+    "max": 6222,
+    "avg": 4543,
+    "p50": 4902,
+    "p90": 6014,
+    "p95": 6153,
+    "p99": 6218
+  },
+  "statusCounts": {
+    "200": 100
+  },
+  "sampleErrors": []
+}

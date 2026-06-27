@@ -8,11 +8,39 @@
 const { Client, Pool } = require('pg');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
-const { getPgSslOption } = require('../utils/pgSslOption');
+const { buildPoolConfig, pgSslOptions } = require('../utils/pgSsl');
 require('dotenv').config();
 
 // Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
 let tenantRegistryPool = null;
+
+// Cached tenant DB pools — one pool per org (never create per request)
+const tenantPools = new Map();
+
+function tenantPoolMax() {
+  const parsed = Number(process.env.TENANT_DB_POOL_MAX);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5;
+}
+
+function tenantRegistryPoolMax() {
+  const parsed = Number(process.env.TENANT_REGISTRY_POOL_MAX);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 10;
+}
+
+function credentialsFingerprint(credentials) {
+  return `${credentials.host}:${credentials.port}:${credentials.database}:${credentials.user}`;
+}
+
+async function evictTenantPool(orgId) {
+  const entry = tenantPools.get(orgId);
+  if (!entry) return;
+  tenantPools.delete(orgId);
+  try {
+    await entry.pool.end();
+  } catch {
+    // pool may already be closed
+  }
+}
 
 /**
  * Initialize tenant registry database connection pool
@@ -24,13 +52,13 @@ function initTenantRegistryPool() {
     if (!connectionString) {
       throw new Error('Neither TENANT_DATABASE_URL nor DATABASE_URL environment variable is set');
     }
-    tenantRegistryPool = new Pool({
-      connectionString,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: parseInt(process.env.TENANT_REGISTRY_CONNECT_TIMEOUT_MS || '15000', 10) || 15000,
-      ssl: getPgSslOption(),
-    });
+    tenantRegistryPool = new Pool(
+      buildPoolConfig(connectionString, {
+        max: tenantRegistryPoolMax(),
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: parseInt(process.env.TENANT_REGISTRY_CONNECT_TIMEOUT_MS || '15000', 10) || 15000,
+      }),
+    );
   }
   return tenantRegistryPool;
 }
@@ -76,6 +104,13 @@ function decryptPassword(encryptedPassword) {
  * Check if a tenant exists for the given org_id
  */
 async function checkTenantExists(orgId) {
+  const cacheService = require('./cacheService');
+  const cacheKey = cacheService.buildKey('tenant', 'exists', orgId);
+  const cached = await cacheService.get(cacheKey);
+  if (cached !== null && cached !== undefined) {
+    return !!cached.exists;
+  }
+
   const pool = initTenantRegistryPool();
   
   try {
@@ -83,9 +118,13 @@ async function checkTenantExists(orgId) {
       `SELECT org_id FROM "tenants" WHERE org_id = $1 AND is_active = true`,
       [orgId]
     );
-    return result.rows.length > 0;
+    const exists = result.rows.length > 0;
+    await cacheService.set(cacheKey, { exists }, cacheService.getTenantExistsCacheTtlMs());
+    return exists;
   } catch (error) {
     console.error('[TenantService] Error checking tenant existence:', error);
+    // Cache negative result so unreachable tenant registry does not add ~2s to every API call
+    await cacheService.set(cacheKey, { exists: false }, cacheService.getTenantExistsCacheTtlMs());
     return false;
   }
 }
@@ -94,6 +133,11 @@ async function checkTenantExists(orgId) {
  * Get tenant database credentials by org_id
  */
 async function getTenantCredentials(orgId) {
+  const cacheService = require('./cacheService');
+  const cacheKey = cacheService.buildKey('tenant', 'credentials', orgId);
+  const cached = await cacheService.get(cacheKey);
+  if (cached) return cached;
+
   const pool = initTenantRegistryPool();
   
   try {
@@ -109,11 +153,9 @@ async function getTenantCredentials(orgId) {
     }
 
     const tenant = result.rows[0];
-    
-    // Decrypt password
     const decryptedPassword = decryptPassword(tenant.db_password);
 
-    return {
+    const credentials = {
       orgId: tenant.org_id,
       host: tenant.db_host,
       port: tenant.db_port,
@@ -121,6 +163,8 @@ async function getTenantCredentials(orgId) {
       user: tenant.db_user,
       password: decryptedPassword,
     };
+    await cacheService.set(cacheKey, credentials, cacheService.getTenantExistsCacheTtlMs());
+    return credentials;
   } catch (error) {
     console.error('[TenantService] Error getting tenant credentials:', error);
     throw error;
@@ -137,79 +181,48 @@ function getTenantConnectionString(credentials) {
 /**
  * Get a database connection pool for a specific tenant
  */
-// Cache for tenant pools to avoid recreating them
-const tenantPoolCache = new Map();
-
 async function getTenantPool(orgId) {
   if (!orgId) {
     throw new Error('org_id is required');
   }
-  
-  // Check cache first
-  if (tenantPoolCache.has(orgId)) {
-    const cachedPool = tenantPoolCache.get(orgId);
-    // Verify pool is still valid by checking if it's ended
-    if (!cachedPool.ended) {
-      logger.log(`[TenantService] ♻️ Using cached pool for org_id: ${orgId}`);
-      return cachedPool;
-    } else {
-      // Pool was ended, remove from cache
-      tenantPoolCache.delete(orgId);
-      logger.log(`[TenantService] ⚠️ Cached pool was ended, creating new one for org_id: ${orgId}`);
-    }
-  }
-  
-  logger.log(`[TenantService] 🔍 Getting tenant pool for org_id: ${orgId}`);
-  
-  try {
-  const credentials = await getTenantCredentials(orgId);
-    logger.log(`[TenantService] ✅ Got credentials for org_id: ${orgId}, database: ${credentials.database}`);
-    
-    // Validate credentials
-    if (!credentials.host || !credentials.port || !credentials.database || !credentials.user) {
-      throw new Error(`Invalid tenant credentials for org_id: ${orgId}`);
-    }
-    
-  const connectionString = getTenantConnectionString(credentials);
-    logger.debug(`[TenantService] 🔗 Connection string: postgresql://${credentials.user}@${credentials.host}:${credentials.port}/${credentials.database}`);
 
-    const pool = new Pool({
-    connectionString,
-    max: 10,
-    idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000, // Increased timeout for better reliability
-      ssl: getPgSslOption(),
-      // Handle pool errors
-      errorHandler: (err, client) => {
-        console.error(`[TenantService] ❌ Pool error for org_id ${orgId}:`, err);
-        // Remove from cache if pool has errors
-        if (tenantPoolCache.has(orgId)) {
-          tenantPoolCache.delete(orgId);
-        }
-      }
-    });
-    
-    // Test the connection before caching
-    try {
-      const testClient = await pool.connect();
-      await testClient.query('SELECT 1');
-      testClient.release();
-      logger.log(`[TenantService] ✅ Pool connection test successful for org_id: ${orgId}`);
-    } catch (testError) {
-      logger.error(`[TenantService] ❌ Pool connection test failed for org_id ${orgId}:`, testError);
-      await pool.end(); // Clean up failed pool
-      throw new Error(`Failed to connect to tenant database: ${testError.message}`);
-    }
-    
-    // Cache the pool
-    tenantPoolCache.set(orgId, pool);
-    logger.log(`[TenantService] ✅ Created and cached pool for org_id: ${orgId}`);
-    
-    return pool;
-  } catch (error) {
-    logger.error(`[TenantService] ❌ Error creating pool for org_id ${orgId}:`, error);
-    throw error;
+  const credentials = await getTenantCredentials(orgId);
+  const fingerprint = credentialsFingerprint(credentials);
+
+  const existing = tenantPools.get(orgId);
+  if (existing && existing.fingerprint === fingerprint) {
+    logger.log(`[TenantService] Using cached pool for org_id: ${orgId}`);
+    return existing.pool;
   }
+
+  if (existing) {
+    await evictTenantPool(orgId);
+  }
+
+  const connectionString = getTenantConnectionString(credentials);
+  logger.log(`[TenantService] Creating pool for org_id: ${orgId}, database: ${credentials.database}`);
+
+  const pool = new Pool(
+    buildPoolConfig(connectionString, {
+      max: tenantPoolMax(),
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: parseInt(process.env.TENANT_CONNECT_TIMEOUT_MS || '5000', 10) || 5000,
+    }),
+  );
+
+  try {
+    const testClient = await pool.connect();
+    await testClient.query('SELECT 1');
+    testClient.release();
+  } catch (testError) {
+    await pool.end().catch(() => {});
+    logger.error(`[TenantService] Pool connection test failed for org_id ${orgId}:`, testError);
+    throw new Error(`Failed to connect to tenant database: ${testError.message}`);
+  }
+
+  tenantPools.set(orgId, { pool, fingerprint });
+  logger.log(`[TenantService] Created and cached pool for org_id: ${orgId}`);
+  return pool;
 }
 
 /**
@@ -221,7 +234,7 @@ async function getTenantClient(orgId) {
 
   const client = new Client({
     connectionString,
-    ssl: getPgSslOption(),
+    ssl: pgSslOptions(connectionString),
   });
 
   await client.connect();
@@ -298,6 +311,11 @@ async function registerTenant(orgId, dbConfig) {
       logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
     }
 
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'exists', orgId));
+
     return true;
   } catch (error) {
     console.error('[TenantService] Error registering tenant:', error);
@@ -333,8 +351,9 @@ async function updateTenant(orgId, dbConfig) {
       ]
     );
 
-    // Clear the pool cache since credentials changed
-    clearTenantPoolCache(orgId);
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
 
     return true;
   } catch (error) {
@@ -358,8 +377,10 @@ async function deactivateTenant(orgId) {
       [orgId]
     );
 
-    // Clear the pool cache since tenant is deactivated
-    clearTenantPoolCache(orgId);
+    await evictTenantPool(orgId);
+    const cacheService = require('./cacheService');
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'exists', orgId));
 
     return true;
   } catch (error) {
@@ -376,7 +397,7 @@ async function testTenantConnection(orgId) {
     const credentials = await getTenantCredentials(orgId);
     const client = new Client({
       connectionString: getTenantConnectionString(credentials),
-      ssl: getPgSslOption(),
+      ssl: pgSslOptions(getTenantConnectionString(credentials)),
     });
 
     await client.connect();
@@ -401,26 +422,17 @@ async function testTenantConnection(orgId) {
  */
 function clearTenantPoolCache(orgId = null) {
   if (orgId) {
-    const pool = tenantPoolCache.get(orgId);
-    if (pool && !pool.ended) {
-      pool.end().catch(err => {
-        logger.error(`[TenantService] Error ending pool for org_id ${orgId}:`, err);
-      });
-    }
-    tenantPoolCache.delete(orgId);
-    logger.log(`[TenantService] 🗑️ Cleared pool cache for org_id: ${orgId}`);
-  } else {
-    // Clear all pools
-    for (const [cachedOrgId, pool] of tenantPoolCache.entries()) {
-      if (pool && !pool.ended) {
-        pool.end().catch(err => {
-          logger.error(`[TenantService] Error ending pool for org_id ${cachedOrgId}:`, err);
-        });
-      }
-    }
-    tenantPoolCache.clear();
-    logger.log(`[TenantService] 🗑️ Cleared all pool caches`);
+    evictTenantPool(orgId).catch((err) => {
+      logger.error(`[TenantService] Error evicting pool for org_id ${orgId}:`, err);
+    });
+    logger.log(`[TenantService] Cleared pool cache for org_id: ${orgId}`);
+    return;
   }
+
+  Promise.all([...tenantPools.keys()].map((id) => evictTenantPool(id))).catch((err) => {
+    logger.error('[TenantService] Error clearing all tenant pools:', err);
+  });
+  logger.log('[TenantService] Cleared all tenant pool caches');
 }
 
 module.exports = {

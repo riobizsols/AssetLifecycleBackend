@@ -1,4 +1,5 @@
 const model = require('../models/assetWorkflowHistoryModel');
+const reportsCache = require('../utils/reportsCache');
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -112,29 +113,29 @@ const getAssetWorkflowHistory = async (req, res) => {
         console.log('🔍 [Controller] Vendor ID filter:', filters.vendor_id);
         console.log('🔍 [Controller] Advanced Conditions:', JSON.stringify(filters.advancedConditions, null, 2));
         
-        // Get workflow history and count
-        const [historyResult, countResult] = await Promise.all([
-            model.getAssetWorkflowHistory(filters, orgId),
-            model.getAssetWorkflowHistoryCount(filters, orgId)
-        ]);
-        
-        const totalCount = countResult.rows[0].total_count;
+        const cacheFilters = { ...filters, orgId };
+
+        const { data: cachedPayload } = await reportsCache.cachedList(
+            req,
+            'asset-workflow-history',
+            cacheFilters,
+            async () => {
+                const [historyResult, countResult] = await Promise.all([
+                    model.getAssetWorkflowHistory(filters, orgId),
+                    model.getAssetWorkflowHistoryCount(filters, orgId),
+                ]);
+                return {
+                    rows: historyResult.rows,
+                    totalCount: countResult.rows[0].total_count,
+                };
+            },
+        );
+
+        const historyRows = cachedPayload.rows;
+        const totalCount = cachedPayload.totalCount;
         const totalPages = Math.ceil(totalCount / limit);
-        
-        // Debug: Log sample data to see what's being returned
-        if (historyResult.rows.length > 0) {
-            console.log('🔍 [Controller] Sample record user data:', {
-                user_id: historyResult.rows[0].user_id,
-                user_name: historyResult.rows[0].user_name,
-                user_email: historyResult.rows[0].user_email,
-                wfamsd_id: historyResult.rows[0].wfamsd_id,
-                wfamsh_id: historyResult.rows[0].wfamsd_id
-            });
-            console.log('🔍 [Controller] All available fields in first record:', Object.keys(historyResult.rows[0]));
-        }
-        
-        // Format the response data
-        const formattedData = historyResult.rows.map(record => ({
+
+        const formattedData = historyRows.map(record => ({
             // Workflow Header Information
             workflow_id: record.wfamsh_id,
             asset_maintenance_frequency_id: record.at_main_freq_id,
@@ -488,11 +489,18 @@ const getWorkflowFilterOptions = async (req, res) => {
         
         console.log('Workflow Filter Options Request:', { orgId });
         
-        const result = await model.getWorkflowFilterOptions(orgId);
-        
+        const { data: filterOptions } = await reportsCache.cachedFilterOptions(
+            req,
+            'asset-workflow-history',
+            async () => {
+                const result = await model.getWorkflowFilterOptions(orgId);
+                return result.rows[0];
+            },
+        );
+
         res.json({
             success: true,
-            filter_options: result.rows[0]
+            filter_options: filterOptions
         });
         
     } catch (error) {

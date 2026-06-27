@@ -1,9 +1,15 @@
 const TechCertModel = require('../models/techCertModel');
+const operationalCache = require('../utils/operationalCache');
 
 const getAllCertificates = async (req, res) => {
   try {
     const orgId = req.user.org_id;
-    const certificates = await TechCertModel.getAllCertificates(orgId);
+    const { data: certificates } = await operationalCache.cachedList(
+      req,
+      'tech-certificates',
+      'list',
+      () => TechCertModel.getAllCertificates(orgId),
+    );
 
     return res.status(200).json({
       success: true,
@@ -45,6 +51,8 @@ const createCertificate = async (req, res) => {
       orgId,
       createdBy
     });
+
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
     return res.status(201).json({
       success: true,
@@ -100,6 +108,8 @@ const updateCertificate = async (req, res) => {
       });
     }
 
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'Certificate updated successfully',
@@ -135,6 +145,8 @@ const deleteCertificate = async (req, res) => {
       });
     }
 
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'Certificate deleted successfully'
@@ -161,7 +173,12 @@ const getMappedCertificates = async (req, res) => {
       });
     }
 
-    const mapped = await TechCertModel.getMappedCertificates(assetTypeId, orgId);
+    const { data: mapped } = await operationalCache.cachedList(
+      req,
+      'tech-certificates',
+      `mapped:${assetTypeId}`,
+      () => TechCertModel.getMappedCertificates(assetTypeId, orgId),
+    );
 
     return res.status(200).json({
       success: true,
@@ -209,6 +226,8 @@ const saveMappedCertificates = async (req, res) => {
 
     const refreshed = await TechCertModel.getMappedCertificates(assetTypeId, orgId);
 
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+
     return res.status(200).json({
       success: true,
       message: 'Certificates mapped successfully',
@@ -248,6 +267,8 @@ const saveInspectionCertificates = async (req, res) => {
     try {
       await TechCertModel.replaceAssetTypeInspectionCertificates(assetTypeId, certificate_ids, orgId, createdBy);
       const refreshed = await TechCertModel.getInspectionCertificates(assetTypeId, orgId);
+
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
       return res.status(200).json({
         success: true,
@@ -307,7 +328,12 @@ const getAllInspectionCertificates = async (req, res) => {
   try {
     const orgId = req.user.org_id;
 
-    const certificates = await TechCertModel.getAllInspectionCertificates(orgId);
+    const { data: certificates } = await operationalCache.cachedList(
+      req,
+      'tech-certificates',
+      'inspection-all',
+      () => TechCertModel.getAllInspectionCertificates(orgId),
+    );
 
     return res.status(200).json({
       success: true,
@@ -336,6 +362,8 @@ const deleteInspectionCertificate = async (req, res) => {
     }
 
     await TechCertModel.deleteInspectionCertificate(id, orgId);
+
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
 
     return res.status(200).json({
       success: true,

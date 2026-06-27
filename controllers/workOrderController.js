@@ -1,4 +1,5 @@
 const model = require("../models/workOrderModel");
+const operationalCache = require("../utils/operationalCache");
 
 // Get all work orders
 const getAllWorkOrders = async (req, res) => {
@@ -16,19 +17,16 @@ const getAllWorkOrders = async (req, res) => {
         console.log('Final userBranchId:', userBranchId);
         console.log('=== END CONTROLLER DEBUG ===');
         
-        const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
-        
-        if (result.rows.length === 0) {
-            return res.status(200).json({
-                success: true,
-                message: "No work orders found with status 'IN' and maintained_by 'Vendor'",
-                data: [],
-                count: 0
-            });
-        }
-        
-        // Format the response data with separated asset and vendor details
-        const formattedData = result.rows.map(row => ({
+        const { data: formattedData } = await operationalCache.cachedList(
+            req,
+            'work-orders',
+            'all',
+            async () => {
+                const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
+                if (result.rows.length === 0) {
+                    return [];
+                }
+                return result.rows.map(row => ({
             // Work Order Details
             ams_id: row.ams_id,
             wo_id: row.wo_id,
@@ -69,13 +67,11 @@ const getAllWorkOrders = async (req, res) => {
             asset_type: {
                 asset_type_id: row.asset_type_id,
                 asset_type_name: row.asset_type_name,
-                maint_required: row.maint_required,
                 assignment_type: row.assignment_type,
                 inspection_required: row.inspection_required,
                 group_required: row.group_required,
                 is_child: row.is_child,
                 parent_asset_type_id: row.parent_asset_type_id,
-                maint_type_id: row.asset_type_maint_type_id,
                 maint_lead_type: row.maint_lead_type,
                 depreciation_type: row.depreciation_type,
                 checklist_items: row.checklist_items || []
@@ -93,6 +89,17 @@ const getAllWorkOrders = async (req, res) => {
             // Breakdown Details (if applicable)
             breakdown_info: row.breakdown_info || null
         }));
+            },
+        );
+        
+        if (formattedData.length === 0) {
+            return res.status(200).json({
+                success: true,
+                message: "No work orders found with status 'IN' and maintained_by 'Vendor'",
+                data: [],
+                count: 0
+            });
+        }
         
         console.log(`Successfully fetched ${formattedData.length} work orders with status 'IN' and maintained_by 'Vendor'`);
         
@@ -188,13 +195,11 @@ const getWorkOrderById = async (req, res) => {
             asset_type: {
                 asset_type_id: workOrder.asset_type_id,
                 asset_type_name: workOrder.asset_type_name,
-                maint_required: workOrder.maint_required,
                 assignment_type: workOrder.assignment_type,
                 inspection_required: workOrder.inspection_required,
                 group_required: workOrder.group_required,
                 is_child: workOrder.is_child,
                 parent_asset_type_id: workOrder.parent_asset_type_id,
-                maint_type_id: workOrder.asset_type_maint_type_id,
                 maint_lead_type: workOrder.maint_lead_type,
                 depreciation_type: workOrder.depreciation_type,
                 checklist_items: workOrder.checklist_items || []

@@ -1,4 +1,5 @@
 const EmployeeTechCertModel = require("../models/employeeTechCertModel");
+const operationalCache = require('../utils/operationalCache');
 const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/minioClient');
 const multer = require('multer');
 const crypto = require('crypto');
@@ -134,7 +135,12 @@ const getAllEmployeeCertificates = async (req, res) => {
     const orgId = req.user?.org_id;
     const status = req.query?.status || null;
 
-    const certificates = await EmployeeTechCertModel.getAllEmployeeCertificates(orgId, status);
+    const { data: certificates } = await operationalCache.cachedList(
+      req,
+      'employee-tech-certificates',
+      operationalCache.hashQuery({ status: status || 'all' }),
+      () => EmployeeTechCertModel.getAllEmployeeCertificates(orgId, status),
+    );
 
     return res.status(200).json({
       success: true,
@@ -188,6 +194,8 @@ const updateEmployeeCertificateStatus = async (req, res) => {
         message: "Certificate not found"
       });
     }
+
+    operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
     return res.status(200).json({
       success: true,

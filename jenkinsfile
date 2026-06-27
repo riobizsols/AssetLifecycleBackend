@@ -1,0 +1,60 @@
+// Pull latest, preserve local edits (stash → pull → pop), rebuild main backend container.
+// Aligns with deploy.txt: stash, pull, stash pop, docker-compose up -d --build
+// Optional: remove existing backend container before up avoids docker-compose 1.29.x
+// KeyError ContainerConfig on recreate (forces fresh create).
+// Requires: agent on host that has repo + docker-compose; workspace = repo root.
+
+pipeline {
+    agent any
+
+    options {
+        skipDefaultCheckout(true)
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Stash, pull, apply') {
+            steps {
+                sh '''
+                    set -e
+                    cd "${WORKSPACE}"
+                    if [ -n "$(git status --porcelain)" ]; then
+                        echo "Local changes detected; stashing before pull..."
+                        git stash push -u -m "wip before pull"
+                        git pull --no-rebase
+                        echo "Restoring stashed changes..."
+                        git stash pop
+                    else
+                        echo "Clean tree; pulling only..."
+                        git pull --no-rebase
+                    fi
+                '''
+            }
+        }
+
+        stage('Build and run container') {
+            steps {
+                sh '''
+                    set -e
+                    cd "${WORKSPACE}"
+                    # Avoid docker-compose 1.29.x recreate bug (ContainerConfig) when container already exists
+                    docker ps -aq --filter "name=alm-main-backend" | xargs -r docker rm -f 2>/dev/null || true
+                    docker-compose up -d --build
+                    docker-compose ps -a
+                    docker-compose logs --tail=100
+                '''
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo 'Deploy failed — check console log and container status on the agent.'
+        }
+    }
+}

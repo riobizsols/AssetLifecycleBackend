@@ -64,6 +64,7 @@ const auditLogConfigRoutes = require("./routes/auditLogConfigRoutes");
 const columnAccessConfigRoutes = require("./routes/columnAccessConfigRoutes");
 const fcmRoutes = require("./routes/fcmRoutes");
 const CronService = require("./services/cronService");
+const { connectRedis, quitRedis } = require("./config/redis");
 const setupWizardRoutes = require("./routes/setupWizardRoutes");
 const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const slaRoutes = require("./routes/slaRoutes");
@@ -81,8 +82,11 @@ const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
+const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
+applyScalingMiddleware(app);
+registerHealthRoutes(app);
 const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
@@ -272,6 +276,10 @@ app.get("/", (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Server is listening on port ${PORT}`);
+
+  connectRedis().catch((err) => {
+    console.warn('[Redis] Startup connect skipped:', err.message);
+  });
   
   // Initialize cron jobs after server starts
   const cronService = new CronService();
@@ -282,7 +290,8 @@ const server = app.listen(PORT, () => {
 // so in-flight requests never see "Cannot use a pool after calling end")
 function gracefulShutdown() {
   console.log('\n🛑 Shutting down (closing server)...');
-  server.close(() => {
+  server.close(async () => {
+    await quitRedis();
     process.exit(0);
   });
 }

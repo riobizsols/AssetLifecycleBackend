@@ -1,13 +1,19 @@
 const model = require('../models/maintenanceDetailsModel');
+const operationalCache = require('../utils/operationalCache');
 
 // Get all workflow steps
 const getAllWorkflowSteps = async (req, res) => {
     try {
         const org_id = req.user.org_id;
-        const result = await model.getAllWorkflowSteps(org_id);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'maintenance-details',
+            'workflow-steps',
+            () => model.getAllWorkflowSteps(org_id).then((result) => result.rows),
+        );
         res.status(200).json({
             success: true,
-            data: result.rows
+            data: rows
         });
     } catch (error) {
         console.error('Error fetching workflow steps:', error);
@@ -35,6 +41,7 @@ const createWorkflowStep = async (req, res) => {
 
         const escDays = esc_no_days === undefined || esc_no_days === '' ? null : parseInt(esc_no_days, 10);
         const result = await model.createWorkflowStep(org_id, text.trim(), created_by, escDays);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
         res.status(201).json({
             success: true,
             message: 'Workflow step created successfully',
@@ -72,6 +79,8 @@ const updateWorkflowStep = async (req, res) => {
             });
         }
 
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: 'Workflow step updated successfully',
@@ -105,6 +114,8 @@ const deleteWorkflowStep = async (req, res) => {
             });
         }
 
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: 'Workflow step deleted successfully'
@@ -125,10 +136,15 @@ const getWorkflowSequencesByAssetType = async (req, res) => {
         const { asset_type_id } = req.params;
         const org_id = req.user.org_id;
 
-        const result = await model.getWorkflowSequencesByAssetType(asset_type_id, org_id);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'maintenance-details',
+            `workflow-sequences:${asset_type_id}`,
+            () => model.getWorkflowSequencesByAssetType(asset_type_id, org_id).then((result) => result.rows),
+        );
         res.status(200).json({
             success: true,
-            data: result.rows
+            data: rows
         });
     } catch (error) {
         console.error('Error fetching workflow sequences:', error);
@@ -172,6 +188,7 @@ const createWorkflowSequence = async (req, res) => {
         }
 
         const result = await model.createWorkflowSequence(asset_type_id, wf_steps_id, seqs_no, org_id);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
         res.status(201).json({
             success: true,
             message: 'Workflow sequence created successfully',
@@ -228,6 +245,8 @@ const updateWorkflowSequence = async (req, res) => {
             });
         }
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: 'Workflow sequence updated successfully',
@@ -257,6 +276,8 @@ const deleteWorkflowSequence = async (req, res) => {
             });
         }
 
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: 'Workflow sequence deleted successfully'
@@ -277,10 +298,15 @@ const getJobRolesByWorkflowStep = async (req, res) => {
         const { wf_steps_id } = req.params;
         const org_id = req.user.org_id;
 
-        const result = await model.getJobRolesByWorkflowStep(wf_steps_id, org_id);
+        const { data: rows } = await operationalCache.cachedList(
+            req,
+            'maintenance-details',
+            `workflow-job-roles:${wf_steps_id}`,
+            () => model.getJobRolesByWorkflowStep(wf_steps_id, org_id).then((result) => result.rows),
+        );
         res.status(200).json({
             success: true,
-            data: result.rows
+            data: rows
         });
     } catch (error) {
         console.error('Error fetching job roles:', error);
@@ -315,6 +341,7 @@ const createWorkflowJobRole = async (req, res) => {
         }
 
         const result = await model.createWorkflowJobRole(wf_steps_id, job_role_id, emp_int_id || null, org_id);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
         res.status(201).json({
             success: true,
             message: 'Job role assigned successfully',
@@ -368,6 +395,8 @@ const updateWorkflowJobRole = async (req, res) => {
             });
         }
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(200).json({
             success: true,
             message: 'Job role updated successfully',
@@ -396,6 +425,8 @@ const deleteWorkflowJobRole = async (req, res) => {
                 error: 'Workflow job role not found'
             });
         }
+
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
 
         res.status(200).json({
             success: true,

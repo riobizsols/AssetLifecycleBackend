@@ -492,6 +492,14 @@ const DEFAULT_MAINT_TYPES = [
   { id: "MT004", name: "Break Down" }
 ];
 
+const DEFAULT_UOM = [
+  { id: "UOM001", name: "Days" },
+  { id: "UOM002", name: "Weeks" },
+  { id: "UOM003", name: "Months" },
+  { id: "UOM004", name: "Years" },
+  { id: "UOM005", name: "KMS" }
+];
+
 const DEFAULT_MAINT_STATUS = [
   { id: "MS001", name: "Pending" },
   { id: "MS002", name: "In-Progress" },
@@ -712,6 +720,7 @@ module.exports = {
   DEFAULT_APPS,
   DEFAULT_AUDIT_EVENTS,
   DEFAULT_MAINT_TYPES,
+  DEFAULT_UOM,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,

@@ -5,57 +5,52 @@ const logger = require('../utils/logger');
 const getDb = () => getDbFromContext();
 
 // Find user by email or username (used for login)
-// For tenant database connections, query tblUsers only (tenant DBs don't have tblRioAdmin).
-// For default database connections, support both tblRioAdmin and tblUsers lookups.
+// Tenant DBs query tblUsers only; default DB also supports tblRioAdmin.
 const findUserByEmail = async (emailOrUsername, tenantPool = null) => {
+    const lookup = String(emailOrUsername || '').trim();
+    if (!lookup) return undefined;
+
     const runLookup = async (connection, includeRioAdmin) => {
-        // Check if this is a RioAdmin login attempt (username = "rioadmin")
-        if (includeRioAdmin && emailOrUsername && emailOrUsername.toLowerCase() === 'rioadmin') {
-            const rioAdminResult = await connection.query(
-                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE username = $1 OR email = $1',
-                [emailOrUsername]
+        const isRioAdminUsername = lookup.toLowerCase() === 'rioadmin';
+
+        if (!isRioAdminUsername) {
+            const userResult = await connection.query(
+                'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1 LIMIT 1',
+                [lookup]
             );
-            if (rioAdminResult.rows.length > 0) {
-                return rioAdminResult.rows[0];
+            if (userResult.rows.length > 0) {
+                return userResult.rows[0];
             }
         }
-        
-        if (includeRioAdmin) {
-            // Check tblRioAdmin by email (in case email is used)
-            const rioAdminByEmailResult = await connection.query(
-                'SELECT *, \'tblRioAdmin\' as source_table FROM "tblRioAdmin" WHERE email = $1',
-                [emailOrUsername]
-            );
-            if (rioAdminByEmailResult.rows.length > 0) {
-                return rioAdminByEmailResult.rows[0];
-            }
+
+        if (!includeRioAdmin) {
+            return undefined;
         }
-        
-        // Fall back to tblUsers (normal login)
-        const result = await connection.query(
-            'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
-            [emailOrUsername]
+
+        const rioAdminResult = await connection.query(
+            `SELECT *, 'tblRioAdmin' as source_table FROM "tblRioAdmin"
+             WHERE username = $1 OR email = $1
+             LIMIT 1`,
+            [lookup]
         );
-        return result.rows[0];
+        return rioAdminResult.rows[0];
     };
 
     if (tenantPool) {
-        logger.debug(`[UserModel] 🔍 Searching tenant user with identifier: "${emailOrUsername}"`);
-        // Tenant DBs are schema-isolated and do not contain tblRioAdmin.
+        logger.debug(`[UserModel] Searching tenant user with identifier: "${lookup}"`);
         return runLookup(tenantPool, false);
     }
 
     const connection = getDb();
-    logger.debug(`[UserModel] 🔍 Searching default user with identifier: "${emailOrUsername}"`);
+    logger.debug(`[UserModel] Searching default user with identifier: "${lookup}"`);
     try {
         return await runLookup(connection, true);
     } catch (err) {
-        // If tblRioAdmin doesn't exist in current DB context, fallback safely to tblUsers.
         if (err && (err.code === '42P01' || String(err.message || '').includes('tblRioAdmin'))) {
             logger.warn('[UserModel] tblRioAdmin table not found, falling back to tblUsers-only lookup');
             const userResult = await connection.query(
-                'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1',
-                [emailOrUsername]
+                'SELECT *, \'tblUsers\' as source_table FROM "tblUsers" WHERE email = $1 LIMIT 1',
+                [lookup]
             );
             return userResult.rows[0];
         }

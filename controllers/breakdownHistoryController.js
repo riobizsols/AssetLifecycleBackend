@@ -1,4 +1,5 @@
 const model = require('../models/breakdownHistoryModel');
+const reportsCache = require('../utils/reportsCache');
 const { listAssetMaintDocsByWorkOrder } = require('../models/assetMaintDocsModel');
 const {
     logReportApiCall,
@@ -84,18 +85,30 @@ const getBreakdownHistory = async (req, res) => {
             userId
         });
         
-        // Get breakdown history and count
-        const [historyResult, countResult] = await Promise.all([
-            model.getBreakdownHistory(filters, orgId),
-            model.getBreakdownHistoryCount(filters, orgId)
-        ]);
-        
-        const totalCount = countResult.rows[0].total_count;
+        const cacheFilters = { ...filters, orgId };
+
+        const { data: cachedPayload } = await reportsCache.cachedList(
+            req,
+            'breakdown-history',
+            cacheFilters,
+            async () => {
+                const [historyResult, countResult] = await Promise.all([
+                    model.getBreakdownHistory(filters, orgId),
+                    model.getBreakdownHistoryCount(filters, orgId),
+                ]);
+                return {
+                    rows: historyResult.rows,
+                    totalCount: countResult.rows[0].total_count,
+                };
+            },
+        );
+
+        const historyRows = cachedPayload.rows;
+        const totalCount = cachedPayload.totalCount;
         const totalPages = Math.ceil(totalCount / limit);
-        const recordCount = historyResult.rows?.length || 0;
-        
-        // Format the response data
-        const formattedData = historyResult.rows.map(record => ({
+        const recordCount = historyRows?.length || 0;
+
+        const formattedData = historyRows.map(record => ({
             // Breakdown Information
             breakdown_id: record.abr_id,
             asset_id: record.asset_id,
@@ -543,11 +556,18 @@ const getBreakdownFilterOptions = async (req, res) => {
         
         console.log('Breakdown Filter Options Request:', { orgId });
         
-        const result = await model.getBreakdownFilterOptions(orgId);
-        
+        const { data: filterOptions } = await reportsCache.cachedFilterOptions(
+            req,
+            'breakdown-history',
+            async () => {
+                const result = await model.getBreakdownFilterOptions(orgId);
+                return result.rows[0];
+            },
+        );
+
         res.json({
             success: true,
-            filter_options: result.rows[0]
+            filter_options: filterOptions
         });
         
     } catch (error) {

@@ -10,6 +10,14 @@ const {
   snoozeWarrantyNotification,
   mapStatus,
 } = require('../models/assetWarrantyNotifyModel');
+const {
+  getExpiryNotificationsByUser,
+  markExpiryNotificationOpen,
+  discardExpiryNotification,
+  snoozeExpiryNotification,
+  mapStatus: mapExpiryStatus,
+} = require('../models/assetExpiryNotifyModel');
+const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 
 // Get all maintenance notifications for an organization
 const getAllNotifications = async (req, res) => {
@@ -96,6 +104,12 @@ const getUserNotifications = async (req, res) => {
       branchId,
       hasSuperAccess: req.user?.hasSuperAccess || false,
     });
+    const expiryNotifications = await getExpiryNotificationsByUser({
+      empIntId: userId,
+      orgId,
+      branchId,
+      hasSuperAccess: req.user?.hasSuperAccess || false,
+    });
     
     console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);
     console.log('🐛 [getUserNotifications] First 3 notifications:', notifications.slice(0, 3));
@@ -142,31 +156,34 @@ const getUserNotifications = async (req, res) => {
       groupAssetCount: notification.group_asset_count ? parseInt(notification.group_asset_count) : null,
       isGroupMaintenance: !!notification.group_id
     }));
-    const formattedWarrantyNotifications = warrantyNotifications.map((notification) => {
+    const formatExpiryNotification = (notification, workflowType, maintenanceType, userLabel, dateField) => {
       const status = mapStatus(notification.status);
       const isVendorMaintained = !!notification.service_vendor_id;
+      const targetDate = notification[dateField];
+      const daysUntilExpiry = Math.floor(
+        (new Date(targetDate) - new Date()) / (1000 * 60 * 60 * 24)
+      );
+      const isExpired =
+        workflowType === "WARRANTY" &&
+        (daysUntilExpiry < 0 || String(notification.title || "").toLowerCase() === "warranty expired");
 
       return {
         id: notification.notify_id,
         wfamshId: null,
         workflowId: notification.notify_id,
-        workflowType: "WARRANTY",
+        workflowType,
         route: `/asset-detail/${notification.asset_id}`,
         userId: userId,
-        userName: "Warranty Alert",
+        userName: userLabel,
         userEmail: null,
         status,
-        dueDate: notification.warranty_period,
-        cutoffDate: notification.warranty_period,
-        daysUntilDue: Math.floor(
-          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        daysUntilCutoff: Math.floor(
-          (new Date(notification.warranty_period) - new Date()) / (1000 * 60 * 60 * 24)
-        ),
-        isUrgent: true,
-        isOverdue: false,
-        maintenanceType: "Warranty Expiry",
+        dueDate: targetDate,
+        cutoffDate: targetDate,
+        daysUntilDue: daysUntilExpiry,
+        daysUntilCutoff: daysUntilExpiry,
+        isUrgent: isExpired || daysUntilExpiry <= 2,
+        isOverdue: workflowType === "WARRANTY" ? isExpired : daysUntilExpiry <= 0,
+        maintenanceType: isExpired ? "Warranty Expired" : maintenanceType,
         assetId: notification.asset_id,
         assetTypeName: notification.asset_type_name || "Asset",
         isGroupMaintenance: false,
@@ -175,9 +192,59 @@ const getUserNotifications = async (req, res) => {
         groupAssetCount: null,
         notifyId: notification.notify_id,
         notificationStatus: status,
-        title: notification.title || "Warranty Expiry",
+        title: notification.title || (isExpired ? "Warranty Expired" : maintenanceType),
         body: notification.body || "",
         canChangeVendor: isVendorMaintained,
+      };
+    };
+
+    const formattedWarrantyNotifications = warrantyNotifications.map((notification) =>
+      formatExpiryNotification(
+        notification,
+        "WARRANTY",
+        "Warranty Expiry",
+        "Warranty Alert",
+        "warranty_period"
+      )
+    );
+
+    const formattedExpiryNotifications = expiryNotifications.map((notification) => {
+      const status = mapExpiryStatus(notification.status);
+      const daysUntilExpiry = Math.floor(
+        (new Date(notification.expiry_date) - new Date()) / (1000 * 60 * 60 * 24)
+      );
+      const isExpired =
+        daysUntilExpiry < 0 || String(notification.title || "").toLowerCase() === "asset expired";
+
+      return {
+        id: notification.notify_id,
+        wfamshId: null,
+        workflowId: notification.notify_id,
+        workflowType: "ASSET_EXPIRY",
+        route: `/asset-detail/${notification.asset_id}`,
+        userId: userId,
+        userName: "Asset Expiry Alert",
+        userEmail: null,
+        status,
+        dueDate: notification.expiry_date,
+        cutoffDate: notification.expiry_date,
+        daysUntilDue: daysUntilExpiry,
+        daysUntilCutoff: daysUntilExpiry,
+        isUrgent: isExpired || daysUntilExpiry <= 2,
+        isOverdue: isExpired,
+        maintenanceType: isExpired ? "Asset Expired" : "Asset Expiry",
+        assetId: notification.asset_id,
+        assetTypeName: notification.asset_type_name || "Asset",
+        isGroupMaintenance: false,
+        groupId: null,
+        groupName: null,
+        groupAssetCount: null,
+        notifyId: notification.notify_id,
+        notificationStatus: status,
+        title: notification.title || (isExpired ? "Asset Expired" : "Asset Expiry"),
+        body: notification.body || "",
+        canExtendExpiry: true,
+        canScrap: true,
       };
     });
 
@@ -187,8 +254,15 @@ const getUserNotifications = async (req, res) => {
     res.json({
       success: true,
       message: 'User maintenance notifications retrieved successfully',
-      data: [...formattedNotifications, ...formattedWarrantyNotifications],
-      count: formattedNotifications.length + formattedWarrantyNotifications.length,
+      data: [
+        ...formattedNotifications,
+        ...formattedWarrantyNotifications,
+        ...formattedExpiryNotifications,
+      ],
+      count:
+        formattedNotifications.length +
+        formattedWarrantyNotifications.length +
+        formattedExpiryNotifications.length,
       userId: userId,
       timestamp: new Date().toISOString()
     });
@@ -263,6 +337,121 @@ const snoozeWarrantyNotificationAction = async (req, res) => {
     return res.json({ success: true, message: "Notification snoozed", data: updated });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const openExpiryNotification = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const updated = await markExpiryNotificationOpen({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification opened", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const discardExpiryNotificationAction = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const updated = await discardExpiryNotification({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification resolved", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const snoozeExpiryNotificationAction = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const snoozeDays = Number(req.body?.snooze_days);
+    if (!Number.isFinite(snoozeDays) || snoozeDays < 0) {
+      return res.status(400).json({ success: false, message: "Invalid snooze_days" });
+    }
+    const updated = await snoozeExpiryNotification({
+      notifyId,
+      orgId: req.user?.org_id,
+      empIntId: req.user?.emp_int_id,
+      snoozeDays,
+    });
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Notification not found" });
+    }
+    return res.json({ success: true, message: "Notification snoozed", data: updated });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Initiate scrap approval from a warranty notification
+// PUT /api/notifications/warranty/:notifyId/scrap
+const scrapFromWarrantyNotification = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const orgId = req.user?.org_id;
+    const userId = req.user?.user_id;
+
+    if (!orgId || !userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+
+    const { getDb } = require('../utils/dbContext');
+    const db = getDb();
+    const notifResult = await db.query(
+      `SELECT asset_id, org_id, emp_int_id
+       FROM "tblAssetWarrantyNotify"
+       WHERE notify_id = $1 AND org_id = $2`,
+      [notifyId, orgId]
+    );
+
+    if (!notifResult.rows.length) {
+      return res.status(404).json({ success: false, message: 'Notification not found' });
+    }
+
+    const { asset_id } = notifResult.rows[0];
+
+    const scrapResult = await scrapMaintenanceModel.createScrapRequest({
+      orgId,
+      userId,
+      branchId: req.user?.branch_id,
+      asset_id,
+      assetgroup_id: null,
+      is_scrap_sales: 'N',
+      request_notes: 'Initiated from asset/warranty expiry notification',
+    });
+
+    if (!scrapResult.success) {
+      return res.status(400).json(scrapResult);
+    }
+
+    await db.query(
+      `UPDATE "tblAssetWarrantyNotify"
+       SET status = 'RESOLVED', last_seen_on = CURRENT_TIMESTAMP
+       WHERE notify_id = $1 AND org_id = $2`,
+      [notifyId, orgId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Scrap approval initiated and warranty notification resolved',
+      data: scrapResult,
+    });
+  } catch (error) {
+    console.error('Error in scrapFromWarrantyNotification:', error);
+    return res.status(500).json({ success: false, message: 'Failed to initiate scrap approval', error: error.message });
   }
 };
 
@@ -369,4 +558,8 @@ module.exports = {
   openWarrantyNotification,
   discardWarrantyNotificationAction,
   snoozeWarrantyNotificationAction,
+  scrapFromWarrantyNotification,
+  openExpiryNotification,
+  discardExpiryNotificationAction,
+  snoozeExpiryNotificationAction,
 }; 

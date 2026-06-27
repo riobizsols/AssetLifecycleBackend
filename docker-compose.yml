@@ -1,0 +1,41 @@
+version: "3.9"
+
+# DATABASE_URL like postgres://...@alm_db:5432/db only works if this container
+# shares a user-defined Docker network with the Postgres container named alm_db.
+# One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db
+# Then deploy/restart this compose stack so alm-main-backend joins alm-shared.
+
+services:
+  alm-backend:
+    container_name: alm-main-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env.production
+    ports:
+      - "5002:5000"
+    restart: unless-stopped
+    depends_on:
+      - alm-redis
+    networks:
+      - default
+      - alm-shared
+
+  alm-redis:
+    image: redis:7-alpine
+    container_name: alm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - alm-shared
+
+volumes:
+  redis-data:
+
+networks:
+  alm-shared:
+    external: true
+

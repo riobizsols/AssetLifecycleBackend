@@ -1,46 +1,31 @@
 const vendorsModel = require("../models/vendorsModel");
+const operationalCache = require('../utils/operationalCache');
+const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
+const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
     const org_id = req.user.org_id;
     
-    // Get user's branch information
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
-    
-    console.log('=== Vendor Listing Debug ===');
-    console.log('User org_id:', org_id);
-    console.log('User branch_id:', userBranchId);
-    
-    // Get branch_code from tblBranches
-    let userBranchCode = null;
+    const userBranchCode = branchCodeFromReq(req);
     const hasSuperAccess = req.user?.hasSuperAccess || false;
-    
-    if (!hasSuperAccess && userBranchId) {
-      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-      const dbPool = req.db || require("../config/db");
-
-      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-      if (branchResult.rows.length > 0) {
-        userBranchCode = branchResult.rows[0].branch_code;
-        console.log('User branch_code:', userBranchCode);
-      } else {
-        console.log('Branch not found for branch_id:', userBranchId);
-      }
-    }
     
     // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
     const type = req.query.type ? String(req.query.type).toLowerCase() : '';
-    if (type === 'product' || type === 'service') {
-      const vendors = await vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
-      return res.json(vendors);
-    }
-    // Optional query param to request only service vendors (legacy, uses service_supply column if present)
     const serviceOnly = req.query.serviceOnly === 'true' || req.query.serviceOnly === '1';
-    const vendors = await vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+    const { data: vendors } = await operationalCache.cachedList(
+      req,
+      'vendors',
+      operationalCache.hashQuery({ type, serviceOnly }),
+      () => {
+        if (type === 'product' || type === 'service') {
+          return vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+        }
+        return vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+      },
+    );
     res.json(vendors);
   } catch (error) {
     console.error("Get all vendors error:", error);
@@ -152,7 +137,7 @@ exports.createVendor = async (req, res) => {
     const created_on = new Date();
     const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
 
-    const vendorData = {
+    const vendorData = sanitizeVendorPayload({
       vendor_id, // use generated
       org_id: org_id, // Use internal org_id from req.user (already set by authMiddleware)
       branch_code,
@@ -176,7 +161,7 @@ exports.createVendor = async (req, res) => {
       created_on,
       changed_by,
       changed_on,
-    };
+    });
 
     const newVendor = await vendorsModel.createVendor(vendorData);
 
@@ -400,6 +385,7 @@ exports.updateVendor = async (req, res) => {
     // Use internal org_id from req.user (already set by authMiddleware from tblOrgs)
     const org_id = req.user.org_id; // This is now the internal org_id from tblOrgs
     
+    const sanitized = sanitizeVendorPayload(req.body);
     const {
       vendor_name,
       int_status,
@@ -420,7 +406,7 @@ exports.updateVendor = async (req, res) => {
       contract_end_date,
       changed_by,
       changed_on,
-    } = req.body;
+    } = sanitized;
 
     // Validate int_status: 0 = Inactive, 1 = Active, 3 = CRApproved, 4 = Blocked
     if (int_status !== undefined && int_status !== null) {

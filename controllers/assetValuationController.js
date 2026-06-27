@@ -1,4 +1,5 @@
 const AssetValuationModel = require('../models/assetValuationModel');
+const reportsCache = require('../utils/reportsCache');
 const { exportToExcel, exportToCSV } = require('../utils/exportUtils');
 const {
     logReportApiCall,
@@ -149,7 +150,12 @@ class AssetValuationController {
                 userId
             });
 
-            const result = await AssetValuationModel.getAssetValuationData(filters, orgId);
+            const { data: result } = await reportsCache.cachedList(
+                req,
+                'asset-valuation',
+                { ...filters, orgId },
+                () => AssetValuationModel.getAssetValuationData(filters, orgId),
+            );
             const recordCount = result.assets?.length || 0;
 
             // Log no data or success
@@ -251,7 +257,11 @@ class AssetValuationController {
             
             const orgId = req.user.org_id;
 
-            const summary = await AssetValuationModel.getAssetValuationSummary(orgId);
+            const { data: summary } = await reportsCache.cachedSummary(
+                req,
+                'asset-valuation',
+                () => AssetValuationModel.getAssetValuationSummary(orgId),
+            );
 
             res.status(200).json({
                 success: true,
@@ -286,7 +296,11 @@ class AssetValuationController {
             
             const orgId = req.user.org_id;
 
-            const filterOptions = await AssetValuationModel.getFilterOptions(orgId);
+            const { data: filterOptions } = await reportsCache.cachedFilterOptions(
+                req,
+                'asset-valuation',
+                () => AssetValuationModel.getFilterOptions(orgId),
+            );
 
             res.status(200).json({
                 success: true,

@@ -37,8 +37,20 @@ const generateToken = (user, useDefaultDb = false) => {
         email: user.email,
         job_role_id: user.job_role_id,
         emp_int_id: user.emp_int_id,
+        language_code: user.language_code || 'en',
         use_default_db: useDefaultDb // Flag to force default database usage
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
+};
+
+// Auth logs must never block login response flow.
+const safeAuthLog = (logFn) => {
+    Promise.resolve()
+        .then(logFn)
+        .catch((error) => {
+            if (process.env.NODE_ENV !== 'production') {
+                console.warn('[AuthController] Non-blocking auth log failed:', error?.message || error);
+            }
+        });
 };
 
 // 🔑 Login (Supports both subdomain-based multi-tenant and normal database login)
@@ -47,15 +59,14 @@ const generateToken = (user, useDefaultDb = false) => {
 const login = async (req, res) => {
     const startTime = Date.now();
     const { email, password } = req.body;
-    let tempLoginPool = null;
     
     try {
         // Step 1: Log API called
-        await logLoginApiCalled({
+        safeAuthLog(() => logLoginApiCalled({
             email,
             method: req.method,
             url: req.originalUrl
-        });
+        }));
 
         // Step 2: Check if subdomain-based login or normal database login
         const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
@@ -96,7 +107,7 @@ const login = async (req, res) => {
             logger.log(`[AuthController] ✅ Subdomain-based login: ${subdomain}, org_id: ${orgId}`);
             
             // Step 3: Log checking user in database
-            await logCheckingUserInDatabase({ email, orgId, subdomain });
+            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId, subdomain }));
             
             // Check if this is a tenant organization
             const tenantExists = await checkTenantExists(orgId);
@@ -110,46 +121,24 @@ const login = async (req, res) => {
                 logger.warn(`[AuthController] ⚠️ Using default database for org_id: ${orgId} (tenant not found)`);
             }
         } else {
-            // No subdomain - use normal database login (from .env DATABASE_URL)
-            logger.log(`[AuthController] ℹ️ Normal database login (no subdomain) - using default database from .env`);
-            // Use a fresh pool for each normal login request to isolate auth from
-            // shared pool lifecycle issues (e.g., stale/ended shared pool state).
-            const { Pool } = require('pg');
-            const { getPgSslOption } = require('../utils/pgSslOption');
-            tempLoginPool = new Pool({
-                connectionString: process.env.DATABASE_URL,
-                max: 2,
-                idleTimeoutMillis: 10000,
-                connectionTimeoutMillis: 5000,
-                ssl: getPgSslOption(),
-            });
-            dbPool = tempLoginPool;
-            await logCheckingUserInDatabase({ email, orgId: null, subdomain: null });
-            // dbPool is already set to defaultDb
+            // No subdomain — use shared default database pool
+            logger.log('[AuthController] Normal database login (no subdomain) - using default database from .env');
+            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId: null, subdomain: null }));
         }
         
         // Step 5: Find user in the appropriate database
         logger.debug(`[AuthController] 🔍 Searching for user with email: "${email}" in ${isTenant ? 'tenant' : 'default'} database`);
         const user = await findUserByEmail(email, dbPool);
         
-        if (user) {
-            logger.debug(`[AuthController] ✅ User found: ${user.user_id}, org_id: ${user.org_id}`);
-        } else {
-            logger.debug(`[AuthController] ❌ User not found with email: "${email}"`);
-        }
-        
-        // For subdomain-based login with tenant database, skip org_id check
-        // Tenant databases are already isolated, so any user in that database is valid
-        // Only check org_id mismatch when using default database (multi-org scenario)
+        // For subdomain login on default DB (non-tenant), verify org_id when not using tenant pool
         if (loginMode === 'subdomain' && user && !isTenant && user.org_id !== orgId) {
-            console.log(`[AuthController] ⚠️ Org ID mismatch: user.org_id (${user.org_id}) !== tenant org_id (${orgId})`);
-            await logUserNotFound({ email, orgId, reason: 'User belongs to different organization' });
-            await logFailedLogin({
+            safeAuthLog(() => logUserNotFound({ email, orgId, reason: 'User belongs to different organization' }));
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found in this organization',
                 duration: Date.now() - startTime
-            });
+            }));
             return res.status(404).json({ message: 'User not found in this organization' });
         }
         
@@ -163,26 +152,25 @@ const login = async (req, res) => {
         // For normal login, set orgId from user if found
         if (loginMode === 'normal' && user) {
             orgId = user.org_id;
-            console.log(`[AuthController] Normal login - user org_id: ${orgId}`);
         }
         
         if (!user) {
             // Step 3a: User not found
-            await logUserNotFound({ email });
+            safeAuthLog(() => logUserNotFound({ email }));
             
             // Log failed login attempt - user not found
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Step 3b: User found
-        await logUserFound({ 
+        safeAuthLog(() => logUserFound({ 
             email, 
             userId: user.user_id,
             userData: {
@@ -191,109 +179,101 @@ const login = async (req, res) => {
                 job_role_id: user.job_role_id,
                 emp_int_id: user.emp_int_id
             }
-        });
+        }));
 
         // Step 4: Log comparing password
-        await logComparingPassword({ email, userId: user.user_id });
+        safeAuthLog(() => logComparingPassword({ email, userId: user.user_id }));
         
-        const isMatch = await bcrypt.compare(password, user.password);
+        let loginUser = user;
+        let isMatch = await bcrypt.compare(password, user.password);
+
+        // Setup wizard stores admin in both tblRioAdmin and tblUsers; if hashes diverge, try tblUsers
+        if (!isMatch && user.source_table === 'tblRioAdmin' && String(email || '').includes('@')) {
+            const fallbackResult = await dbPool.query(
+                `SELECT *, 'tblUsers' as source_table FROM "tblUsers" WHERE email = $1`,
+                [email]
+            );
+            if (fallbackResult.rows[0]) {
+                const fallbackMatch = await bcrypt.compare(password, fallbackResult.rows[0].password);
+                if (fallbackMatch) {
+                    loginUser = fallbackResult.rows[0];
+                    isMatch = true;
+                }
+            }
+        }
         
         if (!isMatch) {
             // Step 5a: Password not matched
-            await logPasswordNotMatched({ email, userId: user.user_id });
+            safeAuthLog(() => logPasswordNotMatched({ email, userId: user.user_id }));
             
             // Log failed login attempt - invalid credentials
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: user.user_id,
                 reason: 'Invalid credentials',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
         // Step 5b: Password matched
-        await logPasswordMatched({ email, userId: user.user_id });
+        safeAuthLog(() => logPasswordMatched({ email, userId: loginUser.user_id }));
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
-        const isRioAdmin = user.source_table === 'tblRioAdmin';
+        const isRioAdmin = loginUser.source_table === 'tblRioAdmin';
         
-        // Check if password matches the initial password from org settings
-        const initialPassword = await getInitialPassword(user.org_id, dbPool);
-        const isInitialPassword = await bcrypt.compare(initialPassword, user.password);
-        
-        // Update last_accessed field in the appropriate table
-        if (isRioAdmin) {
-            await dbPool.query(
-                `UPDATE "tblRioAdmin" 
-                 SET last_accessed = CURRENT_DATE 
-                 WHERE org_id = $1 AND user_id = $2`,
-                [user.org_id, user.user_id]
+        const lastAccessedPromise = isRioAdmin
+            ? dbPool.query(
+                `UPDATE "tblRioAdmin" SET last_accessed = CURRENT_DATE WHERE org_id = $1 AND user_id = $2`,
+                [loginUser.org_id, loginUser.user_id]
+            )
+            : dbPool.query(
+                `UPDATE "tblUsers" SET last_accessed = CURRENT_DATE WHERE org_id = $1 AND user_id = $2`,
+                [loginUser.org_id, loginUser.user_id]
             );
-        } else {
-            await dbPool.query(
-                `UPDATE "tblUsers" 
-                 SET last_accessed = CURRENT_DATE 
-                 WHERE org_id = $1 AND user_id = $2`,
-                [user.org_id, user.user_id]
-            );
-        }
 
-        // Fetch all user roles from tblUserJobRoles (RioAdmin might not have roles, so handle gracefully)
-        let userRoles = [];
-        try {
-            userRoles = await getUserRoles(user.user_id, dbPool);
-        } catch (roleError) {
-            // If RioAdmin doesn't have roles, that's okay - they have admin access by default
-            console.log(`[AuthController] No roles found for user ${user.user_id}, continuing...`);
-        }
-        
-        // For RioAdmin, create a default admin role if no roles exist
+        const [initialPassword, , userRolesResult, userWithBranch] = await Promise.all([
+            getInitialPassword(loginUser.org_id, dbPool),
+            lastAccessedPromise,
+            getUserRoles(loginUser.user_id, dbPool).catch(() => {
+                console.log(`[AuthController] No roles found for user ${loginUser.user_id}, continuing...`);
+                return [];
+            }),
+            isRioAdmin
+                ? dbPool.query(
+                    `SELECT ra.user_id, ra.full_name, ra.email, ra.phone, ra.job_role_id,
+                            ra.dept_id, ra.branch_id, d.text as dept_name, b.text as branch_name,
+                            b.branch_code, jr.text as job_role_name
+                     FROM "tblRioAdmin" ra
+                     LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
+                     LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                     LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
+                     WHERE ra.user_id = $1`,
+                    [loginUser.user_id]
+                ).then((r) => r.rows[0])
+                : getUserWithBranch(loginUser.user_id, dbPool),
+        ]);
+
+        const isInitialPassword = initialPassword
+            ? await bcrypt.compare(initialPassword, loginUser.password)
+            : false;
+
+        let userRoles = userRolesResult || [];
         if (isRioAdmin && userRoles.length === 0) {
             userRoles = [{
                 user_job_role_id: 'UJR_RIOADMIN',
-                user_id: user.user_id,
-                job_role_id: 'JR001', // System Administrator
+                user_id: loginUser.user_id,
+                job_role_id: 'JR001',
                 job_role_name: 'System Administrator'
             }];
         }
-        
-        // Fetch user with branch information (using the appropriate database)
-        let userWithBranch = null;
-        if (isRioAdmin) {
-            // For RioAdmin, get branch info directly from the user record or join with departments
-            const branchQuery = `
-                SELECT 
-                    ra.user_id,
-                    ra.full_name,
-                    ra.email,
-                    ra.phone,
-                    ra.job_role_id,
-                    ra.dept_id,
-                    ra.branch_id,
-                    d.text as dept_name,
-                    b.text as branch_name,
-                    b.branch_code,
-                    jr.text as job_role_name
-                FROM "tblRioAdmin" ra
-                LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
-                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
-                LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
-                WHERE ra.user_id = $1
-            `;
-            const branchResult = await dbPool.query(branchQuery, [user.user_id]);
-            userWithBranch = branchResult.rows[0];
-        } else {
-            userWithBranch = await getUserWithBranch(user.user_id, dbPool);
-        }
-        
-        // Fetch language_code from employee table if emp_int_id exists (RioAdmin doesn't have emp_int_id)
-        let language_code = user.language_code || 'en'; // default language
-        if (!isRioAdmin && user.emp_int_id) {
+
+        let language_code = loginUser.language_code || 'en';
+        if (!isRioAdmin && loginUser.emp_int_id) {
             const employeeResult = await dbPool.query(
                 'SELECT language_code FROM "tblEmployees" WHERE emp_int_id = $1',
-                [user.emp_int_id]
+                [loginUser.emp_int_id]
             );
             if (employeeResult.rows.length > 0) {
                 language_code = employeeResult.rows[0].language_code || 'en';
@@ -301,55 +281,58 @@ const login = async (req, res) => {
         }
         
         // Step 6: Log generating token
-        await logGeneratingToken({ email, userId: user.user_id });
+        safeAuthLog(() => logGeneratingToken({ email, userId: loginUser.user_id }));
         
         // Generate token with tenant information
         // If tenant exists, don't set use_default_db flag so middleware uses tenant database
-        const token = generateToken(user, !isTenant);
+        const token = generateToken(
+            { ...loginUser, language_code },
+            !isTenant
+        );
         
         // Step 7: Log token generated
-        await logTokenGenerated({ 
+        safeAuthLog(() => logTokenGenerated({ 
             email, 
-            userId: user.user_id,
+            userId: loginUser.user_id,
             tokenPayload: {
-                org_id: user.org_id,
-                user_id: user.user_id,
-                email: user.email,
-                job_role_id: user.job_role_id,
-                emp_int_id: user.emp_int_id,
+                org_id: loginUser.org_id,
+                user_id: loginUser.user_id,
+                email: loginUser.email,
+                job_role_id: loginUser.job_role_id,
+                emp_int_id: loginUser.emp_int_id,
                 use_default_db: !isTenant,
                 subdomain: subdomain || null,
                 loginMode: loginMode
             }
-        });
+        }));
         
         const duration = Date.now() - startTime;
 
         // Step 8: Log successful login (final summary with response data)
-        await logSuccessfulLogin({
+        safeAuthLog(() => logSuccessfulLogin({
             email,
-            userId: user.user_id,
+            userId: loginUser.user_id,
             duration,
             responseData: {
-                full_name: user.full_name,
-                org_id: user.org_id,
+                full_name: loginUser.full_name,
+                org_id: loginUser.org_id,
                 branch_id: userWithBranch?.branch_id,
                 branch_name: userWithBranch?.branch_name,
                 roles: userRoles,
                 language_code
             }
-        });
+        }));
 
         res.json({
             token,
             requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
             user: {
-                full_name: user.full_name,
-                email: user.email,
-                org_id: user.org_id,
-                user_id: user.user_id,
-                job_role_id: user.job_role_id, // Keep for backward compatibility
-                emp_int_id: user.emp_int_id,
+                full_name: loginUser.full_name,
+                email: loginUser.email,
+                org_id: loginUser.org_id,
+                user_id: loginUser.user_id,
+                job_role_id: loginUser.job_role_id, // Keep for backward compatibility
+                emp_int_id: loginUser.emp_int_id,
                 roles: userRoles, // Add all roles
                 branch_id: userWithBranch?.branch_id || null,
                 branch_name: userWithBranch?.branch_name || null,
@@ -363,22 +346,14 @@ const login = async (req, res) => {
         const duration = Date.now() - startTime;
         
         // Log CRITICAL error - system failure during login
-        await logLoginCriticalError({
+        safeAuthLog(() => logLoginCriticalError({
             email,
             error,
             duration
-        });
+        }));
 
         console.error('Login error:', error);
         res.status(500).json({ message: 'Internal server error' });
-    } finally {
-        if (tempLoginPool) {
-            try {
-                await tempLoginPool.end();
-            } catch (_) {
-                // no-op
-            }
-        }
     }
 };
 
@@ -744,7 +719,8 @@ const refreshToken = async (req, res) => {
         // This ensures the token has the correct org_id for tenant lookup
         const refreshTokenUser = {
             ...user,
-            org_id: decoded.org_id // Use org_id from token (tenant org_id), not from user record
+            org_id: decoded.org_id, // Use org_id from token (tenant org_id), not from user record
+            language_code
         };
         const newToken = generateToken(refreshTokenUser, decoded.use_default_db || false);
         
@@ -897,11 +873,11 @@ const tenantLogin = async (req, res) => {
         }
 
         // Step 1: Log API called
-        await logLoginApiCalled({
+        safeAuthLog(() => logLoginApiCalled({
             email,
             method: req.method,
             url: req.originalUrl
-        });
+        }));
 
         // Step 1.5: Get tenant database credentials
         const { getTenantPool } = require('../services/tenantService');
@@ -909,38 +885,38 @@ const tenantLogin = async (req, res) => {
         try {
             tenantPool = await getTenantPool(org_id);
         } catch (tenantError) {
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: `Tenant lookup failed: ${tenantError.message}`,
                 duration: Date.now() - startTime
-            });
+            }));
             return res.status(404).json({ message: `Organization ${org_id} not found or inactive` });
         }
 
         // Step 2: Log checking user in database
-        await logCheckingUserInDatabase({ email });
+        safeAuthLog(() => logCheckingUserInDatabase({ email }));
         
         // Use tenant-specific database connection
         const user = await findUserByEmail(email, tenantPool);
 
         if (!user) {
             // Step 3a: User not found
-            await logUserNotFound({ email });
+            safeAuthLog(() => logUserNotFound({ email }));
             
             // Log failed login attempt - user not found
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: null,
                 reason: 'User not found',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(404).json({ message: 'User not found' });
         }
 
         // Step 3b: User found
-        await logUserFound({ 
+        safeAuthLog(() => logUserFound({ 
             email, 
             userId: user.user_id,
             userData: {
@@ -949,30 +925,30 @@ const tenantLogin = async (req, res) => {
                 job_role_id: user.job_role_id,
                 emp_int_id: user.emp_int_id
             }
-        });
+        }));
 
         // Step 4: Log comparing password
-        await logComparingPassword({ email, userId: user.user_id });
+        safeAuthLog(() => logComparingPassword({ email, userId: user.user_id }));
         
         const isMatch = await bcrypt.compare(password, user.password);
         
         if (!isMatch) {
             // Step 5a: Password not matched
-            await logPasswordNotMatched({ email, userId: user.user_id });
+            safeAuthLog(() => logPasswordNotMatched({ email, userId: user.user_id }));
             
             // Log failed login attempt - invalid credentials
-            await logFailedLogin({
+            safeAuthLog(() => logFailedLogin({
                 email,
                 userId: user.user_id,
                 reason: 'Invalid credentials',
                 duration: Date.now() - startTime
-            });
+            }));
 
             return res.status(401).json({ message: 'Invalid credentials' });
         }
 
         // Step 5b: Password matched
-        await logPasswordMatched({ email, userId: user.user_id });
+        safeAuthLog(() => logPasswordMatched({ email, userId: user.user_id }));
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = user.source_table === 'tblRioAdmin';
@@ -1059,7 +1035,7 @@ const tenantLogin = async (req, res) => {
         }
         
         // Step 6: Log generating token
-        await logGeneratingToken({ email, userId: user.user_id });
+        safeAuthLog(() => logGeneratingToken({ email, userId: user.user_id }));
         
         // For tenant login (/tenant-login), use tenant database (set useDefaultDb = false)
         // IMPORTANT: Use the tenant org_id from the request (org_id), not user.org_id
@@ -1069,12 +1045,13 @@ const tenantLogin = async (req, res) => {
         console.log(`[TenantLogin] Using tenant org_id: ${tenantOrgId} (user.org_id from DB: ${user.org_id})`);
         const tokenUser = {
             ...user,
-            org_id: tenantOrgId // Use tenant org_id, not generated org_id from user record
+            org_id: tenantOrgId, // Use tenant org_id, not generated org_id from user record
+            language_code
         };
         const token = generateToken(tokenUser, false);
         
         // Step 7: Log token generated
-        await logTokenGenerated({ 
+        safeAuthLog(() => logTokenGenerated({ 
             email, 
             userId: user.user_id,
             tokenPayload: {
@@ -1085,13 +1062,13 @@ const tenantLogin = async (req, res) => {
                 emp_int_id: user.emp_int_id,
                 use_default_db: false
             }
-        });
+        }));
         
         const duration = Date.now() - startTime;
 
         // Step 8: Log successful login (final summary with response data)
         // Use tenant org_id (from request) for logging, not user.org_id (which is generated org_id)
-        await logSuccessfulLogin({
+        safeAuthLog(() => logSuccessfulLogin({
             email,
             userId: user.user_id,
             duration,
@@ -1103,7 +1080,7 @@ const tenantLogin = async (req, res) => {
                 roles: userRoles,
                 language_code
             }
-        });
+        }));
 
         res.json({
             token,
@@ -1128,11 +1105,11 @@ const tenantLogin = async (req, res) => {
         const duration = Date.now() - startTime;
         
         // Log CRITICAL error - system failure during login
-        await logLoginCriticalError({
+        safeAuthLog(() => logLoginCriticalError({
             email,
             error,
             duration
-        });
+        }));
 
         console.error('Tenant login error:', error);
         res.status(500).json({ message: 'Internal server error' });

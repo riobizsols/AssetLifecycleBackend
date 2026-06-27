@@ -44,7 +44,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
     // Auto-create entry if it doesn't exist
     if (result.rows.length === 0) {
         console.log(`⚠️ Entry for ${tableKey} not found in tblIDSequences, creating it...`);
-        
+
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
         
         // Insert new entry with last_number = 0 (or seed from existing table if needed)
@@ -143,6 +143,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'wfscrap_h': 'tblWFScrap_H',
         'wfscrap_d': 'tblWFScrap_D',
         'asset_scrap': 'tblAssetScrap',
+        'scrap_asset_hist': 'tblScrapAssetHist',
         // Existing scrap details table (legacy)
         'asset_scrap_det': 'tblAssetScrapDet',
         'etc': 'tblEmpTechCert'
@@ -192,6 +193,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
             'wfscrap_h': 'id_d',
             'wfscrap_d': 'id',
             'asset_scrap': 'id',
+            'scrap_asset_hist': 'scraphis_id',
             // Existing scrap details table (legacy)
               'asset_scrap_det': 'asd_id',
               'etc': 'etc_id'

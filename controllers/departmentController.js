@@ -1,4 +1,5 @@
 const DepartmentModel = require('../models/departmentModel');
+const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 
 const createDepartment = async (req, res) => {
@@ -61,6 +62,7 @@ const createDepartment = async (req, res) => {
         });
 
         res.status(201).json(newDept);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
     } catch (err) {
         console.error("Error creating department:", err);
         res.status(500).json({ error: 'Failed to create department' });
@@ -119,6 +121,7 @@ const deleteDepartment = async (req, res) => {
         }
 
         res.status(200).json({ message: "Departments deleted successfully" });
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
     } catch (err) {
         console.error("Error deleting departments:", err);
         
@@ -167,6 +170,7 @@ const updateDepartment = async (req, res) => {
         }
 
         res.status(200).json({ message: "Department updated successfully", department: updatedDept });
+        operationalCache.invalidateOrgCaches(req.user.org_id).catch(() => {});
     } catch (err) {
         console.error("Error updating department:", err);
         res.status(500).json({ error: "Failed to update department" });
@@ -181,7 +185,12 @@ module.exports = {
         const org_id = req.user.org_id;
         const branch_id = req.user.branch_id;   
 
-        const departments = await DepartmentModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false);
+        const { data: departments } = await operationalCache.cachedList(
+            req,
+            'departments',
+            'list',
+            () => DepartmentModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false),
+        );
         res.status(200).json(departments);
     },
     deleteDepartment,

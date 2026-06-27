@@ -1,4 +1,5 @@
 const assetRegisterModel = require("../models/assetRegisterModel");
+const reportsCache = require("../utils/reportsCache");
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -108,51 +109,54 @@ const getAssetRegister = async (req, res) => {
     filters.orgId = req.user?.org_id;
     filters.org_id = req.user?.org_id;
 
-    // Get data and count
-    const [data, count] = await Promise.all([
-      assetRegisterModel.getAssetRegisterData(filters),
-      assetRegisterModel.getAssetRegisterCount(filters)
-    ]);
+    const { data: cachedPayload } = await reportsCache.cachedList(
+      req,
+      'asset-register',
+      filters,
+      async () => {
+        const [rawData, rawCount] = await Promise.all([
+          assetRegisterModel.getAssetRegisterData(filters),
+          assetRegisterModel.getAssetRegisterCount(filters),
+        ]);
 
-    // Transform data: flatten Properties JSON into individual columns
-    if (data.rows && data.rows.length > 0) {
-      // Collect all unique property names to create columns
-      const allProperties = new Set();
-      data.rows.forEach(row => {
-        if (row.Properties && Array.isArray(row.Properties)) {
-          row.Properties.forEach(prop => {
-            if (prop.property) {
-              allProperties.add(prop.property);
+        const rows = rawData.rows ? [...rawData.rows] : [];
+        if (rows.length > 0) {
+          const allProperties = new Set();
+          rows.forEach((row) => {
+            if (row.Properties && Array.isArray(row.Properties)) {
+              row.Properties.forEach((prop) => {
+                if (prop.property) allProperties.add(prop.property);
+              });
             }
           });
-        }
-      });
 
-      // Transform each row: add property columns and keep Properties for reference
-      data.rows = data.rows.map(row => {
-        const transformedRow = { ...row };
-        
-        // Parse Properties if it's a string
-        let properties = row.Properties;
-        if (typeof properties === 'string') {
-          try {
-            properties = JSON.parse(properties);
-          } catch (e) {
-            properties = [];
-          }
+          const transformedRows = rows.map((row) => {
+            const transformedRow = { ...row };
+            let properties = row.Properties;
+            if (typeof properties === 'string') {
+              try {
+                properties = JSON.parse(properties);
+              } catch {
+                properties = [];
+              }
+            }
+            allProperties.forEach((propName) => {
+              const propData = Array.isArray(properties)
+                ? properties.find((p) => p.property === propName)
+                : null;
+              transformedRow[`Property: ${propName}`] = propData ? propData.value : '';
+            });
+            return transformedRow;
+          });
+
+          return { rows: transformedRows, count: parseInt(rawCount, 10) };
         }
-        
-        // Create columns for each property
-        allProperties.forEach(propName => {
-          const propData = Array.isArray(properties) 
-            ? properties.find(p => p.property === propName)
-            : null;
-          transformedRow[`Property: ${propName}`] = propData ? propData.value : '';
-        });
-        
-        return transformedRow;
-      });
-    }
+
+        return { rows, count: parseInt(rawCount, 10) };
+      },
+    );
+    const data = { rows: cachedPayload.rows };
+    const count = cachedPayload.count;
 
     const recordCount = data.rows?.length || 0;
 
@@ -246,7 +250,11 @@ const getAssetRegister = async (req, res) => {
 // Get filter options for asset register
 const getAssetRegisterFilterOptions = async (req, res) => {
   try {
-    const options = await assetRegisterModel.getAssetRegisterFilterOptions();
+    const { data: options } = await reportsCache.cachedFilterOptions(
+      req,
+      'asset-register',
+      () => assetRegisterModel.getAssetRegisterFilterOptions(),
+    );
     
     res.status(200).json({
       success: true,

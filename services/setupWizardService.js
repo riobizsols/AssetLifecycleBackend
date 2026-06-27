@@ -13,6 +13,7 @@ const {
   DEFAULT_APPS,
   DEFAULT_AUDIT_EVENTS,
   DEFAULT_MAINT_TYPES,
+  DEFAULT_UOM,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,
@@ -38,6 +39,26 @@ const clearSchemaCache = () => {
   cachedSchemaSql = null;
   cachedDynamicSchemaSql = null;
   console.log('[SetupWizard] 🗑️ Schema cache cleared');
+};
+
+/**
+ * Wrap ALTER TABLE ... ADD CONSTRAINT so re-running setup on an existing DB does not fail.
+ */
+const wrapAddConstraintIfNotExists = (alterSql, constraintName) => {
+  const safeName = String(constraintName).replace(/'/g, "''");
+  const statement = alterSql.trim().replace(/;\s*$/, '');
+  return `
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = '${safeName}'
+  ) THEN
+    ${statement};
+  END IF;
+END $$;
+`;
 };
 
 /**
@@ -452,7 +473,10 @@ const generateDynamicSchemaSql = async () => {
       
       for (const [constraintName, columns] of Object.entries(uniqueConstraints)) {
         schemaParts.push(
-          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" UNIQUE (${columns.map(c => `"${c}"`).join(', ')});\n`
+          wrapAddConstraintIfNotExists(
+            `ALTER TABLE "${tableName}" ADD CONSTRAINT "${constraintName}" UNIQUE (${columns.map(c => `"${c}"`).join(', ')})`,
+            constraintName
+          )
         );
       }
       
@@ -498,9 +522,12 @@ const generateDynamicSchemaSql = async () => {
         const updateRule = fk.updateRule === 'NO ACTION' ? '' : ` ON UPDATE ${fk.updateRule}`;
         const deleteRule = fk.deleteRule === 'NO ACTION' ? '' : ` ON DELETE ${fk.deleteRule}`;
         foreignKeyStatements.push({
-          sql: `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
-               `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
-               `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule};\n`,
+          sql: wrapAddConstraintIfNotExists(
+            `ALTER TABLE "${fk.tableName}" ADD CONSTRAINT "${constraintName}" ` +
+            `FOREIGN KEY (${fk.columns.map(c => `"${c}"`).join(', ')}) ` +
+            `REFERENCES "${fk.foreignTable}" (${fk.foreignColumns.map(c => `"${c}"`).join(', ')})${updateRule}${deleteRule}`,
+            constraintName
+          ),
           tableName: fk.tableName,
           foreignTable: fk.foreignTable,
           foreignColumns: fk.foreignColumns,
@@ -511,7 +538,10 @@ const generateDynamicSchemaSql = async () => {
       // Add CHECK constraints
       for (const check of checkResult.rows) {
         schemaParts.push(
-          `ALTER TABLE "${tableName}" ADD CONSTRAINT "${check.constraint_name}" CHECK (${check.check_clause});\n`
+          wrapAddConstraintIfNotExists(
+            `ALTER TABLE "${tableName}" ADD CONSTRAINT "${check.constraint_name}" CHECK (${check.check_clause})`,
+            check.constraint_name
+          )
         );
       }
     }
@@ -1166,6 +1196,58 @@ const seedReferenceTables = async (client, orgId, logs) => {
     );
   }
 
+  // Sync UOM reference data (Days, Weeks, Months, etc.) from template database
+  try {
+    const { buildPoolConfig } = require('../utils/pgSsl');
+    const uomPool = new Pool(
+      buildPoolConfig(process.env.GENERIC_URL, {
+        max: 2,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+      }),
+    );
+    const uomResult = await uomPool.query(`
+      SELECT uom_id, uom
+      FROM "tblUom"
+      ORDER BY uom_id
+    `);
+    await uomPool.end();
+
+    for (const row of uomResult.rows) {
+      await client.query(
+        `
+          INSERT INTO "tblUom" (uom_id, uom)
+          VALUES ($1, $2)
+          ON CONFLICT (uom_id) DO UPDATE
+          SET uom = EXCLUDED.uom
+        `,
+        [row.uom_id, row.uom]
+      );
+    }
+    logs.push({
+      message: `${uomResult.rows.length} UOM entries synced from template database`,
+      scope: 'reference',
+    });
+  } catch (error) {
+    console.error('[SetupWizard] Error syncing tblUom:', error.message);
+    for (const uom of DEFAULT_UOM) {
+      await client.query(
+        `
+          INSERT INTO "tblUom" (uom_id, uom)
+          VALUES ($1, $2)
+          ON CONFLICT (uom_id) DO UPDATE
+          SET uom = EXCLUDED.uom
+        `,
+        [uom.id, uom.name]
+      );
+    }
+    logs.push({
+      message: `Warning: Used fallback DEFAULT_UOM (${DEFAULT_UOM.length} entries) - template sync failed`,
+      scope: 'reference',
+      level: 'warning',
+    });
+  }
+
   await seedTextMessages(client, {
     genericUrl: process.env.GENERIC_URL,
     logs,
@@ -1504,7 +1586,7 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId 
   return { branchMappings, deptMappings };
 };
 
-const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, existingUserId = null) => {
+const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, existingUserId = null, existingPasswordHash = null) => {
   if (!adminUser.email) {
     throw new Error("Admin user email is required.");
   }
@@ -1522,10 +1604,10 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     throw new Error("Unable to resolve branch for admin user. Please ensure at least one branch exists.");
   }
 
-  // Get initial password from org settings (defaults to "Initial1" if not configured)
+  // Reuse the hash created earlier in runSetup when available so tblUsers/tblRioAdmin stay in sync
   const { getInitialPassword } = require('../utils/orgSettingsUtils');
   const initialPassword = await getInitialPassword(orgId, client);
-  const passwordHash = await bcrypt.hash(initialPassword, 10);
+  const passwordHash = existingPasswordHash || await bcrypt.hash(initialPassword, 10);
 
   // Use existing user ID if provided, otherwise generate new one
   let rioAdminUserId;
@@ -1681,6 +1763,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN008', orgId, 1, 'JR001', null, 'SUPERVISORAPPROVAL', 'Maintenance List', null, 8, 'A', false, 'D'],
     ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
     ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
+    ['JRN042', orgId, 1, 'JR001', null, 'EMPLOYEE REPORT BREAKDOWN', 'Employee Report Breakdown', null, 11, 'A', false, 'D'],
     ['JRN012', orgId, 1, 'JR001', null, 'REPORTS', 'Reports', null, 12, 'A', true, 'D'],
     ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
     ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],
@@ -1875,6 +1958,29 @@ const runSetup = async (payload = {}) => {
         console.warn("[SetupWizard] Could not alter tblOrgs table:", err.message);
         // Continue anyway - columns might already exist
       }
+
+      // Legacy columns from GENERIC_URL template; app uses tblATMaintFreq instead
+      try {
+        await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required`);
+        await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id`);
+        logs.push({
+          message: "Dropped legacy maint_required/maint_type_id from tblAssetTypes",
+          scope: "schema",
+        });
+      } catch (err) {
+        console.warn("[SetupWizard] Could not drop legacy tblAssetTypes columns:", err.message);
+      }
+
+      // tblWFJobRole.dept_id is optional in role-based maintenance workflow
+      try {
+        await client.query(`ALTER TABLE "tblWFJobRole" ALTER COLUMN dept_id DROP NOT NULL`);
+        logs.push({
+          message: "Made tblWFJobRole.dept_id nullable for role-based workflow",
+          scope: "schema",
+        });
+      } catch (err) {
+        console.warn("[SetupWizard] Could not alter tblWFJobRole.dept_id:", err.message);
+      }
       
       logs.push({ message: "Core tables verified", scope: "schema" });
 
@@ -1959,7 +2065,7 @@ const runSetup = async (payload = {}) => {
       }
       
       const structureMappings = await seedBranchesAndDepartments(client, orgId, org, logs, tempAdminUserId);
-      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs, tempAdminUserId);
+      const adminResult = await seedEmployeeAndUser(client, orgId, adminUser, structureMappings, logs, tempAdminUserId, passwordHash);
       
       // Update admin user in tblUsers with full details (dept_id, etc.)
       try {
