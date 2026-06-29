@@ -1,6 +1,6 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const operationalCache = require('../utils/operationalCache');
-const { branchCodeFromReq } = require('../utils/reqUserBranch');
+const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch');
 const {
     // Generic helpers
     logApiCall,
@@ -735,6 +735,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const userBranchCode = branchCodeFromReq(req);
+    const userBranchId = branchIdFromReq(req);
 
     // Log API called
     await logApiCall({
@@ -850,6 +851,7 @@ const getVendorRenewalApprovalsController = async (req, res) => {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const userBranchCode = branchCodeFromReq(req);
+    const userBranchId = branchIdFromReq(req);
 
     // Log API called
     await logApiCall({

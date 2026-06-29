@@ -82,8 +82,11 @@ const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
 const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
+const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
+applyScalingMiddleware(app);
+registerHealthRoutes(app);
 const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
