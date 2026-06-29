@@ -35,7 +35,7 @@ function parseDatabaseUrl(databaseUrl) {
   if (!databaseUrl) {
     throw new Error('Database URL is required');
   }
-  const match = databaseUrl.match(/^postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)$/);
+  const match = databaseUrl.match(/^postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/);
   if (!match) {
     throw new Error('Invalid database URL format');
   }
@@ -43,7 +43,7 @@ function parseDatabaseUrl(databaseUrl) {
     user: match[1],
     password: match[2],
     host: match[3],
-    port: parseInt(match[4]),
+    port: parseInt(match[4], 10),
     database: match[5],
   };
 }
@@ -70,6 +70,97 @@ async function checkSubdomainExists(subdomain) {
   const { isSubdomainAvailable } = require('../utils/subdomainUtils');
   const available = await isSubdomainAvailable(subdomain);
   return !available;
+}
+
+function buildSubdomainUrl(subdomain) {
+  const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost';
+
+  if (MAIN_DOMAIN === 'localhost') {
+    const port = process.env.FRONTEND_PORT || '5175';
+    return `http://${subdomain}.localhost:${port}`;
+  }
+
+  const protocol = process.env.FORCE_HTTP === 'true' ? 'http' : 'https';
+  return `${protocol}://${subdomain}.${MAIN_DOMAIN}`;
+}
+
+async function getTenantRegistryRow(orgId) {
+  const pool = initTenantRegistryPool();
+  const subdomainColumnCheck = await pool.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'tenants' AND column_name = 'subdomain'
+    )
+  `);
+  const hasSubdomainColumn = subdomainColumnCheck.rows[0].exists;
+  const columns = hasSubdomainColumn
+    ? 'org_id, db_name, subdomain, is_active'
+    : 'org_id, db_name, is_active';
+
+  const result = await pool.query(
+    `SELECT ${columns} FROM "tenants" WHERE org_id = $1`,
+    [orgId.toUpperCase()],
+  );
+
+  return result.rows[0] || null;
+}
+
+async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgName, orgCity) {
+  const row = await getTenantRegistryRow(orgIdUpper);
+  if (!row || row.is_active === false) {
+    return null;
+  }
+
+  const rowSubdomain = (row.subdomain || '').trim().toLowerCase();
+  if (rowSubdomain && rowSubdomain !== subdomain) {
+    throw new Error(
+      `Organization ID ${orgIdUpper} already exists with a different sub-domain. Please choose a different ID.`,
+    );
+  }
+
+  const tenantDatabaseUrl = process.env.TENANT_DATABASE_URL;
+  if (!tenantDatabaseUrl) {
+    throw new Error('TENANT_DATABASE_URL must be set.');
+  }
+
+  const dbConfig = parseDatabaseUrl(tenantDatabaseUrl);
+  const adminClient = new Client(pgClientOpts({
+    host: dbConfig.host,
+    port: dbConfig.port,
+    user: dbConfig.user,
+    password: dbConfig.password,
+    database: 'postgres',
+  }));
+
+  try {
+    await adminClient.connect();
+    const dbCheck = await adminClient.query(
+      'SELECT 1 FROM pg_database WHERE datname = $1',
+      [row.db_name],
+    );
+    if (dbCheck.rows.length === 0) {
+      return null;
+    }
+  } finally {
+    await adminClient.end();
+  }
+
+  const effectiveSubdomain = rowSubdomain || subdomain;
+
+  return {
+    orgId: orgIdUpper,
+    orgName,
+    orgCity,
+    subdomain: effectiveSubdomain,
+    subdomainUrl: buildSubdomainUrl(effectiveSubdomain),
+    database: row.db_name,
+    alreadyExists: true,
+    adminCredentials: {
+      email: adminUser.email,
+      password: adminUser.password || 'Initial1',
+    },
+    message: 'Tenant already exists. You can sign in with your credentials.',
+  };
 }
 
 /**
@@ -191,8 +282,11 @@ async function ensureBranchAndDepartment(client, orgId) {
       branchId = await generateCustomIdForClient(client, 'branch', 3);
 
       await client.query(`
-        INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
-        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW())
+        INSERT INTO public."tblBranches" (
+          org_id, branch_id, text, city, branch_code, int_status,
+          created_by, created_on, changed_by, changed_on
+        )
+        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW(), 'SYSTEM', NOW())
         ON CONFLICT (branch_id) DO NOTHING
       `, [orgId, branchId]);
       if (!/^BR\d{3}$/.test(branchId)) {
@@ -219,8 +313,11 @@ async function ensureBranchAndDepartment(client, orgId) {
       deptId = await generateCustomIdForClient(client, 'department', 3);
 
       await client.query(`
-        INSERT INTO public."tblDepartments" (org_id, dept_id, text, branch_id, int_status)
-        VALUES ($1, $2, 'Administration', $3, 1)
+        INSERT INTO public."tblDepartments" (
+          org_id, dept_id, text, branch_id, int_status,
+          parent_id, created_on, changed_on, changed_by, created_by
+        )
+        VALUES ($1, $2, 'Administration', $3, 1, NULL, CURRENT_DATE, CURRENT_DATE, 'SYSTEM', 'SYSTEM')
         ON CONFLICT (dept_id) DO NOTHING
       `, [orgId, deptId, branchId]);
       console.log(`[TenantSetup] ✅ Created department: ${deptId}`);
@@ -524,6 +621,111 @@ async function getTableColumns(client, tableName) {
   }
 }
 
+async function getNextJobRoleNavNumber(client, startAt = 1) {
+  const idResult = await client.query(`
+    SELECT job_role_nav_id
+    FROM "tblJobRoleNav"
+    WHERE job_role_nav_id ~ '^JRN[0-9]+$'
+    ORDER BY CAST(SUBSTRING(job_role_nav_id FROM 'JRN([0-9]+)') AS INTEGER) DESC
+    LIMIT 1
+  `);
+
+  if (idResult.rows.length === 0) {
+    return startAt;
+  }
+
+  const match = idResult.rows[0].job_role_nav_id.match(/JRN(\d+)/);
+  return match ? parseInt(match[1], 10) + 1 : startAt;
+}
+
+/**
+ * Copy JR001 navigation from reference DB with fresh JRN### ids.
+ * parent_id is remapped so menu groups (e.g. Inspection) keep working — app_id is unchanged.
+ */
+async function copyJobRoleNavigationForRole(referenceClient, tenantClient, orgId, jobRoleId = 'JR001') {
+  if (!(await tableExists(referenceClient, 'tblJobRoleNav'))) {
+    return { copied: 0, skipped: true };
+  }
+
+  const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
+  const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
+  const commonColumns = tenantColumns.filter((col) => refColumns.includes(col));
+
+  if (commonColumns.length === 0) {
+    return { copied: 0, skipped: true };
+  }
+
+  const selectColumns = commonColumns.map((col) => `"${col}"`).join(', ');
+  const navResult = await referenceClient.query(
+    `
+      SELECT ${selectColumns}
+      FROM "tblJobRoleNav"
+      WHERE job_role_id = $1
+      ORDER BY sequence NULLS LAST, job_role_nav_id
+    `,
+    [jobRoleId],
+  );
+
+  const rows = navResult.rows;
+  if (rows.length === 0) {
+    return { copied: 0, skipped: false };
+  }
+
+  let jrnNum = await getNextJobRoleNavNumber(tenantClient);
+  const idMap = new Map();
+
+  for (const row of rows) {
+    const newId = `JRN${String(jrnNum).padStart(3, '0')}`;
+    idMap.set(row.job_role_nav_id, newId);
+    jrnNum += 1;
+  }
+
+  let copied = 0;
+  for (const row of rows) {
+    const newRow = { ...row };
+    newRow.job_role_nav_id = idMap.get(row.job_role_nav_id);
+    if (row.parent_id && idMap.has(row.parent_id)) {
+      newRow.parent_id = idMap.get(row.parent_id);
+    }
+    if (commonColumns.includes('org_id')) {
+      newRow.org_id = orgId;
+    }
+
+    const values = commonColumns.map((col) => newRow[col]);
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+    const columnNames = commonColumns.map((col) => `"${col}"`).join(', ');
+
+    try {
+      await tenantClient.query(
+        `
+          INSERT INTO "tblJobRoleNav" (${columnNames})
+          VALUES (${placeholders})
+          ON CONFLICT (job_role_nav_id) DO NOTHING
+        `,
+        values,
+      );
+      copied += 1;
+    } catch (insertErr) {
+      console.warn(`[TenantSetup] ⚠️ Error inserting job role nav row for ${newRow.app_id}:`, insertErr.message);
+    }
+  }
+
+  const maxJrn = jrnNum - 1;
+  if (maxJrn > 0) {
+    await tenantClient.query(
+      `
+        INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+        VALUES ('jobrolenav', 'JRN', $1)
+        ON CONFLICT (table_key) DO UPDATE
+        SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+      `,
+      [maxJrn],
+    );
+  }
+
+  return { copied, skipped: false, maxJrn };
+}
+
 /**
  * Helper function to copy data dynamically based on actual column names
  */
@@ -742,43 +944,19 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No audit log config copied (table may be empty or columns don't match)`);
     }
 
-    // 6. Copy job role navigation for JR001 from tblJobRoleNav (reference database)
-    // Filter to only copy rows where job_role_id = 'JR001'
+    // 6. Copy job role navigation for JR001 with remapped JRN### ids
     console.log(`[TenantSetup] Copying job role navigation for JR001 from reference database...`);
     try {
-      if (await tableExists(referenceClient, 'tblJobRoleNav')) {
-        const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
-        const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
-        const commonColumns = tenantColumns.filter(col => refColumns.includes(col));
-
-        if (commonColumns.length > 0) {
-          const selectColumns = commonColumns.map(col => `"${col}"`).join(', ');
-          const navRows = await referenceClient.query(`
-            SELECT ${selectColumns} FROM "tblJobRoleNav" 
-            WHERE "job_role_id" = 'JR001'
-          `);
-
-          let copied = 0;
-          for (const row of navRows.rows) {
-            const values = commonColumns.map(col => row[col]);
-            const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
-            const columnNames = commonColumns.map(col => `"${col}"`).join(', ');
-
-            try {
-              await tenantClient.query(`
-                INSERT INTO "tblJobRoleNav" (${columnNames})
-                VALUES (${placeholders})
-                ON CONFLICT DO NOTHING
-              `, values);
-              copied++;
-            } catch (insertErr) {
-              console.warn(`[TenantSetup] ⚠️ Error inserting job role nav row:`, insertErr.message);
-            }
-          }
-          console.log(`[TenantSetup] ✅ Copied ${copied} job role navigation items for JR001`);
-        }
-      } else {
+      const navResult = await copyJobRoleNavigationForRole(
+        referenceClient,
+        tenantClient,
+        orgId,
+        'JR001',
+      );
+      if (navResult.skipped) {
         console.log(`[TenantSetup] ⚠️ tblJobRoleNav does not exist in reference database, skipping...`);
+      } else {
+        console.log(`[TenantSetup] ✅ Copied ${navResult.copied} job role navigation items for JR001 (JRN remapped)`);
       }
     } catch (err) {
       console.error(`[TenantSetup] ❌ Error copying job role navigation:`, err.message);
@@ -989,11 +1167,31 @@ async function createTenant(tenantData) {
   }
   const orgExists = await checkOrgIdExists(orgIdUpper);
   if (orgExists) {
+    const existingTenant = await tryResolveExistingTenant(
+      orgIdUpper,
+      subdomain,
+      adminUser,
+      orgName,
+      orgCity,
+    );
+    if (existingTenant) {
+      return existingTenant;
+    }
     throw new Error(`Organization ID ${orgIdUpper} already exists. Please choose a different ID.`);
   }
 
   const subdomainExists = await checkSubdomainExists(subdomain);
   if (subdomainExists) {
+    const existingTenant = await tryResolveExistingTenant(
+      orgIdUpper,
+      subdomain,
+      adminUser,
+      orgName,
+      orgCity,
+    );
+    if (existingTenant) {
+      return existingTenant;
+    }
     throw new Error(`Sub-domain name "${subdomain}" is already taken. Please choose a different one.`);
   }
 
@@ -1444,37 +1642,10 @@ async function createTenant(tenantData) {
       }
       
       await tenantClient.end();
-      
-      // Get base domain from environment variable or use default
-      // Main domain is riowebworks.net (configured in GoDaddy with wildcard DNS)
-      const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost';
-      
-      // Construct subdomain URL
-      // If MAIN_DOMAIN is 'localhost', use development format with port
-      // Otherwise, use production format with HTTPS
-      let finalSubdomainUrl;
-      
-      if (MAIN_DOMAIN === 'localhost') {
-        // Development: use localhost with port
-        const port = process.env.FRONTEND_PORT || '5173';
-        finalSubdomainUrl = `http://${subdomain}.localhost:${port}`;
-      } else {
-        // Production: use main domain with subdomain
-        // Always use HTTPS for production (secure tenant access)
-        // FORCE_HTTP can be set to 'true' only for testing purposes
-        const protocol = process.env.FORCE_HTTP === 'true' ? 'http' : 'https';
-        finalSubdomainUrl = `${protocol}://${subdomain}.${MAIN_DOMAIN}`;
-        
-        // Log security note
-        if (protocol === 'https') {
-          console.log(`[TenantSetup] ✅ Generated secure HTTPS subdomain URL: ${finalSubdomainUrl}`);
-        } else {
-          console.warn(`[TenantSetup] ⚠️ WARNING: Using HTTP instead of HTTPS. This is not secure for production!`);
-        }
-      }
-      
+
+      const finalSubdomainUrl = buildSubdomainUrl(subdomain);
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
-      
+
       return {
         orgId: orgIdUpper,
         orgName,
@@ -1496,14 +1667,14 @@ async function createTenant(tenantData) {
     }
   } catch (error) {
     console.error('[TenantSetup] Error creating tenant:', error);
-    
-    // If database was created but registration failed, try to drop it
+
     try {
       await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+      await deactivateTenant(orgIdUpper);
     } catch (dropError) {
-      console.error('[TenantSetup] Error dropping database:', dropError);
+      console.error('[TenantSetup] Error rolling back tenant:', dropError);
     }
-    
+
     throw error;
   } finally {
     await adminClient.end();
@@ -1625,4 +1796,5 @@ module.exports = {
   testTenantConnection,
   checkOrgIdExists,
   checkSubdomainExists,
+  copyJobRoleNavigationForRole,
 };
