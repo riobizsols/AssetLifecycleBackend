@@ -203,6 +203,22 @@ const generateSetupReport = async (setupData) => {
 };
 
 /**
+ * Align freshly created tenant schemas with current application code.
+ * GENERIC_URL may still include columns removed from the app layer.
+ */
+const applyPostSchemaMigrations = async (client, logs = []) => {
+  await client.query(`
+    ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
+    ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
+  `);
+  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes columns)";
+  console.log(`[SetupWizard] ✅ ${message}`);
+  if (logs) {
+    logs.push({ message, scope: "schema" });
+  }
+};
+
+/**
  * Dynamically generate schema SQL from GENERIC_URL (template database)
  * This includes all tables, columns, constraints, indexes, and sequences
  */
@@ -768,8 +784,6 @@ const CORE_TABLE_DDL = [
       text character varying(50) NOT NULL,
       is_child boolean,
       parent_asset_type_id character varying(20),
-      maint_required boolean NOT NULL DEFAULT false,
-      maint_type_id character varying(20),
       maint_lead_type character varying(20),
       serial_num_format integer,
       last_gen_seq_no bigint,
@@ -1380,18 +1394,16 @@ const seedAssetTypes = async (client, orgId, selectedIds = [], logs) => {
         INSERT INTO "tblAssetTypes"
           (org_id, asset_type_id, int_status, assignment_type, inspection_required, group_required,
            created_by, created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-           maint_required, maint_type_id, maint_lead_type, serial_num_format, last_gen_seq_no, depreciation_type)
+           maint_lead_type, serial_num_format, last_gen_seq_no, depreciation_type)
         VALUES
           ($1, $2, 1, $3, $4, $5,
            'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $6, $7, $8,
-           $9, $10, NULL, $11, 0, $12)
+           NULL, $9, 0, $10)
         ON CONFLICT (asset_type_id) DO UPDATE
         SET text = EXCLUDED.text,
             assignment_type = EXCLUDED.assignment_type,
             inspection_required = EXCLUDED.inspection_required,
             group_required = EXCLUDED.group_required,
-            maint_required = EXCLUDED.maint_required,
-            maint_type_id = EXCLUDED.maint_type_id,
             serial_num_format = EXCLUDED.serial_num_format,
             depreciation_type = EXCLUDED.depreciation_type,
             org_id = EXCLUDED.org_id
@@ -1405,8 +1417,6 @@ const seedAssetTypes = async (client, orgId, selectedIds = [], logs) => {
         asset.name,
         asset.isChild || false,
         asset.parentId || null,
-        asset.maintRequired,
-        asset.maintTypeId || null,
         asset.serialFormat || 1,
         asset.depreciationType || "SL",
       ]
@@ -1924,6 +1934,17 @@ const runSetup = async (payload = {}) => {
         logs.push({ message: "Schema creation skipped per configuration", scope: "schema" });
       }
 
+      try {
+        await applyPostSchemaMigrations(client, logs);
+      } catch (migrationError) {
+        console.warn("[SetupWizard] Post-schema migration warning:", migrationError.message);
+        logs.push({
+          message: `Post-schema migration warning: ${migrationError.message}`,
+          scope: "schema",
+          warning: true,
+        });
+      }
+
       // Note: CORE_TABLE_DDL is not needed when using dynamic schema generation
       // as all tables are already included in the dynamically generated schema.
       // The dynamic schema includes the actual structure from DATABASE_URL.
@@ -2234,6 +2255,7 @@ module.exports = {
   getSchemaSqlSync, // Sync version (static file only, for backward compatibility)
   generateDynamicSchemaSql, // Export for direct use if needed
   clearSchemaCache, // Export to clear cache when DB structure changes
+  applyPostSchemaMigrations,
   CORE_TABLE_DDL,
 };
 

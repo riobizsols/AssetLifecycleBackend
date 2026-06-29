@@ -1,0 +1,103 @@
+====================================================================================================
+DATABASE KEY SYNCHRONIZATION COMPREHENSIVE REPORT
+====================================================================================================
+Generated: 2026-06-12T09:12:44.955Z
+Source Database: GENERIC_URL
+Target Database: DATABASE_URL
+====================================================================================================
+
+EXECUTIVE SUMMARY
+----------------------------------------------------------------------------------------------------
+Total Missing Primary Keys Found: 0
+Total Missing Foreign Keys Found: 5
+Foreign Keys with Orphaned Records: 0
+Validation Errors (Cannot be Applied): 0
+
+APPLICATION RESULTS:
+  ✅ Primary Keys Applied Successfully: 0
+  ❌ Primary Keys Failed: 0
+  ✅ Foreign Keys Applied Successfully: 5
+  ❌ Foreign Keys Failed: 0
+  📊 Total Relationships Set: 5
+  ⚠️  Total Relationships Not Set: 0
+
+====================================================================================================
+
+SECTION 2: MISSING FOREIGN KEYS
+----------------------------------------------------------------------------------------------------
+Total: 5
+
+1. Table: tblAssetGroup_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ✅ APPLIED
+
+2. Table: tblAssetMaintSch
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ✅ APPLIED
+
+3. Table: tblScrapSales_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ✅ APPLIED
+
+4. Table: tblVendors
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ✅ APPLIED
+
+5. Table: tblWFAssetMaintSch_H
+   Column: branch_code
+   References: tblBranches.branch_code
+   Status: ✅ APPLIED
+
+
+SECTION 5: DETAILED APPLICATION RESULTS
+----------------------------------------------------------------------------------------------------
+Total Constraints Attempted: 5
+
+✅ SUCCESSFULLY APPLIED CONSTRAINTS:
+   Total: 5
+
+   1. FOREIGN KEY: tblAssetGroup_H.branch_code -> tblBranches.branch_code
+   2. FOREIGN KEY: tblAssetMaintSch.branch_code -> tblBranches.branch_code
+   3. FOREIGN KEY: tblScrapSales_H.branch_code -> tblBranches.branch_code
+   4. FOREIGN KEY: tblVendors.branch_code -> tblBranches.branch_code
+   5. FOREIGN KEY: tblWFAssetMaintSch_H.branch_code -> tblBranches.branch_code
+
+SECTION 6: STATISTICS
+----------------------------------------------------------------------------------------------------
+Primary Keys:
+  - Found Missing: 0
+  - Successfully Applied: 0
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Foreign Keys:
+  - Found Missing: 5
+  - With Orphaned Records: 0
+  - Successfully Applied: 5
+  - Failed to Apply: 0
+  - Cannot Apply (Validation Errors): 0
+
+Orphaned Records:
+  - Foreign Keys with Orphaned Records: 0
+  - Successfully Fixed: 0
+  - Failed to Fix: 0
+  - Total Records Fixed: 0
+
+Overall:
+  - Total Relationships Set: 5
+  - Total Relationships Not Set: 0
+  - Success Rate: 100.00%
+
+SECTION 7: RECOMMENDATIONS
+----------------------------------------------------------------------------------------------------
+✅ SUCCESS:
+   All constraints were successfully applied!
+   Your database is now synchronized with the source database.
+
+====================================================================================================
+END OF REPORT
+====================================================================================================

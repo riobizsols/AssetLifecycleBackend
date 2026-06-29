@@ -1,131 +1,21 @@
 const jwt = require('jsonwebtoken');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { getUserWithBranch } = require('../models/userModel');
-const cacheService = require('../services/cacheService');
+const logger = require('../utils/logger');
 require('dotenv').config();
 
-function buildAuthCacheKey(decoded) {
-    return cacheService.buildKey(
-        'auth',
-        'ctx',
-        decoded.user_id,
-        decoded.org_id || 'none',
-        decoded.use_default_db ? '1' : '0',
-        decoded.iat || 0,
-    );
+function getRequestHostname(req) {
+    return req.get('x-forwarded-host') || req.get('host') || req.hostname || req.headers.host;
 }
 
-async function resolveDatabasePool(decoded) {
-    const db = require('../config/db');
-    let dbPool;
-    let isTenant = false;
-
-    if (decoded.use_default_db === true) {
-        return { dbPool: db, isTenant: false };
+async function connectTenantDatabase(tenantOrgId) {
+    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
+    const tenantExists = await checkTenantExists(tenantOrgId);
+    if (!tenantExists) {
+        return { ok: false, status: 404, message: `Tenant not found for org_id: ${tenantOrgId}` };
     }
-
-    if (decoded.org_id) {
-        const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-        try {
-            const tenantExists = await checkTenantExists(decoded.org_id);
-            if (tenantExists) {
-                dbPool = await getTenantPool(decoded.org_id);
-                isTenant = true;
-            } else {
-                dbPool = db;
-                isTenant = false;
-            }
-        } catch (tenantError) {
-            console.warn(`[AuthMiddleware] Tenant lookup failed for org_id ${decoded.org_id}, using default database:`, tenantError.message);
-            dbPool = db;
-            isTenant = false;
-        }
-    } else {
-        dbPool = db;
-        isTenant = false;
-    }
-
-    return { dbPool, isTenant };
-}
-
-async function retryOnPoolExhaustion(dbPool, fn, maxRetries = 3, delay = 150) {
-    for (let i = 0; i < maxRetries; i++) {
-        try {
-            return await fn();
-        } catch (error) {
-            const msg = String(error?.message || '');
-            const code = error?.code;
-
-            if (code === '53300' || msg.includes('too many clients')) {
-                if (dbPool && typeof dbPool.totalCount !== 'undefined') {
-                    console.error(`[AuthMiddleware] Pool stats - Total: ${dbPool.totalCount}, Idle: ${dbPool.idleCount}, Waiting: ${dbPool.waitingCount}, Active: ${dbPool.totalCount - dbPool.idleCount}`);
-                }
-
-                if (i < maxRetries - 1) {
-                    console.warn(`[AuthMiddleware] Connection pool exhausted, retrying (${i + 1}/${maxRetries}) after ${delay * (i + 1)}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
-                    continue;
-                }
-
-                throw new Error('Database connection pool is full. Please close unused database connections (e.g., DBeaver) and try again.');
-            }
-
-            const transientCodes = new Set(['EADDRNOTAVAIL', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
-            if (transientCodes.has(code)) {
-                if (i < maxRetries - 1) {
-                    const waitMs = delay * (i + 1);
-                    console.warn(`[AuthMiddleware] Transient DB error (${code}), retrying (${i + 1}/${maxRetries}) after ${waitMs}ms...`);
-                    await new Promise(resolve => setTimeout(resolve, waitMs));
-                    continue;
-                }
-            }
-
-            throw error;
-        }
-    }
-}
-
-async function buildUserContext(decoded, dbPool, isTenant) {
-    const userRoles = await retryOnPoolExhaustion(dbPool, () => getUserRoles(decoded.user_id, dbPool));
-    const userWithBranch = await retryOnPoolExhaustion(dbPool, () => getUserWithBranch(decoded.user_id, dbPool));
-
-    let internalOrgId = decoded.org_id;
-    try {
-        const orgResult = await retryOnPoolExhaustion(dbPool, () =>
-            dbPool.query('SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1')
-        );
-        if (orgResult.rows.length > 0) {
-            internalOrgId = orgResult.rows[0].org_id;
-        }
-    } catch (orgError) {
-        console.warn(`[AuthMiddleware] Could not fetch internal org_id from tblOrgs:`, orgError.message);
-    }
-
-    const { hasSuperAccess } = require('../utils/branchAccessUtils');
-    const hasSuperAccessFlag = await retryOnPoolExhaustion(dbPool, () =>
-        hasSuperAccess(decoded.user_id, internalOrgId)
-    );
-
-    return {
-        user: {
-            org_id: internalOrgId,
-            tenant_org_id: decoded.org_id,
-            user_id: decoded.user_id,
-            job_role_id: decoded.job_role_id,
-            email: decoded.email,
-            emp_int_id: decoded.emp_int_id,
-            language_code: (decoded.language_code || decoded.lang_code || 'en').toLowerCase(),
-            roles: userRoles,
-            branch_id: userWithBranch?.branch_id || null,
-            branch_name: userWithBranch?.branch_name || null,
-            branch_code: userWithBranch?.branch_code || null,
-            dept_id: userWithBranch?.dept_id || null,
-            dept_name: userWithBranch?.dept_name || null,
-            hasSuperAccess: hasSuperAccessFlag,
-            isTenant,
-        },
-        isTenant,
-    };
+    const pool = await getTenantPool(tenantOrgId);
+    return { ok: true, dbPool: pool, isTenant: true, tenantOrgId };
 }
 
 const protect = async (req, res, next) => {
@@ -138,44 +28,229 @@ const protect = async (req, res, next) => {
     try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const { runWithDb } = require('../utils/dbContext');
-        const cacheKey = buildAuthCacheKey(decoded);
 
-        // Fast path: skip repeated user-context DB lookups when auth is cached
-        const cached = await cacheService.get(cacheKey);
-        if (cached?.user) {
-            const { dbPool, isTenant } = await resolveDatabasePool(decoded);
-            req.db = dbPool;
-            req.tenantPool = isTenant ? dbPool : null;
-            req.isTenant = isTenant;
-            req.user = cached.user;
-            return runWithDb(dbPool, () => next());
+        logger.debug('=== Auth Middleware Debug ===');
+        logger.debug('decoded token:', decoded);
+        logger.debug('decoded.emp_int_id:', decoded.emp_int_id);
+
+        const { runWithDb } = require('../utils/dbContext');
+        const db = require('../config/db');
+        let dbPool;
+        let isTenant = false;
+
+        // ALWAYS check subdomain first - subdomain takes precedence over use_default_db flag
+        // This ensures that even if user has an old token with use_default_db=true,
+        // accessing via subdomain will still route to tenant database
+        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+        const hostname = getRequestHostname(req);
+        const subdomain = extractSubdomain(hostname);
+        
+        // If subdomain exists, use tenant database (regardless of use_default_db flag)
+        if (subdomain) {
+            try {
+                const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
+                
+                if (tenantOrgId) {
+                    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
+                    const tenantExists = await checkTenantExists(tenantOrgId);
+                    
+                    if (tenantExists) {
+                        dbPool = await getTenantPool(tenantOrgId);
+                        isTenant = true;
+                        logger.log(`[AuthMiddleware] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${tenantOrgId} (ignoring use_default_db flag)`);
+                    } else {
+                        logger.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but tenant not active, falling back to default database`);
+                        dbPool = db;
+                        isTenant = false;
+                    }
+                } else {
+                    logger.warn(`[AuthMiddleware] ⚠️ Subdomain ${subdomain} found but no org_id, falling back to default database`);
+                    dbPool = db;
+                    isTenant = false;
+                }
+            } catch (subdomainError) {
+                console.error(`[AuthMiddleware] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
+                dbPool = db;
+                isTenant = false;
+            }
+        } else if (decoded.use_default_db === true) {
+            // No subdomain and use_default_db=true - use default database
+            dbPool = db;
+            isTenant = false;
+            logger.log(`[AuthMiddleware] Normal login detected (use_default_db=true, no subdomain) - Using default DATABASE_URL for org_id: ${decoded.org_id}`);
+        } else {
+            // Tenant login without subdomain in API host (common in local dev on localhost:5173)
+            try {
+                const hostname = getRequestHostname(req);
+                const subdomain = extractSubdomain(hostname);
+                let tenantOrgId = null;
+
+                if (subdomain) {
+                    try {
+                        tenantOrgId = await getOrgIdFromSubdomain(subdomain);
+                    } catch (subdomainError) {
+                        logger.error(`[AuthMiddleware] ❌ Error looking up subdomain "${subdomain}":`, subdomainError);
+                        return res.status(500).json({ message: 'Error looking up organization' });
+                    }
+
+                    if (!tenantOrgId && !decoded.org_id) {
+                        logger.warn(`[AuthMiddleware] ⚠️ Organization not found for subdomain: ${subdomain}`);
+                        return res.status(404).json({ message: `Organization not found for subdomain: ${subdomain}` });
+                    }
+                }
+
+                if (!tenantOrgId && decoded.org_id) {
+                    tenantOrgId = decoded.org_id;
+                    logger.log(`[AuthMiddleware] Using org_id from token for tenant database: ${tenantOrgId}`);
+                }
+
+                if (!tenantOrgId) {
+                    logger.error(`[AuthMiddleware] ❌ No subdomain or org_id for tenant login (hostname: ${hostname || 'unknown'})`);
+                    return res.status(400).json({ message: 'Subdomain required for tenant login' });
+                }
+
+                logger.log(`[AuthMiddleware] ✅ Tenant login resolved to org_id: ${tenantOrgId}${subdomain ? ` (subdomain: ${subdomain})` : ''}`);
+
+                try {
+                    const tenantConnection = await connectTenantDatabase(tenantOrgId);
+                    if (!tenantConnection.ok) {
+                        return res.status(tenantConnection.status).json({ message: tenantConnection.message });
+                    }
+                    dbPool = tenantConnection.dbPool;
+                    isTenant = tenantConnection.isTenant;
+                    logger.log(`[AuthMiddleware] ✅ Tenant user connected for org_id: ${tenantOrgId} (user org_id: ${decoded.org_id})`);
+                } catch (poolError) {
+                    logger.error(`[AuthMiddleware] ❌ Error getting tenant pool for org_id "${tenantOrgId}":`, poolError);
+                    return res.status(500).json({ message: 'Error connecting to tenant database' });
+                }
+            } catch (error) {
+                logger.error('[AuthMiddleware] ❌ Unexpected error in tenant login flow:', error);
+                return res.status(500).json({ message: 'Internal server error during tenant authentication' });
+            }
         }
 
-        const { dbPool, isTenant } = await resolveDatabasePool(decoded);
+        // Attach database pool to request so controllers/models can use it
         req.db = dbPool;
-        req.tenantPool = isTenant ? dbPool : null;
-        req.isTenant = isTenant;
-
+        req.tenantPool = isTenant ? dbPool : null; // Only set if tenant
+        req.isTenant = isTenant; // Flag to indicate if this is a tenant user
+        
+        // Set database in async context so all models can access it
+        // This allows models to use getDb() without passing dbConnection through every function
         return runWithDb(dbPool, async () => {
-            const context = await buildUserContext(decoded, dbPool, isTenant);
-            req.user = context.user;
+            // Helper function to retry on transient DB errors
+            // NOTE: We originally only retried on "too many clients" (53300).
+            // In real deployments we also see transient socket errors like EADDRNOTAVAIL.
+            const retryOnPoolExhaustion = async (fn, maxRetries = 3, delay = 150) => {
+                for (let i = 0; i < maxRetries; i++) {
+                    try {
+                        return await fn();
+                    } catch (error) {
+                        const msg = String(error?.message || '');
+                        const code = error?.code;
 
-            await cacheService.set(cacheKey, { user: context.user }, cacheService.getAuthCacheTtlMs());
+                        // 1) Connection pool exhaustion / too many clients
+                        if (code === '53300' || msg.includes('too many clients')) {
+                            // Log pool stats if available
+                            if (dbPool && typeof dbPool.totalCount !== 'undefined') {
+                                console.error(`[AuthMiddleware] Pool stats - Total: ${dbPool.totalCount}, Idle: ${dbPool.idleCount}, Waiting: ${dbPool.waitingCount}, Active: ${dbPool.totalCount - dbPool.idleCount}`);
+                            }
+                            
+                            if (i < maxRetries - 1) {
+                                logger.warn(`[AuthMiddleware] Connection pool exhausted, retrying (${i + 1}/${maxRetries}) after ${delay * (i + 1)}ms...`);
+                                await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Exponential backoff
+                                continue;
+                            } else {
+                                console.error(`[AuthMiddleware] Connection pool exhausted after ${maxRetries} retries`);
+                                console.error(`[AuthMiddleware] This usually means PostgreSQL max_connections limit is reached.`);
+                                console.error(`[AuthMiddleware] Solution: Close unused DBeaver connections or increase PostgreSQL max_connections`);
+                                throw new Error('Database connection pool is full. Please close unused database connections (e.g., DBeaver) and try again.');
+                            }
+                        }
+
+                        // 2) Transient socket/network errors (common when DB is remote)
+                        const transientCodes = new Set(['EADDRNOTAVAIL', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE']);
+                        if (transientCodes.has(code)) {
+                            if (i < maxRetries - 1) {
+                                const waitMs = delay * (i + 1);
+                                console.warn(`[AuthMiddleware] Transient DB error (${code}), retrying (${i + 1}/${maxRetries}) after ${waitMs}ms...`);
+                                await new Promise(resolve => setTimeout(resolve, waitMs));
+                                continue;
+                            }
+                        }
+
+                        throw error;
+                    }
+                }
+            };
+
+            // Fetch current user roles from tblUserJobRoles (using appropriate database)
+            const userRoles = await retryOnPoolExhaustion(() => getUserRoles(decoded.user_id, dbPool));
+
+            // Fetch user with branch information (using appropriate database)
+            const userWithBranch = await retryOnPoolExhaustion(() => getUserWithBranch(decoded.user_id, dbPool));
+
+            // Get internal org_id from tblOrgs (for data operations)
+            // This is the org_id that should be used for storing/fetching data
+            let internalOrgId = decoded.org_id; // Default to token org_id
+            try {
+                const orgResult = await retryOnPoolExhaustion(() => 
+                    dbPool.query('SELECT org_id FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1')
+                );
+                if (orgResult.rows.length > 0) {
+                    internalOrgId = orgResult.rows[0].org_id;
+                    logger.log(`[AuthMiddleware] Internal org_id from tblOrgs: ${internalOrgId} (tenant org_id: ${decoded.org_id})`);
+                }
+            } catch (orgError) {
+                logger.warn(`[AuthMiddleware] Could not fetch internal org_id from tblOrgs:`, orgError.message);
+                // Fall back to token org_id
+            }
+
+            // Check if user has super access (can view all branches)
+            const { hasSuperAccess } = require('../utils/branchAccessUtils');
+            const hasSuperAccessFlag = await retryOnPoolExhaustion(() => 
+                hasSuperAccess(decoded.user_id, internalOrgId)
+            );
+            
+            if (hasSuperAccessFlag) {
+                logger.log(`[AuthMiddleware] User ${decoded.user_id} has SUPER ACCESS - can view all branches`);
+            }
+
+            // Attach full decoded info with current roles and branch information
+            req.user = {
+                org_id: internalOrgId, // Use internal org_id for all data operations
+                tenant_org_id: decoded.org_id, // Keep tenant org_id for reference
+                user_id: decoded.user_id,
+                job_role_id: decoded.job_role_id, // Keep for backward compatibility
+                email: decoded.email,
+                emp_int_id: decoded.emp_int_id,
+                roles: userRoles, // Current roles from tblUserJobRoles
+                branch_id: userWithBranch?.branch_id || null,
+                branch_name: userWithBranch?.branch_name || null,
+                branch_code: userWithBranch?.branch_code || null,
+                dept_id: userWithBranch?.dept_id || null,
+                dept_name: userWithBranch?.dept_name || null,
+                hasSuperAccess: hasSuperAccessFlag, // Flag indicating user can view all branches
+                isTenant: isTenant // Add flag to user object
+            };
 
             next();
         });
     } catch (err) {
+        // Handle connection pool exhaustion specifically
         if (err.code === '53300' || (err.message && err.message.includes('too many clients'))) {
             console.error('[AuthMiddleware] Connection pool exhausted:', err.message);
-            return res.status(503).json({
+            return res.status(503).json({ 
                 message: 'Server is busy. Please try again in a moment.',
                 error: 'Database connection pool exhausted'
             });
         }
+        // Handle other errors
         console.error('[AuthMiddleware] Authentication error:', err.message);
         return res.status(401).json({ message: 'Session expired. Please login again.' });
     }
 };
 
 module.exports = { protect };
+
+
+

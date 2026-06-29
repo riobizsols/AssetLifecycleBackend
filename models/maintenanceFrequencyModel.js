@@ -75,22 +75,26 @@ class MaintenanceFrequencyModel {
       const dbPool = getDb();
       const query = `
         SELECT 
-          at_main_freq_id,
-          asset_type_id,
-          frequency,
-          uom,
-          text,
-          maintained_by,
-          maint_type_id,
-          int_status,
-          org_id,
-          is_recurring,
-          emp_int_id
-        FROM "tblATMaintFreq"
-        WHERE asset_type_id = $1 
-        AND org_id = $2 
-        AND int_status = 1
-        ORDER BY text
+          mf.at_main_freq_id,
+          mf.asset_type_id,
+          mf.frequency,
+          mf.uom,
+          mf.text,
+          mf.maintained_by,
+          mf.maint_type_id,
+          mt.text AS maint_type_name,
+          mf.int_status,
+          mf.org_id,
+          mf.is_recurring,
+          mf.emp_int_id
+        FROM "tblATMaintFreq" mf
+        LEFT JOIN "tblMaintTypes" mt
+          ON mf.maint_type_id = mt.maint_type_id
+          AND mf.org_id = mt.org_id
+        WHERE mf.asset_type_id = $1 
+        AND mf.org_id = $2 
+        AND mf.int_status = 1
+        ORDER BY mf.text
       `;
       
       const result = await dbPool.query(query, [assetTypeId, orgId]);

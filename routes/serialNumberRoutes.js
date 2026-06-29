@@ -13,10 +13,14 @@ const {
 } = require('../utils/serialNumberGenerator');
 const { protect } = require('../middlewares/authMiddleware');
 
+const resolveOrgId = (req, fallback = 'ORG001') =>
+  req.user?.org_id || req.query?.orgId || req.body?.orgId || fallback;
+
 // Generate new serial number
 router.post('/generate', protect, async (req, res) => {
   try {
-    const { assetTypeId, orgId = 'ORG001' } = req.body;
+    const { assetTypeId } = req.body;
+    const orgId = resolveOrgId(req);
     
     if (!assetTypeId) {
       return res.status(400).json({
@@ -53,7 +57,8 @@ router.post('/generate', protect, async (req, res) => {
 // Generate new serial number and add to print queue
 router.post('/generate-and-queue', protect, async (req, res) => {
   try {
-    const { assetTypeId, orgId = 'ORG001' } = req.body;
+    const { assetTypeId } = req.body;
+    const orgId = resolveOrgId(req);
     const createdBy = req.user.user_id;
     
     if (!assetTypeId) {
@@ -92,7 +97,7 @@ router.post('/generate-and-queue', protect, async (req, res) => {
 router.get('/current/:assetTypeId', protect, async (req, res) => {
   try {
     const { assetTypeId } = req.params;
-    const { orgId = 'ORG001' } = req.query;
+    const orgId = resolveOrgId(req);
     
     const result = await getCurrentSequence(assetTypeId, orgId);
     
@@ -122,7 +127,7 @@ router.get('/current/:assetTypeId', protect, async (req, res) => {
 router.get('/next/:assetTypeId', protect, async (req, res) => {
   try {
     const { assetTypeId } = req.params;
-    const { orgId = 'ORG001' } = req.query;
+    const orgId = resolveOrgId(req);
     
     if (!assetTypeId) {
       return res.status(400).json({
@@ -165,7 +170,7 @@ router.get('/next/:assetTypeId', protect, async (req, res) => {
 // Get serial number statistics
 router.get('/stats', protect, async (req, res) => {
   try {
-    const { orgId = 'ORG001' } = req.query;
+    const orgId = resolveOrgId(req);
     
     const result = await getSerialNumberStats(orgId);
     
@@ -194,7 +199,8 @@ router.get('/stats', protect, async (req, res) => {
 // Get print queue items
 router.get('/print-queue', protect, async (req, res) => {
   try {
-    const { orgId = 'ORG001', status } = req.query;
+    const orgId = resolveOrgId(req);
+    const { status } = req.query;
     
     const result = await getPrintQueue(orgId, status);
     
@@ -224,7 +230,8 @@ router.get('/print-queue', protect, async (req, res) => {
 router.put('/print-queue/:psnqId/status', protect, async (req, res) => {
   try {
     const { psnqId } = req.params;
-    const { status, orgId = 'ORG001' } = req.body;
+    const { status } = req.body;
+    const orgId = resolveOrgId(req);
     
     if (!status) {
       return res.status(400).json({
@@ -261,7 +268,7 @@ router.put('/print-queue/:psnqId/status', protect, async (req, res) => {
 // Get print queue statistics
 router.get('/print-queue-stats', protect, async (req, res) => {
   try {
-    const { orgId = 'ORG001' } = req.query;
+    const orgId = resolveOrgId(req);
     
     const result = await getPrintQueueStats(orgId);
     

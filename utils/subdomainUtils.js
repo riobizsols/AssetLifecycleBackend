@@ -5,6 +5,12 @@
  */
 
 const db = require('../config/db');
+const { initTenantRegistryPool } = require('../services/tenantService');
+
+async function queryTenantRegistry(sql, params) {
+  const pool = initTenantRegistryPool();
+  return pool.query(sql, params);
+}
 
 const RESERVED_SUBDOMAINS = (process.env.RESERVED_SUBDOMAINS || 'web,www,api')
   .split(',')
@@ -59,7 +65,7 @@ async function getOrgIdFromSubdomain(subdomain) {
   
   try {
     // First check tenants table for subdomain mapping
-    const tenantResult = await db.query(
+    const tenantResult = await queryTenantRegistry(
       `SELECT org_id FROM "tenants" WHERE subdomain = $1 AND is_active = true`,
       [subdomain]
     );
@@ -138,27 +144,33 @@ async function isSubdomainAvailable(subdomain, excludeOrgId = null) {
       tenantParams.push(excludeOrgId);
     }
     
-    const tenantResult = await db.query(tenantQuery, tenantParams);
+    const tenantResult = await queryTenantRegistry(tenantQuery, tenantParams);
     
     if (tenantResult.rows.length > 0) {
       return false;
     }
     
-    // Check tblOrgs table
-    let orgQuery = `SELECT org_id FROM "tblOrgs" WHERE subdomain = $1 AND int_status = 1`;
-    const orgParams = [subdomain];
-    
-    if (excludeOrgId) {
-      orgQuery += ` AND org_id != $2`;
-      orgParams.push(excludeOrgId);
+    // Check tblOrgs table (optional — column may not exist on all deployments)
+    try {
+      let orgQuery = `SELECT org_id FROM "tblOrgs" WHERE subdomain = $1 AND int_status = 1`;
+      const orgParams = [subdomain];
+
+      if (excludeOrgId) {
+        orgQuery += ` AND org_id != $2`;
+        orgParams.push(excludeOrgId);
+      }
+
+      const orgResult = await db.query(orgQuery, orgParams);
+      return orgResult.rows.length === 0;
+    } catch (orgError) {
+      if (orgError.code === '42703' || orgError.code === '42P01') {
+        return true;
+      }
+      throw orgError;
     }
-    
-    const orgResult = await db.query(orgQuery, orgParams);
-    
-    return orgResult.rows.length === 0;
   } catch (error) {
     console.error('[SubdomainUtils] Error checking subdomain availability:', error);
-    return false;
+    throw error;
   }
 }
 

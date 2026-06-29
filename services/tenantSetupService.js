@@ -2,27 +2,26 @@ const { Client } = require('pg');
 const bcrypt = require('bcrypt');
 const { registerTenant, deactivateTenant, testTenantConnection: testConnection } = require('./tenantService');
 const { initTenantRegistryPool } = require('./tenantService');
+const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
-const { generateCustomId } = require('../utils/idGenerator');
+const { seedTextMessages } = require('../utils/seedTextMessages');
+const { generateCustomIdForClient } = require('../utils/idGenerator');
+const { DEFAULT_ID_SEQUENCES, DEFAULT_JOB_ROLES, DEFAULT_JOB_ROLE_NAV } = require('../constants/setupDefaults');
+const { sendWelcomeEmail } = require('../utils/mailer');
+const {
+  getPgSslOption,
+  getPgClientConnectTimeoutMs,
+  parseDatabaseUrl,
+  pgClientOptsFromDatabaseUrl,
+} = require('../utils/pgSslOption');
+// Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
 require('dotenv').config();
 
-/**
- * Parse database URL to extract connection details
- */
-function parseDatabaseUrl(databaseUrl) {
-  if (!databaseUrl) {
-    throw new Error('Database URL is required');
-  }
-  const match = databaseUrl.match(/^postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)$/);
-  if (!match) {
-    throw new Error('Invalid database URL format');
-  }
+function pgClientOpts(base) {
   return {
-    user: match[1],
-    password: match[2],
-    host: match[3],
-    port: parseInt(match[4]),
-    database: match[5],
+    ...base,
+    ssl: getPgSslOption(),
+    connectionTimeoutMillis: getPgClientConnectTimeoutMs(),
   };
 }
 
@@ -44,31 +43,38 @@ async function checkOrgIdExists(orgId) {
   }
 }
 
+async function checkSubdomainExists(subdomain) {
+  const { isSubdomainAvailable } = require('../utils/subdomainUtils');
+  const available = await isSubdomainAvailable(subdomain);
+  return !available;
+}
+
 /**
  * Generate unique database name based on org details
  */
-async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
+async function generateUniqueDatabaseName(orgId, subdomain) {
   const pool = initTenantRegistryPool();
   
-  // Base name from org code or org id
-  const baseName = (orgCode || orgId).toLowerCase().replace(/[^a-z0-9]/g, '_');
+  // Base name from subdomain or org id
+  const baseName = (subdomain || orgId).toLowerCase().replace(/[^a-z0-9]/g, '_');
   let dbName = `${baseName}_db`;
   let counter = 1;
   
   // Check if database name already exists
-  const tenantDbUrl = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;
+  // CRITICAL: Only use TENANT_DATABASE_URL, never fallback to DATABASE_URL
+  const tenantDbUrl = process.env.TENANT_DATABASE_URL;
   if (!tenantDbUrl) {
-    throw new Error('TENANT_DATABASE_URL or DATABASE_URL must be set');
+    throw new Error('TENANT_DATABASE_URL must be set. Do not use DATABASE_URL fallback.');
   }
   
   const tenantDbConfig = parseDatabaseUrl(tenantDbUrl);
-  const adminClient = new Client({
+  const adminClient = new Client(pgClientOpts({
     host: tenantDbConfig.host,
     port: tenantDbConfig.port,
     user: tenantDbConfig.user,
     password: tenantDbConfig.password,
     database: 'postgres',
-  });
+  }));
   
   try {
     await adminClient.connect();
@@ -107,77 +113,955 @@ async function generateUniqueDatabaseName(orgId, orgCode, orgName) {
 }
 
 /**
+ * Seed default ID sequences from setupDefaults before creating branch/department.
+ * Uses ON CONFLICT DO NOTHING so reference DB copies can still merge later.
+ */
+async function seedDefaultIdSequences(client) {
+  for (const entry of DEFAULT_ID_SEQUENCES) {
+    await client.query(
+      `
+        INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (table_key) DO NOTHING
+      `,
+      [entry.tableKey, entry.prefix, entry.lastNumber]
+    );
+  }
+  console.log(`[TenantSetup] ✅ Default ID sequences seeded (${DEFAULT_ID_SEQUENCES.length} entries)`);
+}
+
+/**
+ * Ensure branch and department exist before creating admin user
+ * Creates branch and department with correct ID formats if they don't exist
+ * CRITICAL: This function ONLY uses the tenant client passed as parameter
+ * It NEVER falls back to DATABASE_URL or default database connection
+ * @param {Client} client - Tenant database client (MUST be connected to tenant database)
+ * @param {string} orgId - Organization ID
+ */
+async function ensureBranchAndDepartment(client, orgId) {
+  // CRITICAL: Validate client is connected to tenant database
+  if (!client) {
+    throw new Error('CRITICAL: Tenant database client is required. Cannot ensure branch/department without tenant database connection.');
+  }
+  
+  if (client.ended) {
+    throw new Error('CRITICAL: Tenant database client is disconnected. Cannot ensure branch/department.');
+  }
+  
+  if (!orgId) {
+    throw new Error('Organization ID is required');
+  }
+  
+  await client.query('SET search_path TO public');
+  
+  // 1. Ensure branch exists
+  let branchId;
+  try {
+    const existingBranch = await client.query(`
+      SELECT branch_id FROM public."tblBranches" WHERE org_id = $1 LIMIT 1
+    `, [orgId]);
+    
+    if (existingBranch.rows.length > 0) {
+      branchId = existingBranch.rows[0].branch_id;
+      console.log(`[TenantSetup] Using existing branch: ${branchId}`);
+    } else {
+      branchId = await generateCustomIdForClient(client, 'branch', 3);
+
+      await client.query(`
+        INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
+        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW())
+        ON CONFLICT (branch_id) DO NOTHING
+      `, [orgId, branchId]);
+      console.log(`[TenantSetup] ✅ Created branch: ${branchId}`);
+    }
+  } catch (err) {
+    console.error(`[TenantSetup] ❌ Error ensuring branch:`, err.message);
+    throw err;
+  }
+  
+  // 2. Ensure department exists with DPT format
+  let deptId;
+  try {
+    const existingDept = await client.query(`
+      SELECT dept_id FROM public."tblDepartments" WHERE dept_id LIKE 'DPT%' AND org_id = $1 ORDER BY dept_id LIMIT 1
+    `, [orgId]);
+    
+    if (existingDept.rows.length > 0) {
+      deptId = existingDept.rows[0].dept_id;
+      console.log(`[TenantSetup] Using existing department: ${deptId}`);
+    } else {
+      deptId = await generateCustomIdForClient(client, 'department', 3);
+
+      await client.query(`
+        INSERT INTO public."tblDepartments" (org_id, dept_id, text, branch_id, int_status)
+        VALUES ($1, $2, 'Administration', $3, 1)
+        ON CONFLICT (dept_id) DO NOTHING
+      `, [orgId, deptId, branchId]);
+      console.log(`[TenantSetup] ✅ Created department: ${deptId}`);
+    }
+    
+    return { branchId, deptId };
+  } catch (err) {
+    console.error(`[TenantSetup] ❌ Error ensuring department:`, err.message);
+    throw err;
+  }
+}
+
+/**
  * Create admin user in the tenant database
- * This function adds the admin user to tblUsers in the created tenant database
+ * This function adds the admin user to both tblEmployees and tblUsers in the created tenant database
+ */
+/**
+ * Create admin user in tenant database
+ * CRITICAL: This function ONLY uses the tenant client passed as parameter
+ * It NEVER falls back to DATABASE_URL or default database connection
+ * @param {Client} client - Tenant database client (MUST be connected to tenant database)
+ * @param {string} orgId - Organization ID
+ * @param {object} adminData - Admin user data
  */
 async function createAdminUser(client, orgId, adminData) {
+  // CRITICAL: Validate client is connected to tenant database
+  if (!client) {
+    throw new Error('CRITICAL: Tenant database client is required. Cannot create admin user without tenant database connection.');
+  }
+  
+  if (client.ended) {
+    throw new Error('CRITICAL: Tenant database client is disconnected. Cannot create admin user.');
+  }
+  
+  // Verify we're using tenant database by checking client database name
+  // This prevents accidental use of default database
+  try {
+    const dbCheck = await client.query('SELECT current_database() as db_name');
+    if (dbCheck.rows && dbCheck.rows[0]) {
+      const dbName = dbCheck.rows[0].db_name;
+      console.log(`[TenantSetup] ✅ Verified using tenant database: ${dbName}`);
+      
+      // Ensure we're not using the default database (if DATABASE_URL points to a specific database)
+      if (process.env.DATABASE_URL) {
+        const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
+        if (dbName === defaultDbConfig.database) {
+          throw new Error(`CRITICAL: Attempted to create admin user in default database (${dbName}). This is not allowed. Must use tenant database.`);
+        }
+      }
+    }
+  } catch (dbCheckErr) {
+    // If we can't verify, log warning but continue (might be connection issue)
+    console.warn(`[TenantSetup] ⚠️ Could not verify database name: ${dbCheckErr.message}`);
+  }
+  
   const {
     fullName = 'System Administrator',
     email,
-    password,
     username = 'USR001',
     phone = '',
   } = adminData;
 
-  if (!email || !password) {
-    throw new Error('Admin user email and password are required');
+  if (!email) {
+    throw new Error('Admin user email is required');
+  }
+  
+  if (!orgId) {
+    throw new Error('Organization ID is required');
   }
 
-  const passwordHash = await bcrypt.hash(password, 10);
+  // Use a fixed initial password for newly created tenant admin
+  const plainPassword = 'Initial1';
+  const passwordHash = await bcrypt.hash(plainPassword, 10);
   const userId = username.toUpperCase();
+  const employeeId = 'EMP001'; // First employee in the organization
+
+  await client.query('SET search_path TO public');
 
   // Ensure System Administrator job role exists
-  // Use fully qualified table name
   try {
-    await client.query('SET search_path TO public');
     await client.query(`
-      INSERT INTO public."tblJobRoles" (job_role_id, text, job_function, int_status)
-      VALUES ('JR001', 'System Administrator', 'Full system access', 1)
+      INSERT INTO public."tblJobRoles" (org_id, job_role_id, text, job_function, int_status)
+      VALUES ($1, 'JR001', 'System Administrator', 'Full system access', 1)
       ON CONFLICT (job_role_id) DO NOTHING
-    `);
+    `, [orgId]);
     console.log(`[TenantSetup] Job role 'JR001' (System Administrator) ensured in tblJobRoles`);
   } catch (err) {
-    // Job role might already exist, continue
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
-  // Add admin user to tblUsers in the created database
-  // Use fully qualified table name
-  await client.query(`
-    INSERT INTO public."tblUsers" (
-      org_id, user_id, full_name, email, phone, job_role_id, password,
-      created_by, created_on, changed_by, changed_on, int_status, time_zone
-    )
-    VALUES ($1, $2, $3, $4, $5, 'JR001', $6, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
-    ON CONFLICT (user_id) DO UPDATE
-    SET full_name = EXCLUDED.full_name,
-        email = EXCLUDED.email,
-        phone = EXCLUDED.phone,
-        password = EXCLUDED.password
-  `, [orgId, userId, fullName, email, phone, passwordHash]);
-  console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId}`);
-
-  // Assign job role - use fully qualified table name
+  // Get department ID (should already exist from ensureBranchAndDepartment)
+  let deptId = 'DPT001';
   try {
-    await client.query('SET search_path TO public');
-    await client.query(`
-      INSERT INTO public."tblUserJobRoles" (user_job_role_id, user_id, job_role_id)
-      VALUES ('UJR001', $1, 'JR001')
-      ON CONFLICT (user_job_role_id) DO NOTHING
-    `, [userId]);
+    const existingDept = await client.query(`
+      SELECT dept_id FROM public."tblDepartments" WHERE dept_id LIKE 'DPT%' AND org_id = $1 ORDER BY dept_id LIMIT 1
+    `, [orgId]);
+    
+    if (existingDept.rows.length > 0) {
+      deptId = existingDept.rows[0].dept_id;
+      console.log(`[TenantSetup] Using department: ${deptId}`);
+    } else {
+      console.warn(`[TenantSetup] No DPT format department found, using DPT001 as fallback`);
+    }
   } catch (err) {
-    // Role assignment might already exist, continue
-    console.warn(`[TenantSetup] User job role assignment note: ${err.message}`);
+    console.warn(`[TenantSetup] Error getting department: ${err.message}, using DPT001 as fallback`);
   }
 
-  console.log(`[TenantSetup] Admin user created: ${userId} (${email})`);
+  // Step 1: Create employee record in tblEmployees (with all required NOT NULL columns)
+  try {
+    // Generate emp_int_id (first employee gets ID 1)
+    const empIntId = 1;
+    const employeeType = 'PERMANENT';
+    const languageCode = 'en';
+    
+    await client.query(`
+      INSERT INTO public."tblEmployees" (
+        emp_int_id, employee_id, name, full_name, email_id, dept_id, 
+        phone_number, employee_type, joining_date, language_code,
+        int_status, created_by, created_on, changed_by, changed_on, org_id
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, 1, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $10)
+    `, [empIntId, employeeId, fullName, fullName, email, deptId, phone, employeeType, languageCode, orgId]);
+    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
+  } catch (err) {
+    console.error(`[TenantSetup] Error creating employee record:`, err.message);
+    throw new Error(`Failed to create employee record: ${err.message}`);
+  }
+
+  // Step 2: Add admin user to tblUsers with emp_int_id reference
+  try {
+    const empIntId = 1; // Reference to the employee record we just created
+    
+    await client.query(`
+      INSERT INTO public."tblUsers" (
+        org_id, user_id, emp_int_id, full_name, email, phone, job_role_id, password,
+        created_by, created_on, changed_by, changed_on, int_status, time_zone
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
+    `, [orgId, userId, empIntId.toString(), fullName, email, phone, passwordHash]);
+    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to emp_int_id: ${empIntId})`);
+  } catch (err) {
+    console.error(`[TenantSetup] Error creating user record:`, err.message);
+    throw new Error(`Failed to create user record: ${err.message}`);
+  }
+
+  // Step 3: Assign job role
+  // CRITICAL: This MUST succeed - admin user needs role to access system
+  // Note: tblUserJobRoles doesn't have org_id column in the actual schema
+  // CRITICAL: All operations use tenant client, never fallback to default database
+  
+  // Validate client is connected
+  if (!client || client.ended) {
+    throw new Error('Tenant database client is not connected. Cannot assign job role.');
+  }
+  
+  // First check if the role assignment already exists
+  const existingRole = await client.query(`
+    SELECT user_job_role_id FROM public."tblUserJobRoles" 
+    WHERE user_id = $1 AND job_role_id = 'JR001'
+  `, [userId]);
+  
+  if (existingRole.rows.length > 0) {
+    console.log(`[TenantSetup] ✅ Job role already assigned: ${userId} -> JR001 (user_job_role_id: ${existingRole.rows[0].user_job_role_id})`);
+  } else {
+  // CRITICAL: All operations use tenant client, never default database
+  let userJobRoleId = null;
+  
+  // Check if userjobrole sequence exists in tblIDSequences
+  const seqResult = await client.query(`
+    SELECT prefix, last_number FROM public."tblIDSequences" 
+    WHERE table_key = 'userjobrole'
+  `);
+  
+  if (seqResult.rows.length > 0) {
+    const { prefix, last_number } = seqResult.rows[0];
+    const next = last_number + 1;
+    
+    // Update the sequence atomically
+    await client.query(`
+      UPDATE public."tblIDSequences" 
+      SET last_number = $1 
+      WHERE table_key = 'userjobrole'
+    `, [next]);
+    
+    // Generate ID: prefix + padded number (e.g., UJR001)
+    userJobRoleId = `${prefix}${String(next).padStart(3, '0')}`;
+  } else {
+    // Create the sequence entry if it doesn't exist
+    await client.query(`
+      INSERT INTO public."tblIDSequences" (table_key, prefix, last_number)
+      VALUES ('userjobrole', 'UJR', 0)
+    `);
+    userJobRoleId = 'UJR001';
+  }
+  
+  // Check if this ID already exists (duplicate check)
+  const duplicateCheck = await client.query(`
+    SELECT user_job_role_id FROM public."tblUserJobRoles" 
+    WHERE user_job_role_id = $1
+  `, [userJobRoleId]);
+  
+  if (duplicateCheck.rows.length > 0) {
+    // If duplicate, increment and try again
+    const seqUpdate = await client.query(`
+      UPDATE public."tblIDSequences" 
+      SET last_number = last_number + 1 
+      WHERE table_key = 'userjobrole'
+      RETURNING prefix, last_number
+    `);
+    if (seqUpdate.rows.length > 0) {
+      const { prefix, last_number } = seqUpdate.rows[0];
+      userJobRoleId = `${prefix}${String(last_number).padStart(3, '0')}`;
+    } else {
+      throw new Error('Failed to update ID sequence after duplicate detection');
+    }
+  }
+  
+  if (!userJobRoleId) {
+    throw new Error('Failed to generate user_job_role_id');
+  }
+  
+  // Insert the role assignment - CRITICAL: This must succeed
+  const insertResult = await client.query(`
+    INSERT INTO public."tblUserJobRoles" (user_job_role_id, user_id, job_role_id)
+    VALUES ($1, $2, 'JR001')
+    RETURNING user_job_role_id, user_id, job_role_id
+  `, [userJobRoleId, userId]);
+  
+  if (!insertResult.rows || insertResult.rows.length === 0) {
+    throw new Error('Job role assignment INSERT returned no rows');
+  }
+  
+  console.log(`[TenantSetup] ✅ Job role assigned: ${userId} -> JR001 (user_job_role_id: ${insertResult.rows[0].user_job_role_id})`);
+  
+  // CRITICAL: Verify the insert succeeded - this is a hard requirement
+  const verifyResult = await client.query(`
+    SELECT user_job_role_id, user_id, job_role_id 
+    FROM public."tblUserJobRoles" 
+    WHERE user_id = $1 AND job_role_id = 'JR001'
+  `, [userId]);
+  
+  if (verifyResult.rows.length === 0) {
+    throw new Error(`CRITICAL: Role assignment insert appeared to succeed but verification query returned no rows. Admin user ${userId} will not have access to the system.`);
+  }
+  
+  if (verifyResult.rows[0].user_job_role_id !== userJobRoleId) {
+    throw new Error(`CRITICAL: Role assignment verification failed - expected user_job_role_id ${userJobRoleId} but got ${verifyResult.rows[0].user_job_role_id}`);
+  }
+  
+  console.log(`[TenantSetup] ✅ Verified role assignment exists in tenant database (user_job_role_id: ${verifyResult.rows[0].user_job_role_id})`);
+  }
+
+  console.log(`[TenantSetup] ✅ Admin user created successfully: ${userId} (${email}) with employee record ${employeeId}`);
 
   return {
     userId,
+    employeeId,
     email,
-    password, // Return plain password for display
+    password: plainPassword, // Return initial password for display / email
     fullName,
   };
+}
+
+/**
+ * Helper function to check if a table exists in the reference database
+ */
+async function tableExists(client, tableName) {
+  try {
+    const result = await client.query(`
+      SELECT EXISTS (
+        SELECT FROM information_schema.tables 
+        WHERE table_schema = 'public' 
+        AND table_name = $1
+      )
+    `, [tableName]);
+    return result.rows[0].exists;
+  } catch (err) {
+    console.error(`[TenantSetup] Error checking table existence for ${tableName}:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Helper function to get column names from a table
+ */
+async function getTableColumns(client, tableName) {
+  try {
+    const result = await client.query(`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_schema = 'public' 
+      AND table_name = $1
+      ORDER BY ordinal_position
+    `, [tableName]);
+    return result.rows.map(row => row.column_name);
+  } catch (err) {
+    console.error(`[TenantSetup] Error getting columns for ${tableName}:`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Helper function to copy data dynamically based on actual column names
+ */
+async function copyTableDataDynamically(referenceClient, tenantClient, tableName, orgId, options = {}) {
+  try {
+    if (!(await tableExists(referenceClient, tableName))) {
+      console.log(`[TenantSetup] ⚠️ ${tableName} does not exist in reference database, skipping...`);
+      return { copied: 0, skipped: true };
+    }
+
+    // Get column names from both tables
+    const refColumns = await getTableColumns(referenceClient, tableName);
+    const tenantColumns = await getTableColumns(tenantClient, tableName);
+
+    if (refColumns.length === 0 || tenantColumns.length === 0) {
+      console.log(`[TenantSetup] ⚠️ Could not get columns for ${tableName}, skipping...`);
+      return { copied: 0, skipped: true };
+    }
+
+    // Find common columns (excluding org_id which we'll replace)
+    const commonColumns = tenantColumns.filter(col => 
+      refColumns.includes(col) || (options.orgIdColumn && col === options.orgIdColumn)
+    );
+
+    if (commonColumns.length === 0) {
+      console.log(`[TenantSetup] ⚠️ No common columns found for ${tableName}, skipping...`);
+      return { copied: 0, skipped: true };
+    }
+
+    // Build SELECT query with only common columns
+    const selectColumns = commonColumns.map(col => `"${col}"`).join(', ');
+    const rows = await referenceClient.query(`SELECT ${selectColumns} FROM "${tableName}"`);
+
+    if (rows.rows.length === 0) {
+      console.log(`[TenantSetup] ⚠️ No data found in ${tableName}, skipping...`);
+      return { copied: 0, skipped: false };
+    }
+
+    // Insert each row
+    let copied = 0;
+    for (const row of rows.rows) {
+      const values = commonColumns.map(col => {
+        // Replace org_id with tenant's org_id if specified
+        if (options.orgIdColumn && col === options.orgIdColumn) {
+          return orgId;
+        }
+        return row[col];
+      });
+
+      const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+      const columnNames = commonColumns.map(col => `"${col}"`).join(', ');
+
+      try {
+        await tenantClient.query(`
+          INSERT INTO "${tableName}" (${columnNames})
+          VALUES (${placeholders})
+          ON CONFLICT DO NOTHING
+        `, values);
+        copied++;
+      } catch (insertErr) {
+        // Log but continue with other rows
+        console.warn(`[TenantSetup] ⚠️ Error inserting row into ${tableName}:`, insertErr.message);
+      }
+    }
+
+    return { copied, skipped: false };
+  } catch (err) {
+    console.error(`[TenantSetup] ❌ Error copying ${tableName}:`, err.message);
+    return { copied: 0, skipped: false, error: err.message };
+  }
+}
+
+/**
+ * Copy data from reference database (GENERIC_URL) to tenant database
+ * This function connects to GENERIC_URL and copies all required default data
+ */
+/**
+ * Copy data from reference database (GENERIC_URL) to tenant database
+ * CRITICAL: This function uses GENERIC_URL for reference data and tenantClient for target
+ * It NEVER uses DATABASE_URL for either source or target
+ * @param {Client} tenantClient - Tenant database client (MUST be connected to tenant database)
+ * @param {string} orgId - Organization ID
+ */
+async function copyDataFromReferenceDatabase(tenantClient, orgId) {
+  // CRITICAL: Validate tenant client is connected
+  if (!tenantClient) {
+    throw new Error('CRITICAL: Tenant database client is required. Cannot copy reference data without tenant database connection.');
+  }
+  
+  if (tenantClient.ended) {
+    throw new Error('CRITICAL: Tenant database client is disconnected. Cannot copy reference data.');
+  }
+  
+  if (!orgId) {
+    throw new Error('Organization ID is required');
+  }
+  
+  // GENERIC_URL should point to the golden/reference database that has
+  // all master tables (tblEvents, tblApps, tblJobRoleNav, etc.)
+  // CRITICAL: Only use GENERIC_URL, never fallback to DATABASE_URL
+  const referenceDbUrl = process.env.GENERIC_URL;
+  if (!referenceDbUrl) {
+    throw new Error('GENERIC_URL must be set to copy reference data. Do not use DATABASE_URL fallback.');
+  }
+
+  const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
+  
+  // CRITICAL: Verify we're not accidentally using the default database as reference
+  if (process.env.DATABASE_URL) {
+    const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
+    if (referenceDbConfig.database === defaultDbConfig.database && 
+        referenceDbConfig.host === defaultDbConfig.host) {
+      console.warn(`[TenantSetup] ⚠️ WARNING: GENERIC_URL points to same database as DATABASE_URL. This may cause data conflicts.`);
+    }
+  }
+  
+  const referenceClient = new Client(pgClientOpts({
+    host: referenceDbConfig.host,
+    port: referenceDbConfig.port,
+    user: referenceDbConfig.user,
+    password: referenceDbConfig.password,
+    database: referenceDbConfig.database,
+  }));
+
+  try {
+    await referenceClient.connect();
+    console.log(`[TenantSetup] ✅ Connected to reference database: ${referenceDbConfig.database}`);
+    
+    // Verify reference client is connected
+    const refDbCheck = await referenceClient.query('SELECT current_database() as db_name');
+    console.log(`[TenantSetup] ✅ Reference database verified: ${refDbCheck.rows[0].db_name}`);
+    
+    await referenceClient.query('SET search_path TO public');
+    await tenantClient.query('SET search_path TO public');
+
+    // 1. Copy all ID Sequences from tblIDSequences
+    console.log(`[TenantSetup] Copying ID sequences from reference database...`);
+    try {
+      // Check if table exists in reference database
+      const tableCheck = await referenceClient.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'tblIDSequences'
+        )
+      `);
+      
+      if (!tableCheck.rows[0].exists) {
+        console.log(`[TenantSetup] ⚠️ tblIDSequences table does not exist in reference database, skipping...`);
+        console.log(`[TenantSetup] Creating default ID sequences in tenant database...`);
+        
+        for (const entry of DEFAULT_ID_SEQUENCES) {
+          await tenantClient.query(`
+            INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (table_key) DO UPDATE
+            SET prefix = EXCLUDED.prefix,
+                last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+          `, [entry.tableKey, entry.prefix, entry.lastNumber]);
+        }
+        console.log(`[TenantSetup] ✅ Created ${DEFAULT_ID_SEQUENCES.length} default ID sequences`);
+      } else {
+        const idSequences = await referenceClient.query('SELECT * FROM "tblIDSequences"');
+        for (const seq of idSequences.rows) {
+          // For employee and user sequences, set last_number to 1 since we've already created EMP001 and USR001
+          let lastNumber = seq.last_number;
+          if (seq.table_key === 'employee' || seq.table_key === 'user') {
+            lastNumber = 1; // We've used 001, so next will be 002
+          }
+          
+          await tenantClient.query(`
+            INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (table_key) DO UPDATE
+            SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+          `, [seq.table_key, seq.prefix, lastNumber]);
+        }
+        console.log(`[TenantSetup] ✅ Copied ${idSequences.rows.length} ID sequences`);
+      }
+    } catch (err) {
+      console.error(`[TenantSetup] ❌ Error copying ID sequences:`, err.message);
+      // Don't throw - continue with other data copying
+      console.log(`[TenantSetup] ⚠️ Continuing without ID sequences from reference database...`);
+    }
+
+    // 2. Branch and department are already created by ensureBranchAndDepartment
+    // Skip creating them here to avoid duplicates
+    console.log(`[TenantSetup] Branch and department already created, skipping...`);
+
+    // 3. Copy all events from tblEvents (reference database)
+    console.log(`[TenantSetup] Copying events from reference database...`);
+    const eventsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblEvents', orgId);
+    if (eventsResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${eventsResult.copied} events`);
+    } else if (!eventsResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No events copied (table may be empty or columns don't match)`);
+    }
+
+    // 4. Copy all apps from tblApps (reference database)
+    console.log(`[TenantSetup] Copying apps from reference database...`);
+    const appsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblApps', orgId);
+    if (appsResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${appsResult.copied} apps`);
+    } else if (!appsResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No apps copied (table may be empty or columns don't match)`);
+    }
+
+    // 5. Copy all audit log config from tblAuditLogConfig (reference database)
+    console.log(`[TenantSetup] Copying audit log config from reference database...`);
+    const auditLogResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblAuditLogConfig', orgId, { orgIdColumn: 'org_id' });
+    if (auditLogResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${auditLogResult.copied} audit log config rows`);
+    } else if (!auditLogResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No audit log config copied (table may be empty or columns don't match)`);
+    }
+
+    // 6. Copy job role navigation for JR001 from tblJobRoleNav (reference database)
+    console.log(`[TenantSetup] Copying job role navigation for JR001 from reference database...`);
+    try {
+      const navCopyResult = await copyJobRoleNavFromReference(referenceClient, tenantClient, orgId, { upsert: true });
+      if (navCopyResult.skipped) {
+        console.log(`[TenantSetup] ⚠️ tblJobRoleNav copy skipped: ${navCopyResult.reason || 'unknown'}`);
+        await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
+      } else {
+        console.log(`[TenantSetup] ✅ Copied ${navCopyResult.copied} job role navigation items for JR001`);
+        if ((navCopyResult.copied || 0) === 0) {
+          await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
+        }
+      }
+    } catch (err) {
+      console.error(`[TenantSetup] ❌ Error copying job role navigation:`, err.message);
+      console.log(`[TenantSetup] ⚠️ Continuing without job role navigation...`);
+      await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
+    }
+
+    // 7. Copy all maintenance status from tblMaintStatus (reference database)
+    console.log(`[TenantSetup] Copying maintenance status from reference database...`);
+    const maintStatusResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblMaintStatus', orgId);
+    if (maintStatusResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${maintStatusResult.copied} maintenance statuses`);
+    } else if (!maintStatusResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No maintenance status copied (table may be empty or columns don't match)`);
+    }
+
+    // 8. Copy all maintenance types from tblMaintTypes (reference database)
+    console.log(`[TenantSetup] Copying maintenance types from reference database...`);
+    const maintTypesResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblMaintTypes', orgId, { orgIdColumn: 'org_id' });
+    if (maintTypesResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${maintTypesResult.copied} maintenance types`);
+    } else if (!maintTypesResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No maintenance types copied (table may be empty or columns don't match)`);
+    }
+
+    // 9. Copy all org settings from tblOrgSettings (reference database)
+    console.log(`[TenantSetup] Copying organization settings from reference database...`);
+    const orgSettingsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblOrgSettings', orgId, { orgIdColumn: 'org_id' });
+    if (orgSettingsResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${orgSettingsResult.copied} organization settings`);
+    } else if (!orgSettingsResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No organization settings copied (table may be empty or columns don't match)`);
+    }
+
+    // 10. Copy all table filter columns from tblTableFilterColumns (reference database)
+    console.log(`[TenantSetup] Copying table filter columns from reference database...`);
+    const filterColumnsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblTableFilterColumns', orgId, { orgIdColumn: 'org_id' });
+    if (filterColumnsResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${filterColumnsResult.copied} table filter columns`);
+    } else if (!filterColumnsResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No table filter columns copied (table may be empty or columns don't match)`);
+    }
+
+    // 11. Copy all technical log config from tblTechnicalLogConfig (reference database)
+    console.log(`[TenantSetup] Copying technical log config from reference database...`);
+    const techLogResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblTechnicalLogConfig', orgId, { orgIdColumn: 'org_id' });
+    if (techLogResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${techLogResult.copied} technical log configs`);
+    } else if (!techLogResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No technical log config copied (table may be empty or columns don't match)`);
+    }
+
+    // 12. Copy multilingual text messages (tblTextMessagesDefault + tblTextMessagesOtherLangs)
+    console.log(`[TenantSetup] Copying text messages from reference database...`);
+    const textMsgDefaultResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblTextMessagesDefault',
+      orgId,
+    );
+    if (textMsgDefaultResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${textMsgDefaultResult.copied} default text messages`);
+    } else if (!textMsgDefaultResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No default text messages copied (table may be empty or columns don't match)`);
+    }
+
+    const textMsgOtherResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblTextMessagesOtherLangs',
+      orgId,
+    );
+    if (textMsgOtherResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${textMsgOtherResult.copied} translated text messages`);
+    } else if (!textMsgOtherResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
+    }
+
+    console.log(`[TenantSetup] ✅ Reference data copy process completed`);
+    
+  } catch (error) {
+    console.error(`[TenantSetup] ❌ Error in reference data copy process:`, error.message);
+    // Don't throw - allow tenant creation to continue even if reference data copy fails
+    console.log(`[TenantSetup] ⚠️ Continuing tenant creation without reference data...`);
+  } finally {
+    if (referenceClient) {
+      await referenceClient.end();
+    }
+  }
+}
+
+/**
+ * Copy JR001 navigation from reference DB into tenant (upsert so partial tenants get full menu).
+ */
+async function copyJobRoleNavFromReference(referenceClient, tenantClient, orgId, { upsert = false } = {}) {
+  if (!(await tableExists(referenceClient, 'tblJobRoleNav'))) {
+    return { copied: 0, skipped: true, reason: 'no reference tblJobRoleNav' };
+  }
+
+  const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
+  const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
+  const commonColumns = tenantColumns.filter((col) => refColumns.includes(col));
+
+  if (commonColumns.length === 0) {
+    return { copied: 0, skipped: true, reason: 'no common columns' };
+  }
+
+  const selectColumns = commonColumns.map((col) => `"${col}"`).join(', ');
+  const navRows = await referenceClient.query(`
+    SELECT ${selectColumns} FROM "tblJobRoleNav"
+    WHERE "job_role_id" = 'JR001'
+  `);
+
+  const conflictClause = upsert && commonColumns.includes('job_role_nav_id')
+    ? `ON CONFLICT (job_role_nav_id) DO UPDATE SET ${commonColumns
+        .filter((col) => col !== 'job_role_nav_id')
+        .map((col) => `"${col}" = EXCLUDED."${col}"`)
+        .join(', ')}`
+    : 'ON CONFLICT DO NOTHING';
+
+  let copied = 0;
+  for (const row of navRows.rows) {
+    const values = commonColumns.map((col) => {
+      if (col === 'org_id' && orgId) return orgId;
+      return row[col];
+    });
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+    const columnNames = commonColumns.map((col) => `"${col}"`).join(', ');
+
+    try {
+      const result = await tenantClient.query(
+        `
+          INSERT INTO "tblJobRoleNav" (${columnNames})
+          VALUES (${placeholders})
+          ${conflictClause}
+        `,
+        values,
+      );
+      if (!upsert && result.rowCount > 0) copied += 1;
+      else if (upsert) copied += 1;
+    } catch (insertErr) {
+      console.warn(`[TenantSetup] ⚠️ Error inserting job role nav row:`, insertErr.message);
+    }
+  }
+
+  return { copied, total: navRows.rows.length, skipped: false };
+}
+
+/**
+ * Ensure tenant JR001 navigation matches reference (full menu like hospitality tenants).
+ */
+async function ensureJobRoleNavigation(client, orgId) {
+  if (!client || !orgId) return { synced: false, count: 0 };
+
+  const tenantCountResult = await client.query(`
+    SELECT COUNT(*)::int AS count
+    FROM "tblJobRoleNav"
+    WHERE job_role_id = 'JR001' AND int_status = 1
+  `);
+  const tenantCount = tenantCountResult.rows[0]?.count || 0;
+
+  const referenceDbUrl = process.env.GENERIC_URL;
+  if (referenceDbUrl) {
+    const referenceClient = new Client(pgClientOptsFromDatabaseUrl(referenceDbUrl));
+
+    try {
+      await referenceClient.connect();
+      const refCountResult = await referenceClient.query(`
+        SELECT COUNT(*)::int AS count
+        FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const refCount = refCountResult.rows[0]?.count || 0;
+
+      const tenantApps = await client.query(`
+        SELECT DISTINCT app_id FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const tenantAppIds = new Set(tenantApps.rows.map((r) => r.app_id));
+
+      const refApps = await referenceClient.query(`
+        SELECT DISTINCT app_id FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const missingApps = refApps.rows.filter((r) => !tenantAppIds.has(r.app_id));
+
+      if (refCount > 0 && (tenantCount < refCount || missingApps.length > 0)) {
+        console.log(
+          `[TenantSetup] JR001 navigation incomplete for ${orgId} (${tenantCount}/${refCount}, missing ${missingApps.length} apps); syncing from reference...`,
+        );
+        const syncResult = await copyJobRoleNavFromReference(referenceClient, client, orgId, { upsert: true });
+        console.log(`[TenantSetup] ✅ Synced JR001 navigation (${syncResult.copied}/${syncResult.total} rows)`);
+
+        // Copy tblApps rows for any newly added navigation app_ids
+        await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+
+        return { synced: true, count: syncResult.copied };
+      }
+
+      if (tenantCount > 0) {
+        return { synced: false, count: tenantCount };
+      }
+    } catch (err) {
+      console.warn(`[TenantSetup] Reference navigation sync failed: ${err.message}`);
+    } finally {
+      await referenceClient.end().catch(() => {});
+    }
+  }
+
+  return seedDefaultJobRoleNavigationIfMissing(client, orgId);
+}
+
+/**
+ * Seed default JR001 navigation when tenant DB has none (reference copy miss or legacy tenant).
+ */
+async function seedDefaultJobRoleNavigationIfMissing(client, orgId) {
+  if (!client || !orgId) return { seeded: false, count: 0 };
+
+  const navCount = await client.query(`
+    SELECT COUNT(*)::int AS count
+    FROM "tblJobRoleNav"
+    WHERE job_role_id = 'JR001' AND int_status = 1
+  `);
+
+  if ((navCount.rows[0]?.count || 0) > 0) {
+    return { seeded: false, count: navCount.rows[0].count };
+  }
+
+  console.log(`[TenantSetup] No JR001 navigation found for ${orgId}; seeding defaults...`);
+
+  for (const role of DEFAULT_JOB_ROLES) {
+    await client.query(
+      `
+        INSERT INTO "tblJobRoles" (org_id, job_role_id, text, job_function, int_status)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (job_role_id) DO UPDATE
+        SET text = EXCLUDED.text,
+            job_function = EXCLUDED.job_function,
+            int_status = EXCLUDED.int_status,
+            org_id = EXCLUDED.org_id
+      `,
+      [orgId, role.id, role.name, role.jobFunction, role.intStatus],
+    );
+  }
+
+  let inserted = 0;
+  for (const item of DEFAULT_JOB_ROLE_NAV) {
+    await client.query(
+      `
+        INSERT INTO "tblJobRoleNav"
+          (job_role_nav_id, org_id, int_status, job_role_id, parent_id, app_id, label, sub_menu, sequence, access_level, is_group, mob_desk)
+        VALUES
+          ($1, $2, 1, $3, $4, $5, $6, NULL, $7, $8, $9, 'D')
+        ON CONFLICT (job_role_nav_id) DO UPDATE
+        SET org_id = EXCLUDED.org_id,
+            int_status = 1,
+            job_role_id = EXCLUDED.job_role_id,
+            parent_id = EXCLUDED.parent_id,
+            app_id = EXCLUDED.app_id,
+            label = EXCLUDED.label,
+            sequence = EXCLUDED.sequence,
+            access_level = EXCLUDED.access_level,
+            is_group = EXCLUDED.is_group,
+            mob_desk = 'D'
+      `,
+      [
+        item.id,
+        orgId,
+        item.jobRoleId,
+        item.parentId,
+        item.appId,
+        item.label,
+        item.sequence,
+        item.accessLevel,
+        item.isGroup,
+      ],
+    );
+    inserted += 1;
+  }
+
+  console.log(`[TenantSetup] ✅ Seeded ${inserted} default navigation items for JR001`);
+  return { seeded: true, count: inserted };
+}
+
+/**
+ * Seed default data for tenant database
+ * This includes: ID sequences, job roles, navigation, asset types, maintenance types, etc.
+ * Excludes any RioAdmin-specific data
+ * Now copies data from GENERIC_URL instead of using constants
+ * CRITICAL: This function ONLY uses the tenant client passed as parameter
+ * It NEVER falls back to DATABASE_URL or default database connection
+ * @param {Client} client - Tenant database client (MUST be connected to tenant database)
+ * @param {string} orgId - Organization ID
+ * @param {string} adminUserId - Admin user ID (for logging)
+ * @param {string} adminEmployeeId - Admin employee ID (for logging)
+ */
+async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId) {
+  // CRITICAL: Validate client is connected to tenant database
+  if (!client) {
+    throw new Error('CRITICAL: Tenant database client is required. Cannot seed default data without tenant database connection.');
+  }
+  
+  if (client.ended) {
+    throw new Error('CRITICAL: Tenant database client is disconnected. Cannot seed default data.');
+  }
+  
+  if (!orgId) {
+    throw new Error('Organization ID is required');
+  }
+  
+  console.log(`[TenantSetup] 🌱 Seeding default data for tenant from reference database...`);
+  
+  await client.query('SET search_path TO public');
+  
+  try {
+    // Copy all data from reference database (GENERIC_URL)
+    // CRITICAL: copyDataFromReferenceDatabase uses GENERIC_URL, never DATABASE_URL
+    await copyDataFromReferenceDatabase(client, orgId);
+
+    const textMsgCount = await client.query(
+      'SELECT COUNT(*)::int AS count FROM "tblTextMessagesDefault"',
+    );
+    if ((textMsgCount.rows[0]?.count || 0) === 0) {
+      console.log('[TenantSetup] No text messages found after reference copy; running text message seed...');
+      await seedTextMessages(client, { genericUrl: process.env.GENERIC_URL });
+    }
+
+    await ensureJobRoleNavigation(client, orgId);
+    
+    console.log(`[TenantSetup] ✅ Default data seeding process completed`);
+    
+  } catch (error) {
+    console.error(`[TenantSetup] ❌ Error seeding default data:`, error.message);
+    console.error(`[TenantSetup] Error stack:`, error.stack);
+    // CRITICAL: Re-throw error - tenant creation should fail if seeding fails
+    // This ensures data integrity - tenant without default data is not usable
+    throw new Error(`Failed to seed default tenant data: ${error.message}`);
+  }
 }
 
 /**
@@ -185,16 +1069,19 @@ async function createAdminUser(client, orgId, adminData) {
  * This will:
  * 1. Check org_id uniqueness
  * 2. Generate unique database name
- * 3. Create a new database for the organization using DATABASE_URL credentials
+ * 3. Create a new database for the organization using TENANT_DATABASE_URL credentials
  * 4. Create all tables with constraints
- * 5. Create admin user
+ * 5. Create admin user (using tenant database client)
  * 6. Register the tenant in the tenant table
+ * 
+ * CRITICAL: All tenant operations use TENANT_DATABASE_URL, never DATABASE_URL
+ * Reference data comes from GENERIC_URL, never DATABASE_URL
  */
 async function createTenant(tenantData) {
   const {
     orgId,
     orgName,
-    orgCode,
+    subdomain: subdomainInput,
     orgCity,
     adminUser,
   } = tenantData;
@@ -204,41 +1091,54 @@ async function createTenant(tenantData) {
     throw new Error('Missing required fields: orgId, orgName');
   }
 
-  if (!adminUser || !adminUser.email || !adminUser.password) {
-    throw new Error('Admin user email and password are required');
+  if (!subdomainInput) {
+    throw new Error('Sub-domain name is required');
   }
 
+  if (!adminUser || !adminUser.email) {
+    throw new Error('Admin user email is required');
+  }
+
+  const { validateSubdomain } = require('../utils/subdomainUtils');
+  const subdomain = validateSubdomain(subdomainInput);
+
   // Check if org_id already exists
-  const orgIdUpper = orgId.toUpperCase();
+  const orgIdUpper = orgId.toUpperCase().trim();
+  if (orgIdUpper.length > 10) {
+    throw new Error('Organization ID must be 10 characters or less.');
+  }
   const orgExists = await checkOrgIdExists(orgIdUpper);
   if (orgExists) {
     throw new Error(`Organization ID ${orgIdUpper} already exists. Please choose a different ID.`);
   }
 
-  // Generate unique subdomain from organization name
-  const { generateUniqueSubdomain } = require('../utils/subdomainUtils');
-  const subdomain = await generateUniqueSubdomain(orgName);
-  console.log(`[TenantSetup] Generated subdomain: ${subdomain} for organization: ${orgName}`);
-
-  // Generate unique database name
-  const dbName = await generateUniqueDatabaseName(orgIdUpper, orgCode, orgName);
-
-  // Parse DATABASE_URL to get connection details for creating new database
-  const databaseUrl = process.env.DATABASE_URL;
-  if (!databaseUrl) {
-    throw new Error('DATABASE_URL must be set');
+  const subdomainExists = await checkSubdomainExists(subdomain);
+  if (subdomainExists) {
+    throw new Error(`Sub-domain name "${subdomain}" is already taken. Please choose a different one.`);
   }
 
-  const dbConfig = parseDatabaseUrl(databaseUrl);
+  console.log(`[TenantSetup] Using user-specified subdomain: ${subdomain}`);
+
+  // Generate unique database name
+  const dbName = await generateUniqueDatabaseName(orgIdUpper, subdomain);
+
+  // CRITICAL: Use TENANT_DATABASE_URL for all tenant database operations
+  // This ensures we never accidentally use the default DATABASE_URL
+  const tenantDatabaseUrl = process.env.TENANT_DATABASE_URL;
+  if (!tenantDatabaseUrl) {
+    throw new Error('TENANT_DATABASE_URL must be set. This is required for tenant database operations.');
+  }
+
+  const dbConfig = parseDatabaseUrl(tenantDatabaseUrl);
   
   // Connect to postgres database to create new database
-  const adminClient = new Client({
+  const adminClient = new Client(pgClientOpts({
     host: dbConfig.host,
     port: dbConfig.port,
     user: dbConfig.user,
     password: dbConfig.password,
     database: 'postgres', // Connect to postgres database to create new DB
-  });
+  }));
 
   try {
     await adminClient.connect();
@@ -269,13 +1169,13 @@ async function createTenant(tenantData) {
     });
 
     // Create all tables in the new database using DATABASE_URL credentials
-    const tenantClient = new Client({
+    const tenantClient = new Client(pgClientOpts({
       host: dbConfig.host,
       port: dbConfig.port,
       user: dbConfig.user,
       password: dbConfig.password,
       database: dbName,
-    });
+    }));
 
     try {
       await tenantClient.connect();
@@ -300,16 +1200,16 @@ async function createTenant(tenantData) {
       await tenantClient.query('SET search_path TO public');
       await tenantClient.query("SET session search_path TO 'public'");
 
-      // Get and execute schema SQL from setup wizard service
+      // Get and execute tenant schema SQL (excludes tblRioAdmin)
       // This includes all tables, primary keys, foreign keys, indexes, and constraints
       let schemaCreated = false;
       try {
         let schemaSql;
         let foreignKeysSql = '';
         try {
-          // Force regeneration to ensure we get the latest schema including any new tables
-          console.log(`[TenantSetup] 🔄 Fetching latest schema from GENERIC_URL (template database with all 79 tables)...`);
-          const schemaResult = await setupWizardService.getSchemaSql(false, true); // forceRegenerate = true
+          // Prefer latest schema snapshot (with optional FK split) from setup wizard service.
+          console.log(`[TenantSetup] 🔄 Fetching latest schema from template source...`);
+          const schemaResult = await setupWizardService.getSchemaSql(false, true);
           
           // Handle both old string format and new object format
           if (typeof schemaResult === 'string') {
@@ -320,18 +1220,19 @@ async function createTenant(tenantData) {
             console.log(`[TenantSetup] 📋 Schema without FKs: ${schemaSql.length} chars`);
             console.log(`[TenantSetup] 🔗 Foreign keys: ${foreignKeysSql.length} chars`);
           }
-        } catch (fileError) {
-          console.error(`[TenantSetup] Error reading schema SQL file:`, fileError.message);
-          console.error(`[TenantSetup] This is expected if the SQL dump file doesn't exist. Will use CORE_TABLE_DDL fallback.`);
-          schemaSql = null; // Will trigger fallback
+        } catch (schemaSourceError) {
+          console.warn(`[TenantSetup] Schema source fetch failed, using tenantSchemaService fallback: ${schemaSourceError.message}`);
+          // Fallback: generate tenant schema directly (still executed only on tenantClient).
+          schemaSql = await tenantSchemaService.generateTenantSchemaSql();
+          foreignKeysSql = '';
         }
         
         if (!schemaSql || schemaSql.trim().length === 0) {
-          console.log(`[TenantSetup] Schema SQL is empty or not available. Will use CORE_TABLE_DDL fallback.`);
-          schemaSql = null; // Will trigger fallback
-        } else {
-          console.log(`[TenantSetup] Executing full schema SQL (includes all tables, PKs, FKs, constraints)...`);
-          console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
+          throw new Error('Tenant schema SQL generation returned empty result');
+        }
+        
+        console.log(`[TenantSetup] Executing tenant schema SQL...`);
+        console.log(`[TenantSetup] Schema SQL length: ${schemaSql.length} characters`);
         
         // Execute the schema SQL (WITHOUT foreign keys to avoid constraint violations during seeding)
         // Foreign keys will be added after data is inserted
@@ -350,8 +1251,6 @@ async function createTenant(tenantData) {
           // If single query fails, try executing statement by statement
           console.warn(`[TenantSetup] Single query execution failed, trying statement-by-statement:`, execError.message);
           
-          // Split by semicolons and execute statements one by one for better error handling
-          // But be careful with functions, triggers, etc. that contain semicolons
           const statements = schemaSql
             .split(/;\s*(?=\n|$)/)
             .map(s => s.trim())
@@ -396,41 +1295,17 @@ async function createTenant(tenantData) {
             schemaCreated = true;
             console.log(`[TenantSetup] ✅ Schema partially created (${tableCheck.rows[0].count} tables)`);
           } else {
-            console.warn(`[TenantSetup] No tables were created after executing schema SQL. Will use CORE_TABLE_DDL fallback.`);
+            throw new Error('No tables were created after executing tenant schema SQL');
           }
-        }
         }
       } catch (schemaError) {
-        console.error(`[TenantSetup] ❌ Error executing schema SQL:`, schemaError.message);
+        console.error(`[TenantSetup] ❌ Error generating/executing tenant schema:`, schemaError.message);
         console.error(`[TenantSetup] Stack trace:`, schemaError.stack);
-        // Try fallback to core tables
-        console.log(`[TenantSetup] Attempting to create core tables as fallback...`);
+        throw new Error(`Tenant schema creation failed: ${schemaError.message}`);
       }
-
-      // Create core tables (safety net - ensures essential tables exist)
-      // Note: These are basic table definitions. The full schema SQL above should have already
-      // created all tables with complete constraints. This is just a fallback.
+      
       if (!schemaCreated) {
-        console.log(`[TenantSetup] Creating core tables as fallback...`);
-        const CORE_TABLE_DDL = setupWizardService.CORE_TABLE_DDL;
-        if (CORE_TABLE_DDL && Array.isArray(CORE_TABLE_DDL)) {
-          for (const ddl of CORE_TABLE_DDL) {
-            try {
-              if (ddl && ddl.trim()) {
-                await tenantClient.query(ddl);
-                console.log(`[TenantSetup] Created table from CORE_TABLE_DDL`);
-              }
-            } catch (err) {
-              // Table might already exist (from schema SQL), continue
-              if (err.code !== '42P07' && err.code !== '42710') {
-                console.error(`[TenantSetup] Error creating core table:`, err.message);
-                console.error(`[TenantSetup] DDL that failed:`, ddl.substring(0, 200));
-              }
-            }
-          }
-        } else {
-          console.error(`[TenantSetup] CORE_TABLE_DDL is not available or not an array`);
-        }
+        throw new Error('Tenant schema was not created successfully');
       }
       
       // Verify that tblOrgs table exists before trying to insert
@@ -553,91 +1428,11 @@ async function createTenant(tenantData) {
         // This is not critical, continue
       }
 
-      // Step 1: Generate org_id for tblOrgs (ORG001 format)
-      // Query tblIDSequences to get the next org_id
+      // Step 1: Create organization record in tblOrgs using the user-specified org_id
       await tenantClient.query('SET search_path TO public');
+      console.log(`[TenantSetup] Using user-specified org_id across tenant database: ${orgIdUpper}`);
       
-      let generatedOrgId;
-      try {
-        // Check if tblIDSequences exists and has 'org' entry
-        const seqCheck = await tenantClient.query(`
-          SELECT EXISTS (
-            SELECT 1 FROM information_schema.tables 
-            WHERE table_schema = 'public' AND table_name = 'tblIDSequences'
-          )
-        `);
-        
-        if (seqCheck.rows[0].exists) {
-          // Check if 'org' entry exists in tblIDSequences
-          const orgSeqCheck = await tenantClient.query(`
-            SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = 'org'
-          `);
-          
-          if (orgSeqCheck.rows.length > 0) {
-            // Use existing sequence
-            const { prefix, last_number } = orgSeqCheck.rows[0];
-            const next = last_number + 1;
-            generatedOrgId = `${prefix}${String(next).padStart(3, "0")}`;
-            
-            // Update the sequence
-            await tenantClient.query(`
-              UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = 'org'
-            `, [next]);
-          } else {
-            // Create 'org' entry in tblIDSequences
-            await tenantClient.query(`
-              INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-              VALUES ('org', 'ORG', 0)
-            `);
-            generatedOrgId = 'ORG001';
-          }
-        } else {
-          // tblIDSequences doesn't exist, use default
-          generatedOrgId = 'ORG001';
-        }
-        
-        // Check if generated org_id already exists in tblOrgs
-        const existingCheck = await tenantClient.query(`
-          SELECT org_id FROM public."tblOrgs" WHERE org_id = $1
-        `, [generatedOrgId]);
-        
-        if (existingCheck.rows.length > 0) {
-          // If exists, find the next available
-          const allOrgs = await tenantClient.query(`
-            SELECT org_id FROM public."tblOrgs" WHERE org_id LIKE 'ORG%' ORDER BY org_id DESC LIMIT 1
-          `);
-          if (allOrgs.rows.length > 0) {
-            const lastOrgId = allOrgs.rows[0].org_id;
-            const match = lastOrgId.match(/\d+/);
-            if (match) {
-              const nextNum = parseInt(match[0]) + 1;
-              generatedOrgId = `ORG${String(nextNum).padStart(3, "0")}`;
-            }
-          }
-        }
-      } catch (seqError) {
-        console.warn('[TenantSetup] Could not generate org_id from sequence, using default:', seqError.message);
-        // Fallback: use ORG001 or find next available
-        const fallbackCheck = await tenantClient.query(`
-          SELECT org_id FROM public."tblOrgs" WHERE org_id LIKE 'ORG%' ORDER BY org_id DESC LIMIT 1
-        `);
-        if (fallbackCheck.rows.length > 0) {
-          const lastOrgId = fallbackCheck.rows[0].org_id;
-          const match = lastOrgId.match(/\d+/);
-          if (match) {
-            const nextNum = parseInt(match[0]) + 1;
-            generatedOrgId = `ORG${String(nextNum).padStart(3, "0")}`;
-          } else {
-            generatedOrgId = 'ORG001';
-          }
-        } else {
-          generatedOrgId = 'ORG001';
-        }
-      }
-      
-      console.log(`[TenantSetup] Generated org_id for tblOrgs: ${generatedOrgId} (tenant org_id: ${orgIdUpper})`);
-      
-      // Create organization record in tblOrgs with generated org_id and subdomain
+      // Create organization record in tblOrgs with user-specified org_id and subdomain
       // Check if subdomain column exists before inserting
       const subdomainColumnCheck = await tenantClient.query(`
         SELECT EXISTS (
@@ -659,7 +1454,7 @@ async function createTenant(tenantData) {
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city,
               subdomain = EXCLUDED.subdomain
-        `, [generatedOrgId, orgName, orgCode || orgIdUpper, orgCity || '', subdomain]);
+        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '', subdomain]);
       } else {
         await tenantClient.query(`
           INSERT INTO public."tblOrgs" (org_id, text, org_code, org_city, int_status)
@@ -668,16 +1463,41 @@ async function createTenant(tenantData) {
           SET text = EXCLUDED.text,
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city
-        `, [generatedOrgId, orgName, orgCode || orgIdUpper, orgCity || '']);
+        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '']);
       }
-      console.log(`[TenantSetup] Organization record created in tblOrgs: ${generatedOrgId} with subdomain: ${subdomain}`);
+      console.log(`[TenantSetup] Organization record created in tblOrgs: ${orgIdUpper} with subdomain: ${subdomain}`);
 
-      // Step 2: Create admin user and add to tblUsers in the created database
-      // Use generatedOrgId (ORG001 format) for the admin user, not tenant orgId
+      // Step 2: Seed ID sequences, then ensure branch and department exist
+      console.log(`[TenantSetup] Seeding default ID sequences...`);
+      await seedDefaultIdSequences(tenantClient);
+      console.log(`[TenantSetup] Ensuring branch and department exist...`);
+      await ensureBranchAndDepartment(tenantClient, orgIdUpper);
+      
+      // Step 3: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
-      const adminCredentials = await createAdminUser(tenantClient, generatedOrgId, adminUser);
+      const adminCredentials = await createAdminUser(tenantClient, orgIdUpper, adminUser);
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
+      // Send welcome email with initial password and role information
+      try {
+        const userData = {
+          full_name: adminCredentials.fullName,
+          email: adminCredentials.email,
+          generatedPassword: adminCredentials.password,
+        };
+        const roles = [
+          { job_role_name: 'System Administrator' },
+        ];
+        await sendWelcomeEmail(userData, roles, orgName);
+        console.log('[TenantSetup] Welcome email sent to admin user');
+      } catch (emailErr) {
+        console.warn('[TenantSetup] Failed to send welcome email to admin user:', emailErr.message);
+      }
+
+      // Step 4: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
+      console.log(`[TenantSetup] Seeding default tenant data...`);
+      await seedTenantDefaultData(tenantClient, orgIdUpper, adminCredentials.userId, adminCredentials.employeeId);
+      
       // Apply foreign key constraints after all data has been seeded
       if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
         console.log('[TenantSetup] 🔗 Applying foreign key constraints to tenant database...');
@@ -692,22 +1512,37 @@ async function createTenant(tenantData) {
       } else {
         console.log('[TenantSetup] ℹ️ No foreign key constraints to apply (already in schema or none generated)');
       }
-
       console.log(`[TenantSetup] All tables created successfully in: ${dbName}`);
+      
+      // CRITICAL: Final validation - verify tenant database was used throughout
+      // This ensures we never accidentally used DATABASE_URL for tenant operations
+      try {
+        const finalDbCheck = await tenantClient.query('SELECT current_database() as db_name');
+        if (finalDbCheck.rows && finalDbCheck.rows[0]) {
+          const finalDbName = finalDbCheck.rows[0].db_name;
+          if (finalDbName !== dbName) {
+            throw new Error(`CRITICAL: Final validation failed - expected database ${dbName} but got ${finalDbName}. Tenant operations may have used wrong database.`);
+          }
+          console.log(`[TenantSetup] ✅ Final validation passed - all operations used tenant database: ${finalDbName}`);
+        }
+      } catch (validationErr) {
+        // If validation fails, this is critical - tenant may be in inconsistent state
+        console.error(`[TenantSetup] ❌ CRITICAL: Final validation failed: ${validationErr.message}`);
+        throw new Error(`Tenant creation validation failed: ${validationErr.message}`);
+      }
       
       await tenantClient.end();
       
       // Get base domain from environment variable or use default
       // Main domain is riowebworks.net (configured in GoDaddy with wildcard DNS)
-      const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'riowebworks.net';
-      const isDevelopment = process.env.NODE_ENV !== 'production';
+      const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost';
       
       // Construct subdomain URL
-      // For development, use subdomain.localhost:port format
-      // For production, use subdomain.riowebworks.net format with HTTPS (secure)
+      // If MAIN_DOMAIN is 'localhost', use development format with port
+      // Otherwise, use production format with HTTPS
       let finalSubdomainUrl;
       
-      if (isDevelopment) {
+      if (MAIN_DOMAIN === 'localhost') {
         // Development: use localhost with port
         const port = process.env.FRONTEND_PORT || '5173';
         finalSubdomainUrl = `http://${subdomain}.localhost:${port}`;
@@ -729,12 +1564,10 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
       
       return {
-        orgId: orgIdUpper, // Tenant org_id (for login/tenant identification)
-        generatedOrgId: generatedOrgId, // Generated org_id for tblOrgs (ORG001 format)
+        orgId: orgIdUpper,
         orgName,
-        orgCode,
         orgCity,
-        subdomain, // Add subdomain to response
+        subdomain,
         subdomainUrl: finalSubdomainUrl, // Add subdomain URL to response
         database: dbName,
         host: dbConfig.host,
@@ -879,4 +1712,7 @@ module.exports = {
   deleteTenant,
   testTenantConnection,
   checkOrgIdExists,
+  checkSubdomainExists,
+  seedDefaultJobRoleNavigationIfMissing,
+  ensureJobRoleNavigation,
 };

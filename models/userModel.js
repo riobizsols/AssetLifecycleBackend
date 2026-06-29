@@ -81,9 +81,9 @@ const createUser = async ({
 
 
 // Set reset token for password reset
-const setResetToken = async (email, token, expiry) => {
-    const dbPool = getDb();
-    await dbPool.query(
+const setResetToken = async (email, token, expiry, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    await connection.query(
         `UPDATE "tblUsers"
          SET reset_token = $1, reset_token_expiry = $2
          WHERE email = $3`,
@@ -92,9 +92,9 @@ const setResetToken = async (email, token, expiry) => {
 };
 
 // Find user by valid reset token
-const findUserByResetToken = async (token) => {
-    const dbPool = getDb();
-    const result = await dbPool.query(
+const findUserByResetToken = async (token, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    const result = await connection.query(
         `SELECT * FROM "tblUsers"
          WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
         [token]
@@ -103,9 +103,9 @@ const findUserByResetToken = async (token) => {
 };
 
 // Update user password after reset
-const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by) => {
-    const dbPool = getDb();
-    await dbPool.query(
+const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by, tenantPool = null) => {
+    const connection = tenantPool || getDb();
+    await connection.query(
         `UPDATE "tblUsers"
          SET password = $1,
              reset_token = NULL,
