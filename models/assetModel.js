@@ -12,6 +12,7 @@ const getDb = (dbConnection) => {
   return contextDb;
 };
 const { generateCustomId } = require("../utils/idGenerator");
+const { normalizeBranchId } = require("../utils/branchAccessUtils");
 const {
   convertAssetTypeToSerialFormat,
   generateSerialNumber,
@@ -1891,7 +1892,7 @@ const bulkUpsertAssets = async (
       let finalAssetId = row.asset_id;
       let finalSerialNumber = row.serial_number;
       let finalOrgId = row.org_id || user_org_id; // Use user's org_id if not provided in CSV
-      let finalBranchId = row.branch_id || user_branch_id; // Use user's branch_id if not provided in CSV
+      let finalBranchId = normalizeBranchId(row.branch_id) || user_branch_id;
 
       // Get asset type text for the 'text' field
       const assetTypeText = assetTypesMap[row.asset_type_id] || "";

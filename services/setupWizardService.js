@@ -207,17 +207,27 @@ const generateSetupReport = async (setupData) => {
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
-  // Create a separate connection pool for GENERIC_URL (template database)
+  const referenceUrl =
+    process.env.TENANT_SCHEMA_REFERENCE_URL ||
+    process.env.DATABASE_URL ||
+    process.env.HOSPITALITY_DATABASE_URL;
+
+  if (!referenceUrl) {
+    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / DATABASE_URL for schema generation');
+    return null;
+  }
+
+  // Template database for new tenants — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
   const genericPool = new Pool({
-    connectionString: process.env.GENERIC_URL,
+    connectionString: referenceUrl,
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
 
   try {
-    console.log('[SetupWizard] 🔄 Generating dynamic schema from GENERIC_URL (template database)...');
-    console.log('[SetupWizard] 📍 Template DB: ' + (process.env.GENERIC_URL || '').replace(/:[^:@]+@/, ':***@'));
+    console.log('[SetupWizard] 🔄 Generating dynamic schema from reference database...');
+    console.log('[SetupWizard] 📍 Template DB: ' + referenceUrl.replace(/:[^:@]+@/, ':***@'));
     
     const schemaParts = [];
     const foreignKeyStatements = []; // Collect FK constraints to add at the end
@@ -1088,28 +1098,29 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  // Sync ALL tblApps entries from GENERIC_URL (template database)
-  // This ensures all app_ids exist before job role navigation is created
-  const genericPool = new Pool({
-    connectionString: process.env.GENERIC_URL,
+  const { getReferenceUrl } = require('./tenantSchemaAlignService');
+  const { seedRequiredMasterData } = require('./tenantReferenceDataService');
+  const referenceUrl = getReferenceUrl() || process.env.GENERIC_URL;
+
+  // Sync tblApps + required master data from hospitality reference
+  const referencePool = new Pool({
+    connectionString: referenceUrl,
     max: 5,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 10000,
   });
 
   try {
-    console.log('[SetupWizard] 📋 Syncing tblApps entries from GENERIC_URL...');
-    
-    // Get all apps from GENERIC_URL
-    const appsResult = await genericPool.query(`
+    console.log('[SetupWizard] 📋 Syncing tblApps entries from hospitality reference...');
+
+    const appsResult = await referencePool.query(`
       SELECT app_id, text, int_status
       FROM "tblApps"
       ORDER BY app_id
     `);
-    
-    console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in template database`);
-    
-    // Insert all apps into new database with the new org_id
+
+    console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in reference database`);
+
     for (const app of appsResult.rows) {
       await client.query(
         `
@@ -1123,13 +1134,12 @@ const seedReferenceTables = async (client, orgId, logs) => {
         [app.app_id, app.text, app.int_status !== false, orgId]
       );
     }
-    
+
     console.log(`[SetupWizard] ✅ Synced ${appsResult.rows.length} app entries to new database`);
-    logs.push({ 
-      message: `${appsResult.rows.length} app entries synced from template database`, 
-      scope: "reference" 
+    logs.push({
+      message: `${appsResult.rows.length} app entries synced from reference database`,
+      scope: 'reference',
     });
-    
   } catch (error) {
     console.error('[SetupWizard] ❌ Error syncing tblApps:', error.message);
     // Fallback to DEFAULT_APPS if sync fails
@@ -1153,7 +1163,15 @@ const seedReferenceTables = async (client, orgId, logs) => {
       level: "warning"
     });
   } finally {
-    await genericPool.end();
+    await referencePool.end();
+  }
+
+  // Status codes, text messages, props from hospitality
+  try {
+    await seedRequiredMasterData(client, { orgId, referenceUrl });
+    logs.push({ message: 'Required master data seeded from hospitality', scope: 'reference' });
+  } catch (seedErr) {
+    console.error('[SetupWizard] Error seeding master data:', seedErr.message);
   }
 
   for (const event of DEFAULT_EVENTS) {
@@ -1200,7 +1218,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   try {
     const { buildPoolConfig } = require('../utils/pgSsl');
     const uomPool = new Pool(
-      buildPoolConfig(process.env.GENERIC_URL, {
+      buildPoolConfig(getReferenceUrl() || process.env.GENERIC_URL, {
         max: 2,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 10000,
@@ -1249,7 +1267,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   }
 
   await seedTextMessages(client, {
-    genericUrl: process.env.GENERIC_URL,
+    genericUrl: getReferenceUrl() || process.env.GENERIC_URL,
     logs,
   });
 

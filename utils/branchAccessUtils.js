@@ -1,5 +1,49 @@
 const { getDbFromContext } = require('./dbContext');
 
+function normalizeBranchId(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+    const trimmed = String(value).trim();
+    return trimmed || null;
+}
+
+/**
+ * Resolve branch_id for new assets: explicit value → user's branch → org default branch.
+ */
+async function resolveAssetBranchId(requestedBranchId, user, dbConnection = null) {
+    const explicit = normalizeBranchId(requestedBranchId);
+    if (explicit) {
+        return explicit;
+    }
+
+    const userBranch = normalizeBranchId(user?.branch_id);
+    if (userBranch) {
+        return userBranch;
+    }
+
+    const orgId = user?.org_id;
+    if (!orgId) {
+        return null;
+    }
+
+    try {
+        const dbPool = dbConnection || getDbFromContext();
+        const result = await dbPool.query(
+            `SELECT branch_id
+             FROM "tblBranches"
+             WHERE org_id = $1 AND int_status = 1
+             ORDER BY branch_id
+             LIMIT 1`,
+            [orgId]
+        );
+        return result.rows[0]?.branch_id || null;
+    } catch (error) {
+        console.error('Error resolving default org branch for asset:', error);
+        return null;
+    }
+}
+
 /**
  * Check if a user has super access (can view all branches)
  * This checks tblOrgSettings for a key 'super_access_users' or 'all_branch_access_users'
@@ -98,6 +142,8 @@ const getUserBranchFilter = async (userId, orgId, userBranchId, tableAlias = '',
 module.exports = {
     hasSuperAccess,
     buildBranchFilter,
-    getUserBranchFilter
+    getUserBranchFilter,
+    normalizeBranchId,
+    resolveAssetBranchId,
 };
 

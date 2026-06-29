@@ -1,4 +1,9 @@
-const db = require("../config/db");
+const { getDb: getDbFromContext } = require("../utils/dbContext");
+
+const getDb = (dbConnection) => {
+  if (dbConnection) return dbConnection;
+  return getDbFromContext();
+};
 
 /**
  * Inspection Schedule Model
@@ -22,7 +27,7 @@ const getAssetTypesRequiringInspection = async (org_id) => {
     ORDER BY text
   `;
   
-  return await db.query(query, [org_id]);
+  return await getDb().query(query, [org_id]);
 };
 
 /**
@@ -50,7 +55,7 @@ const getInspectionFrequency = async (asset_type_id, org_id) => {
     LIMIT 1
   `;
   
-  return await db.query(query, [asset_type_id, org_id]);
+  return await getDb().query(query, [asset_type_id, org_id]);
 };
 
 /**
@@ -69,7 +74,7 @@ const getAssetByIdForInspection = async (asset_id, org_id) => {
       AND a.org_id = $2
       AND UPPER(COALESCE(a.current_status, '')) IN ('ACTIVE', 'IN_USE')
   `;
-  return await db.query(query, [asset_id, org_id]);
+  return await getDb().query(query, [asset_id, org_id]);
 };
 
 /**
@@ -98,7 +103,7 @@ const getAssetsByAssetType = async (asset_type_id, org_id) => {
     ORDER BY a.asset_id
   `;
   
-  return await db.query(query, [asset_type_id, org_id]);
+  return await getDb().query(query, [asset_type_id, org_id]);
 };
 
 /**
@@ -122,7 +127,7 @@ const getGroupsByAssetType = async (asset_type_id, org_id) => {
     ORDER BY a.group_id
   `;
   
-  return await db.query(query, [asset_type_id, org_id]);
+  return await getDb().query(query, [asset_type_id, org_id]);
 };
 
 /**
@@ -146,7 +151,7 @@ const getAssetsByGroupId = async (group_id, org_id) => {
     ORDER BY asset_id
   `;
   
-  return await db.query(query, [group_id, org_id]);
+  return await getDb().query(query, [group_id, org_id]);
 };
 
 /**
@@ -167,7 +172,7 @@ const checkWorkflowExists = async (asset_type_id, org_id) => {
     ORDER BY seqs_no ASC
   `;
   
-  return await db.query(query, [asset_type_id, org_id]);
+  return await getDb().query(query, [asset_type_id, org_id]);
 };
 
 /**
@@ -188,7 +193,7 @@ const getInspectionJobRole = async (wf_steps_id, org_id) => {
     LIMIT 1
   `;
   
-  return await db.query(query, [wf_steps_id, org_id]);
+  return await getDb().query(query, [wf_steps_id, org_id]);
 };
 
 /**
@@ -209,7 +214,7 @@ const checkExistingWorkflowInspection = async (asset_id, org_id) => {
     LIMIT 1
   `;
   
-  return await db.query(query, [asset_id, org_id]);
+  return await getDb().query(query, [asset_id, org_id]);
 };
 
 /**
@@ -230,7 +235,7 @@ const checkExistingDirectInspection = async (asset_id, org_id) => {
     LIMIT 1
   `;
   
-  return await db.query(query, [asset_id, org_id]);
+  return await getDb().query(query, [asset_id, org_id]);
 };
 
 /**
@@ -251,7 +256,7 @@ const getLastCompletedInspectionDate = async (asset_id, org_id) => {
     LIMIT 1
   `;
   
-  const workflowResult = await db.query(workflowQuery, [asset_id, org_id]);
+  const workflowResult = await getDb().query(workflowQuery, [asset_id, org_id]);
   
   if (workflowResult.rows.length > 0) {
     return workflowResult.rows[0].completed_date;
@@ -270,7 +275,7 @@ const getLastCompletedInspectionDate = async (asset_id, org_id) => {
     LIMIT 1
   `;
   
-  const directResult = await db.query(directQuery, [asset_id, org_id]);
+  const directResult = await getDb().query(directQuery, [asset_id, org_id]);
   
   if (directResult.rows.length > 0) {
     return directResult.rows[0].completed_date;
@@ -301,7 +306,7 @@ const createWorkflowInspectionHeader = async (data) => {
     RETURNING *
   `;
   
-  return await db.query(query, [
+  return await getDb().query(query, [
     data.wfaiish_id,
     data.aatif_id,
     data.asset_id,
@@ -336,7 +341,7 @@ const createWorkflowInspectionDetail = async (data) => {
     RETURNING *
   `;
   
-  return await db.query(query, [
+  return await getDb().query(query, [
     data.wfaiisd_id,
     data.wfaiish_id,
     data.job_role_id,
@@ -357,7 +362,7 @@ const createDirectInspectionSchedule = async (data) => {
   let empIntToSave = data.emp_int_id || null;
   try {
     if (data.aatif_id) {
-      const aifRes = await db.query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [data.aatif_id]);
+      const aifRes = await getDb().query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [data.aatif_id]);
       const maintainedBy = aifRes.rows.length ? (aifRes.rows[0].maintained_by || '') : '';
       if (String(maintainedBy).toLowerCase() === 'vendor') {
         empIntToSave = null;
@@ -385,7 +390,7 @@ const createDirectInspectionSchedule = async (data) => {
     RETURNING *
   `;
 
-  return await db.query(query, [
+  return await getDb().query(query, [
     data.ais_id,
     data.aatif_id,
     data.asset_id,
@@ -449,7 +454,7 @@ const getNextWFAIISHId = async () => {
     LIMIT 1
   `;
 
-  const result = await db.query(query);
+  const result = await getDb().query(query);
 
   if (result.rows.length === 0) {
     return 'WFAIISH_01';
@@ -478,7 +483,7 @@ const getNextWFAIISDId = async () => {
     LIMIT 1
   `;
 
-  const result = await db.query(query);
+  const result = await getDb().query(query);
 
   if (result.rows.length === 0) {
     return 'WFAIISD_01';
@@ -569,7 +574,7 @@ const getInspectionList = async (org_id, emp_int_id = null) => {
     params = [org_id];
   }
 
-  return await db.query(query, params);
+  return await getDb().query(query, params);
 };
 
 /**
@@ -594,7 +599,7 @@ const getInspectionDetailsById = async (ais_id, org_id) => {
     LEFT JOIN "tblAAT_Insp_Freq" aif ON sch.aatif_id = aif.aatif_id
     WHERE sch.ais_id = $1 AND sch.org_id = $2
   `;
-  return await db.query(query, [ais_id, org_id]);
+  return await getDb().query(query, [ais_id, org_id]);
 };
 
 /**
@@ -614,7 +619,7 @@ const updateInspectionRecord = async (ais_id, org_id, updateData) => {
     RETURNING *
   `;
   
-  return await db.query(query, values);
+  return await getDb().query(query, values);
 };
 
 /**
@@ -636,7 +641,7 @@ const getInspectionChecklistByAssetType = async (assetTypeId, org_id) => {
     WHERE aatic."at_id" = $1 AND icl.org_id = $2
     ORDER BY icl."insp_check_id"
   `;
-  return await db.query(query, [assetTypeId, org_id]);
+  return await getDb().query(query, [assetTypeId, org_id]);
 };
 
 /**
@@ -646,7 +651,7 @@ const getInspectionChecklistByAssetType = async (assetTypeId, org_id) => {
 const getInspectionRecords = async (aisId, org_id) => {
   // The tblAAT_Insp_Rec.aatisch_id stores the frequency id (aatif_id).
   // Map the provided ais_id to its aatif_id before querying records.
-  const freqRes = await db.query(`SELECT aatif_id FROM "tblAAT_Insp_Sch" WHERE ais_id = $1 AND org_id = $2 LIMIT 1`, [aisId, org_id]);
+  const freqRes = await getDb().query(`SELECT aatif_id FROM "tblAAT_Insp_Sch" WHERE ais_id = $1 AND org_id = $2 LIMIT 1`, [aisId, org_id]);
   if (!freqRes || freqRes.rows.length === 0) {
     return { rows: [] };
   }
@@ -667,7 +672,7 @@ const getInspectionRecords = async (aisId, org_id) => {
     WHERE air."aatisch_id" = $1 AND air.org_id = $2
     ORDER BY air.created_on DESC
   `;
-  return await db.query(query, [aatifId, org_id]);
+  return await getDb().query(query, [aatifId, org_id]);
 };
 
 /**
@@ -687,7 +692,7 @@ const saveInspectionRecord = async (recordData) => {
     SELECT attirec_id FROM "tblAAT_Insp_Rec"
     WHERE aatisch_id = $1 AND insp_check_id = $2
   `;
-  const existingRecord = await db.query(checkQuery, [linkId, insp_check_id]);
+  const existingRecord = await getDb().query(checkQuery, [linkId, insp_check_id]);
 
   if (existingRecord.rows.length > 0) {
     // Update existing record
@@ -697,7 +702,7 @@ const saveInspectionRecord = async (recordData) => {
       WHERE aatisch_id = $3 AND insp_check_id = $4
       RETURNING *
     `;
-    return await db.query(updateQuery, [recorded_value, created_by, linkId, insp_check_id]);
+    return await getDb().query(updateQuery, [recorded_value, created_by, linkId, insp_check_id]);
   } else {
     // Create new record
     const insertQuery = `
@@ -712,7 +717,7 @@ const saveInspectionRecord = async (recordData) => {
       ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
       RETURNING *
     `;
-    return await db.query(insertQuery, [
+    return await getDb().query(insertQuery, [
       attirec_id, linkId, insp_check_id, recorded_value, org_id, created_by
     ]);
   }

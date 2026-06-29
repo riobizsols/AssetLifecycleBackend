@@ -17,7 +17,47 @@ const DEFAULT_JOBS = [
   { job_id: 'JOB007', job_name: 'asset expiry notification trigger', frequency: '0 7 * * *', status: 'DISABLED', file_path: 'cron/assetExpiryNotificationTrigger' },
 ];
 
+const ensureJobMonitorTables = async () => {
+  const dbPool = getDb();
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS "tblJobs" (
+      job_id         VARCHAR(50) PRIMARY KEY,
+      job_name       VARCHAR(255) NOT NULL,
+      frequency      VARCHAR(100),
+      status         VARCHAR(20) NOT NULL DEFAULT 'DISABLED',
+      file_path      TEXT,
+      created_on     TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_by     VARCHAR(100) NOT NULL DEFAULT 'SYSTEM',
+      changed_on     TIMESTAMPTZ,
+      changed_by     VARCHAR(100)
+    );
+  `);
+  await dbPool.query(`
+    CREATE INDEX IF NOT EXISTS idx_tblJobs_status ON "tblJobs" (status);
+  `);
+  await dbPool.query(`
+    CREATE TABLE IF NOT EXISTS "tblJobHistory" (
+      jh_id                 VARCHAR(50) PRIMARY KEY,
+      job_id                VARCHAR(50) NOT NULL,
+      execution_timestamp   TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      executed_by           VARCHAR(100) NOT NULL,
+      duration_ms           BIGINT NOT NULL DEFAULT 0,
+      is_error              BOOLEAN NOT NULL DEFAULT FALSE,
+      output_json           JSONB,
+      CONSTRAINT fk_tblJobHistory_job_id
+        FOREIGN KEY (job_id)
+        REFERENCES "tblJobs" (job_id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+    );
+  `);
+  await dbPool.query(`CREATE INDEX IF NOT EXISTS idx_tblJobHistory_job_id ON "tblJobHistory" (job_id);`);
+  await dbPool.query(`CREATE INDEX IF NOT EXISTS idx_tblJobHistory_execution_timestamp ON "tblJobHistory" (execution_timestamp DESC);`);
+  await dbPool.query(`CREATE INDEX IF NOT EXISTS idx_tblJobHistory_is_error ON "tblJobHistory" (is_error);`);
+};
+
 const ensureDefaultJobs = async () => {
+  await ensureJobMonitorTables();
   const dbPool = getDb();
   for (const job of DEFAULT_JOBS) {
     await dbPool.query(
@@ -93,6 +133,7 @@ const addHistory = async ({ job_id, executed_by, duration_ms, is_error, output_j
 };
 
 const getJobHistory = async (jobId, limit = 100) => {
+  await ensureJobMonitorTables();
   const dbPool = getDb();
   const result = await dbPool.query(
     `SELECT jh_id, job_id, execution_timestamp, executed_by, duration_ms, is_error, output_json

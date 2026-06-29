@@ -4,6 +4,14 @@ const { registerTenant, deactivateTenant, testTenantConnection: testConnection }
 const { initTenantRegistryPool } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
+const {
+  ensureJobMonitorTables,
+  ensureAtInspCertStructure,
+  ensureReferenceViews,
+  getReferenceUrl,
+} = require('./tenantSchemaAlignService');
+const { seedRequiredMasterData, alignTenantColumnsFromReference } = require('./tenantReferenceDataService');
+const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
 const { DEFAULT_ID_SEQUENCES } = require('../constants/setupDefaults');
@@ -187,6 +195,9 @@ async function ensureBranchAndDepartment(client, orgId) {
         VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW())
         ON CONFLICT (branch_id) DO NOTHING
       `, [orgId, branchId]);
+      if (!/^BR\d{3}$/.test(branchId)) {
+        throw new Error(`Generated branch_id "${branchId}" does not match expected format BR###`);
+      }
       console.log(`[TenantSetup] ✅ Created branch: ${branchId}`);
     }
   } catch (err) {
@@ -610,22 +621,24 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     throw new Error('Organization ID is required');
   }
   
-  // GENERIC_URL should point to the golden/reference database that has
-  // all master tables (tblEvents, tblApps, tblJobRoleNav, etc.)
-  // CRITICAL: Only use GENERIC_URL, never fallback to DATABASE_URL
-  const referenceDbUrl = process.env.GENERIC_URL;
+  // Reference database for master data — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
+  const referenceDbUrl = getReferenceUrl();
   if (!referenceDbUrl) {
-    throw new Error('GENERIC_URL must be set to copy reference data. Do not use DATABASE_URL fallback.');
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or DATABASE_URL must be set to copy reference data.');
   }
 
   const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
   
   // CRITICAL: Verify we're not accidentally using the default database as reference
-  if (process.env.DATABASE_URL) {
+  if (process.env.GENERIC_URL && process.env.DATABASE_URL) {
+    const genericDbConfig = parseDatabaseUrl(process.env.GENERIC_URL);
     const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
-    if (referenceDbConfig.database === defaultDbConfig.database && 
-        referenceDbConfig.host === defaultDbConfig.host) {
-      console.warn(`[TenantSetup] ⚠️ WARNING: GENERIC_URL points to same database as DATABASE_URL. This may cause data conflicts.`);
+    if (referenceDbConfig.database === genericDbConfig.database &&
+        referenceDbConfig.host === genericDbConfig.host) {
+      console.warn(`[TenantSetup] ⚠️ WARNING: Reference URL points to GENERIC_URL legacy DB. Use hospitality (DATABASE_URL) instead.`);
+    }
+    if (referenceDbConfig.database !== defaultDbConfig.database) {
+      console.log(`[TenantSetup] Using hospitality reference: ${referenceDbConfig.database}`);
     }
   }
   
@@ -843,6 +856,19 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
     }
 
+    // 13. Status codes and property definitions (required for workflows and asset types)
+    console.log(`[TenantSetup] Copying status codes from reference database...`);
+    const statusCodesResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblStatusCodes', orgId);
+    if (statusCodesResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${statusCodesResult.copied} status codes`);
+    }
+
+    console.log(`[TenantSetup] Copying property definitions from reference database...`);
+    const propsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblProps', orgId);
+    if (propsResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${propsResult.copied} property definitions`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {
@@ -896,8 +922,16 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     );
     if ((textMsgCount.rows[0]?.count || 0) === 0) {
       console.log('[TenantSetup] No text messages found after reference copy; running text message seed...');
-      await seedTextMessages(client, { genericUrl: process.env.GENERIC_URL });
+      await seedTextMessages(client, { genericUrl: getReferenceUrl() || process.env.GENERIC_URL });
     }
+
+    // Idempotent safety net: status codes, props, text messages, missing apps
+    console.log('[TenantSetup] Verifying required master data from hospitality...');
+    await seedRequiredMasterData(client, { orgId });
+
+    // Sync ID sequences to match existing rows (prevents duplicate IDs after setup)
+    console.log('[TenantSetup] Syncing ID sequences from tenant data...');
+    await syncIdSequencesFromData(client);
     
     console.log(`[TenantSetup] ✅ Default data seeding process completed`);
     
@@ -1223,6 +1257,38 @@ async function createTenant(tenantData) {
       } catch (verifyError) {
         console.error(`[TenantSetup] Schema verification failed:`, verifyError.message);
         throw new Error(`Schema verification failed: ${verifyError.message}`);
+      }
+
+      // Post-schema: views, job monitor, and hospitality-specific structures not in BASE TABLE dump
+      try {
+        console.log('[TenantSetup] Applying tenant schema extras (views, job monitor, AT insp certs)...');
+        const referenceDbUrl = getReferenceUrl();
+        const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
+        const refClient = new Client(pgClientOpts({
+          host: referenceDbConfig.host,
+          port: referenceDbConfig.port,
+          user: referenceDbConfig.user,
+          password: referenceDbConfig.password,
+          database: referenceDbConfig.database,
+        }));
+        await ensureJobMonitorTables(tenantClient);
+        await ensureAtInspCertStructure(tenantClient);
+        try {
+          await refClient.connect();
+          await ensureReferenceViews(tenantClient, refClient);
+        } finally {
+          await refClient.end().catch(() => {});
+        }
+        const columnLog = await alignTenantColumnsFromReference(tenantClient, {
+          referenceUrl: referenceDbUrl,
+        });
+        console.log(
+          `[TenantSetup] Column alignment: ${columnLog.summary.applied} applied, ${columnLog.summary.failed} failed`
+        );
+        console.log('[TenantSetup] ✅ Tenant schema extras applied');
+      } catch (extrasError) {
+        console.error('[TenantSetup] ❌ Tenant schema extras failed:', extrasError.message);
+        throw new Error(`Tenant schema extras failed: ${extrasError.message}`);
       }
 
       // Ensure search_path is set to public before any operations

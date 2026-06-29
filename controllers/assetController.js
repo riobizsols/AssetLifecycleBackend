@@ -2,6 +2,7 @@ const model = require("../models/assetModel");
 const assetsDashboardCache = require("../utils/assetsDashboardCache");
 const operationalCache = require("../utils/operationalCache");
 const assignmentCache = require("../utils/assignmentCache");
+const { resolveAssetBranchId } = require("../utils/branchAccessUtils");
 const { findConflictingAssetName } = require("../utils/assetTypeNameValidation");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 
@@ -250,6 +251,8 @@ const addAsset = async (req, res) => {
 
         const trimmedDescription = String(description || "").trim();
 
+        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
+
         // Prepare asset data (now includes prod_serv_id)
         const assetData = {
             asset_type_id,
@@ -257,7 +260,7 @@ const addAsset = async (req, res) => {
             text,
             serial_number,
             description: trimmedDescription || null,
-            branch_id: branch_id || null,
+            branch_id: resolvedBranchId,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
             prod_serv_id: prod_serv_id || null, // Use value from frontend
@@ -1779,15 +1782,13 @@ const createAsset = async (req, res) => {
         console.log("Received asset data:", req.body);
         console.log("User info:", req.user);
         
-        const userBranchId = req.user?.branch_id;
-        
         const {
             asset_type_id,
             asset_id,
             text,
             serial_number,
             description,
-            branch_id = userBranchId, // Use user's branch if not provided
+            branch_id,
             purchase_vendor_id,
             service_vendor_id,
             prod_serv_id, // Accept prod_serv_id from frontend
@@ -1936,6 +1937,7 @@ const createAsset = async (req, res) => {
         }
 
         const trimmedDescription = String(description || "").trim();
+        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
         
         // Get asset type's depreciation method to calculate correct rate
         let calculatedDepreciationRate = 0;
@@ -2008,8 +2010,7 @@ if (useful_life_years && useful_life_years > 0) {
         console.log('  Useful Life Years:', useful_life_years);
         console.log('  Calculated Depreciation Rate:', calculatedDepreciationRate);
         console.log('  Branch ID from request:', branch_id);
-        console.log('  User Branch ID:', userBranchId);
-        console.log('  Final Branch ID:', branch_id || userBranchId || null);
+        console.log('  Resolved Branch ID:', resolvedBranchId);
         
         // Prepare asset data (now includes prod_serv_id and depreciation fields)
         const assetData = {
@@ -2018,7 +2019,7 @@ if (useful_life_years && useful_life_years > 0) {
             text,
             serial_number,
             description: trimmedDescription || null,
-            branch_id: branch_id || userBranchId || null,
+            branch_id: resolvedBranchId,
             purchase_vendor_id: purchase_vendor_id || null,
             service_vendor_id: service_vendor_id || null,
             prod_serv_id: prod_serv_id || null, // Use value from frontend

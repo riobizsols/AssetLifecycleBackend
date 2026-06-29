@@ -133,6 +133,7 @@ const updateEmployeeStatus = async (req, res) => {
             message: 'Employee status updated successfully',
             data: updated
         });
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     } catch (err) {
         console.error('Error updating employee status:', err);
         res.status(500).json({
@@ -232,6 +233,8 @@ const assignRoleToEmployee = async (req, res) => {
             skippedRoles: job_role_ids.filter(roleId => existingRoleIds.includes(roleId)),
             action: existingUser ? 'roles_added' : 'user_created_and_roles_added'
         });
+
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
 
         // Send email notification asynchronously (non-blocking)
         setImmediate(async () => {
@@ -426,6 +429,20 @@ const createEmployee = async (req, res) => {
                 error: "Department is required"
             });
         }
+
+        if (!employeeData.employee_type || !String(employeeData.employee_type).trim()) {
+            return res.status(400).json({
+                success: false,
+                error: "Employment type is required"
+            });
+        }
+
+        if (!employeeData.joining_date || !String(employeeData.joining_date).trim()) {
+            return res.status(400).json({
+                success: false,
+                error: "Joining date is required"
+            });
+        }
         
         // Create employee
         const newEmployee = await model.createEmployee(
@@ -434,7 +451,9 @@ const createEmployee = async (req, res) => {
             org_id,
             userBranchId
         );
-        
+
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(201).json({
             success: true,
             message: "Employee created successfully",
