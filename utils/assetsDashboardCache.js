@@ -26,6 +26,20 @@ function memoryInvalidatePrefix(prefix) {
   }
 }
 
+/** Keys are scoped as api:{tenantDb}:{orgId}:{branch}:... — match org segment, not api:{orgId} */
+function memoryInvalidateOrg(orgId) {
+  if (!orgId) return 0;
+  const marker = `:${orgId}:`;
+  let deleted = 0;
+  for (const key of memoryL1.keys()) {
+    if (key.startsWith('api:') && key.includes(marker)) {
+      memoryL1.delete(key);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
 function branchScope(req) {
   const hasSuperAccess = req.user?.hasSuperAccess || false;
   const branchId = req.user?.branch_id || null;
@@ -69,9 +83,10 @@ async function getOrSet(key, ttlMs, fetcher) {
 
 async function invalidateOrgApiCache(orgId) {
   if (!orgId) return;
-  const prefix = cacheService.buildKey('api', orgId);
-  memoryInvalidatePrefix(prefix);
-  await cacheService.invalidateByPrefix(prefix);
+  memoryInvalidateOrg(orgId);
+  // Legacy prefix shape (api:{orgId}) for older keys
+  memoryInvalidatePrefix(cacheService.buildKey('api', orgId));
+  await cacheService.invalidateOrgApiKeys(orgId);
 }
 
 module.exports = {

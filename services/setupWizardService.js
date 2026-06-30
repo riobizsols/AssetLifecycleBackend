@@ -20,6 +20,7 @@ const {
   DEFAULT_JOB_ROLE_NAV,
 } = require("../constants/setupDefaults");
 const { seedTextMessages } = require("../utils/seedTextMessages");
+const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
 
 const DUMP_FILE_PATH = path.join(
   __dirname,
@@ -2105,26 +2106,34 @@ const runSetup = async (payload = {}) => {
 
       // Step 2: Apply foreign key constraints AFTER all data has been seeded
       if (client._foreignKeysSql && client._foreignKeysSql.length > 0) {
-        console.log('[SetupWizard] 🔗 Applying foreign key constraints...');
+        console.log('[SetupWizard] 🔗 Finalizing foreign key constraints (org_id remap + apply)...');
         const info = client._foreignKeysInfo || {};
-        console.log(`[SetupWizard] 📎 Adding ${info.validCount || 0} foreign key constraints...`);
-        
+        console.log(`[SetupWizard] 📎 Target: ${info.validCount || 0} foreign key constraints`);
+
         try {
-          await client.query(client._foreignKeysSql);
-          logs.push({ 
-            message: `Foreign key constraints applied (${info.validCount || 0} valid, ${info.skippedCount || 0} skipped)`, 
-            scope: "schema" 
+          const fkResult = await finalizeTenantForeignKeys(
+            client,
+            orgId,
+            client._foreignKeysSql,
+            {
+              expectedCount: info.validCount || 0,
+              label: 'SetupWizard',
+              adminUserId: adminResult.userId,
+            },
+          );
+          logs.push({
+            message: `Foreign key constraints applied (${fkResult.applied} statements, ${fkResult.totalFkInDb} in DB)`,
+            scope: 'schema',
           });
           console.log('[SetupWizard] ✅ Foreign key constraints applied successfully');
         } catch (fkError) {
           console.error('[SetupWizard] ❌ Error applying foreign key constraints:', fkError.message);
-          console.error('[SetupWizard] Detail:', fkError.detail);
-          // Log but don't fail the entire setup - foreign keys are important but not critical
-          logs.push({ 
-            message: `Warning: Some foreign key constraints failed to apply: ${fkError.message}`, 
-            scope: "schema",
-            warning: true 
+          logs.push({
+            message: `Foreign key constraints failed: ${fkError.message}`,
+            scope: 'schema',
+            warning: true,
           });
+          throw fkError;
         }
       } else {
         console.log('[SetupWizard] ℹ️  No foreign key constraints to apply (using static schema or none defined)');

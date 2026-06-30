@@ -36,6 +36,19 @@ function memoryInvalidatePrefix(prefix) {
   return deleted;
 }
 
+function memoryInvalidateOrg(orgId) {
+  if (!orgId) return 0;
+  const marker = `:${orgId}:`;
+  let deleted = 0;
+  for (const key of memoryL1.keys()) {
+    if (key.startsWith('api:') && key.includes(marker)) {
+      memoryL1.delete(key);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
 function parseTtlMs(envValue, fallbackMs) {
   const parsed = Number(envValue);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMs;
@@ -100,6 +113,38 @@ async function del(key) {
   } catch {
     return false;
   }
+}
+
+async function invalidateOrgApiKeys(orgId) {
+  if (!orgId) return 0;
+  let deleted = memoryInvalidateOrg(orgId);
+  deleted += memoryInvalidatePrefix(buildKey('api', orgId));
+
+  if (!isCacheEnabled()) return deleted;
+  const redis = getRedis();
+  if (!redis || redis.status !== 'ready') return deleted;
+
+  const marker = `:${orgId}:`;
+  let cursor = '0';
+
+  try {
+    do {
+      const [nextCursor, keys] = await redis.scan(cursor, 'MATCH', 'api:*', 'COUNT', 200);
+      cursor = nextCursor;
+      const toDelete = keys.filter((key) => key.includes(marker));
+      if (toDelete.length > 0) {
+        await redis.del(...toDelete);
+        deleted += toDelete.length;
+      }
+    } while (cursor !== '0');
+  } catch (err) {
+    if (!warnedUnavailable) {
+      console.warn('[CacheService] invalidateOrgApiKeys failed:', err.message);
+      warnedUnavailable = true;
+    }
+  }
+
+  return deleted;
 }
 
 async function invalidateByPrefix(prefix) {
@@ -184,6 +229,7 @@ module.exports = {
   del,
   getOrSet,
   invalidateByPrefix,
+  invalidateOrgApiKeys,
   buildKey,
   getAuthCacheTtlMs,
   getTenantExistsCacheTtlMs,

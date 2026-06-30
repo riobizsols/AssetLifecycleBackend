@@ -11,6 +11,7 @@ const {
   getReferenceUrl,
 } = require('./tenantSchemaAlignService');
 const { seedRequiredMasterData, alignTenantColumnsFromReference } = require('./tenantReferenceDataService');
+const { finalizeTenantForeignKeys } = require('./tenantForeignKeyService');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
@@ -252,7 +253,7 @@ async function seedDefaultIdSequences(client) {
  * @param {Client} client - Tenant database client (MUST be connected to tenant database)
  * @param {string} orgId - Organization ID
  */
-async function ensureBranchAndDepartment(client, orgId) {
+async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001') {
   // CRITICAL: Validate client is connected to tenant database
   if (!client) {
     throw new Error('CRITICAL: Tenant database client is required. Cannot ensure branch/department without tenant database connection.');
@@ -286,9 +287,9 @@ async function ensureBranchAndDepartment(client, orgId) {
           org_id, branch_id, text, city, branch_code, int_status,
           created_by, created_on, changed_by, changed_on
         )
-        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW(), 'SYSTEM', NOW())
+        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, $3, NOW(), $3, NOW())
         ON CONFLICT (branch_id) DO NOTHING
-      `, [orgId, branchId]);
+      `, [orgId, branchId, adminUserId]);
       if (!/^BR\d{3}$/.test(branchId)) {
         throw new Error(`Generated branch_id "${branchId}" does not match expected format BR###`);
       }
@@ -317,9 +318,9 @@ async function ensureBranchAndDepartment(client, orgId) {
           org_id, dept_id, text, branch_id, int_status,
           parent_id, created_on, changed_on, changed_by, created_by
         )
-        VALUES ($1, $2, 'Administration', $3, 1, NULL, CURRENT_DATE, CURRENT_DATE, 'SYSTEM', 'SYSTEM')
+        VALUES ($1, $2, 'Administration', $3, 1, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4)
         ON CONFLICT (dept_id) DO NOTHING
-      `, [orgId, deptId, branchId]);
+      `, [orgId, deptId, branchId, adminUserId]);
       console.log(`[TenantSetup] ✅ Created department: ${deptId}`);
     }
     
@@ -438,7 +439,7 @@ async function createAdminUser(client, orgId, adminData) {
         phone_number, employee_type, joining_date, language_code,
         int_status, created_by, created_on, changed_by, changed_on, org_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, 1, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $10)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, 1, $2, CURRENT_DATE, $2, CURRENT_DATE, $10)
     `, [empIntId, employeeId, fullName, fullName, email, deptId, phone, employeeType, languageCode, orgId]);
     console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
   } catch (err) {
@@ -455,7 +456,7 @@ async function createAdminUser(client, orgId, adminData) {
         org_id, user_id, emp_int_id, full_name, email, phone, job_role_id, password,
         created_by, created_on, changed_by, changed_on, int_status, time_zone
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
+      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, $2, CURRENT_DATE, $2, CURRENT_DATE, 1, 'IST')
     `, [orgId, userId, empIntId.toString(), fullName, email, phone, passwordHash]);
     console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to emp_int_id: ${empIntId})`);
   } catch (err) {
@@ -764,11 +765,16 @@ async function copyTableDataDynamically(referenceClient, tenantClient, tableName
       return { copied: 0, skipped: false };
     }
 
+    const remapOrgId = options.remapOrgId !== false && commonColumns.includes('org_id');
+
     // Insert each row
     let copied = 0;
     for (const row of rows.rows) {
       const values = commonColumns.map(col => {
-        // Replace org_id with tenant's org_id if specified
+        // Always use tenant org_id when the column exists (reference DB uses ORG001, etc.)
+        if (col === 'org_id' && remapOrgId) {
+          return orgId;
+        }
         if (options.orgIdColumn && col === options.orgIdColumn) {
           return orgId;
         }
@@ -1323,6 +1329,7 @@ async function createTenant(tenantData) {
           if (foreignKeysSql && foreignKeysSql.length > 0) {
             console.log(`[TenantSetup] 📋 Foreign keys will be applied after data seeding (${foreignKeysSql.length} chars)`);
             tenantClient._foreignKeysSql = foreignKeysSql;
+            tenantClient._foreignKeysValidCount = schemaResult.validCount || 0;
           }
         } catch (execError) {
           console.error(`[TenantSetup] Error executing schema SQL as single query:`, execError.message);
@@ -1581,7 +1588,8 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Seeding default ID sequences...`);
       await seedDefaultIdSequences(tenantClient);
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
-      await ensureBranchAndDepartment(tenantClient, orgIdUpper);
+      const plannedAdminUserId = (adminUser.username || 'USR001').toUpperCase();
+      await ensureBranchAndDepartment(tenantClient, orgIdUpper, plannedAdminUserId);
       
       // Step 3: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
@@ -1610,15 +1618,18 @@ async function createTenant(tenantData) {
       
       // Apply foreign key constraints after all data has been seeded
       if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
-        console.log('[TenantSetup] 🔗 Applying foreign key constraints to tenant database...');
-        try {
-          await tenantClient.query(tenantClient._foreignKeysSql);
-          console.log('[TenantSetup] ✅ Foreign key constraints applied successfully to tenant database');
-        } catch (fkError) {
-          console.error('[TenantSetup] ⚠️ Warning: Some foreign key constraints failed to apply:', fkError.message);
-          // Note: Not throwing error here, allowing setup to complete
-          // User can verify and fix constraints later if needed
-        }
+        console.log('[TenantSetup] 🔗 Finalizing foreign key constraints (org_id remap + apply)...');
+        await finalizeTenantForeignKeys(
+          tenantClient,
+          orgIdUpper,
+          tenantClient._foreignKeysSql,
+          {
+            expectedCount: tenantClient._foreignKeysValidCount || 0,
+            label: 'TenantSetup',
+            adminUserId: adminCredentials.userId,
+          },
+        );
+        console.log('[TenantSetup] ✅ Foreign key constraints applied successfully to tenant database');
       } else {
         console.log('[TenantSetup] ℹ️ No foreign key constraints to apply (already in schema or none generated)');
       }
