@@ -19,6 +19,11 @@ const {
   DEFAULT_JOB_ROLES,
   DEFAULT_JOB_ROLE_NAV,
 } = require("../constants/setupDefaults");
+const {
+  filterScreenApps,
+  applyNavigationGroupModel,
+  resolveNavAppId,
+} = require("../utils/navigationGroupUtils");
 const { seedTextMessages } = require("../utils/seedTextMessages");
 
 const DUMP_FILE_PATH = path.join(
@@ -754,7 +759,7 @@ const CORE_TABLE_DDL = [
       int_status integer NOT NULL DEFAULT 1,
       job_role_id character varying(20) NOT NULL,
       parent_id character varying(20),
-      app_id character varying(50) NOT NULL,
+      app_id character varying(50),
       label character varying(50) NOT NULL,
       sub_menu character varying(20),
       sequence integer NOT NULL DEFAULT 10,
@@ -1118,10 +1123,11 @@ const seedReferenceTables = async (client, orgId, logs) => {
       FROM "tblApps"
       ORDER BY app_id
     `);
-
     console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in reference database`);
 
-    for (const app of appsResult.rows) {
+    const screenApps = filterScreenApps(appsResult.rows);
+
+    for (const app of screenApps) {
       await client.query(
         `
           INSERT INTO "tblApps" (app_id, text, int_status, org_id)
@@ -1134,17 +1140,16 @@ const seedReferenceTables = async (client, orgId, logs) => {
         [app.app_id, app.text, app.int_status !== false, orgId]
       );
     }
-
-    console.log(`[SetupWizard] ✅ Synced ${appsResult.rows.length} app entries to new database`);
+    console.log(`[SetupWizard] ✅ Synced ${screenApps.length} screen app entries to new database (excluded menu group apps)`);
     logs.push({
-      message: `${appsResult.rows.length} app entries synced from reference database`,
+      message: `${screenApps.length} screen apps synced from reference database (menu groups are nav-only)`,
       scope: 'reference',
     });
   } catch (error) {
     console.error('[SetupWizard] ❌ Error syncing tblApps:', error.message);
     // Fallback to DEFAULT_APPS if sync fails
     console.log('[SetupWizard] ⚠️ Falling back to DEFAULT_APPS...');
-    for (const app of DEFAULT_APPS) {
+    for (const app of filterScreenApps(DEFAULT_APPS, "id")) {
       await client.query(
         `
           INSERT INTO "tblApps" (app_id, text, int_status, org_id)
@@ -1374,7 +1379,7 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
         orgId,
         item.jobRoleId,
         item.parentId,
-        item.appId,
+        resolveNavAppId(item),
         item.label,
         item.sequence,
         item.accessLevel,
@@ -1382,6 +1387,8 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
       ]
     );
   }
+
+  await applyNavigationGroupModel(client, "SetupWizard");
 
   logs.push({ message: "System administrator role & navigation ready", scope: "roles" });
 };
@@ -1773,7 +1780,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
   const navEntries = [
     ['JRN001', orgId, 1, 'JR001', null, 'DASHBOARD', 'Dashboard', null, 1, 'A', false, 'D'],
     ['JRN002', orgId, 1, 'JR001', null, 'ASSETS', 'Assets', null, 2, 'A', false, 'D'],
-    ['JRN003', orgId, 1, 'JR001', null, 'ASSETASSIGNMENT', 'Asset Assignment', null, 3, 'A', true, 'D'],
+    ['JRN003', orgId, 1, 'JR001', null, null, 'Asset Assignment', null, 3, 'A', true, 'D'],
     ['JRN004', orgId, 1, 'JR001', 'JRN003', 'DEPTASSIGNMENT', 'Department Assignment', null, 4, 'A', false, 'D'],
     ['JRN005', orgId, 1, 'JR001', 'JRN003', 'EMPASSIGNMENT', 'Employee Assignment', null, 5, 'A', false, 'D'],
     ['JRN006', orgId, 1, 'JR001', null, 'WORKORDERMANAGEMENT', 'Workorder Management', null, 6, 'A', false, 'D'],
@@ -1782,7 +1789,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
     ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
     ['JRN042', orgId, 1, 'JR001', null, 'EMPLOYEE REPORT BREAKDOWN', 'Employee Report Breakdown', null, 11, 'A', false, 'D'],
-    ['JRN012', orgId, 1, 'JR001', null, 'REPORTS', 'Reports', null, 12, 'A', true, 'D'],
+    ['JRN012', orgId, 1, 'JR001', null, null, 'Reports', null, 12, 'A', true, 'D'],
     ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
     ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],
     ['JRN015', orgId, 1, 'JR001', 'JRN012', 'MAINTENANCEHISTORY', 'Maintenance History', null, 15, 'A', false, 'D'],
@@ -1790,11 +1797,11 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN017', orgId, 1, 'JR001', 'JRN012', 'ASSETWORKFLOWHISTORY', 'Asset Workflow History', null, 17, 'A', false, 'D'],
     ['JRN018', orgId, 1, 'JR001', 'JRN012', 'BREAKDOWNHISTORY', 'Breakdown History', null, 18, 'A', false, 'D'],
     ['JRN019', orgId, 1, 'JR001', 'JRN012', 'USAGEBASEDASSETREPORT', 'Usage Based Asset Report', null, 19, 'A', false, 'D'],
-    ['JRN020', orgId, 1, 'JR001', null, 'ADMINSETTINGS', 'Settings', null, 20, 'A', true, 'D'],
+    ['JRN020', orgId, 1, 'JR001', null, null, 'Settings', null, 20, 'A', true, 'D'],
     ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
     ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
     ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
-    ['JRN022', orgId, 1, 'JR001', null, 'MASTERDATA', 'Master Data', null, 22, 'A', true, 'D'],
+    ['JRN022', orgId, 1, 'JR001', null, null, 'Master Data', null, 22, 'A', true, 'D'],
     ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
     ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
     ['JRN025', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTS', 'Departments', null, 25, 'A', false, 'D'],
@@ -1838,6 +1845,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
       entry
     );
   }
+
+  await applyNavigationGroupModel(client, "SetupWizard");
 
   logs.push({ message: `Rio Admin user ${rioAdminUsername} provisioned in tblRioAdmin with user_id: ${rioAdminUserId}`, scope: "admin" });
   logs.push({ message: `Login credentials: username=${rioAdminUsername}, password=${initialPassword}`, scope: "admin" });
@@ -2246,6 +2255,17 @@ const getCatalog = () => ({
   auditEvents: DEFAULT_AUDIT_EVENTS,
 });
 
+/**
+ * Seed tblApps, tblJobRoles, and tblJobRoleNav for a tenant database.
+ * Safe to run on existing tenants (uses ON CONFLICT).
+ */
+const bootstrapTenantMenus = async (client, orgId) => {
+  const logs = [];
+  await seedReferenceTables(client, orgId, logs);
+  await seedJobRolesAndNavigation(client, orgId, logs);
+  return logs;
+};
+
 module.exports = {
   testConnection,
   runSetup,
@@ -2254,6 +2274,7 @@ module.exports = {
   getSchemaSqlSync, // Sync version (static file only, for backward compatibility)
   generateDynamicSchemaSql, // Export for direct use if needed
   clearSchemaCache, // Export to clear cache when DB structure changes
+  bootstrapTenantMenus,
   CORE_TABLE_DDL,
 };
 

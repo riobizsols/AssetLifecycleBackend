@@ -46,9 +46,21 @@ const addJobRoleNavigation = async (req, res) => {
             parent_id
         } = req.body;
 
-        if (!job_role_id || !app_id) {
+        if (!job_role_id) {
             return res.status(400).json({ 
-                message: "Missing required fields (job_role_id, app_id)" 
+                message: "Missing required field job_role_id" 
+            });
+        }
+
+        if (!is_group && !app_id) {
+            return res.status(400).json({ 
+                message: "Missing required field app_id for navigation items" 
+            });
+        }
+
+        if (is_group && !label?.trim()) {
+            return res.status(400).json({ 
+                message: "Group entries require a label" 
             });
         }
 
@@ -60,7 +72,7 @@ const addJobRoleNavigation = async (req, res) => {
             job_role_nav_id,
             org_id,
             job_role_id,
-            app_id,
+            app_id: is_group ? (app_id || null) : app_id,
             label: label || "",
             access_level: access_level || "D",
             is_group: is_group || false,
@@ -153,9 +165,21 @@ const bulkAddJobRoleNavigation = async (req, res) => {
         // Validate all entries
         for (let i = 0; i < entries.length; i++) {
             const entry = entries[i];
-            if (!entry.job_role_id || !entry.app_id) {
-                return res.status(400).json({ 
-                    message: `Entry ${i + 1}: Missing required fields (job_role_id, app_id)` 
+            const isGroup = entry.is_group === true;
+            if (!entry.job_role_id) {
+                return res.status(400).json({
+                    message: `Entry ${i + 1}: Missing required field job_role_id`,
+                });
+            }
+            if (isGroup) {
+                if (!entry.label?.trim()) {
+                    return res.status(400).json({
+                        message: `Entry ${i + 1}: Group entries require a label`,
+                    });
+                }
+            } else if (!entry.app_id) {
+                return res.status(400).json({
+                    message: `Entry ${i + 1}: Missing required field app_id`,
                 });
             }
         }
@@ -169,7 +193,7 @@ const bulkAddJobRoleNavigation = async (req, res) => {
             entriesWithIds.push({
                 job_role_nav_id,
                 job_role_id: entry.job_role_id,
-                app_id: entry.app_id,
+                app_id: entry.is_group ? (entry.app_id || null) : entry.app_id,
                 parent_id: entry.parent_id || null,
                 label: entry.label || "",
                 sequence: entry.sequence || 1,
