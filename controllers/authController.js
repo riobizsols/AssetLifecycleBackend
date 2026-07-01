@@ -13,6 +13,7 @@ const {
 const { sendResetEmail } = require('../utils/mailer');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { getInitialPassword } = require('../utils/orgSettingsUtils');
+const { ensureJobRoleNavigation } = require('../services/tenantSetupService');
 const { 
     logLoginApiCalled,
     logCheckingUserInDatabase,
@@ -219,6 +220,14 @@ const login = async (req, res) => {
 
         // Step 5b: Password matched
         safeAuthLog(() => logPasswordMatched({ email, userId: loginUser.user_id }));
+
+        if (isTenant && orgId) {
+            try {
+                await ensureJobRoleNavigation(dbPool, orgId);
+            } catch (navErr) {
+                console.warn(`[AuthController] Navigation sync on login failed: ${navErr.message}`);
+            }
+        }
 
         // Check if this is a RioAdmin user (from tblRioAdmin)
         const isRioAdmin = loginUser.source_table === 'tblRioAdmin';

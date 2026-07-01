@@ -1,25 +1,17 @@
 const EmployeeTechCertModel = require("../models/employeeTechCertModel");
 const operationalCache = require('../utils/operationalCache');
-const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/minioClient');
+const {
+  uploadBuffer,
+  getPresignedDownloadUrl,
+  resolveLocalPath,
+} = require('../utils/documentStorage');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
-const withTimeout = (promise, ms, message) => {
-  let timeoutId;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeoutId = setTimeout(() => {
-      const error = new Error(message || 'Operation timed out');
-      error.code = 'ETIMEDOUT';
-      reject(error);
-    }, ms);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
-};
 
 const getEmployeeCertificates = async (req, res) => {
   try {
@@ -80,21 +72,15 @@ const createEmployeeCertificate = [
       let filePath = null;
 
       if (req.file) {
-        await withTimeout(ensureBucketExists(MINIO_BUCKET), 8000, 'MinIO bucket check timed out');
-
         const ext = path.extname(req.file.originalname);
         const hash = crypto.randomBytes(8).toString('hex');
         const objectName = `${orgId}/employee-tech-certificates/${empIntId}/${Date.now()}_${hash}${ext}`;
 
-        await withTimeout(
-          minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
-            'Content-Type': req.file.mimetype
-          }),
-          15000,
-          'MinIO upload timed out'
-        );
-
-        filePath = `${MINIO_BUCKET}/${objectName}`;
+        filePath = await uploadBuffer({
+          buffer: req.file.buffer,
+          objectName,
+          contentType: req.file.mimetype,
+        });
       }
 
       const created = await EmployeeTechCertModel.createEmployeeCertificate({
@@ -315,17 +301,18 @@ const getEmployeeCertificateDownloadUrl = async (req, res) => {
       });
     }
 
-    const [bucket, ...keyParts] = cert.file_path.split('/');
-    const objectName = keyParts.join('/');
-
-    if (!bucket || !objectName) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid file path"
-      });
+    const localPath = resolveLocalPath(cert.file_path);
+    if (localPath) {
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({
+          success: false,
+          message: "Certificate file not found on server"
+        });
+      }
+      return res.download(localPath, path.basename(localPath));
     }
 
-    const url = await minioClient.presignedGetObject(bucket, objectName, 60 * 10);
+    const url = await getPresignedDownloadUrl(cert.file_path, 60 * 10);
 
     return res.status(200).json({
       success: true,

@@ -16,9 +16,14 @@ const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
-const { DEFAULT_ID_SEQUENCES } = require('../constants/setupDefaults');
+const { DEFAULT_ID_SEQUENCES, DEFAULT_JOB_ROLES, DEFAULT_JOB_ROLE_NAV } = require('../constants/setupDefaults');
 const { sendWelcomeEmail } = require('../utils/mailer');
-const { getPgSslOption, getPgClientConnectTimeoutMs } = require('../utils/pgSslOption');
+const {
+  getPgSslOption,
+  getPgClientConnectTimeoutMs,
+  parseDatabaseUrl,
+  pgClientOptsFromDatabaseUrl,
+} = require('../utils/pgSslOption');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
 require('dotenv').config();
 
@@ -27,26 +32,6 @@ function pgClientOpts(base) {
     ...base,
     ssl: getPgSslOption(),
     connectionTimeoutMillis: getPgClientConnectTimeoutMs(),
-  };
-}
-
-/**
- * Parse database URL to extract connection details
- */
-function parseDatabaseUrl(databaseUrl) {
-  if (!databaseUrl) {
-    throw new Error('Database URL is required');
-  }
-  const match = databaseUrl.match(/^postgresql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/);
-  if (!match) {
-    throw new Error('Invalid database URL format');
-  }
-  return {
-    user: match[1],
-    password: match[2],
-    host: match[3],
-    port: parseInt(match[4], 10),
-    database: match[5],
   };
 }
 
@@ -483,10 +468,7 @@ async function createAdminUser(client, orgId, adminData) {
   
   if (existingRole.rows.length > 0) {
     console.log(`[TenantSetup] ✅ Job role already assigned: ${userId} -> JR001 (user_job_role_id: ${existingRole.rows[0].user_job_role_id})`);
-    return; // Already assigned, nothing to do
-  }
-  
-  // Generate user_job_role_id using tblIDSequences in the tenant database
+  } else {
   // CRITICAL: All operations use tenant client, never default database
   let userJobRoleId = null;
   
@@ -573,6 +555,7 @@ async function createAdminUser(client, orgId, adminData) {
   }
   
   console.log(`[TenantSetup] ✅ Verified role assignment exists in tenant database (user_job_role_id: ${verifyResult.rows[0].user_job_role_id})`);
+  }
 
   console.log(`[TenantSetup] ✅ Admin user created successfully: ${userId} (${email}) with employee record ${employeeId}`);
 
@@ -833,15 +816,13 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     throw new Error('Organization ID is required');
   }
   
-  // Reference database for master data — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
-  const referenceDbUrl = getReferenceUrl();
+  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
   if (!referenceDbUrl) {
-    throw new Error('TENANT_SCHEMA_REFERENCE_URL or DATABASE_URL must be set to copy reference data.');
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL, DATABASE_URL, or GENERIC_URL must be set to copy reference data.');
   }
 
   const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
-  
-  // CRITICAL: Verify we're not accidentally using the default database as reference
+
   if (process.env.GENERIC_URL && process.env.DATABASE_URL) {
     const genericDbConfig = parseDatabaseUrl(process.env.GENERIC_URL);
     const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
@@ -965,12 +946,17 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       );
       if (navResult.skipped) {
         console.log(`[TenantSetup] ⚠️ tblJobRoleNav does not exist in reference database, skipping...`);
+        await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
       } else {
         console.log(`[TenantSetup] ✅ Copied ${navResult.copied} job role navigation items for JR001 (JRN remapped)`);
+        if ((navResult.copied || 0) === 0) {
+          await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
+        }
       }
     } catch (err) {
       console.error(`[TenantSetup] ❌ Error copying job role navigation:`, err.message);
       console.log(`[TenantSetup] ⚠️ Continuing without job role navigation...`);
+      await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
     }
 
     // 7. Copy all maintenance status from tblMaintStatus (reference database)
@@ -1044,19 +1030,6 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
     }
 
-    // 13. Status codes and property definitions (required for workflows and asset types)
-    console.log(`[TenantSetup] Copying status codes from reference database...`);
-    const statusCodesResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblStatusCodes', orgId);
-    if (statusCodesResult.copied > 0) {
-      console.log(`[TenantSetup] ✅ Copied ${statusCodesResult.copied} status codes`);
-    }
-
-    console.log(`[TenantSetup] Copying property definitions from reference database...`);
-    const propsResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblProps', orgId);
-    if (propsResult.copied > 0) {
-      console.log(`[TenantSetup] ✅ Copied ${propsResult.copied} property definitions`);
-    }
-
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {
@@ -1068,6 +1041,199 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       await referenceClient.end();
     }
   }
+}
+
+/**
+ * Copy JR001 navigation from reference DB into tenant (upsert so partial tenants get full menu).
+ */
+async function copyJobRoleNavFromReference(referenceClient, tenantClient, orgId, { upsert = false } = {}) {
+  if (!(await tableExists(referenceClient, 'tblJobRoleNav'))) {
+    return { copied: 0, skipped: true, reason: 'no reference tblJobRoleNav' };
+  }
+
+  const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
+  const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
+  const commonColumns = tenantColumns.filter((col) => refColumns.includes(col));
+
+  if (commonColumns.length === 0) {
+    return { copied: 0, skipped: true, reason: 'no common columns' };
+  }
+
+  const selectColumns = commonColumns.map((col) => `"${col}"`).join(', ');
+  const navRows = await referenceClient.query(`
+    SELECT ${selectColumns} FROM "tblJobRoleNav"
+    WHERE "job_role_id" = 'JR001'
+  `);
+
+  const conflictClause = upsert && commonColumns.includes('job_role_nav_id')
+    ? `ON CONFLICT (job_role_nav_id) DO UPDATE SET ${commonColumns
+        .filter((col) => col !== 'job_role_nav_id')
+        .map((col) => `"${col}" = EXCLUDED."${col}"`)
+        .join(', ')}`
+    : 'ON CONFLICT DO NOTHING';
+
+  let copied = 0;
+  for (const row of navRows.rows) {
+    const values = commonColumns.map((col) => {
+      if (col === 'org_id' && orgId) return orgId;
+      return row[col];
+    });
+    const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+    const columnNames = commonColumns.map((col) => `"${col}"`).join(', ');
+
+    try {
+      const result = await tenantClient.query(
+        `
+          INSERT INTO "tblJobRoleNav" (${columnNames})
+          VALUES (${placeholders})
+          ${conflictClause}
+        `,
+        values,
+      );
+      if (!upsert && result.rowCount > 0) copied += 1;
+      else if (upsert) copied += 1;
+    } catch (insertErr) {
+      console.warn(`[TenantSetup] ⚠️ Error inserting job role nav row:`, insertErr.message);
+    }
+  }
+
+  return { copied, total: navRows.rows.length, skipped: false };
+}
+
+/**
+ * Ensure tenant JR001 navigation matches reference (full menu like hospitality tenants).
+ */
+async function ensureJobRoleNavigation(client, orgId) {
+  if (!client || !orgId) return { synced: false, count: 0 };
+
+  const tenantCountResult = await client.query(`
+    SELECT COUNT(*)::int AS count
+    FROM "tblJobRoleNav"
+    WHERE job_role_id = 'JR001' AND int_status = 1
+  `);
+  const tenantCount = tenantCountResult.rows[0]?.count || 0;
+
+  const referenceDbUrl = process.env.GENERIC_URL;
+  if (referenceDbUrl) {
+    const referenceClient = new Client(pgClientOptsFromDatabaseUrl(referenceDbUrl));
+
+    try {
+      await referenceClient.connect();
+      const refCountResult = await referenceClient.query(`
+        SELECT COUNT(*)::int AS count
+        FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const refCount = refCountResult.rows[0]?.count || 0;
+
+      const tenantApps = await client.query(`
+        SELECT DISTINCT app_id FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const tenantAppIds = new Set(tenantApps.rows.map((r) => r.app_id));
+
+      const refApps = await referenceClient.query(`
+        SELECT DISTINCT app_id FROM "tblJobRoleNav"
+        WHERE job_role_id = 'JR001' AND int_status = 1
+      `);
+      const missingApps = refApps.rows.filter((r) => !tenantAppIds.has(r.app_id));
+
+      if (refCount > 0 && (tenantCount < refCount || missingApps.length > 0)) {
+        console.log(
+          `[TenantSetup] JR001 navigation incomplete for ${orgId} (${tenantCount}/${refCount}, missing ${missingApps.length} apps); syncing from reference...`,
+        );
+        const syncResult = await copyJobRoleNavFromReference(referenceClient, client, orgId, { upsert: true });
+        console.log(`[TenantSetup] ✅ Synced JR001 navigation (${syncResult.copied}/${syncResult.total} rows)`);
+
+        // Copy tblApps rows for any newly added navigation app_ids
+        await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+
+        return { synced: true, count: syncResult.copied };
+      }
+
+      if (tenantCount > 0) {
+        return { synced: false, count: tenantCount };
+      }
+    } catch (err) {
+      console.warn(`[TenantSetup] Reference navigation sync failed: ${err.message}`);
+    } finally {
+      await referenceClient.end().catch(() => {});
+    }
+  }
+
+  return seedDefaultJobRoleNavigationIfMissing(client, orgId);
+}
+
+/**
+ * Seed default JR001 navigation when tenant DB has none (reference copy miss or legacy tenant).
+ */
+async function seedDefaultJobRoleNavigationIfMissing(client, orgId) {
+  if (!client || !orgId) return { seeded: false, count: 0 };
+
+  const navCount = await client.query(`
+    SELECT COUNT(*)::int AS count
+    FROM "tblJobRoleNav"
+    WHERE job_role_id = 'JR001' AND int_status = 1
+  `);
+
+  if ((navCount.rows[0]?.count || 0) > 0) {
+    return { seeded: false, count: navCount.rows[0].count };
+  }
+
+  console.log(`[TenantSetup] No JR001 navigation found for ${orgId}; seeding defaults...`);
+
+  for (const role of DEFAULT_JOB_ROLES) {
+    await client.query(
+      `
+        INSERT INTO "tblJobRoles" (org_id, job_role_id, text, job_function, int_status)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (job_role_id) DO UPDATE
+        SET text = EXCLUDED.text,
+            job_function = EXCLUDED.job_function,
+            int_status = EXCLUDED.int_status,
+            org_id = EXCLUDED.org_id
+      `,
+      [orgId, role.id, role.name, role.jobFunction, role.intStatus],
+    );
+  }
+
+  let inserted = 0;
+  for (const item of DEFAULT_JOB_ROLE_NAV) {
+    await client.query(
+      `
+        INSERT INTO "tblJobRoleNav"
+          (job_role_nav_id, org_id, int_status, job_role_id, parent_id, app_id, label, sub_menu, sequence, access_level, is_group, mob_desk)
+        VALUES
+          ($1, $2, 1, $3, $4, $5, $6, NULL, $7, $8, $9, 'D')
+        ON CONFLICT (job_role_nav_id) DO UPDATE
+        SET org_id = EXCLUDED.org_id,
+            int_status = 1,
+            job_role_id = EXCLUDED.job_role_id,
+            parent_id = EXCLUDED.parent_id,
+            app_id = EXCLUDED.app_id,
+            label = EXCLUDED.label,
+            sequence = EXCLUDED.sequence,
+            access_level = EXCLUDED.access_level,
+            is_group = EXCLUDED.is_group,
+            mob_desk = 'D'
+      `,
+      [
+        item.id,
+        orgId,
+        item.jobRoleId,
+        item.parentId,
+        item.appId,
+        item.label,
+        item.sequence,
+        item.accessLevel,
+        item.isGroup,
+      ],
+    );
+    inserted += 1;
+  }
+
+  console.log(`[TenantSetup] ✅ Seeded ${inserted} default navigation items for JR001`);
+  return { seeded: true, count: inserted };
 }
 
 /**
@@ -1113,16 +1279,16 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
       await seedTextMessages(client, { genericUrl: getReferenceUrl() || process.env.GENERIC_URL });
     }
 
-    // Idempotent safety net: status codes, props, text messages, missing apps
+    await ensureJobRoleNavigation(client, orgId);
+
     console.log('[TenantSetup] Verifying required master data from hospitality...');
     await seedRequiredMasterData(client, { orgId });
 
     await applyNavigationGroupModel(client, 'TenantSetup');
 
-    // Sync ID sequences to match existing rows (prevents duplicate IDs after setup)
     console.log('[TenantSetup] Syncing ID sequences from tenant data...');
     await syncIdSequencesFromData(client);
-    
+
     console.log(`[TenantSetup] ✅ Default data seeding process completed`);
     
   } catch (error) {
@@ -1470,10 +1636,9 @@ async function createTenant(tenantData) {
         throw new Error(`Schema verification failed: ${verifyError.message}`);
       }
 
-      // Post-schema: views, job monitor, and hospitality-specific structures not in BASE TABLE dump
       try {
         console.log('[TenantSetup] Applying tenant schema extras (views, job monitor, AT insp certs)...');
-        const referenceDbUrl = getReferenceUrl();
+        const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
         const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
         const refClient = new Client(pgClientOpts({
           host: referenceDbConfig.host,
@@ -1814,4 +1979,6 @@ module.exports = {
   checkOrgIdExists,
   checkSubdomainExists,
   copyJobRoleNavigationForRole,
+  seedDefaultJobRoleNavigationIfMissing,
+  ensureJobRoleNavigation,
 };
