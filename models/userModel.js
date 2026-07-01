@@ -111,10 +111,10 @@ const createUser = async ({
 // If tenantPool is provided, use it; otherwise use getDb() which gets from context
 const setResetToken = async (email, token, expiry, tenantPool = null) => {
     const connection = tenantPool || getDb();
-    
+
     logger.debug(`[UserModel] Setting reset token for email: "${email}"`);
     logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
-    
+
     await connection.query(
         `UPDATE "tblUsers"
          SET reset_token = $1, reset_token_expiry = $2
@@ -129,10 +129,10 @@ const setResetToken = async (email, token, expiry, tenantPool = null) => {
 // If tenantPool is provided, use it; otherwise use getDb() which gets from context
 const findUserByResetToken = async (token, tenantPool = null) => {
     const connection = tenantPool || getDb();
-    
-    logger.debug(`[UserModel] 🔍 Searching for user with reset token`);
+
+    logger.debug('[UserModel] Searching for user with reset token');
     logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
-    
+
     const result = await connection.query(
         `SELECT * FROM "tblUsers"
          WHERE reset_token = $1 AND reset_token_expiry > NOW()`,
@@ -152,10 +152,10 @@ const findUserByResetToken = async (token, tenantPool = null) => {
 // If tenantPool is provided, use it; otherwise use getDb() which gets from context
 const updatePassword = async ({ org_id, user_id }, hashedPassword, changed_by, tenantPool = null) => {
     const connection = tenantPool || getDb();
-    
+
     logger.debug(`[UserModel] Updating password for user_id: ${user_id}, org_id: ${org_id}`);
     logger.debug(`[UserModel] Using ${tenantPool ? 'tenant' : 'default'} database connection`);
-    
+
     await connection.query(
         `UPDATE "tblUsers"
          SET password = $1,

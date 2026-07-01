@@ -1,5 +1,7 @@
-const pool = require('../config/db');
+const { getDbFromContext } = require('./dbContext');
 const { generateCustomId } = require('./idGenerator');
+
+const getPool = () => getDbFromContext();
 
 /**
  * Convert asset type ID to serial number format
@@ -35,7 +37,7 @@ const addToPrintQueue = async (serialNumber, orgId, createdBy) => {
       RETURNING *
     `;
     
-    const result = await pool.query(query, [
+    const result = await getPool().query(query, [
       psnqId, 
       serialNumber, 
       'PN', // Pending status
@@ -78,10 +80,10 @@ const generateSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
     const seqQuery = `
       SELECT COALESCE(last_gen_seq_no, 0) AS current_seq
       FROM "tblAssetTypes" 
-      WHERE asset_type_id = $1
+      WHERE asset_type_id = $1 AND org_id = $2
     `;
     
-    const seqResult = await pool.query(seqQuery, [assetTypeId]);
+    const seqResult = await getPool().query(seqQuery, [assetTypeId, orgId]);
     
     if (seqResult.rows.length === 0) {
       throw new Error(`Asset type ${assetTypeId} not found`);
@@ -169,10 +171,10 @@ const getCurrentSequence = async (assetTypeId, orgId = 'ORG001') => {
     const query = `
       SELECT COALESCE(last_gen_seq_no, 0) as current_sequence
       FROM "tblAssetTypes" 
-      WHERE asset_type_id = $1
+      WHERE asset_type_id = $1 AND org_id = $2
     `;
     
-    const result = await pool.query(query, [assetTypeId]);
+    const result = await getPool().query(query, [assetTypeId, orgId]);
     
     if (result.rows.length === 0) {
       return {
@@ -222,10 +224,10 @@ const previewNextSerialNumber = async (assetTypeId, orgId = 'ORG001') => {
     const query = `
       SELECT COALESCE(last_gen_seq_no, 0) as current_sequence
       FROM "tblAssetTypes" 
-      WHERE asset_type_id = $1
+      WHERE asset_type_id = $1 AND org_id = $2
     `;
     
-    const result = await pool.query(query, [assetTypeId]);
+    const result = await getPool().query(query, [assetTypeId, orgId]);
     
     if (result.rows.length === 0) {
       return {
@@ -291,7 +293,7 @@ const getPrintQueue = async (orgId = 'ORG001', status = null) => {
     
     query += ` ORDER BY created_on DESC`;
     
-    const result = await pool.query(query, params);
+    const result = await getPool().query(query, params);
     
     return {
       success: true,
@@ -319,7 +321,7 @@ const updatePrintQueueStatus = async (psnqId, status, orgId = 'ORG001') => {
       RETURNING *
     `;
     
-    const result = await pool.query(query, [status, psnqId, orgId]);
+    const result = await getPool().query(query, [status, psnqId, orgId]);
     
     if (result.rows.length > 0) {
       return {
@@ -367,7 +369,7 @@ const getSerialNumberStats = async (orgId = 'ORG001') => {
         SUBSTRING(serial_no, 5, 2) DESC
     `;
     
-    const result = await pool.query(query, [orgId]);
+    const result = await getPool().query(query, [orgId]);
     
     return {
       success: true,
@@ -400,7 +402,7 @@ const getPrintQueueStats = async (orgId = 'ORG001') => {
       ORDER BY status
     `;
     
-    const result = await pool.query(query, [orgId]);
+    const result = await getPool().query(query, [orgId]);
     
     return {
       success: true,

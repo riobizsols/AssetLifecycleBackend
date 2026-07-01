@@ -265,7 +265,8 @@ const getAssetTypesByMaintRequired = async (req, res) => {
 // GET /api/asset-types/inspection-required - Get asset types with inspection frequency configured
 const getAssetTypesByInspectionRequired = async (req, res) => {
     try {
-        const result = await model.getAssetTypesByInspectionRequired();
+        const org_id = req.user?.org_id;
+        const result = await model.getAssetTypesByInspectionRequired(org_id);
         res.status(200).json({
             success: true,
             message: "Asset types with inspection configured retrieved successfully",
@@ -877,8 +878,8 @@ module.exports = {
     getParentAssetTypes,
     getAssetTypesByAssignmentType,
     getAssetTypesByGroupRequired,
-    getAssetTypesByMaintRequired,
     getAssetTypesByInspectionRequired,
+    getAssetTypesByMaintRequired,
     getAllProperties,
     getAssetTypeProperties,
     mapAssetTypeProperties,

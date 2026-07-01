@@ -15,6 +15,9 @@ lerna-debug.log*
 .env.local
 .env.*.local
 
+# Local document storage fallback (when MinIO is unavailable in dev)
+uploads/
+
 # Database backups
 backups/
 *.sql
