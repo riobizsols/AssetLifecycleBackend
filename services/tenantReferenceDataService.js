@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
 
@@ -278,6 +279,11 @@ async function copyReferenceTableRows(referenceClient, tenantClient, tableName, 
   const errors = [];
 
   for (const row of refRows) {
+    if (tableName === 'tblApps' && isLegacyGroupMenuAppId(row.app_id)) {
+      skippedRows += 1;
+      continue;
+    }
+
     if (missingOnly && pkColumns.length > 0) {
       const key = pkColumns.map((col) => String(row[col])).join('|');
       if (existingKeys.has(key)) {

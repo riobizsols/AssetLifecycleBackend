@@ -12,6 +12,7 @@ const {
 } = require('./tenantSchemaAlignService');
 const { seedRequiredMasterData, alignTenantColumnsFromReference } = require('./tenantReferenceDataService');
 const { finalizeTenantForeignKeys } = require('./tenantForeignKeyService');
+const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
@@ -691,6 +692,9 @@ async function copyJobRoleNavigationForRole(referenceClient, tenantClient, orgId
     if (commonColumns.includes('org_id')) {
       newRow.org_id = orgId;
     }
+    if (newRow.is_group === true || newRow.is_group === 't' || newRow.is_group === 1) {
+      newRow.app_id = null;
+    }
 
     const values = commonColumns.map((col) => newRow[col]);
     const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
@@ -1112,6 +1116,8 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     // Idempotent safety net: status codes, props, text messages, missing apps
     console.log('[TenantSetup] Verifying required master data from hospitality...');
     await seedRequiredMasterData(client, { orgId });
+
+    await applyNavigationGroupModel(client, 'TenantSetup');
 
     // Sync ID sequences to match existing rows (prevents duplicate IDs after setup)
     console.log('[TenantSetup] Syncing ID sequences from tenant data...');
