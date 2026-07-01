@@ -1,4 +1,5 @@
 const model = require("../models/assetModel");
+const { resolveAssetBranchId } = require("../utils/branchAccessUtils");
 
 // Check existing asset IDs for bulk upload validation
 const checkExistingAssets = async (req, res) => {
@@ -240,7 +241,7 @@ const commitBulkUploadAssets = async (req, res) => {
 
         const created_by = req.user.user_id;
         const user_org_id = req.user.org_id;
-        const user_branch_id = req.user.branch_id;
+        const user_branch_id = await resolveAssetBranchId(null, req.user, req.db);
         const results = await model.bulkUpsertAssets(csvData, created_by, user_org_id, user_branch_id);
         
         res.json({

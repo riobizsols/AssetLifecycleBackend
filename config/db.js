@@ -15,11 +15,11 @@ if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
   function createPool(connectionString) {
     const pool = new Pool(
       buildPoolConfig(connectionString, {
-      max: parseInt(process.env.DB_POOL_MAX, 10) || 20,
-      min: parseInt(process.env.DB_POOL_MIN, 10) || 2,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 10000,
-      allowExitOnIdle: false,
+        max: parseInt(process.env.DB_POOL_MAX, 10) || 20,
+        min: parseInt(process.env.DB_POOL_MIN, 10) || 2,
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: 10000,
+        allowExitOnIdle: false,
       }),
     );
 
@@ -124,7 +124,6 @@ if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
     console.warn('⚠️ [DB POOL] shutdownPool() is a no-op; pool is not ended to avoid breaking in-flight requests.');
   }
 
-  // Log pool stats periodically (development only)
   if (process.env.NODE_ENV !== 'production') {
     setInterval(() => {
       try {

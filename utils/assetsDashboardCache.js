@@ -32,9 +32,17 @@ function branchScope(req) {
   return hasSuperAccess ? 'all' : (branchId || 'none');
 }
 
+function tenantScope(req) {
+  const pool = req.db || req.tenantPool;
+  if (pool?.options?.database) {
+    return pool.options.database;
+  }
+  return req.isTenant ? 'tenant' : 'default';
+}
+
 function scopeKey(req, ...parts) {
   const orgId = req.user?.org_id || 'unknown';
-  return cacheService.buildKey('api', orgId, branchScope(req), ...parts);
+  return cacheService.buildKey('api', tenantScope(req), orgId, branchScope(req), ...parts);
 }
 
 function hashQuery(value) {

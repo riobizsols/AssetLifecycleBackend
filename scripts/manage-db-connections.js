@@ -1,11 +1,12 @@
 const { Client } = require('pg');
+const { getPgSslOption } = require('../utils/pgSslOption');
 require('dotenv').config();
 
 async function manageConnections() {
   // Use a direct client connection
   const client = new Client({
     connectionString: process.env.DATABASE_URL,
-    ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+    ssl: getPgSslOption(),
   });
   
   try {

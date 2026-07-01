@@ -151,6 +151,46 @@ const checkOrgIdAvailability = async (req, res) => {
   }
 };
 
+const checkSubdomainAvailability = async (req, res) => {
+  try {
+    const { subdomain } = req.body;
+    if (!subdomain) {
+      return res.status(400).json({
+        success: false,
+        message: 'Sub-domain name is required',
+      });
+    }
+
+    const { validateSubdomain } = require('../utils/subdomainUtils');
+    let normalizedSubdomain;
+    try {
+      normalizedSubdomain = validateSubdomain(subdomain);
+    } catch (validationError) {
+      return res.status(400).json({
+        success: false,
+        available: false,
+        message: validationError.message,
+      });
+    }
+
+    const exists = await tenantSetupService.checkSubdomainExists(normalizedSubdomain);
+    return res.json({
+      success: true,
+      available: !exists,
+      subdomain: normalizedSubdomain,
+      message: exists
+        ? `Sub-domain name "${normalizedSubdomain}" is already taken`
+        : `Sub-domain name "${normalizedSubdomain}" is available`,
+    });
+  } catch (error) {
+    console.error('[TenantSetup] Error checking subdomain:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Failed to check sub-domain name',
+    });
+  }
+};
+
 module.exports = {
   createTenant,
   getAllTenants,
@@ -159,5 +199,6 @@ module.exports = {
   deleteTenant,
   testTenantConnection,
   checkOrgIdAvailability,
+  checkSubdomainAvailability,
 };
 

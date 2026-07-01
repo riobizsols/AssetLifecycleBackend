@@ -3,7 +3,8 @@ const {
   getAllJobRoleNavigation,
   addJobRoleNavigation,
   updateJobRoleNavigation,
-  bulkAddJobRoleNavigation
+  bulkAddJobRoleNavigation,
+  deleteJobRoleNavigation
 } = require("../controllers/jobRoleNavigationController");
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -20,5 +21,8 @@ router.post("/", protect, addJobRoleNavigation);
 
 // Update existing job role navigation entry
 router.put("/:navId", protect, updateJobRoleNavigation);
+
+// Delete navigation entries (bulk)
+router.delete("/", protect, deleteJobRoleNavigation);
 
 module.exports = router;

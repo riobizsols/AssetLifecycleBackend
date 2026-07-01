@@ -1,16 +1,17 @@
-FROM node:20-alpine
+# Production image for Express API (multi-tenant backend)
+FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 COPY . .
 
+# RUN chown -R node:node /app
+
 ENV NODE_ENV=production
-ENV PORT=5000
+EXPOSE 5001
 
-EXPOSE 5000
-
-CMD ["npm", "start"]
-
+USER node
+CMD ["node", "server.js"]

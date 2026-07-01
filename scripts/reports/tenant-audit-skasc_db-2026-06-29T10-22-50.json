@@ -1,0 +1,2276 @@
+{
+  "generatedAt": "2026-06-29T10:22:50.577Z",
+  "tenantDb": "skasc_db",
+  "referenceDb": "hospitality",
+  "reportPaths": {
+    "json": "E:\\work\\ALM Prod\\AssetLifecycleBackend\\scripts\\reports\\tenant-audit-skasc_db-2026-06-29T10-22-50.json",
+    "markdown": "E:\\work\\ALM Prod\\AssetLifecycleBackend\\scripts\\reports\\tenant-audit-skasc_db-2026-06-29T10-22-50.md"
+  },
+  "summary": {
+    "hospitalityBaseTables": 98,
+    "tenantBaseTables": 98,
+    "schemaMatch": true
+  },
+  "schema": {
+    "missingInTenant": [],
+    "extraInTenant": [],
+    "incorrectObjectTypes": [],
+    "columnMismatches": []
+  },
+  "data": {
+    "rowCounts": [
+      {
+        "table": "tblAATInspCheckList",
+        "hospitalityCount": 6,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAAT_Insp_Freq",
+        "hospitalityCount": 5,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAAT_Insp_Rec",
+        "hospitalityCount": 2,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAAT_Insp_Sch",
+        "hospitalityCount": 14,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATBRReasonCodes",
+        "hospitalityCount": 34,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATDocs",
+        "hospitalityCount": 7,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATInspCert",
+        "hospitalityCount": 5,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATMaintCert",
+        "hospitalityCount": 15,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATMaintCheckList",
+        "hospitalityCount": 10,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblATMaintFreq",
+        "hospitalityCount": 30,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblApps",
+        "hospitalityCount": 82,
+        "tenantCount": 82,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblAssetAssignments",
+        "hospitalityCount": 154,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetBRDet",
+        "hospitalityCount": 7,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetDepHist",
+        "hospitalityCount": 21,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetDocs",
+        "hospitalityCount": 27,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetExpiryNotify",
+        "hospitalityCount": 444,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetGroupDocs",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetGroup_D",
+        "hospitalityCount": 13,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetGroup_H",
+        "hospitalityCount": 6,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetMaintDocs",
+        "hospitalityCount": 12,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetMaintSch",
+        "hospitalityCount": 19,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetMaintSch_BR_Hist",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetPropListValues",
+        "hospitalityCount": 93,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetPropValues",
+        "hospitalityCount": 96,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetScrap",
+        "hospitalityCount": 3,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetScrapDet",
+        "hospitalityCount": 3,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetTypeProps",
+        "hospitalityCount": 62,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetTypes",
+        "hospitalityCount": 41,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetUsageReg",
+        "hospitalityCount": 5,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssetWarrantyNotify",
+        "hospitalityCount": 181,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAssets",
+        "hospitalityCount": 115,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAuditLogConfig",
+        "hospitalityCount": 60,
+        "tenantCount": 60,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblAuditLogs",
+        "hospitalityCount": 1000,
+        "tenantCount": 35,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblBranchCostCenter",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblBranches",
+        "hospitalityCount": 3,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblCCTransfer",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblColumnAccessConfig",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblCostCenter",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblDepartments",
+        "hospitalityCount": 12,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblDepreciationSettings",
+        "hospitalityCount": 2,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblDeptAdmins",
+        "hospitalityCount": 13,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblDeptAssetTypes",
+        "hospitalityCount": 22,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblDocTypeObjects",
+        "hospitalityCount": 18,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblEmpTechCert",
+        "hospitalityCount": 9,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblEmployees",
+        "hospitalityCount": 37,
+        "tenantCount": 4,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblEvents",
+        "hospitalityCount": 15,
+        "tenantCount": 15,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblFCMTokens",
+        "hospitalityCount": 17,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblIDSequences",
+        "hospitalityCount": 55,
+        "tenantCount": 57,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblInspCheckList",
+        "hospitalityCount": 7,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblInspResTypeDet",
+        "hospitalityCount": 9,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblJobHistory",
+        "hospitalityCount": 17,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblJobRoleNav",
+        "hospitalityCount": 278,
+        "tenantCount": 102,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblJobRoles",
+        "hospitalityCount": 13,
+        "tenantCount": 4,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblJobs",
+        "hospitalityCount": 7,
+        "tenantCount": 7,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblMaintStatus",
+        "hospitalityCount": 5,
+        "tenantCount": 5,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblMaintTypes",
+        "hospitalityCount": 5,
+        "tenantCount": 16,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblNotificationHistory",
+        "hospitalityCount": 2938,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblNotificationPreferences",
+        "hospitalityCount": 100,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblOrgSettings",
+        "hospitalityCount": 8,
+        "tenantCount": 14,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblOrgs",
+        "hospitalityCount": 3,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblPrintSerialNoQueue",
+        "hospitalityCount": 68,
+        "tenantCount": 1,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblProdServs",
+        "hospitalityCount": 27,
+        "tenantCount": 2,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblProps",
+        "hospitalityCount": 32,
+        "tenantCount": 32,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblRioAdmin",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblScrapAssetHist",
+        "hospitalityCount": 14,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblScrapSalesDocs",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblScrapSales_D",
+        "hospitalityCount": 1,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblScrapSales_H",
+        "hospitalityCount": 1,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblStatusCodes",
+        "hospitalityCount": 13,
+        "tenantCount": 13,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblTableFilterColumns",
+        "hospitalityCount": 10,
+        "tenantCount": 10,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblTechCert",
+        "hospitalityCount": 10,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblTechnicalLogConfig",
+        "hospitalityCount": 33,
+        "tenantCount": 33,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblTextMessagesDefault",
+        "hospitalityCount": 264,
+        "tenantCount": 264,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblTextMessagesOtherLangs",
+        "hospitalityCount": 264,
+        "tenantCount": 264,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblUom",
+        "hospitalityCount": 5,
+        "tenantCount": 5,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblUserJobRoles",
+        "hospitalityCount": 39,
+        "tenantCount": 4,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblUsers",
+        "hospitalityCount": 34,
+        "tenantCount": 4,
+        "tenantError": null,
+        "requiredMaster": true
+      },
+      {
+        "table": "tblVendorDocs",
+        "hospitalityCount": 4,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblVendorProdService",
+        "hospitalityCount": 29,
+        "tenantCount": 3,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblVendorRenewal",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblVendorSLAs",
+        "hospitalityCount": 3,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblVendors",
+        "hospitalityCount": 22,
+        "tenantCount": 2,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAATInspHist",
+        "hospitalityCount": 46,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAATInspSch_D",
+        "hospitalityCount": 28,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAATInspSch_H",
+        "hospitalityCount": 15,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFATInspSeqs",
+        "hospitalityCount": 5,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFATSeqs",
+        "hospitalityCount": 59,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAssetMaintHist",
+        "hospitalityCount": 38,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAssetMaintSch_D",
+        "hospitalityCount": 374,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFAssetMaintSch_H",
+        "hospitalityCount": 154,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFInspJobRole",
+        "hospitalityCount": 2,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFInspSteps",
+        "hospitalityCount": 7,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFJobRole",
+        "hospitalityCount": 6,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFScrapSeq",
+        "hospitalityCount": 44,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFScrap_D",
+        "hospitalityCount": 14,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFScrap_H",
+        "hospitalityCount": 14,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblWFSteps",
+        "hospitalityCount": 6,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      },
+      {
+        "table": "tblsla_desc",
+        "hospitalityCount": 0,
+        "tenantCount": 0,
+        "tenantError": null,
+        "requiredMaster": false
+      }
+    ],
+    "idFormatsTenant": [
+      {
+        "table": "tblOrgs",
+        "column": "org_id",
+        "expectedPattern": "/^ORG\\d{3}$/",
+        "example": "ORG001",
+        "db": "skasc_db",
+        "totalRows": 1,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblUsers",
+        "column": "user_id",
+        "expectedPattern": "/^USR\\d{3,}$/",
+        "example": "USR001",
+        "db": "skasc_db",
+        "totalRows": 4,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobRoles",
+        "column": "job_role_id",
+        "expectedPattern": "/^JR\\d{3,}$/",
+        "example": "JR001",
+        "db": "skasc_db",
+        "totalRows": 4,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobs",
+        "column": "job_id",
+        "expectedPattern": "/^JOB\\d{3}$/",
+        "example": "JOB001",
+        "db": "skasc_db",
+        "totalRows": 7,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobHistory",
+        "column": "jh_id",
+        "expectedPattern": "/^JH_\\d{4}$/",
+        "example": "JH_0001",
+        "db": "skasc_db",
+        "totalRows": 0,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "EMPTY"
+      },
+      {
+        "table": "tblBranches",
+        "column": "branch_id",
+        "expectedPattern": "/^BR\\d{3}$/",
+        "example": "BR001",
+        "db": "skasc_db",
+        "totalRows": 1,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblDepartments",
+        "column": "dept_id",
+        "expectedPattern": "/^DPT\\d{3}$/",
+        "example": "DPT001",
+        "db": "skasc_db",
+        "totalRows": 1,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblEmployees",
+        "column": "employee_id",
+        "expectedPattern": "/^EMP\\d{3,}$/",
+        "example": "EMP001",
+        "db": "skasc_db",
+        "totalRows": 4,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblAssets",
+        "column": "asset_id",
+        "expectedPattern": "/^ASS\\d{3,}$/",
+        "example": "ASS001",
+        "db": "skasc_db",
+        "totalRows": 1,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblVendors",
+        "column": "vendor_id",
+        "expectedPattern": "/^V\\d{3,}$/",
+        "example": "V001",
+        "db": "skasc_db",
+        "totalRows": 2,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobRoleNav",
+        "column": "job_role_nav_id",
+        "expectedPattern": "/^JRN\\d{3,}$/",
+        "example": "JRN001",
+        "db": "skasc_db",
+        "totalRows": 102,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      }
+    ],
+    "idFormatsHospitality": [
+      {
+        "table": "tblOrgs",
+        "column": "org_id",
+        "expectedPattern": "/^ORG\\d{3}$/",
+        "example": "ORG001",
+        "db": "hospitality",
+        "totalRows": 3,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblUsers",
+        "column": "user_id",
+        "expectedPattern": "/^USR\\d{3,}$/",
+        "example": "USR001",
+        "db": "hospitality",
+        "totalRows": 34,
+        "invalidRows": 5,
+        "invalidSamples": [
+          "LT002",
+          "LT003",
+          "LT004",
+          "LT005",
+          "LT001"
+        ],
+        "nullIds": 0,
+        "status": "INVALID_IDS"
+      },
+      {
+        "table": "tblJobRoles",
+        "column": "job_role_id",
+        "expectedPattern": "/^JR\\d{3,}$/",
+        "example": "JR001",
+        "db": "hospitality",
+        "totalRows": 13,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobs",
+        "column": "job_id",
+        "expectedPattern": "/^JOB\\d{3}$/",
+        "example": "JOB001",
+        "db": "hospitality",
+        "totalRows": 7,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobHistory",
+        "column": "jh_id",
+        "expectedPattern": "/^JH_\\d{4}$/",
+        "example": "JH_0001",
+        "db": "hospitality",
+        "totalRows": 17,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblBranches",
+        "column": "branch_id",
+        "expectedPattern": "/^BR\\d{3}$/",
+        "example": "BR001",
+        "db": "hospitality",
+        "totalRows": 3,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblDepartments",
+        "column": "dept_id",
+        "expectedPattern": "/^DPT\\d{3}$/",
+        "example": "DPT001",
+        "db": "hospitality",
+        "totalRows": 12,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblEmployees",
+        "column": "employee_id",
+        "expectedPattern": "/^EMP\\d{3,}$/",
+        "example": "EMP001",
+        "db": "hospitality",
+        "totalRows": 37,
+        "invalidRows": 3,
+        "invalidSamples": [
+          "EMP_INT_0051",
+          "EMP_INT_0052",
+          "EMP_INT_0053"
+        ],
+        "nullIds": 0,
+        "status": "INVALID_IDS"
+      },
+      {
+        "table": "tblAssets",
+        "column": "asset_id",
+        "expectedPattern": "/^ASS\\d{3,}$/",
+        "example": "ASS001",
+        "db": "hospitality",
+        "totalRows": 115,
+        "invalidRows": 10,
+        "invalidSamples": [
+          "AST002",
+          "AST001",
+          "AST005",
+          "AST00001",
+          "AST086",
+          "AST085",
+          "AST087",
+          "AST101",
+          "AST004",
+          "AST003"
+        ],
+        "nullIds": 0,
+        "status": "INVALID_IDS"
+      },
+      {
+        "table": "tblVendors",
+        "column": "vendor_id",
+        "expectedPattern": "/^V\\d{3,}$/",
+        "example": "V001",
+        "db": "hospitality",
+        "totalRows": 22,
+        "invalidRows": 0,
+        "invalidSamples": [],
+        "nullIds": 0,
+        "status": "OK"
+      },
+      {
+        "table": "tblJobRoleNav",
+        "column": "job_role_nav_id",
+        "expectedPattern": "/^JRN\\d{3,}$/",
+        "example": "JRN001",
+        "db": "hospitality",
+        "totalRows": 278,
+        "invalidRows": 6,
+        "invalidSamples": [
+          "nav_1771339191801_28",
+          "ifn_y7dtmcnkk",
+          "ifn_f3brjjk03",
+          "ifn_1ed3j5hg7",
+          "ifn_45rv10jzs",
+          "ifn_9qz83jtwx"
+        ],
+        "nullIds": 0,
+        "status": "INVALID_IDS"
+      }
+    ],
+    "masterDataChecks": [
+      {
+        "check": "Organizations",
+        "status": "OK",
+        "count": 1,
+        "rows": [
+          {
+            "org_id": "ORG001",
+            "text": "SRI KRISHNA ARTS AND SCIENCE COLLEGE"
+          }
+        ]
+      },
+      {
+        "check": "Users",
+        "status": "OK",
+        "count": 4,
+        "rows": [
+          {
+            "user_id": "USR001",
+            "email": "sanjanaaasenthilkumar@gmail.com",
+            "full_name": "System Administrator",
+            "job_role_id": "JR001",
+            "org_id": "ORG001",
+            "int_status": 1
+          },
+          {
+            "user_id": "USR002",
+            "email": "mgr.test@skasc.test",
+            "full_name": "Maint Manager",
+            "job_role_id": "JR002",
+            "org_id": "ORG001",
+            "int_status": 1
+          },
+          {
+            "user_id": "USR003",
+            "email": "tech.test@skasc.test",
+            "full_name": "Tech User",
+            "job_role_id": "JR003",
+            "org_id": "ORG001",
+            "int_status": 1
+          },
+          {
+            "user_id": "USR004",
+            "email": "viewer.test@skasc.test",
+            "full_name": "Report Viewer",
+            "job_role_id": "JR004",
+            "org_id": "ORG001",
+            "int_status": 1
+          }
+        ]
+      },
+      {
+        "check": "Job Roles",
+        "status": "OK",
+        "count": 4,
+        "rows": [
+          {
+            "job_role_id": "JR001",
+            "text": "System Administrator",
+            "job_function": "Full system access",
+            "int_status": 1
+          },
+          {
+            "job_role_id": "JR002",
+            "text": "Maintenance Manager",
+            "job_function": "Approves maintenance and assets",
+            "int_status": 1
+          },
+          {
+            "job_role_id": "JR003",
+            "text": "Maintenance Technician",
+            "job_function": "Desktop testing — work orders and breakdowns",
+            "int_status": 1
+          },
+          {
+            "job_role_id": "JR004",
+            "text": "Report Viewer",
+            "job_function": "Read-only reports access",
+            "int_status": 1
+          }
+        ]
+      },
+      {
+        "check": "Cron Jobs (Job Monitor)",
+        "status": "OK",
+        "expected": 7,
+        "count": 7,
+        "rows": [
+          {
+            "job_id": "JOB001",
+            "job_name": "maintenance trigger",
+            "frequency": "0 0 * * *",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB002",
+            "job_name": "Inspection",
+            "frequency": "0 1 * * *",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB003",
+            "job_name": "Vendor contract renewal",
+            "frequency": "0 8 * * *",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB004",
+            "job_name": "scrap seq setting",
+            "frequency": "manual",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB005",
+            "job_name": "maint seq setting",
+            "frequency": "manual",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB006",
+            "job_name": "warranty notification trigger",
+            "frequency": "0 7 * * *",
+            "status": "DISABLED"
+          },
+          {
+            "job_id": "JOB007",
+            "job_name": "asset expiry notification trigger",
+            "frequency": "0 7 * * *",
+            "status": "DISABLED"
+          }
+        ]
+      },
+      {
+        "check": "Job Role Navigation (per role)",
+        "status": "OK",
+        "rows": [
+          {
+            "job_role_id": "JR001",
+            "nav_count": 63
+          },
+          {
+            "job_role_id": "JR002",
+            "nav_count": 16
+          },
+          {
+            "job_role_id": "JR003",
+            "nav_count": 8
+          },
+          {
+            "job_role_id": "JR004",
+            "nav_count": 12
+          }
+        ]
+      },
+      {
+        "check": "ID Sequences",
+        "status": "OK",
+        "count": 57,
+        "rows": [
+          {
+            "table_key": "IC",
+            "prefix": "IC",
+            "last_number": 1
+          },
+          {
+            "table_key": "aat_insp_checklist",
+            "prefix": "AATIC",
+            "last_number": 9
+          },
+          {
+            "table_key": "aatif_id",
+            "prefix": "AATIF",
+            "last_number": 8
+          },
+          {
+            "table_key": "aplv",
+            "prefix": "APLV",
+            "last_number": 0
+          },
+          {
+            "table_key": "asset",
+            "prefix": "ASS",
+            "last_number": 121
+          },
+          {
+            "table_key": "asset_doc",
+            "prefix": "AD",
+            "last_number": 0
+          },
+          {
+            "table_key": "asset_group_d",
+            "prefix": "AGD",
+            "last_number": 0
+          },
+          {
+            "table_key": "asset_group_doc",
+            "prefix": "AGD",
+            "last_number": 8
+          },
+          {
+            "table_key": "asset_group_h",
+            "prefix": "AGH",
+            "last_number": 0
+          },
+          {
+            "table_key": "asset_maint_doc",
+            "prefix": "AMD",
+            "last_number": 16
+          },
+          {
+            "table_key": "asset_scrap",
+            "prefix": "ASCP",
+            "last_number": 13
+          },
+          {
+            "table_key": "asset_scrap_det",
+            "prefix": "ASD",
+            "last_number": 48
+          },
+          {
+            "table_key": "asset_type",
+            "prefix": "AT",
+            "last_number": 62
+          },
+          {
+            "table_key": "asset_type_doc",
+            "prefix": "ATD",
+            "last_number": 16
+          },
+          {
+            "table_key": "asset_type_prop",
+            "prefix": "ATP",
+            "last_number": 43
+          },
+          {
+            "table_key": "asset_usage",
+            "prefix": "AUG",
+            "last_number": 7
+          },
+          {
+            "table_key": "atbrrc",
+            "prefix": "ATB",
+            "last_number": 26
+          },
+          {
+            "table_key": "atic",
+            "prefix": "ATIC",
+            "last_number": 3
+          },
+          {
+            "table_key": "atmc",
+            "prefix": "ATMC",
+            "last_number": 33
+          },
+          {
+            "table_key": "atmcl",
+            "prefix": "ATMCL",
+            "last_number": 8
+          },
+          {
+            "table_key": "atmf",
+            "prefix": "ATMF",
+            "last_number": 27
+          },
+          {
+            "table_key": "atp",
+            "prefix": "ATP",
+            "last_number": 103
+          },
+          {
+            "table_key": "branch",
+            "prefix": "BR",
+            "last_number": 1
+          },
+          {
+            "table_key": "cc_transfer",
+            "prefix": "CC_TR",
+            "last_number": 4
+          },
+          {
+            "table_key": "column_access",
+            "prefix": "COLUM",
+            "last_number": 83
+          },
+          {
+            "table_key": "department",
+            "prefix": "DPT",
+            "last_number": 1
+          },
+          {
+            "table_key": "dept_admin",
+            "prefix": "DPTA",
+            "last_number": 16
+          },
+          {
+            "table_key": "dept_asset",
+            "prefix": "DPTASS",
+            "last_number": 0
+          },
+          {
+            "table_key": "emp_int_id",
+            "prefix": "EMP_INT_",
+            "last_number": 62
+          },
+          {
+            "table_key": "employee",
+            "prefix": "EMP",
+            "last_number": 6
+          },
+          {
+            "table_key": "etc",
+            "prefix": "ETC",
+            "last_number": 14
+          },
+          {
+            "table_key": "job_role",
+            "prefix": "JR",
+            "last_number": 20
+          },
+          {
+            "table_key": "job_role_nav",
+            "prefix": "JRN",
+            "last_number": 134
+          },
+          {
+            "table_key": "jobrole",
+            "prefix": "JR",
+            "last_number": 4
+          },
+          {
+            "table_key": "jobrolenav",
+            "prefix": "JRN",
+            "last_number": 111127
+          },
+          {
+            "table_key": "org",
+            "prefix": "ORG",
+            "last_number": 1
+          },
+          {
+            "table_key": "org_setting",
+            "prefix": "ORG_S",
+            "last_number": 2
+          },
+          {
+            "table_key": "prod_serv",
+            "prefix": "PS",
+            "last_number": 32
+          },
+          {
+            "table_key": "prop",
+            "prefix": "PROP",
+            "last_number": 33
+          },
+          {
+            "table_key": "psnq",
+            "prefix": "PSN",
+            "last_number": 65
+          },
+          {
+            "table_key": "scrap_asset_hist",
+            "prefix": "SCRAP",
+            "last_number": 14
+          },
+          {
+            "table_key": "tblAssetBRDet",
+            "prefix": "ABR",
+            "last_number": 0
+          },
+          {
+            "table_key": "tcert",
+            "prefix": "TCERT",
+            "last_number": 14
+          },
+          {
+            "table_key": "user",
+            "prefix": "USR",
+            "last_number": 4
+          },
+          {
+            "table_key": "user_id",
+            "prefix": "USR",
+            "last_number": 24
+          },
+          {
+            "table_key": "userjobrole",
+            "prefix": "UJR",
+            "last_number": 4
+          },
+          {
+            "table_key": "vendor",
+            "prefix": "V",
+            "last_number": 48
+          },
+          {
+            "table_key": "vendor_doc",
+            "prefix": "VD",
+            "last_number": 7
+          },
+          {
+            "table_key": "vendor_prod_serv",
+            "prefix": "VPS",
+            "last_number": 3
+          },
+          {
+            "table_key": "vendor_sla",
+            "prefix": "VSLA",
+            "last_number": 9
+          },
+          {
+            "table_key": "vendor_sla_rec",
+            "prefix": "VSLAR",
+            "last_number": 6
+          },
+          {
+            "table_key": "wfams",
+            "prefix": "WFAMS",
+            "last_number": 8
+          },
+          {
+            "table_key": "wfamsd",
+            "prefix": "WFAMSD",
+            "last_number": 19
+          },
+          {
+            "table_key": "wfamsh",
+            "prefix": "WFAMSH",
+            "last_number": 6
+          },
+          {
+            "table_key": "wfas",
+            "prefix": "WFAS",
+            "last_number": 28
+          },
+          {
+            "table_key": "wfscrap_d",
+            "prefix": "WFSCD",
+            "last_number": 20
+          },
+          {
+            "table_key": "wfscrap_h",
+            "prefix": "WFSCH",
+            "last_number": 14
+          }
+        ]
+      },
+      {
+        "check": "Org Settings",
+        "status": "OK",
+        "count": 3,
+        "rows": [
+          {
+            "os_id": "OS_01",
+            "org_id": "ORG001",
+            "key": "dep_auto_calc",
+            "value": "1"
+          },
+          {
+            "os_id": "OS_02",
+            "org_id": "ORG001",
+            "key": "asset_inv_doc_size",
+            "value": "10"
+          },
+          {
+            "os_id": "OS_03",
+            "org_id": "ORG001",
+            "key": "default_doc_size",
+            "value": "15"
+          }
+        ]
+      }
+    ]
+  },
+  "inventory": {
+    "hospitality": [
+      {
+        "name": "tblAATInspCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Freq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Rec",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Sch",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATBRReasonCodes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATInspCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATInspCerts",
+        "type": "VIEW"
+      },
+      {
+        "name": "tblATMaintCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATMaintCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATMaintFreq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblApps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetAssignments",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetBRDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetDepHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetExpiryNotify",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroupDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroup_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroup_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintSch",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintSch_BR_Hist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetPropListValues",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetPropValues",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetScrap",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetScrapDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetTypeProps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetUsageReg",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetWarrantyNotify",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssets",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAuditLogConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAuditLogs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblBranchCostCenter",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblBranches",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblCCTransfer",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblColumnAccessConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblCostCenter",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDepartments",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDepreciationSettings",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDeptAdmins",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDeptAssetTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDocTypeObjects",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEmpTechCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEmployees",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEvents",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblFCMTokens",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblIDSequences",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblInspCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblInspResTypeDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobHistory",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobRoleNav",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobRoles",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblMaintStatus",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblMaintTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblNotificationHistory",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblNotificationPreferences",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblOrgSettings",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblOrgs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblPrintSerialNoQueue",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblProdServs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblProps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblRioAdmin",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapAssetHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSalesDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSales_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSales_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblStatusCodes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTableFilterColumns",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTechCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTechnicalLogConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTextMessagesDefault",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTextMessagesOtherLangs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUom",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUserJobRoles",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUsers",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorProdService",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorRenewal",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorSLAs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendors",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspSch_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspSch_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFATInspSeqs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFATSeqs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintSch_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintSch_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFInspJobRole",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFInspSteps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFJobRole",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrapSeq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrap_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrap_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFSteps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblsla_desc",
+        "type": "BASE TABLE"
+      }
+    ],
+    "tenant": [
+      {
+        "name": "tblAATInspCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Freq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Rec",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAAT_Insp_Sch",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATBRReasonCodes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATInspCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATInspCerts",
+        "type": "VIEW"
+      },
+      {
+        "name": "tblATMaintCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATMaintCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblATMaintFreq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblApps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetAssignments",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetBRDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetDepHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetExpiryNotify",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroupDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroup_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetGroup_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintSch",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetMaintSch_BR_Hist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetPropListValues",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetPropValues",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetScrap",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetScrapDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetTypeProps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetUsageReg",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssetWarrantyNotify",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAssets",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAuditLogConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblAuditLogs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblBranchCostCenter",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblBranches",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblCCTransfer",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblColumnAccessConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblCostCenter",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDepartments",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDepreciationSettings",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDeptAdmins",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDeptAssetTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblDocTypeObjects",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEmpTechCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEmployees",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblEvents",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblFCMTokens",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblIDSequences",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblInspCheckList",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblInspResTypeDet",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobHistory",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobRoleNav",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobRoles",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblJobs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblMaintStatus",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblMaintTypes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblNotificationHistory",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblNotificationPreferences",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblOrgSettings",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblOrgs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblPrintSerialNoQueue",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblProdServs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblProps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblRioAdmin",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapAssetHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSalesDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSales_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblScrapSales_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblStatusCodes",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTableFilterColumns",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTechCert",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTechnicalLogConfig",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTextMessagesDefault",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblTextMessagesOtherLangs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUom",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUserJobRoles",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblUsers",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorDocs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorProdService",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorRenewal",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendorSLAs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblVendors",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspSch_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAATInspSch_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFATInspSeqs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFATSeqs",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintHist",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintSch_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFAssetMaintSch_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFInspJobRole",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFInspSteps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFJobRole",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrapSeq",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrap_D",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFScrap_H",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblWFSteps",
+        "type": "BASE TABLE"
+      },
+      {
+        "name": "tblsla_desc",
+        "type": "BASE TABLE"
+      }
+    ]
+  }
+}

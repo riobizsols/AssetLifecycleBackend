@@ -1,0 +1,15 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-11-24T13:51:18.716Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",157,USR001
+2025-11-24T15:33:23.365Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",96,USR001
+2025-11-24T15:35:05.226Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",168,USR001
+2025-11-24T15:40:58.370Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",417,USR001
+2025-11-24T15:41:00.823Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",108,USR001
+2025-11-24T15:51:36.375Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",136,USR001
+2025-11-24T15:51:44.411Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",73,USR001
+2025-11-24T15:57:05.430Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",77,USR001
+2025-11-24T16:16:53.518Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",156,USR001
+2025-11-24T16:19:26.061Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",138,USR001
+2025-11-24T16:19:55.253Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",151,USR002
+2025-11-24T16:20:04.472Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":0}",144,USR002
+2025-11-24T18:36:40.004Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",115,USR002
+2025-11-24T18:36:46.181Z,INFO,ASSET_VIEW,AssetController,"INFO: Retrieved all assets successfully","{""operation"":""getAssetsWithFilters""}","{""count"":40}",104,USR002

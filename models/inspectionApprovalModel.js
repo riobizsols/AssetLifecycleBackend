@@ -1,4 +1,6 @@
-const pool = require('../config/db');
+const { getDbFromContext } = require('../utils/dbContext');
+
+const getDb = () => getDbFromContext();
 
 const pickColumn = (columnMap, candidates) => {
   for (const candidate of candidates) {
@@ -9,7 +11,7 @@ const pickColumn = (columnMap, candidates) => {
 };
 
 const getTableColumns = async (tableName) => {
-  const result = await pool.query(
+  const result = await getDb().query(
     `
       SELECT column_name
       FROM information_schema.columns
@@ -92,7 +94,7 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
   const values = [orgId, roles];
   
   try {
-    const result = await pool.query(query, values);
+    const result = await getDb().query(query, values);
     return result.rows;
   } catch (error) {
     console.error('Error getting pending inspection approvals:', error);
@@ -216,8 +218,8 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
   try {
     // Execute only header and detail queries for now (workflow query causing issues)
     const [headerResult, detailResult] = await Promise.all([
-      pool.query(headerQuery, [orgId, inspSchHId]),
-      pool.query(detailQuery, [orgId, inspSchHId])
+      getDb().query(headerQuery, [orgId, inspSchHId]),
+      getDb().query(detailQuery, [orgId, inspSchHId])
     ]);
     
     if (headerResult.rows.length === 0) {
@@ -280,7 +282,7 @@ async function getInspectionWorkflowHistory(orgId, inspSchHId) {
   const values = [orgId, inspSchHId];
   
   try {
-    const result = await pool.query(query, values);
+    const result = await getDb().query(query, values);
     return result.rows;
   } catch (error) {
     console.error('Error getting inspection workflow history:', error);
@@ -350,7 +352,7 @@ async function getInspectionsByStatus(orgId, branchCode, status = null) {
   `;
   
   try {
-    const result = await pool.query(query, values);
+    const result = await getDb().query(query, values);
     return result.rows;
   } catch (error) {
     console.error('Error getting inspections by status:', error);
@@ -370,7 +372,7 @@ async function getWorkflowStepById(orgId, wfaiisdId) {
     SELECT * FROM "tblWFAATInspSch_D"
     WHERE org_id = $1 AND wfaiisd_id = $2
   `;
-  const result = await pool.query(query, [orgId, wfaiisdId]);
+  const result = await getDb().query(query, [orgId, wfaiisdId]);
   return result.rows[0];
 }
 
@@ -393,7 +395,7 @@ async function updateWorkflowStepStatus(orgId, wfaiisdId, status, userId, notes 
     WHERE org_id = $1 AND wfaiisd_id = $2
     RETURNING *
   `;
-  const result = await pool.query(query, [orgId, wfaiisdId, status, userId, notes]);
+  const result = await getDb().query(query, [orgId, wfaiisdId, status, userId, notes]);
   return result.rows[0];
 }
 
@@ -414,7 +416,7 @@ async function updateHeaderStatus(orgId, wfaiishId, status, userId) {
     WHERE org_id = $1 AND wfaiish_id = $2
     RETURNING *
   `;
-  const result = await pool.query(query, [orgId, wfaiishId, status, userId]);
+  const result = await getDb().query(query, [orgId, wfaiishId, status, userId]);
   return result.rows[0];
 }
 
@@ -433,7 +435,7 @@ async function getNextWorkflowStep(orgId, wfaiishId, currentSequence) {
     ORDER BY sequence ASC
     LIMIT 1
   `;
-  const result = await pool.query(query, [orgId, wfaiishId, currentSequence]);
+  const result = await getDb().query(query, [orgId, wfaiishId, currentSequence]);
   return result.rows[0];
 }
 
@@ -447,7 +449,7 @@ async function createWorkflowHistory(historyData) {
     // Generate new ID based on max existing ID (similar to Asset Maintenance History)
     // Extract number from WFAIHIS_XX
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfaiishis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAATInspHist"`;
-    const historyIdResult = await pool.query(historyIdQuery);
+    const historyIdResult = await getDb().query(historyIdQuery);
     const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
     const wfaihisId = `WFAIHIS_${nextHistoryId.toString().padStart(2, '0')}`;
     
@@ -466,7 +468,7 @@ async function createWorkflowHistory(historyData) {
     `;
     
     // Use the generated ID instead of passed one
-    return await pool.query(query, [
+    return await getDb().query(query, [
       wfaihisId,
       historyData.wfaiish_id,
       historyData.wfaiisd_id,
@@ -497,7 +499,7 @@ async function getPreviousApprovedValues(orgId, wfaiishId, currentSequence) {
     ORDER BY sequence DESC
     LIMIT 1
   `;
-  const result = await pool.query(query, [orgId, wfaiishId, currentSequence]);
+  const result = await getDb().query(query, [orgId, wfaiishId, currentSequence]);
   return result.rows[0];
 }
 
@@ -550,7 +552,7 @@ async function updateHeaderDetails(orgId, wfaiishId, updates, userId) {
   `;
 
   try {
-    const result = await pool.query(query, values);
+    const result = await getDb().query(query, values);
     return result.rows[0];
   } catch (error) {
     console.error('Error updating header details:', error);
@@ -573,7 +575,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       LEFT JOIN "tblBranches" b ON h.branch_code = b.branch_code
       WHERE h.org_id = $1 AND h.wfaiish_id = $2
     `;
-    const headerResult = await pool.query(headerQuery, [orgId, wfaiishId]);
+    const headerResult = await getDb().query(headerQuery, [orgId, wfaiishId]);
     
     if (headerResult.rows.length === 0) {
       throw new Error(`Inspection header not found: ${wfaiishId}`);
@@ -588,7 +590,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     let empIntToSave = finalTechnicianId;
     try {
       if (header.aatif_id) {
-        const aifRes = await pool.query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [header.aatif_id]);
+        const aifRes = await getDb().query('SELECT maintained_by FROM "tblAAT_Insp_Freq" WHERE aatif_id = $1 LIMIT 1', [header.aatif_id]);
         const maintainedBy = aifRes.rows.length ? (aifRes.rows[0].maintained_by || '') : '';
         if (String(maintainedBy).toLowerCase() === 'vendor') {
           empIntToSave = null;
@@ -603,7 +605,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     
     // 2. Generate new AIS ID (e.g. AIS_001)
     const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
-    const idResult = await pool.query(idQuery);
+    const idResult = await getDb().query(idQuery);
     const nextNum = (idResult.rows[0].max_num || 0) + 1;
     const aisId = `AIS_${nextNum.toString().padStart(3, '0')}`;
     
@@ -649,7 +651,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.branch_code
     ];
     
-    const result = await pool.query(insertQuery, values);
+    const result = await getDb().query(insertQuery, values);
     return result.rows[0];
     
   } catch (error) {
@@ -679,7 +681,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
         params.push(orgId);
         where.push(`${qId(mapOrg)} = $${params.length}`);
       }
-      const result = await pool.query(
+      const result = await getDb().query(
         `SELECT DISTINCT ${qId(mapTcId)} AS tc_id FROM "tblATMaintCert" WHERE ${where.join(' AND ')}`,
         params
       );
@@ -702,7 +704,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
         params.push(orgId);
         where.push(`${qId(mapOrg)} = $${params.length}`);
       }
-      const result = await pool.query(
+      const result = await getDb().query(
         `SELECT DISTINCT ${qId(mapTcId)} AS tc_id FROM "tblATInspCert" WHERE ${where.join(' AND ')}`,
         params
       );
@@ -713,7 +715,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
   }
 
   try {
-    const result = await pool.query(
+    const result = await getDb().query(
       `
         SELECT DISTINCT atic.tc_id
         FROM "tblATInspCerts" atic
@@ -771,7 +773,7 @@ async function getCertifiedTechnicians(orgId, assetTypeId) {
       ORDER BY e.full_name
     `;
 
-    const result = await pool.query(query, params);
+    const result = await getDb().query(query, params);
     return result.rows;
   } catch (error) {
     console.error('Error fetching certified technicians:', error);
@@ -856,7 +858,7 @@ async function getAssetTypesWithCertifiedTechnicians(orgId) {
           LEFT JOIN "tblAssetTypes" at ON atmc.${qId(mapAssetTypeId)} = at.${qId(atId)}
           ${whereClause}
         `;
-        const result = await pool.query(query, params);
+        const result = await getDb().query(query, params);
         result.rows.forEach((r) => addPair(r.asset_type_id, r.asset_type_name, r.emp_int_id));
       }
     } catch (error) {
@@ -880,7 +882,7 @@ async function getAssetTypesWithCertifiedTechnicians(orgId) {
           AND e.int_status = 1
           AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
       `;
-      const result = await pool.query(legacyQuery, [orgId]);
+      const result = await getDb().query(legacyQuery, [orgId]);
       result.rows.forEach((r) => addPair(r.asset_type_id, r.asset_type_name, r.emp_int_id));
     } catch (error) {
       console.warn('Legacy inspection asset-type technician lookup skipped:', error.message);
@@ -920,7 +922,7 @@ async function getTechnicianFromWorkflowHeader(orgId, empIntId) {
   `;
   
   try {
-    const result = await pool.query(query, [empIntId, orgId]);
+    const result = await getDb().query(query, [empIntId, orgId]);
     return result.rows;
   } catch (error) {
     console.error('Error fetching technician from workflow header:', error);

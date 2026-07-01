@@ -7,6 +7,7 @@
 
 const { Client, Pool } = require('pg');
 const crypto = require('crypto');
+const logger = require('../utils/logger');
 const { buildPoolConfig, pgSslOptions } = require('../utils/pgSsl');
 require('dotenv').config();
 
@@ -53,9 +54,9 @@ function initTenantRegistryPool() {
     }
     tenantRegistryPool = new Pool(
       buildPoolConfig(connectionString, {
-      max: tenantRegistryPoolMax(),
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+        max: tenantRegistryPoolMax(),
+        idleTimeoutMillis: 30000,
+        connectionTimeoutMillis: parseInt(process.env.TENANT_REGISTRY_CONNECT_TIMEOUT_MS || '15000', 10) || 15000,
       }),
     );
   }
@@ -181,11 +182,16 @@ function getTenantConnectionString(credentials) {
  * Get a database connection pool for a specific tenant
  */
 async function getTenantPool(orgId) {
+  if (!orgId) {
+    throw new Error('org_id is required');
+  }
+
   const credentials = await getTenantCredentials(orgId);
   const fingerprint = credentialsFingerprint(credentials);
 
   const existing = tenantPools.get(orgId);
   if (existing && existing.fingerprint === fingerprint) {
+    logger.log(`[TenantService] Using cached pool for org_id: ${orgId}`);
     return existing.pool;
   }
 
@@ -194,14 +200,28 @@ async function getTenantPool(orgId) {
   }
 
   const connectionString = getTenantConnectionString(credentials);
+  logger.log(`[TenantService] Creating pool for org_id: ${orgId}, database: ${credentials.database}`);
+
   const pool = new Pool(
     buildPoolConfig(connectionString, {
-    max: tenantPoolMax(),
-    idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+      max: tenantPoolMax(),
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: parseInt(process.env.TENANT_CONNECT_TIMEOUT_MS || '5000', 10) || 5000,
     }),
   );
+
+  try {
+    const testClient = await pool.connect();
+    await testClient.query('SELECT 1');
+    testClient.release();
+  } catch (testError) {
+    await pool.end().catch(() => {});
+    logger.error(`[TenantService] Pool connection test failed for org_id ${orgId}:`, testError);
+    throw new Error(`Failed to connect to tenant database: ${testError.message}`);
+  }
+
   tenantPools.set(orgId, { pool, fingerprint });
+  logger.log(`[TenantService] Created and cached pool for org_id: ${orgId}`);
   return pool;
 }
 
@@ -266,7 +286,7 @@ async function registerTenant(orgId, dbConfig) {
           subdomain,
         ]
       );
-      console.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
+      logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
     } else {
       await pool.query(
         `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, is_active)
@@ -288,7 +308,7 @@ async function registerTenant(orgId, dbConfig) {
           encryptedPassword,
         ]
       );
-      console.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
+      logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
     }
 
     await evictTenantPool(orgId);
@@ -377,6 +397,7 @@ async function testTenantConnection(orgId) {
     const credentials = await getTenantCredentials(orgId);
     const client = new Client({
       connectionString: getTenantConnectionString(credentials),
+      ssl: pgSslOptions(getTenantConnectionString(credentials)),
     });
 
     await client.connect();
@@ -395,6 +416,25 @@ async function testTenantConnection(orgId) {
   }
 }
 
+/**
+ * Clear tenant pool cache (useful when tenant credentials are updated)
+ * @param {string} orgId - Optional org_id to clear specific pool, or null to clear all
+ */
+function clearTenantPoolCache(orgId = null) {
+  if (orgId) {
+    evictTenantPool(orgId).catch((err) => {
+      logger.error(`[TenantService] Error evicting pool for org_id ${orgId}:`, err);
+    });
+    logger.log(`[TenantService] Cleared pool cache for org_id: ${orgId}`);
+    return;
+  }
+
+  Promise.all([...tenantPools.keys()].map((id) => evictTenantPool(id))).catch((err) => {
+    logger.error('[TenantService] Error clearing all tenant pools:', err);
+  });
+  logger.log('[TenantService] Cleared all tenant pool caches');
+}
+
 module.exports = {
   checkTenantExists,
   getTenantCredentials,
@@ -406,5 +446,6 @@ module.exports = {
   deactivateTenant,
   testTenantConnection,
   initTenantRegistryPool,
+  clearTenantPoolCache,
 };
 

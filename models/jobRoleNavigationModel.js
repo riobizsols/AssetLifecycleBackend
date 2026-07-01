@@ -208,10 +208,24 @@ const bulkCreateNavigationEntries = async (entries, org_id) => {
     }
 };
 
+/**
+ * Delete navigation entries by ID
+ */
+const deleteNavigationEntries = async (nav_ids, org_id) => {
+    const dbPool = getDb();
+
+    const result = await dbPool.query(
+        `DELETE FROM "tblJobRoleNav" WHERE org_id = $1 AND job_role_nav_id = ANY($2)`,
+        [org_id, nav_ids]
+    );
+    return result.rowCount;
+};
+
 module.exports = {
     getAllNavigationEntries,
     createNavigationEntry,
     updateNavigationEntry,
-    bulkCreateNavigationEntries
+    bulkCreateNavigationEntries,
+    deleteNavigationEntries
 };
 

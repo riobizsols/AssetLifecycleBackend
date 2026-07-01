@@ -194,6 +194,43 @@ const insertNavigationForJobRole = async (job_role_id, org_id, navigationItems, 
     console.log(`✅ Inserted ${navigationItems.length} navigation items for job role ${job_role_id}`);
 };
 
+/**
+ * Delete job roles and their navigation entries (blocked if assigned to users)
+ */
+const deleteJobRolesByIds = async (job_role_ids, org_id) => {
+    const dbPool = getDb();
+
+    const assigned = await dbPool.query(
+        `SELECT DISTINCT job_role_id FROM (
+            SELECT ujr.job_role_id
+            FROM "tblUserJobRoles" ujr
+            INNER JOIN "tblUsers" u ON u.user_id = ujr.user_id
+            WHERE u.org_id = $1 AND ujr.job_role_id = ANY($2)
+            UNION
+            SELECT job_role_id FROM "tblUsers"
+            WHERE org_id = $1 AND job_role_id = ANY($2) AND int_status = 1
+        ) assigned_roles`,
+        [org_id, job_role_ids]
+    );
+
+    if (assigned.rows.length > 0) {
+        const ids = assigned.rows.map((r) => r.job_role_id).join(', ');
+        const error = new Error(`Cannot delete role(s) assigned to users: ${ids}`);
+        error.code = 'ROLE_IN_USE';
+        throw error;
+    }
+
+    for (const job_role_id of job_role_ids) {
+        await deleteNavigationByJobRole(job_role_id, org_id);
+    }
+
+    const result = await dbPool.query(
+        `DELETE FROM "tblJobRoles" WHERE org_id = $1 AND job_role_id = ANY($2)`,
+        [org_id, job_role_ids]
+    );
+    return result.rowCount;
+};
+
 module.exports = {
     getJobRolesByOrg,
     getJobRoleByIdFromDb,
@@ -202,5 +239,6 @@ module.exports = {
     getAllAppIds,
     getNavigationByJobRole,
     deleteNavigationByJobRole,
-    insertNavigationForJobRole
+    insertNavigationForJobRole,
+    deleteJobRolesByIds
 };

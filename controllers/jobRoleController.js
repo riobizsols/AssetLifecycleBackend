@@ -6,7 +6,8 @@ const {
     getAllAppIds,
     getNavigationByJobRole,
     deleteNavigationByJobRole,
-    insertNavigationForJobRole
+    insertNavigationForJobRole,
+    deleteJobRolesByIds
 } = require("../models/jobRoleModel");
 const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
@@ -118,6 +119,8 @@ const addJobRole = async (req, res) => {
             await insertNavigationForJobRole(job_role_id, org_id, navigationItems, user_id);
         }
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.status(201).json({ 
             message: "Job role created successfully", 
             role: newRole 
@@ -174,6 +177,8 @@ const updateJobRole = async (req, res) => {
             }
         }
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
         res.json({ 
             message: "Job role updated successfully", 
             role: updatedRole 
@@ -187,11 +192,36 @@ const updateJobRole = async (req, res) => {
     }
 };
 
+/**
+ * Delete one or more job roles
+ */
+const deleteJobRoles = async (req, res) => {
+    try {
+        const { org_id } = req.user;
+        const { ids } = req.body;
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ message: "Invalid or empty 'ids' array" });
+        }
+
+        const deletedCount = await deleteJobRolesByIds(ids, org_id);
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+        res.json({ message: `${deletedCount} job role(s) deleted`, deletedCount });
+    } catch (error) {
+        console.error("Error deleting job roles:", error);
+        if (error.code === 'ROLE_IN_USE') {
+            return res.status(409).json({ message: error.message });
+        }
+        res.status(500).json({ message: "Failed to delete job roles", error: error.message });
+    }
+};
+
 module.exports = {
     fetchJobRoles,
     addJobRole,
     updateJobRole,
     getJobRoleById,
     getAvailableAppIds,
-    getJobRoleNavigation
+    getJobRoleNavigation,
+    deleteJobRoles
 };

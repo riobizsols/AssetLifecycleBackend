@@ -15,12 +15,13 @@ function pgSslOptions(connectionString) {
   if (
     lower.includes('sslmode=disable') ||
     lower.includes('ssl=false') ||
-    process.env.DB_SSL === 'false'
+    process.env.DB_SSL === 'false' ||
+    process.env.DATABASE_SSL === 'false'
   ) {
     return false;
   }
 
-  if (process.env.DB_SSL === 'true') {
+  if (process.env.DB_SSL === 'true' || process.env.DATABASE_SSL === 'true') {
     return { rejectUnauthorized: false };
   }
 

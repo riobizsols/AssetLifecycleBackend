@@ -2,7 +2,8 @@ const {
     getAllNavigationEntries,
     createNavigationEntry,
     updateNavigationEntry,
-    bulkCreateNavigationEntries
+    bulkCreateNavigationEntries,
+    deleteNavigationEntries
 } = require("../models/jobRoleNavigationModel");
 const { generateCustomId } = require("../utils/idGenerator");
 
@@ -200,10 +201,31 @@ const bulkAddJobRoleNavigation = async (req, res) => {
     }
 };
 
+/**
+ * Delete job role navigation entries
+ */
+const deleteJobRoleNavigation = async (req, res) => {
+    try {
+        const { org_id } = req.user;
+        const { ids } = req.body;
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ message: "Invalid or empty 'ids' array" });
+        }
+
+        const deletedCount = await deleteNavigationEntries(ids, org_id);
+        res.json({ message: `${deletedCount} navigation entry(ies) deleted`, deletedCount });
+    } catch (error) {
+        console.error("Error deleting navigation entries:", error);
+        res.status(500).json({ message: "Failed to delete navigation entries", error: error.message });
+    }
+};
+
 module.exports = {
     getAllJobRoleNavigation,
     addJobRoleNavigation,
     updateJobRoleNavigation,
-    bulkAddJobRoleNavigation
+    bulkAddJobRoleNavigation,
+    deleteJobRoleNavigation
 };
 

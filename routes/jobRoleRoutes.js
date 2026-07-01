@@ -6,9 +6,7 @@ const {
   getJobRoleById,
   getAvailableAppIds,
   getJobRoleNavigation,
-  getAllJobRoleNavigation,
-  addJobRoleNavigation,
-  updateJobRoleNavigation
+  deleteJobRoles
 } = require("../controllers/jobRoleController");
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -31,5 +29,8 @@ router.post("/", protect, addJobRole);
 
 // Update existing job role
 router.put("/:jobRoleId", protect, updateJobRole);
+
+// Delete job roles (bulk)
+router.delete("/", protect, deleteJobRoles);
 
 module.exports = router;

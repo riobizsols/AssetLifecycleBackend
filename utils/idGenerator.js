@@ -1,13 +1,41 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('./dbContext');
+const { DEFAULT_ID_SEQUENCES } = require('../constants/setupDefaults');
 
 // Helper to get database (tenant or default)
 const getDb = () => getDbFromContext();
 
-exports.generateCustomId = async (tableKey, padLength = 3) => {
+const defaultPrefixesFromSetup = Object.fromEntries(
+    DEFAULT_ID_SEQUENCES.map((entry) => [entry.tableKey, entry.prefix])
+);
+
+const defaultPrefixes = {
+    ...defaultPrefixesFromSetup,
+    'vendor_sla_rec': 'VSLAR',
+    'atmf': 'ATMF',
+    'wfs': 'WFS',
+    'wfas': 'WFAS',
+    'wfjr': 'WFJR',
+    'amsbr': 'AMSBR',
+    'prop': 'PROP',
+    'atbrrc': 'ATBRRC',
+    'atmcl': 'ATMCL',
+    'aat_insp_checklist': 'AATIC',
+    'job_role_nav': 'JRN',
+    'job_role': 'JR',
+    // Scrap workflow tables
+    'wfscrapseq': 'WFSCQ',
+    'wfscrap_h': 'WFSCH',
+    'wfscrap_d': 'WFSCD',
+    'asset_scrap': 'ASCP',
+    // Existing scrap details table (legacy, used by reports/UI)
+    'asset_scrap_det': 'ASD',
+    'etc': 'ETC',
+};
+
+async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
     console.log(`🔢 Generating ID for tableKey: ${tableKey}`);
     
-    const dbPool = getDb();
     let result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
         [tableKey]
@@ -16,33 +44,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     // Auto-create entry if it doesn't exist
     if (result.rows.length === 0) {
         console.log(`⚠️ Entry for ${tableKey} not found in tblIDSequences, creating it...`);
-        
-        // Default prefix mapping for auto-creation
-        const defaultPrefixes = {
-            'vendor_sla_rec': 'VSLAR',
-            'atmf': 'ATMF',
-            'wfs': 'WFS',
-            'wfas': 'WFAS',
-            'wfjr': 'WFJR',
-            'amsbr': 'AMSBR',
-            'prop': 'PROP',
-            'atbrrc': 'ATBRRC',
-            'atmcl': 'ATMCL',
-            'aat_insp_checklist': 'AATIC',
-            'job_role_nav': 'JRN',
-            'job_role': 'JR',
-            'aat_insp_checklist': 'AATIC',
-            // Scrap workflow tables
-            'wfscrapseq': 'WFSCQ',
-            'wfscrap_h': 'WFSCH',
-            'wfscrap_d': 'WFSCD',
-            'asset_scrap': 'ASCP',
-            'scrap_asset_hist': 'SCRAP',
-            // Existing scrap details table (legacy, used by reports/UI)
-                'asset_scrap_det': 'ASD',
-                'etc': 'ETC'
-        };
-        
+
         const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
         
         // Insert new entry with last_number = 0 (or seed from existing table if needed)
@@ -207,7 +209,7 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
 
                 if (existingCheck.rows.length > 0) {
                     console.warn(`⚠️ Generated ID ${generatedId} already exists, generating new one...`);
-                    return await exports.generateCustomId(tableKey, padLength);
+                    return await generateCustomIdWithDb(dbPool, tableKey, padLength);
                 }
             } catch (e) {
                 if (e.code === '42P01') {
@@ -224,6 +226,14 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
     console.log(`✅ Final ID generated: ${generatedId}`);
     // Return formatted ID, like DPT01 or USR001
     return generatedId;
+}
+
+exports.generateCustomId = async (tableKey, padLength = 3) => {
+    return generateCustomIdWithDb(getDb(), tableKey, padLength);
+};
+
+exports.generateCustomIdForClient = async (client, tableKey, padLength = 3) => {
+    return generateCustomIdWithDb(client, tableKey, padLength);
 };
 
 

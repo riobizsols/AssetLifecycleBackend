@@ -1,0 +1,3 @@
+Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID
+2025-11-25T14:02:09.807Z,INFO,API_CALL,SupervisorApprovalController,"INFO: GET /api/maintenance-schedules/all?context=SUPERVISORAPPROVAL - Supervisor approval list fetch API called","{""method"":""GET"",""url"":""/api/maintenance-schedules/all?context=SUPERVISORAPPROVAL"",""operation"":""fetchSupervisorApprovals""}","{""status"":""Request received, fetching supervisor approvals""}",N/A,USR002
+2025-11-25T14:02:09.842Z,INFO,SUPERVISOR_APPROVALS_RETRIEVED,SupervisorApprovalController,"INFO: Retrieved 2 supervisor approvals for employee USR002","{""emp_int_id"":""USR002""}","{""count"":2,""has_approvals"":true}",75,USR002
