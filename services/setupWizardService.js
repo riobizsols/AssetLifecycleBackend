@@ -17,15 +17,11 @@ const {
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,
-  DEFAULT_JOB_ROLE_NAV,
 } = require("../constants/setupDefaults");
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
-const {
-  filterScreenApps,
-  applyNavigationGroupModel,
-  resolveNavAppId,
-} = require("../utils/navigationGroupUtils");
+const { filterScreenApps } = require("../utils/navigationGroupUtils");
+const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
 
 const DUMP_FILE_PATH = path.join(
   __dirname,
@@ -1357,6 +1353,10 @@ const seedOrgSettings = async (client, orgId, selectedKeys = [], editableSetting
   logs.push({ message: `${totalSettings} org settings applied`, scope: "org-settings" });
 };
 
+const insertDefaultJobRoleNav = async (client, orgId) => {
+  await seedDefaultJobRoleNav(client, orgId, "SetupWizard");
+};
+
 const seedJobRolesAndNavigation = async (client, orgId, logs) => {
   for (const role of DEFAULT_JOB_ROLES) {
     await client.query(
@@ -1373,39 +1373,7 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
     );
   }
 
-  for (const item of DEFAULT_JOB_ROLE_NAV) {
-    await client.query(
-      `
-        INSERT INTO "tblJobRoleNav"
-          (job_role_nav_id, org_id, int_status, job_role_id, parent_id, app_id, label, sub_menu, sequence, access_level, is_group, mob_desk)
-        VALUES
-          ($1, $2, 1, $3, $4, $5, $6, NULL, $7, $8, $9, 'D')
-        ON CONFLICT (job_role_nav_id) DO UPDATE
-        SET org_id = EXCLUDED.org_id,
-            int_status = 1,
-            job_role_id = EXCLUDED.job_role_id,
-            parent_id = EXCLUDED.parent_id,
-            app_id = EXCLUDED.app_id,
-            label = EXCLUDED.label,
-            sequence = EXCLUDED.sequence,
-            access_level = EXCLUDED.access_level,
-            is_group = EXCLUDED.is_group
-      `,
-      [
-        item.id,
-        orgId,
-        item.jobRoleId,
-        item.parentId,
-        resolveNavAppId(item),
-        item.label,
-        item.sequence,
-        item.accessLevel,
-        item.isGroup,
-      ]
-    );
-  }
-
-  await applyNavigationGroupModel(client, "SetupWizard");
+  await insertDefaultJobRoleNav(client, orgId);
 
   logs.push({ message: "System administrator role & navigation ready", scope: "roles" });
 };
@@ -1789,77 +1757,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     [rioAdminUserId]
   );
 
-  // Add navigation entries in tblJobRoleNav
-  const navEntries = [
-    ['JRN001', orgId, 1, 'JR001', null, 'DASHBOARD', 'Dashboard', null, 1, 'A', false, 'D'],
-    ['JRN002', orgId, 1, 'JR001', null, 'ASSETS', 'Assets', null, 2, 'A', false, 'D'],
-    ['JRN003', orgId, 1, 'JR001', null, null, 'Asset Assignment', null, 3, 'A', true, 'D'],
-    ['JRN004', orgId, 1, 'JR001', 'JRN003', 'DEPTASSIGNMENT', 'Department Assignment', null, 4, 'A', false, 'D'],
-    ['JRN005', orgId, 1, 'JR001', 'JRN003', 'EMPASSIGNMENT', 'Employee Assignment', null, 5, 'A', false, 'D'],
-    ['JRN006', orgId, 1, 'JR001', null, 'WORKORDERMANAGEMENT', 'Workorder Management', null, 6, 'A', false, 'D'],
-    ['JRN007', orgId, 1, 'JR001', null, 'MAINTENANCEAPPROVAL', 'Maintenance Approval', null, 7, 'A', false, 'D'],
-    ['JRN008', orgId, 1, 'JR001', null, 'SUPERVISORAPPROVAL', 'Maintenance List', null, 8, 'A', false, 'D'],
-    ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
-    ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
-    ['JRN042', orgId, 1, 'JR001', null, 'EMPLOYEE REPORT BREAKDOWN', 'Employee Report Breakdown', null, 11, 'A', false, 'D'],
-    ['JRN012', orgId, 1, 'JR001', null, null, 'Reports', null, 12, 'A', true, 'D'],
-    ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
-    ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],
-    ['JRN015', orgId, 1, 'JR001', 'JRN012', 'MAINTENANCEHISTORY', 'Maintenance History', null, 15, 'A', false, 'D'],
-    ['JRN016', orgId, 1, 'JR001', 'JRN012', 'ASSETVALUATION', 'Asset Valuation', null, 16, 'A', false, 'D'],
-    ['JRN017', orgId, 1, 'JR001', 'JRN012', 'ASSETWORKFLOWHISTORY', 'Asset Workflow History', null, 17, 'A', false, 'D'],
-    ['JRN018', orgId, 1, 'JR001', 'JRN012', 'BREAKDOWNHISTORY', 'Breakdown History', null, 18, 'A', false, 'D'],
-    ['JRN019', orgId, 1, 'JR001', 'JRN012', 'USAGEBASEDASSETREPORT', 'Usage Based Asset Report', null, 19, 'A', false, 'D'],
-    ['JRN020', orgId, 1, 'JR001', null, null, 'Settings', null, 20, 'A', true, 'D'],
-    ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
-    ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
-    ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
-    ['JRN022', orgId, 1, 'JR001', null, null, 'Master Data', null, 22, 'A', true, 'D'],
-    ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
-    ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
-    ['JRN025', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTS', 'Departments', null, 25, 'A', false, 'D'],
-    ['JRN026', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSADMIN', 'Departments Admin', null, 26, 'A', false, 'D'],
-    ['JRN027', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSASSET', 'Departments Asset type', null, 27, 'A', false, 'D'],
-    ['JRN028', orgId, 1, 'JR001', 'JRN022', 'BRANCHES', 'Branches', null, 28, 'A', false, 'D'],
-    ['JRN029', orgId, 1, 'JR001', 'JRN022', 'VENDORS', 'Vendors', null, 29, 'A', false, 'D'],
-    ['JRN030', orgId, 1, 'JR001', 'JRN022', 'PRODSERV', 'Products/Services', null, 30, 'A', false, 'D'],
-    ['JRN031', orgId, 1, 'JR001', 'JRN022', 'ROLES', 'Bulk Upload', null, 31, 'A', false, 'D'],
-    ['JRN032', orgId, 1, 'JR001', 'JRN022', 'USERS', 'User Roles', null, 32, 'A', false, 'D'],
-    ['JRN033', orgId, 0, 'JR001', 'JRN022', 'MAINTENANCESCHEDULE', 'Maintenance Schedule', null, 33, 'A', false, 'D'],
-    ['JRN034', orgId, 1, 'JR001', null, 'AUDITLOGS', 'Audit Log', null, 34, 'A', false, 'D'],
-    ['JRN035', orgId, 1, 'JR001', null, 'SCRAPSALES', 'Scrap Sales', null, 35, 'A', false, 'D'],
-    ['JRN036', orgId, 1, 'JR001', null, 'SCRAPASSETS', 'Scrap Assets', null, 36, 'A', false, 'D'],
-    ['JRN037', orgId, 1, 'JR001', null, 'GROUPASSET', 'Asset Groups', null, 37, 'A', false, 'D'],
-    ['JRN040', orgId, 1, 'JR001', null, 'EMPLOYEE TECH CERTIFICATION', 'Employee Tech Certification', null, 40, 'A', false, 'D'],
-    ['JRN041', orgId, 1, 'JR001', null, 'HR/MANAGERAPPROVAL', 'HR/Manager Approval', null, 41, 'A', false, 'D'],
-  ];
-
-  for (const entry of navEntries) {
-    await client.query(
-      `
-        INSERT INTO "tblJobRoleNav" (
-          job_role_nav_id, org_id, int_status, job_role_id, parent_id,
-          app_id, label, sub_menu, sequence, access_level,
-          is_group, mob_desk
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (job_role_nav_id) DO UPDATE
-        SET org_id = EXCLUDED.org_id,
-            int_status = EXCLUDED.int_status,
-            job_role_id = EXCLUDED.job_role_id,
-            parent_id = EXCLUDED.parent_id,
-            app_id = EXCLUDED.app_id,
-            label = EXCLUDED.label,
-            sub_menu = EXCLUDED.sub_menu,
-            sequence = EXCLUDED.sequence,
-            access_level = EXCLUDED.access_level,
-            is_group = EXCLUDED.is_group,
-            mob_desk = EXCLUDED.mob_desk
-      `,
-      entry
-    );
-  }
-
-  await applyNavigationGroupModel(client, "SetupWizard");
+  // Ensure JR001 navigation matches the current System Administrator sidebar template
+  await insertDefaultJobRoleNav(client, orgId);
 
   logs.push({ message: `Rio Admin user ${rioAdminUsername} provisioned in tblRioAdmin with user_id: ${rioAdminUserId}`, scope: "admin" });
   logs.push({ message: `Login credentials: username=${rioAdminUsername}, password=${initialPassword}`, scope: "admin" });

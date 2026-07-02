@@ -13,6 +13,7 @@ const {
 const { seedRequiredMasterData, alignTenantColumnsFromReference } = require('./tenantReferenceDataService');
 const { finalizeTenantForeignKeys } = require('./tenantForeignKeyService');
 const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
+const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
@@ -935,28 +936,14 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No audit log config copied (table may be empty or columns don't match)`);
     }
 
-    // 6. Copy job role navigation for JR001 with remapped JRN### ids
-    console.log(`[TenantSetup] Copying job role navigation for JR001 from reference database...`);
+    // 6. Seed JR001 navigation from the System Administrator sidebar template
+    console.log(`[TenantSetup] Seeding job role navigation for JR001 from DEFAULT_JOB_ROLE_NAV...`);
     try {
-      const navResult = await copyJobRoleNavigationForRole(
-        referenceClient,
-        tenantClient,
-        orgId,
-        'JR001',
-      );
-      if (navResult.skipped) {
-        console.log(`[TenantSetup] ⚠️ tblJobRoleNav does not exist in reference database, skipping...`);
-        await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
-      } else {
-        console.log(`[TenantSetup] ✅ Copied ${navResult.copied} job role navigation items for JR001 (JRN remapped)`);
-        if ((navResult.copied || 0) === 0) {
-          await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
-        }
-      }
+      const navCount = await seedDefaultJobRoleNav(tenantClient, orgId, 'TenantSetup');
+      console.log(`[TenantSetup] ✅ Seeded ${navCount} job role navigation items for JR001`);
     } catch (err) {
-      console.error(`[TenantSetup] ❌ Error copying job role navigation:`, err.message);
+      console.error(`[TenantSetup] ❌ Error seeding job role navigation:`, err.message);
       console.log(`[TenantSetup] ⚠️ Continuing without job role navigation...`);
-      await seedDefaultJobRoleNavigationIfMissing(tenantClient, orgId);
     }
 
     // 7. Copy all maintenance status from tblMaintStatus (reference database)
@@ -1101,7 +1088,64 @@ async function copyJobRoleNavFromReference(referenceClient, tenantClient, orgId,
 }
 
 /**
- * Ensure tenant JR001 navigation matches reference (full menu like hospitality tenants).
+ * Insert only JR001 nav rows for app_ids missing on the tenant.
+ * Does not overwrite existing rows (preserves custom menu grouping).
+ */
+async function insertMissingJobRoleNavFromReference(referenceClient, tenantClient, orgId, missingAppIds) {
+  if (!missingAppIds?.length) {
+    return { copied: 0, total: 0, skipped: true };
+  }
+
+  const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
+  const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
+  const commonColumns = tenantColumns.filter((col) => refColumns.includes(col));
+  if (!commonColumns.length) {
+    return { copied: 0, total: 0, skipped: true, reason: 'no common columns' };
+  }
+
+  const selectColumns = commonColumns.map((col) => `"${col}"`).join(', ');
+  const placeholders = missingAppIds.map((_, i) => `$${i + 1}`).join(', ');
+  const navRows = await referenceClient.query(
+    `
+      SELECT ${selectColumns}
+      FROM "tblJobRoleNav"
+      WHERE "job_role_id" = 'JR001'
+        AND "int_status" = 1
+        AND "app_id" IN (${placeholders})
+    `,
+    missingAppIds,
+  );
+
+  let copied = 0;
+  for (const row of navRows.rows) {
+    const values = commonColumns.map((col) => {
+      if (col === 'org_id' && orgId) return orgId;
+      return row[col];
+    });
+    const valuePlaceholders = values.map((_, i) => `$${i + 1}`).join(', ');
+    const columnNames = commonColumns.map((col) => `"${col}"`).join(', ');
+
+    try {
+      const result = await tenantClient.query(
+        `
+          INSERT INTO "tblJobRoleNav" (${columnNames})
+          VALUES (${valuePlaceholders})
+          ON CONFLICT (job_role_nav_id) DO NOTHING
+        `,
+        values,
+      );
+      if (result.rowCount > 0) copied += 1;
+    } catch (insertErr) {
+      console.warn(`[TenantSetup] ⚠️ Error inserting missing nav row:`, insertErr.message);
+    }
+  }
+
+  return { copied, total: navRows.rows.length, skipped: false };
+}
+
+/**
+ * Keep JR001 navigation complete without overwriting custom tenant menu layout.
+ * Empty tenants get DEFAULT_JOB_ROLE_NAV; existing tenants only gain missing app rows.
  */
 async function ensureJobRoleNavigation(client, orgId) {
   if (!client || !orgId) return { synced: false, count: 0 };
@@ -1113,18 +1157,12 @@ async function ensureJobRoleNavigation(client, orgId) {
   `);
   const tenantCount = tenantCountResult.rows[0]?.count || 0;
 
-  const referenceDbUrl = process.env.GENERIC_URL;
+  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
   if (referenceDbUrl) {
     const referenceClient = new Client(pgClientOptsFromDatabaseUrl(referenceDbUrl));
 
     try {
       await referenceClient.connect();
-      const refCountResult = await referenceClient.query(`
-        SELECT COUNT(*)::int AS count
-        FROM "tblJobRoleNav"
-        WHERE job_role_id = 'JR001' AND int_status = 1
-      `);
-      const refCount = refCountResult.rows[0]?.count || 0;
 
       const tenantApps = await client.query(`
         SELECT DISTINCT app_id FROM "tblJobRoleNav"
@@ -1136,24 +1174,33 @@ async function ensureJobRoleNavigation(client, orgId) {
         SELECT DISTINCT app_id FROM "tblJobRoleNav"
         WHERE job_role_id = 'JR001' AND int_status = 1
       `);
-      const missingApps = refApps.rows.filter((r) => !tenantAppIds.has(r.app_id));
+      const missingAppIds = refApps.rows
+        .filter((r) => r.app_id && !tenantAppIds.has(r.app_id))
+        .map((r) => r.app_id);
 
-      if (refCount > 0 && (tenantCount < refCount || missingApps.length > 0)) {
-        console.log(
-          `[TenantSetup] JR001 navigation incomplete for ${orgId} (${tenantCount}/${refCount}, missing ${missingApps.length} apps); syncing from reference...`,
-        );
-        const syncResult = await copyJobRoleNavFromReference(referenceClient, client, orgId, { upsert: true });
-        console.log(`[TenantSetup] ✅ Synced JR001 navigation (${syncResult.copied}/${syncResult.total} rows)`);
-
-        // Copy tblApps rows for any newly added navigation app_ids
+      if (tenantCount === 0) {
+        console.log(`[TenantSetup] JR001 navigation empty for ${orgId}; seeding default template...`);
+        const seeded = await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
         await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+        return { synced: true, count: seeded };
+      }
 
+      if (missingAppIds.length > 0) {
+        console.log(
+          `[TenantSetup] JR001 missing ${missingAppIds.length} app(s) for ${orgId}; inserting without overwriting layout...`,
+        );
+        const syncResult = await insertMissingJobRoleNavFromReference(
+          referenceClient,
+          client,
+          orgId,
+          missingAppIds,
+        );
+        console.log(`[TenantSetup] ✅ Inserted missing JR001 nav rows (${syncResult.copied}/${syncResult.total})`);
+        await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
         return { synced: true, count: syncResult.copied };
       }
 
-      if (tenantCount > 0) {
-        return { synced: false, count: tenantCount };
-      }
+      return { synced: false, count: tenantCount };
     } catch (err) {
       console.warn(`[TenantSetup] Reference navigation sync failed: ${err.message}`);
     } finally {
@@ -1161,7 +1208,12 @@ async function ensureJobRoleNavigation(client, orgId) {
     }
   }
 
-  return seedDefaultJobRoleNavigationIfMissing(client, orgId);
+  if (tenantCount === 0) {
+    const seeded = await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
+    return { synced: true, count: seeded };
+  }
+
+  return { synced: false, count: tenantCount };
 }
 
 /**
@@ -1197,41 +1249,7 @@ async function seedDefaultJobRoleNavigationIfMissing(client, orgId) {
     );
   }
 
-  let inserted = 0;
-  for (const item of DEFAULT_JOB_ROLE_NAV) {
-    await client.query(
-      `
-        INSERT INTO "tblJobRoleNav"
-          (job_role_nav_id, org_id, int_status, job_role_id, parent_id, app_id, label, sub_menu, sequence, access_level, is_group, mob_desk)
-        VALUES
-          ($1, $2, 1, $3, $4, $5, $6, NULL, $7, $8, $9, 'D')
-        ON CONFLICT (job_role_nav_id) DO UPDATE
-        SET org_id = EXCLUDED.org_id,
-            int_status = 1,
-            job_role_id = EXCLUDED.job_role_id,
-            parent_id = EXCLUDED.parent_id,
-            app_id = EXCLUDED.app_id,
-            label = EXCLUDED.label,
-            sequence = EXCLUDED.sequence,
-            access_level = EXCLUDED.access_level,
-            is_group = EXCLUDED.is_group,
-            mob_desk = 'D'
-      `,
-      [
-        item.id,
-        orgId,
-        item.jobRoleId,
-        item.parentId,
-        item.appId,
-        item.label,
-        item.sequence,
-        item.accessLevel,
-        item.isGroup,
-      ],
-    );
-    inserted += 1;
-  }
-
+  const inserted = await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
   console.log(`[TenantSetup] ✅ Seeded ${inserted} default navigation items for JR001`);
   return { seeded: true, count: inserted };
 }
