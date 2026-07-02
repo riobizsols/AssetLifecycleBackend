@@ -91,17 +91,31 @@ const createNavigation = async (req, res) => {
             mobile_desktop
         } = req.body;
 
-        if (!job_role_id || !app_id || !label) {
+        if (!job_role_id || !label) {
             return res.status(400).json({
                 success: false,
-                message: 'Missing required fields: job_role_id, app_id, label'
+                message: 'Missing required fields: job_role_id, label'
+            });
+        }
+
+        if (!is_group && !app_id) {
+            return res.status(400).json({
+                success: false,
+                message: 'Missing required field app_id for navigation items'
+            });
+        }
+
+        if (is_group && !label?.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: 'Group entries require a label'
             });
         }
 
         const newItem = await createNavigationItem({
             job_role_id,
             parent_id,
-            app_id,
+            app_id: is_group ? (app_id || null) : app_id,
             label,
             is_group: is_group || false,
             seq: seq || 10,

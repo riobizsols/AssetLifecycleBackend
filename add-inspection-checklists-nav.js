@@ -6,6 +6,7 @@
 
 const { getDb } = require('./utils/dbContext');
 const { generateCustomId } = require('./utils/idGenerator');
+const { findAllGroupParents } = require('./utils/navigationParentUtils');
 
 const getDbPool = () => getDb();
 
@@ -46,30 +47,17 @@ const addInspectionChecklistsNav = async () => {
       console.log('   ✓ Already in tblApps');
     }
     
-    // Step 2: Get MASTERDATA parent ID
-    console.log('\n📋 Step 2: Finding MASTERDATA parent in tblJobRoleNav...');
-    const parentResult = await dbPool.query(
-      'SELECT "job_role_nav_id" FROM "tblJobRoleNav" WHERE "app_id" = $1 LIMIT 1',
-      ['MASTERDATA']
-    );
-    
-    if (parentResult.rows.length === 0) {
-      console.log('   ❌ MASTERDATA parent not found in tblJobRoleNav');
+    // Step 2–3: Add under Master Data group per job role
+    console.log('\n📋 Step 2: Finding Master Data parents in tblJobRoleNav...');
+    const jobRoles = await findAllGroupParents(dbPool, 'MASTERDATA');
+
+    if (jobRoles.length === 0) {
+      console.log('   ❌ Master Data parent not found in tblJobRoleNav');
       process.exit(1);
     }
-    
-    const masterdataParentId = parentResult.rows[0].job_role_nav_id;
-    console.log(`   ✓ Found MASTERDATA parent: ${masterdataParentId}\n`);
-    
-    // Step 3: Add to tblJobRoleNav for all job roles with MASTERDATA
+
+    console.log(`   Found ${jobRoles.length} Master Data group(s)\n`);
     console.log('📋 Step 3: Adding INSPECTIONCHECKLISTS to tblJobRoleNav...');
-    const jobRolesResult = await dbPool.query(
-      'SELECT DISTINCT "job_role_id", "org_id" FROM "tblJobRoleNav" WHERE "app_id" = $1',
-      ['MASTERDATA']
-    );
-    
-    const jobRoles = jobRolesResult.rows;
-    console.log(`   Found ${jobRoles.length} job roles with MASTERDATA access\n`);
     
     let totalAdded = 0;
     
@@ -92,7 +80,7 @@ const addInspectionChecklistsNav = async () => {
             navId,
             role.job_role_id,
             role.org_id,
-            masterdataParentId,
+            role.job_role_nav_id,
             'INSPECTIONCHECKLISTS',
             'Inspection Checklists',
             null,

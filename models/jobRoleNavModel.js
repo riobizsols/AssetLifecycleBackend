@@ -150,8 +150,8 @@ const getNavigationStructure = async (job_role_id, platform = 'D') => {
             children: []
         });
         
-        // Top-level items are those without parents OR are groups
-        if (!item.parent_id || item.is_group) {
+        // Top-level items are those without parents only (groups can be nested)
+        if (!item.parent_id) {
             topLevelItems.push(itemMap.get(item.id));
         }
     });
@@ -211,6 +211,28 @@ const getUserNavigation = async (user_id, platform = 'D') => {
 };
 
 // Get combined navigation structure for multiple job roles
+const normalizeGroupLabel = (label) =>
+    String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Legacy group menu labels map to app_id for permission checks after nav-group migration. */
+const GROUP_VIRTUAL_APP_IDS = {
+    'admin settings': 'ADMINSETTINGS',
+    'master data': 'MASTERDATA',
+    reports: 'REPORTS',
+    'asset assignment': 'ASSETASSIGNMENT',
+    inspection: 'INSPECTION',
+};
+
+const getCombineKey = (item) => {
+    if (item.app_id != null && item.app_id !== '') {
+        return String(item.app_id);
+    }
+    if (item.is_group) {
+        return `group:${normalizeGroupLabel(item.label)}`;
+    }
+    return `nav:${item.id}`;
+};
+
 const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
     try {
         // Get navigation items for all job roles
@@ -240,68 +262,80 @@ const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
         
         console.log(`[JobRoleNavModel] Navigation items from database: ${allNavigationItems.rows.length}`);
 
-        // Group items by app_id and combine permissions
+        const rows = allNavigationItems.rows;
+        const rawIdToCombineKey = new Map();
+        rows.forEach((item) => {
+            rawIdToCombineKey.set(item.id, getCombineKey(item));
+        });
+
+        const resolveParentCombineKey = (parentId) => {
+            if (!parentId) return null;
+            return rawIdToCombineKey.get(parentId) || null;
+        };
+
+        const accessRank = { A: 3, D: 2, V: 1 };
         const combinedItems = {};
-        
-        allNavigationItems.rows.forEach(item => {
-            const appId = item.app_id;
-            
-            if (!combinedItems[appId]) {
-                // First time seeing this app_id
-                combinedItems[appId] = {
+
+        rows.forEach((item) => {
+            const combineKey = getCombineKey(item);
+            const parentKey = resolveParentCombineKey(item.parent_id);
+            const groupLabel = normalizeGroupLabel(item.label);
+            const virtualAppId = item.is_group
+                ? GROUP_VIRTUAL_APP_IDS[groupLabel] || null
+                : item.app_id;
+
+            if (!combinedItems[combineKey]) {
+                combinedItems[combineKey] = {
                     id: item.id,
+                    combineKey,
                     job_role_id: item.job_role_id,
-                    parent_id: item.parent_id,
-                    app_id: item.app_id,
+                    parent_id: parentKey,
+                    app_id: virtualAppId ?? item.app_id,
                     label: item.label,
                     is_group: item.is_group,
                     seq: item.seq,
                     access_level: item.access_level,
                     mobile_desktop: item.mobile_desktop,
                     job_role_name: item.job_role_name,
-                    roles: [item.job_role_name]
+                    roles: [item.job_role_name],
                 };
             } else {
-                // Combine permissions - use highest access level
-                const currentAccess = combinedItems[appId].access_level;
+                const currentAccess = combinedItems[combineKey].access_level;
                 const newAccess = item.access_level;
-                
-                // Access level hierarchy: A (Full) > D (Read) > V (View) > NULL (No Access)
-                const accessRank = { A: 3, D: 2, V: 1 };
                 const currentRank = accessRank[currentAccess] || 0;
                 const newRank = accessRank[newAccess] || 0;
                 if (newRank > currentRank) {
-                    combinedItems[appId].access_level = newAccess;
+                    combinedItems[combineKey].access_level = newAccess;
                 }
-                
-                // Add role name if not already present
-                if (!combinedItems[appId].roles.includes(item.job_role_name)) {
-                    combinedItems[appId].roles.push(item.job_role_name);
+
+                if (!combinedItems[combineKey].parent_id && parentKey) {
+                    combinedItems[combineKey].parent_id = parentKey;
+                }
+
+                if (!combinedItems[combineKey].roles.includes(item.job_role_name)) {
+                    combinedItems[combineKey].roles.push(item.job_role_name);
                 }
             }
         });
 
-        // Convert to array and sort
         const navigationItems = Object.values(combinedItems).sort((a, b) => a.seq - b.seq);
-        
-        // Build hierarchical structure
+
         const itemMap = new Map();
         const topLevelItems = [];
-        
-        // First pass: create all items
-        navigationItems.forEach(item => {
-            itemMap.set(item.id, { ...item, children: [] });
+
+        navigationItems.forEach((item) => {
+            itemMap.set(item.combineKey, { ...item, children: [] });
         });
-        
-        // Second pass: build hierarchy
-        navigationItems.forEach(item => {
+
+        navigationItems.forEach((item) => {
+            const node = itemMap.get(item.combineKey);
             if (item.parent_id && itemMap.has(item.parent_id)) {
-                itemMap.get(item.parent_id).children.push(itemMap.get(item.id));
+                itemMap.get(item.parent_id).children.push(node);
             } else {
-                topLevelItems.push(itemMap.get(item.id));
+                topLevelItems.push(node);
             }
         });
-        
+
         return topLevelItems;
     } catch (error) {
         console.error('Error getting combined navigation structure:', error);
