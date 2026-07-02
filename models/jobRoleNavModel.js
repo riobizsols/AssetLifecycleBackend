@@ -1,5 +1,9 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const {
+    applyFullAccessToNavigationTree,
+    SYSTEM_ADMIN_JOB_ROLE_ID,
+} = require('../utils/systemAdmin');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -200,9 +204,13 @@ const getUserNavigation = async (user_id, platform = 'D') => {
         console.log(`[JobRoleNavModel] Job role IDs: ${job_role_ids.join(', ')}`);
         
         // Get navigation for all roles and combine permissions
-        const navigation = await getCombinedNavigationStructure(job_role_ids, platform);
+        let navigation = await getCombinedNavigationStructure(job_role_ids, platform);
         console.log(`[JobRoleNavModel] Navigation items returned: ${navigation.length}`);
-        
+
+        if (job_role_ids.includes(SYSTEM_ADMIN_JOB_ROLE_ID)) {
+            navigation = applyFullAccessToNavigationTree(navigation);
+        }
+
         return navigation;
     } catch (error) {
         console.error(`[JobRoleNavModel] Error in getUserNavigation:`, error);
