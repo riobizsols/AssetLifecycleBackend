@@ -18,11 +18,11 @@ function buildAuthCacheKey(decoded) {
 
 async function resolveDatabasePool(decoded, req) {
     const db = require('../config/db');
-    const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+    const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
     const { getTenantPool, checkTenantExists } = require('../services/tenantService');
 
     const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
-    const subdomain = extractSubdomain(hostname);
+    const subdomain = extractTenantSubdomain(hostname);
 
     // Subdomain takes precedence over use_default_db (multi-tenant routing)
     if (subdomain) {

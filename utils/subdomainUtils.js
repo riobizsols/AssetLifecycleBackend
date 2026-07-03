@@ -46,6 +46,22 @@ function extractSubdomain(hostname) {
   return null;
 }
 
+function isReservedSubdomain(subdomain) {
+  if (!subdomain) return false;
+  return RESERVED_SUBDOMAINS.includes(String(subdomain).trim().toLowerCase());
+}
+
+/**
+ * Subdomain for tenant routing — ignores reserved hosts like web/www/api.
+ */
+function extractTenantSubdomain(hostname) {
+  const subdomain = extractSubdomain(hostname);
+  if (!subdomain || isReservedSubdomain(subdomain)) {
+    return null;
+  }
+  return subdomain;
+}
+
 /**
  * Get org_id from subdomain
  * @param {string} subdomain - The subdomain
@@ -231,6 +247,8 @@ async function generateUniqueSubdomain(orgName) {
 
 module.exports = {
   extractSubdomain,
+  extractTenantSubdomain,
+  isReservedSubdomain,
   getOrgIdFromSubdomain,
   generateSubdomain,
   validateSubdomain,

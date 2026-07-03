@@ -70,11 +70,11 @@ const login = async (req, res) => {
         }));
 
         // Step 2: Check if subdomain-based login or normal database login
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+        const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
         
         // Try multiple ways to get hostname (for different proxy configurations)
         const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
-        const subdomain = extractSubdomain(hostname);
+        const subdomain = extractTenantSubdomain(hostname);
         
         logger.debug(`[AuthController] 🔍 Login Debug Info:`);
         logger.debug(`  - req.get('host'): ${req.get('host')}`);
@@ -446,11 +446,11 @@ const forgotPassword = async (req, res) => {
         }
         
         // Extract subdomain from request to identify tenant
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+        const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
         const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
         console.log('[ForgotPassword] Hostname extracted:', hostname);
         
-        const subdomain = extractSubdomain(hostname);
+        const subdomain = extractTenantSubdomain(hostname);
         console.log('[ForgotPassword] Subdomain extracted:', subdomain);
         
         let tenantPool = null;
@@ -578,11 +578,11 @@ const resetPassword = async (req, res) => {
         }
         
         // Extract subdomain from request to identify tenant
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+        const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
         const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
         console.log('[ResetPassword] Hostname extracted:', hostname);
         
-        const subdomain = extractSubdomain(hostname);
+        const subdomain = extractTenantSubdomain(hostname);
         console.log('[ResetPassword] Subdomain extracted:', subdomain);
         
         let tenantPool = null;

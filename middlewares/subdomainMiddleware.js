@@ -4,7 +4,7 @@
  * Extracts subdomain from request and sets org_id in request context
  */
 
-const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
+const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
 
 /**
  * Middleware to extract subdomain and set org_id in request
@@ -13,7 +13,7 @@ async function subdomainMiddleware(req, res, next) {
   try {
     // Extract subdomain from hostname
     const hostname = req.get('host') || req.hostname;
-    const subdomain = extractSubdomain(hostname);
+    const subdomain = extractTenantSubdomain(hostname);
     
     // Store subdomain in request
     req.subdomain = subdomain;
