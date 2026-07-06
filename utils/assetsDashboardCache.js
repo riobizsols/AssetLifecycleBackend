@@ -69,9 +69,13 @@ async function getOrSet(key, ttlMs, fetcher) {
 
 async function invalidateOrgApiCache(orgId) {
   if (!orgId) return;
-  const prefix = cacheService.buildKey('api', orgId);
-  memoryInvalidatePrefix(prefix);
-  await cacheService.invalidateByPrefix(prefix);
+  const orgNeedle = `:${orgId}:`;
+  for (const key of memoryL1.keys()) {
+    if (key.startsWith('api:') && key.includes(orgNeedle)) {
+      memoryL1.delete(key);
+    }
+  }
+  await cacheService.invalidateByPrefix(`api:`);
 }
 
 module.exports = {

@@ -1,7 +1,14 @@
 const model = require("../models/assetTypeModel");
 const operationalCache = require('../utils/operationalCache');
+const assignmentCache = require('../utils/assignmentCache');
 const { generateCustomId } = require("../utils/idGenerator");
 const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
+
+const invalidateAssetTypeCaches = (req) => {
+    const orgId = req.user?.org_id;
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+    assignmentCache.invalidateOrgCaches(orgId).catch(() => {});
+};
 
 // Helper function to convert parent asset type text to ID
 const convertParentAssetTypeToId = async (parentValue, org_id) => {
@@ -153,6 +160,8 @@ const addAssetType = async (req, res) => {
             console.log('⚠️ No properties provided or properties array is empty');
         }
 
+
+        invalidateAssetTypeCaches(req);
 
         res.status(201).json({
             message: "Asset type added successfully",
@@ -404,6 +413,8 @@ const updateAssetType = async (req, res) => {
         }
 
 
+        invalidateAssetTypeCaches(req);
+
         res.status(200).json({
             success: true,
             message: "Asset type updated successfully",
@@ -473,6 +484,8 @@ const deleteAssetType = async (req, res) => {
         console.log('Delete result:', result.rows);
         
         if (result.rows.length > 0) {
+            invalidateAssetTypeCaches(req);
+
             res.status(200).json({ 
                 message: "Asset type deleted successfully",
                 deleted: result.rows[0]
@@ -852,6 +865,10 @@ const commitBulkUpload = async (req, res) => {
         };
         
         console.log('🔍 Commit results:', results);
+
+        if (inserted > 0 || updated > 0) {
+            invalidateAssetTypeCaches(req);
+        }
         
         res.status(200).json({
             success: true,

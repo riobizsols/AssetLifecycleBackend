@@ -67,14 +67,58 @@ const getAllUsersWithJobRoles = async () => {
     return result.rows;
 };
 
-// Check if employee exists in tblUsers by emp_int_id
-const checkEmployeeInUsers = async (emp_int_id) => {
+// Resolve the user account linked to an employee (prefers active, then most recently updated).
+const getEmployeeUserAccount = async (emp_int_id, { activeOnly = false } = {}) => {
     const dbPool = getDb();
     const result = await dbPool.query(
-        `SELECT user_id, emp_int_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`,
-        [emp_int_id]
+        `SELECT user_id, emp_int_id, int_status, job_role_id
+         FROM "tblUsers"
+         WHERE emp_int_id = $1
+           AND ($2::boolean = false OR int_status = 1)
+         ORDER BY
+            (EXISTS (
+                SELECT 1 FROM "tblUserJobRoles" ujr
+                WHERE ujr.user_id = "tblUsers".user_id
+            )) DESC,
+            int_status DESC,
+            changed_on DESC NULLS LAST,
+            user_id DESC
+         LIMIT 1`,
+        [emp_int_id, activeOnly],
     );
     return result.rows[0] || null;
+};
+
+const consolidateEmployeeUserAccounts = async (emp_int_id, keepUserId, changed_by = 'SYSTEM') => {
+    if (!emp_int_id || !keepUserId) return;
+    const dbPool = getDb();
+    await dbPool.query(
+        `UPDATE "tblUsers"
+         SET int_status = 0,
+             changed_by = $3,
+             changed_on = CURRENT_TIMESTAMP
+         WHERE emp_int_id = $1
+           AND user_id <> $2
+           AND int_status = 1`,
+        [emp_int_id, keepUserId, changed_by],
+    );
+};
+
+const reactivateUser = async (user_id, changed_by = 'SYSTEM') => {
+    const dbPool = getDb();
+    const result = await dbPool.query(
+        `UPDATE "tblUsers"
+         SET int_status = 1, changed_by = $2, changed_on = CURRENT_TIMESTAMP
+         WHERE user_id = $1
+         RETURNING user_id, emp_int_id, int_status`,
+        [user_id, changed_by],
+    );
+    return result.rows[0] || null;
+};
+
+// Check if employee exists in tblUsers by emp_int_id
+const checkEmployeeInUsers = async (emp_int_id) => {
+    return getEmployeeUserAccount(emp_int_id, { activeOnly: true });
 };
 
 // Check if user exists in tblUsers by email
@@ -82,7 +126,7 @@ const checkUserByEmail = async (email) => {
     if (!email) return null;
     const dbPool = getDb();
     const result = await dbPool.query(
-        `SELECT user_id, emp_int_id, email FROM "tblUsers" WHERE email = $1 AND int_status = 1`,
+        `SELECT user_id, emp_int_id, email, int_status FROM "tblUsers" WHERE email = $1 ORDER BY int_status DESC, changed_on DESC NULLS LAST LIMIT 1`,
         [email]
     );
     return result.rows[0] || null;
@@ -114,6 +158,18 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         
         const employee = employeeResult.rows[0];
         
+        const existingUserByEmp = await getEmployeeUserAccount(emp_int_id);
+        if (existingUserByEmp) {
+            const reactivated = await reactivateUser(existingUserByEmp.user_id, created_by);
+            console.log(
+                `Reusing existing user ${existingUserByEmp.user_id} for employee ${emp_int_id}`,
+            );
+            return {
+                ...reactivated,
+                generatedPassword: null,
+            };
+        }
+        
         // Use employee's org_id if provided, otherwise use the passed org_id
         const finalOrgId = employee.org_id || org_id;
         
@@ -131,6 +187,7 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
             const updateResult = await dbPool.query(
                 `UPDATE "tblUsers" 
                  SET emp_int_id = $1, 
+                     int_status = 1,
                      changed_by = $2, 
                      changed_on = CURRENT_TIMESTAMP
                  WHERE user_id = $3
@@ -232,6 +289,30 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
     }
 };
 
+// Keep tblUsers.job_role_id aligned with the latest role in tblUserJobRoles.
+const syncPrimaryJobRole = async (user_id, changed_by = 'SYSTEM') => {
+    const dbPool = getDb();
+    const result = await dbPool.query(
+        `SELECT job_role_id
+         FROM "tblUserJobRoles"
+         WHERE user_id = $1
+         ORDER BY user_job_role_id DESC
+         LIMIT 1`,
+        [user_id],
+    );
+
+    const primaryRoleId = result.rows[0]?.job_role_id || null;
+
+    await dbPool.query(
+        `UPDATE "tblUsers"
+         SET job_role_id = $1, changed_by = $2, changed_on = CURRENT_TIMESTAMP
+         WHERE user_id = $3`,
+        [primaryRoleId, changed_by, user_id],
+    );
+
+    return primaryRoleId;
+};
+
 // Assign job role to user (insert into tblUserJobRoles and update tblUsers.job_role_id)
 const assignJobRole = async (user_id, job_role_id, assigned_by) => {
     try {
@@ -252,16 +333,9 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
             [user_job_role_id, user_id, job_role_id]
         );
         
-        // Update job_role_id in tblUsers only if it's null (set to first role assigned)
-        // This allows users to have multiple roles while maintaining a primary role in tblUsers
-        await dbPool.query(
-            `UPDATE "tblUsers" 
-             SET job_role_id = COALESCE(job_role_id, $1), changed_by = $2, changed_on = CURRENT_TIMESTAMP
-             WHERE user_id = $3 AND job_role_id IS NULL`,
-            [job_role_id, assigned_by, user_id]
-        );
+        await syncPrimaryJobRole(user_id, assigned_by);
         
-        console.log(`Updated tblUsers.job_role_id to ${job_role_id} for user ${user_id} (if it was null)`);
+        console.log(`Synced tblUsers.job_role_id for user ${user_id}`);
         console.log('Role assignment result:', result.rows[0]);
         return result.rows[0];
     } catch (error) {
@@ -276,32 +350,24 @@ const getEmployeeJobRoles = async (emp_int_id) => {
         console.log(`Querying roles for emp_int_id: ${emp_int_id}`);
         
         const dbPool = getDb();
-        // First, let's check if the employee exists in tblUsers
-        const userCheck = await dbPool.query(
-            `SELECT user_id, emp_int_id FROM "tblUsers" WHERE emp_int_id = $1 AND int_status = 1`,
-            [emp_int_id]
-        );
+        const userAccount = await getEmployeeUserAccount(emp_int_id);
         
-        console.log(`User check result for emp_int_id ${emp_int_id}:`, userCheck.rows);
+        console.log(`User check result for emp_int_id ${emp_int_id}:`, userAccount);
         
-        if (userCheck.rows.length === 0) {
+        if (!userAccount) {
             console.log(`No user found for emp_int_id ${emp_int_id}`);
             return [];
         }
-        
-        const user_id = userCheck.rows[0].user_id;
-        console.log(`Found user_id: ${user_id} for emp_int_id: ${emp_int_id}`);
-        
-        // Now get the roles for this user
+
         const result = await dbPool.query(
             `SELECT ujr.user_job_role_id, ujr.user_id, ujr.job_role_id, jr.text as job_role_name
              FROM "tblUserJobRoles" ujr
              JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
              WHERE ujr.user_id = $1
              ORDER BY ujr.user_job_role_id DESC`,
-            [user_id]
+            [userAccount.user_id],
         );
-        
+
         console.log(`Query result for emp_int_id ${emp_int_id}:`, result.rows);
         return result.rows;
     } catch (error) {
@@ -362,8 +428,11 @@ const deleteUserRole = async (user_job_role_id) => {
             throw new Error(`Role assignment ${user_job_role_id} not found`);
         }
         
+        const deleted = result.rows[0];
+        await syncPrimaryJobRole(deleted.user_id);
+        
         console.log(`Deleted role assignment: ${user_job_role_id}`);
-        return result.rows[0];
+        return deleted;
     } catch (error) {
         console.error(`Error in deleteUserRole for ${user_job_role_id}:`, error);
         throw error;
@@ -388,8 +457,11 @@ const updateUserRole = async (user_job_role_id, new_job_role_id) => {
             throw new Error(`Role assignment ${user_job_role_id} not found`);
         }
         
+        const updated = result.rows[0];
+        await syncPrimaryJobRole(updated.user_id);
+        
         console.log(`Updated role assignment: ${user_job_role_id}`);
-        return result.rows[0];
+        return updated;
     } catch (error) {
         console.error(`Error in updateUserRole for ${user_job_role_id}:`, error);
         throw error;
@@ -442,6 +514,9 @@ module.exports = {
     updateUserJobRole,
     getAllUsersWithJobRoles,
     checkEmployeeInUsers,
+    getEmployeeUserAccount,
+    reactivateUser,
+    consolidateEmployeeUserAccounts,
     checkUserByEmail,
     createUserForEmployee,
     assignJobRole,
@@ -450,5 +525,6 @@ module.exports = {
     deleteUserRole,
     updateUserRole,
     getUserRoleCount,
-    deactivateUser
-}; 
+    deactivateUser,
+    syncPrimaryJobRole,
+};
