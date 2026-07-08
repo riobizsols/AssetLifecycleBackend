@@ -62,10 +62,35 @@ const getAllEmployeesWithJobRoles = async () => {
             e.middle_name, e.full_name, e.email_id, e.dept_id, e.phone_number, 
             e.employee_type, e.joining_date, e.releiving_date, e.language_code, 
             e.int_status, e.created_by, e.created_on, e.changed_by, e.changed_on,
-            u.user_id, u.job_role_id, jr.text as job_role_name, jr.job_function
+            canonical.user_id,
+            COALESCE(roles.primary_job_role_id, canonical.job_role_id) AS job_role_id,
+            COALESCE(roles.job_role_names, jr_fallback.text) AS job_role_name,
+            COALESCE(roles.job_function, jr_fallback.job_function) AS job_function
         FROM "tblEmployees" e
-        LEFT JOIN "tblUsers" u ON e.emp_int_id = u.emp_int_id AND u.int_status = 1
-        LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
+        LEFT JOIN LATERAL (
+            SELECT u.user_id, u.job_role_id
+            FROM "tblUsers" u
+            WHERE u.emp_int_id = e.emp_int_id
+            ORDER BY
+                (EXISTS (
+                    SELECT 1 FROM "tblUserJobRoles" ujr
+                    WHERE ujr.user_id = u.user_id
+                )) DESC,
+                u.int_status DESC,
+                u.changed_on DESC NULLS LAST,
+                u.user_id DESC
+            LIMIT 1
+        ) canonical ON true
+        LEFT JOIN LATERAL (
+            SELECT
+                (ARRAY_AGG(jr.job_role_id ORDER BY ujr.user_job_role_id DESC))[1] AS primary_job_role_id,
+                STRING_AGG(jr.text, ', ' ORDER BY ujr.user_job_role_id DESC) AS job_role_names,
+                (ARRAY_AGG(jr.job_function ORDER BY ujr.user_job_role_id DESC))[1] AS job_function
+            FROM "tblUserJobRoles" ujr
+            JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
+            WHERE ujr.user_id = canonical.user_id
+        ) roles ON canonical.user_id IS NOT NULL
+        LEFT JOIN "tblJobRoles" jr_fallback ON jr_fallback.job_role_id = canonical.job_role_id
         WHERE e.int_status = 1
         ORDER BY e.name
     `;

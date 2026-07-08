@@ -472,8 +472,9 @@ const createDirectInspection = async (
     ais_id,
     aatif_id: frequency.aatif_id,
     asset_id: asset.asset_id,
-    group_id: asset.group_id || null,
-    pl_sch_date: scheduledDate,
+    vendor_id: asset.vendor_id || null,
+    emp_int_id: frequency.emp_int_id || null,
+    act_insp_st_date: scheduledDate,
     status: 'PN', // Pending
     created_by: 'SYSTEM',
     org_id,
@@ -595,6 +596,10 @@ const updateInspection = async (req, res) => {
         }
     });
 
+    if (updateData.inspector_phone !== undefined && filteredUpdate.inspector_phno === undefined) {
+      filteredUpdate.inspector_phno = updateData.inspector_phone;
+    }
+
     if (Object.keys(filteredUpdate).length === 0) {
         return res.status(400).json({ success: false, message: 'No valid fields to update' });
     }
@@ -604,17 +609,11 @@ const updateInspection = async (req, res) => {
       // Check if this inspection is vendor-maintained; if so, do not set emp_int_id
       try {
         const existing = await inspectionModel.getInspectionDetailsById(id, org_id);
-        const aatif_id = existing.rows.length ? existing.rows[0].aatif_id : null;
+        const row = existing.rows.length ? existing.rows[0] : null;
         let isVendor = false;
-        if (aatif_id) {
-          const aifRes = await inspectionModel.getInspectionFrequency ? await inspectionModel.getInspectionFrequency(aatif_id, org_id) : null;
-          // aifRes may be a db result or null; normalize
-          if (aifRes && aifRes.rows && aifRes.rows.length) {
-            const maintainedBy = aifRes.rows[0].maintained_by || '';
-            isVendor = String(maintainedBy).toLowerCase() === 'vendor';
-          }
-        } else if (existing.rows.length && existing.rows[0].vendor_id) {
-          isVendor = true;
+        if (row) {
+          const maintainedBy = row.maintained_by || '';
+          isVendor = String(maintainedBy).toLowerCase() === 'vendor' || !!row.vendor_id;
         }
 
         if (!isVendor) {
@@ -757,29 +756,36 @@ const saveInspectionRecord = async (req, res) => {
             insp_check_id: r.insp_check_id,
           });
         }
-
-        const min = checklistItem.min_range != null && checklistItem.min_range !== ''
-          ? parseFloat(checklistItem.min_range)
-          : null;
-        const max = checklistItem.max_range != null && checklistItem.max_range !== ''
-          ? parseFloat(checklistItem.max_range)
-          : null;
-
-        if (Number.isFinite(min) && numValue < min) {
-          return res.status(400).json({
-            success: false,
-            message: 'Value is outside the expected range',
-            insp_check_id: r.insp_check_id,
-          });
-        }
-        if (Number.isFinite(max) && numValue > max) {
-          return res.status(400).json({
-            success: false,
-            message: 'Value is outside the expected range',
-            insp_check_id: r.insp_check_id,
-          });
-        }
       }
+    }
+
+    const isRecordedValueOutOfRange = (checklistItem, value) => {
+      if (checklistItem?.response_type !== 'QN') return false;
+      const numValue = parseFloat(value);
+      if (Number.isNaN(numValue)) return false;
+
+      const min = checklistItem.min_range != null && checklistItem.min_range !== ''
+        ? parseFloat(checklistItem.min_range)
+        : 0;
+      const max = checklistItem.max_range != null && checklistItem.max_range !== ''
+        ? parseFloat(checklistItem.max_range)
+        : null;
+
+      if (Number.isFinite(min) && numValue < min) return true;
+      if (Number.isFinite(max) && numValue > max) return true;
+      return false;
+    };
+
+    const hasOutOfRangeValues = recordsToSave.some((r) => {
+      const checklistItem = checklistById.get(String(r.insp_check_id));
+      return checklistItem && isRecordedValueOutOfRange(checklistItem, r.recorded_value);
+    });
+
+    if (hasOutOfRangeValues && (!notes || !String(notes).trim())) {
+      return res.status(400).json({
+        success: false,
+        message: 'Notes are required when a recorded value is outside the expected range',
+      });
     }
 
     const saved = [];

@@ -82,16 +82,8 @@ const getEmployeesByDepartment = async (req, res) => {
 // GET /api/employees/with-roles - Get all employees with their current job roles
 const getAllEmployeesWithJobRoles = async (req, res) => {
     try {
-        const { data: rows } = await operationalCache.cachedList(
-            req,
-            'employees',
-            'with-roles',
-            async () => {
-                const result = await model.getAllEmployeesWithJobRoles();
-                return result.rows;
-            },
-        );
-        res.status(200).json(rows);
+        const result = await model.getAllEmployeesWithJobRoles();
+        res.status(200).json(result.rows);
     } catch (err) {
         console.error("Error fetching employees with job roles:", err);
         res.status(500).json({ error: "Failed to fetch employees with job roles" });
@@ -157,14 +149,21 @@ const assignRoleToEmployee = async (req, res) => {
             });
         }
 
-        // Check if employee exists in tblUsers by emp_int_id
-        const existingUser = await userJobRoleModel.checkEmployeeInUsers(emp_int_id);
+        // Check if employee already has a user account (including temporarily inactive accounts).
+        const existingUser = await userJobRoleModel.getEmployeeUserAccount(emp_int_id);
         
         let user_id;
         let newUser = null; // Initialize newUser variable
         if (existingUser) {
-            // Employee exists in tblUsers, use existing user_id
             user_id = existingUser.user_id;
+            if (Number(existingUser.int_status) !== 1) {
+                await userJobRoleModel.reactivateUser(user_id, assigned_by);
+            }
+            await userJobRoleModel.consolidateEmployeeUserAccounts(
+                emp_int_id,
+                user_id,
+                assigned_by,
+            );
             console.log(`Employee ${emp_int_id} already exists in tblUsers with user_id: ${user_id}`);
         } else {
             // Employee doesn't exist in tblUsers, create new user
@@ -330,17 +329,17 @@ const deleteUserRole = async (req, res) => {
         const roleCount = await userJobRoleModel.getUserRoleCount(user_id);
         
         if (roleCount === 0) {
-            // Deactivate user if no roles left
-            await userJobRoleModel.deactivateUser(user_id);
-            console.log(`User ${user_id} deactivated - no roles remaining`);
+            await userJobRoleModel.syncPrimaryJobRole(user_id, changed_by);
+            console.log(`User ${user_id} has no remaining roles; kept account active for reassignment`);
         }
         
         res.status(200).json({
             success: true,
             message: "Role deleted successfully",
             data: deletedRole,
-            userDeactivated: roleCount === 0
+            userDeactivated: false,
         });
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     } catch (error) {
         console.error("Error deleting user role:", error);
         res.status(500).json({
@@ -372,6 +371,7 @@ const updateUserRole = async (req, res) => {
             message: "Role updated successfully",
             data: updatedRole
         });
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     } catch (error) {
         console.error("Error updating user role:", error);
         res.status(500).json({

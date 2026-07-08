@@ -609,7 +609,7 @@ const updateInspectionRecord = async (ais_id, org_id, updateData) => {
   const keys = Object.keys(updateData);
   if (keys.length === 0) return null;
   
-  const setClause = keys.map((key, index) => `${key} = $${index + 3}`).join(', ');
+  const setClause = keys.map((key, index) => `"${key}" = $${index + 3}`).join(', ');
   const values = [ais_id, org_id, ...Object.values(updateData)];
   
   const query = `
