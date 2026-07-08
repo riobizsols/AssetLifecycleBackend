@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const { registerFromRequestContext } = require('../services/tenantEmailRegistryService');
 const { generateCustomId } = require('../utils/idGenerator');
 const bcrypt = require('bcrypt');
 
@@ -139,10 +140,19 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
             );
             
             console.log(`Linked employee ${emp_int_id} to existing user ${existingUserByEmail.user_id}`);
-            return {
+            const linkedUser = {
                 ...updateResult.rows[0],
                 generatedPassword: null // No password generated since user already exists
             };
+            if (linkedUser.email) {
+                await registerFromRequestContext({
+                    email: linkedUser.email,
+                    userId: linkedUser.user_id,
+                    employeeId: emp_int_id,
+                    source: 'link_user_employee',
+                });
+            }
+            return linkedUser;
         }
         
         // Generate user_id using ID generator
@@ -222,10 +232,19 @@ const createUserForEmployee = async (emp_int_id, job_role_id, created_by, org_id
         });
         
         console.log(`Created user for employee ${emp_int_id} with user_id: ${user_id}`);
-        return {
+        const createdUser = {
             ...result.rows[0],
             generatedPassword: defaultPassword
         };
+        if (createdUser.email) {
+            await registerFromRequestContext({
+                email: createdUser.email,
+                userId: createdUser.user_id,
+                employeeId: emp_int_id,
+                source: 'create_user_for_employee',
+            });
+        }
+        return createdUser;
     } catch (error) {
         console.error('Error in createUserForEmployee:', error);
         throw error;

@@ -8,20 +8,23 @@ const {
   getMessageById,
 } = require("../controllers/textMessagesController");
 
-router.use(protect);
-
 // GET /api/text-messages/default
-router.get("/default", getDefaults);
+router.get("/default", protect, getDefaults);
 
 // GET /api/text-messages/translations/:langCode
-router.get("/translations/:langCode", getTranslationsByLang);
+router.get("/translations/:langCode", protect, getTranslationsByLang);
 
 // PUT /api/text-messages/translations/:langCode
-router.put("/translations/:langCode", upsertTranslations);
+router.put("/translations/:langCode", protect, upsertTranslations);
 
 // GET /api/text-messages/:tmdId
-// Resolves translated text based on logged-in user's language with English fallback
-router.get("/:tmdId", getMessageById);
+// Public for auto-generated toast ids (TMD_*); admin lookups stay protected.
+router.get("/:tmdId", (req, res, next) => {
+  const tmdId = String(req.params.tmdId || "");
+  if (tmdId.startsWith("TMD_")) {
+    return getMessageById(req, res, next);
+  }
+  return protect(req, res, () => getMessageById(req, res, next));
+});
 
 module.exports = router;
-

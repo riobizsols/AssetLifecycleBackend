@@ -69,8 +69,7 @@ class EventLogger {
             const requiredLevel = TechnicalLogConfigModel.getLogLevelCode(eventLevel);
             return await TechnicalLogConfigModel.shouldLog(appId, requiredLevel);
         } catch (error) {
-            // Only log errors in non-production environments
-            if (process.env.NODE_ENV !== 'production') {
+            if (error?.code !== 'TENANT_DB_CONTEXT_REQUIRED' && process.env.NODE_ENV !== 'production') {
                 console.error('Error checking if should log:', error);
             }
             return false;

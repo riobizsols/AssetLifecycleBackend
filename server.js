@@ -186,6 +186,7 @@ app.use(
 app.use("/api/auth", authRoutes);
 app.use("/api/setup", setupWizardRoutes);
 app.use("/api/tenant-setup", tenantSetupRoutes);
+app.use("/api/text-messages", textMessagesRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
@@ -266,7 +267,6 @@ app.use("/api/cost-center-transfer", costCenterTransferRoutes);
 app.use("/api/internal", internalRoutes);
 app.use("/api/job-monitor", jobMonitorRoutes);
   app.use("/api/org-settings", orgSettingsRoutes);
-  app.use("/api/text-messages", textMessagesRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
@@ -279,6 +279,11 @@ const server = app.listen(PORT, () => {
 
   connectRedis().catch((err) => {
     console.warn('[Redis] Startup connect skipped:', err.message);
+  });
+
+  const { ensureTenantUserEmailsTable } = require('./services/tenantEmailRegistryService');
+  ensureTenantUserEmailsTable().catch((err) => {
+    console.warn('[TenantEmailRegistry] Startup table ensure skipped:', err.message);
   });
   
   // Initialize cron jobs after server starts

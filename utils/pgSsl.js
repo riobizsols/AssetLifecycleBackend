@@ -43,11 +43,28 @@ function buildPoolConfig(connectionString, poolOptions = {}) {
   return {
     connectionString,
     ssl: pgSslOptions(connectionString),
+    keepAlive: true,
+    keepAliveInitialDelayMillis: 10000,
     ...poolOptions,
   };
+}
+
+/**
+ * pg-pool emits 'error' on idle clients; without a listener Node crashes the process.
+ */
+function attachPoolErrorHandler(pool, label = 'DB POOL') {
+  if (!pool || pool.__almPoolErrorHandlerAttached) {
+    return pool;
+  }
+  pool.__almPoolErrorHandlerAttached = true;
+  pool.on('error', (err) => {
+    console.error(`❌ [${label}] Idle client error:`, err?.message || err);
+  });
+  return pool;
 }
 
 module.exports = {
   pgSslOptions,
   buildPoolConfig,
+  attachPoolErrorHandler,
 };

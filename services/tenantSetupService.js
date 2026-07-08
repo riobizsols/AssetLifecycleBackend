@@ -18,6 +18,7 @@ const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
 const { DEFAULT_ID_SEQUENCES, DEFAULT_JOB_ROLES, DEFAULT_JOB_ROLE_NAV } = require('../constants/setupDefaults');
 const { sendWelcomeEmail } = require('../utils/mailer');
+const { registerTenantEmail } = require('./tenantEmailRegistryService');
 const {
   getPgSslOption,
   getPgClientConnectTimeoutMs,
@@ -59,6 +60,81 @@ async function checkSubdomainExists(subdomain) {
   return !available;
 }
 
+function getProposedDatabaseName(subdomain) {
+  const baseName = String(subdomain || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '_');
+  return `${baseName}_db`;
+}
+
+async function isDatabaseNameTaken(dbName) {
+  const pool = initTenantRegistryPool();
+  const tenantCheck = await pool.query(
+    `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+    [dbName],
+  );
+  if (tenantCheck.rows.length > 0) {
+    return true;
+  }
+
+  const tenantDbUrl = process.env.TENANT_DATABASE_URL;
+  if (!tenantDbUrl) {
+    return false;
+  }
+
+  const tenantDbConfig = parseDatabaseUrl(tenantDbUrl);
+  const adminClient = new Client(pgClientOpts({
+    host: tenantDbConfig.host,
+    port: tenantDbConfig.port,
+    user: tenantDbConfig.user,
+    password: tenantDbConfig.password,
+    database: 'postgres',
+  }));
+
+  try {
+    await adminClient.connect();
+    const dbCheck = await adminClient.query(
+      `SELECT 1 FROM pg_database WHERE datname = $1`,
+      [dbName],
+    );
+    return dbCheck.rows.length > 0;
+  } finally {
+    await adminClient.end();
+  }
+}
+
+/**
+ * Verify login domain (subdomain) and proposed Postgres database name are both free.
+ */
+async function checkDomainAndDatabaseAvailability(subdomainInput) {
+  const { validateSubdomain } = require('../utils/subdomainUtils');
+  const normalizedSubdomain = validateSubdomain(subdomainInput);
+  const databaseName = getProposedDatabaseName(normalizedSubdomain);
+  const subdomainTaken = await checkSubdomainExists(normalizedSubdomain);
+  const databaseTaken = await isDatabaseNameTaken(databaseName);
+  const available = !subdomainTaken && !databaseTaken;
+
+  let message;
+  if (subdomainTaken && databaseTaken) {
+    message = `Login domain "${normalizedSubdomain}" and database "${databaseName}" are already taken.`;
+  } else if (subdomainTaken) {
+    message = `Login domain "${normalizedSubdomain}" is already taken.`;
+  } else if (databaseTaken) {
+    message = `Database name "${databaseName}" is already taken.`;
+  } else {
+    message = `Login domain "${normalizedSubdomain}" and database "${databaseName}" are available.`;
+  }
+
+  return {
+    available,
+    subdomain: normalizedSubdomain,
+    databaseName,
+    subdomainTaken,
+    databaseTaken,
+    message,
+  };
+}
+
 function buildSubdomainUrl(subdomain) {
   const MAIN_DOMAIN = process.env.MAIN_DOMAIN || 'localhost';
 
@@ -92,19 +168,30 @@ async function getTenantRegistryRow(orgId) {
   return result.rows[0] || null;
 }
 
+async function getTenantRegistryRowBySubdomain(subdomain) {
+  const pool = initTenantRegistryPool();
+  const result = await pool.query(
+    `SELECT org_id, db_name, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
+    [String(subdomain || '').trim().toLowerCase()],
+  );
+  return result.rows[0] || null;
+}
+
+function deriveRegistryOrgId(subdomain) {
+  const normalized = String(subdomain || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (!normalized) {
+    throw new Error('Invalid domain name for tenant registry');
+  }
+  return normalized.slice(0, 10);
+}
+
 async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgName, orgCity) {
-  const row = await getTenantRegistryRow(orgIdUpper);
+  const row = await getTenantRegistryRowBySubdomain(subdomain);
   if (!row || row.is_active === false) {
     return null;
   }
 
   const rowSubdomain = (row.subdomain || '').trim().toLowerCase();
-  if (rowSubdomain && rowSubdomain !== subdomain) {
-    throw new Error(
-      `Organization ID ${orgIdUpper} already exists with a different sub-domain. Please choose a different ID.`,
-    );
-  }
-
   const tenantDatabaseUrl = process.env.TENANT_DATABASE_URL;
   if (!tenantDatabaseUrl) {
     throw new Error('TENANT_DATABASE_URL must be set.');
@@ -328,8 +415,9 @@ async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001') 
  * @param {Client} client - Tenant database client (MUST be connected to tenant database)
  * @param {string} orgId - Organization ID
  * @param {object} adminData - Admin user data
+ * @param {{ registryOrgId?: string, subdomain?: string }} registryMeta - Registry DB org_id + subdomain for email lookup
  */
-async function createAdminUser(client, orgId, adminData) {
+async function createAdminUser(client, orgId, adminData, registryMeta = null) {
   // CRITICAL: Validate client is connected to tenant database
   if (!client) {
     throw new Error('CRITICAL: Tenant database client is required. Cannot create admin user without tenant database connection.');
@@ -559,13 +647,32 @@ async function createAdminUser(client, orgId, adminData) {
 
   console.log(`[TenantSetup] ✅ Admin user created successfully: ${userId} (${email}) with employee record ${employeeId}`);
 
-  return {
+  const credentials = {
     userId,
     employeeId,
     email,
     password: plainPassword, // Return initial password for display / email
     fullName,
   };
+
+  if (registryMeta?.registryOrgId && registryMeta?.subdomain && email) {
+    try {
+      await registerTenantEmail({
+        email,
+        orgId: registryMeta.registryOrgId,
+        subdomain: registryMeta.subdomain,
+        userId,
+        employeeId,
+        source: 'tenant_registration',
+      });
+      console.log(`[TenantSetup] Admin email registered in tenant_user_emails: ${email}`);
+    } catch (registryErr) {
+      console.error(`[TenantSetup] Failed to register admin email in tenant_user_emails: ${registryErr.message}`);
+      throw new Error(`Admin user created but email registry failed: ${registryErr.message}`);
+    }
+  }
+
+  return credentials;
 }
 
 /**
@@ -1337,25 +1444,11 @@ async function createTenant(tenantData) {
 
   const { validateSubdomain } = require('../utils/subdomainUtils');
   const subdomain = validateSubdomain(subdomainInput);
+  const registryOrgId = deriveRegistryOrgId(subdomain);
 
-  // Check if org_id already exists
   const orgIdUpper = orgId.toUpperCase().trim();
   if (orgIdUpper.length > 10) {
     throw new Error('Organization ID must be 10 characters or less.');
-  }
-  const orgExists = await checkOrgIdExists(orgIdUpper);
-  if (orgExists) {
-    const existingTenant = await tryResolveExistingTenant(
-      orgIdUpper,
-      subdomain,
-      adminUser,
-      orgName,
-      orgCity,
-    );
-    if (existingTenant) {
-      return existingTenant;
-    }
-    throw new Error(`Organization ID ${orgIdUpper} already exists. Please choose a different ID.`);
   }
 
   const subdomainExists = await checkSubdomainExists(subdomain);
@@ -1415,7 +1508,7 @@ async function createTenant(tenantData) {
 
     // Register tenant in tenant table using DATABASE_URL credentials
     // Note: registerTenant will be updated to accept subdomain
-    await registerTenant(orgIdUpper, {
+    await registerTenant(registryOrgId, {
       host: dbConfig.host,
       port: dbConfig.port,
       database: dbName,
@@ -1764,7 +1857,10 @@ async function createTenant(tenantData) {
       
       // Step 3: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
-      const adminCredentials = await createAdminUser(tenantClient, orgIdUpper, adminUser);
+      const adminCredentials = await createAdminUser(tenantClient, orgIdUpper, adminUser, {
+        registryOrgId,
+        subdomain,
+      });
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
       // Send welcome email with initial password and role information
@@ -1852,7 +1948,7 @@ async function createTenant(tenantData) {
 
     try {
       await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
-      await deactivateTenant(orgIdUpper);
+      await deactivateTenant(registryOrgId);
     } catch (dropError) {
       console.error('[TenantSetup] Error rolling back tenant:', dropError);
     }
@@ -1978,6 +2074,8 @@ module.exports = {
   testTenantConnection,
   checkOrgIdExists,
   checkSubdomainExists,
+  checkDomainAndDatabaseAvailability,
+  getProposedDatabaseName,
   copyJobRoleNavigationForRole,
   seedDefaultJobRoleNavigationIfMissing,
   ensureJobRoleNavigation,

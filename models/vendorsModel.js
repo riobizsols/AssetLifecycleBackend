@@ -46,24 +46,14 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, ser
   return result.rows;
 };
 
-// Get vendor by ID - try tenant DB first, fallback to default DB
+// Get vendor by ID from tenant database context only
 const getVendorById = async (vendorId) => {
   const dbPool = getDb();
   try {
     const result = await dbPool.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
     if (result.rows && result.rows.length > 0) return result.rows[0];
   } catch (e) {
-    console.warn('Vendor lookup in request DB failed:', e.message);
-  }
-
-  // Fallback: try default DB pool
-  if (db && db !== dbPool) {
-    try {
-      const fallback = await db.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
-      if (fallback.rows && fallback.rows.length > 0) return fallback.rows[0];
-    } catch (e) {
-      console.warn('Vendor lookup in default DB failed:', e.message);
-    }
+    console.warn('Vendor lookup in tenant DB failed:', e.message);
   }
 
   return null;

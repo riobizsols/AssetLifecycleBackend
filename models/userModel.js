@@ -1,5 +1,6 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const logger = require('../utils/logger');
+const { registerFromRequestContext, unregisterTenantEmail } = require('../services/tenantEmailRegistryService');
 
 // Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
@@ -102,7 +103,16 @@ const createUser = async ({
         ]
     );
 
-    return result.rows[0];
+    const created = result.rows[0];
+    if (created?.email) {
+        await registerFromRequestContext({
+            email: created.email,
+            userId: created.user_id,
+            source: 'create_user',
+        });
+    }
+
+    return created;
 };
 
 
@@ -279,11 +289,22 @@ const deleteUsers = async (userIds = []) => {
             throw error;
         }
 
-        // If no dependencies, proceed with deletion
+        // If no dependencies, fetch emails then delete
+        const emailRows = await dbPool.query(
+            `SELECT email FROM "tblUsers" WHERE user_id = ANY($1::text[]) AND email IS NOT NULL`,
+            [userIds],
+        );
+
         const result = await dbPool.query(
             `DELETE FROM "tblUsers" WHERE user_id = ANY($1::text[])`,
             [userIds]
         );
+
+        for (const row of emailRows.rows) {
+            if (row.email) {
+                await unregisterTenantEmail(row.email).catch(() => {});
+            }
+        }
         
         return result.rowCount;
     } catch (error) {
@@ -303,16 +324,38 @@ const updateUser = async (user_id, fieldsToUpdate = {}) => {
     const keys = Object.keys(fieldsToUpdate);
     if (!keys.length) return;
 
+    const dbPool = getDb();
+    let previousEmail = null;
+    if (fieldsToUpdate.email) {
+        const prev = await dbPool.query(
+            `SELECT email FROM "tblUsers" WHERE user_id = $1`,
+            [user_id],
+        );
+        previousEmail = prev.rows[0]?.email || null;
+    }
+
     const setClause = keys.map((key, idx) => `${key} = $${idx + 2}`).join(", ");
     const values = [user_id, ...keys.map((key) => fieldsToUpdate[key])];
 
-    const dbPool = getDb();
     const result = await dbPool.query(
         `UPDATE "tblUsers" SET ${setClause} WHERE user_id = $1 RETURNING *`,
         values
     );
 
-    return result.rows[0];
+    const updated = result.rows[0];
+    if (updated?.email) {
+        if (previousEmail && previousEmail !== updated.email) {
+            await unregisterTenantEmail(previousEmail).catch(() => {});
+        }
+        await registerFromRequestContext({
+            email: updated.email,
+            userId: updated.user_id,
+            employeeId: updated.emp_int_id || null,
+            source: 'update_user',
+        });
+    }
+
+    return updated;
 };
 
 

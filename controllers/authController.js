@@ -30,8 +30,8 @@ const {
 } = require('../eventLoggers/authEventLogger');
 require('dotenv').config();
 
-// 🔐 JWT Creator
-const generateToken = (user, useDefaultDb = false) => {
+// 🔐 JWT Creator — tenant-only; no default database access
+const generateToken = (user) => {
     return jwt.sign({
         org_id: user.org_id,
         user_id: user.user_id,
@@ -39,7 +39,7 @@ const generateToken = (user, useDefaultDb = false) => {
         job_role_id: user.job_role_id,
         emp_int_id: user.emp_int_id,
         language_code: user.language_code || 'en',
-        use_default_db: useDefaultDb // Flag to force default database usage
+        use_default_db: false,
     }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
@@ -54,9 +54,7 @@ const safeAuthLog = (logFn) => {
         });
 };
 
-// 🔑 Login (Supports both subdomain-based multi-tenant and normal database login)
-// - If subdomain exists: Uses subdomain to find org_id and tenant database
-// - If no subdomain (e.g., localhost): Uses default database from .env (normal login)
+// 🔑 Login — tenant-only (subdomain or email registry); no default database access
 const login = async (req, res) => {
     const startTime = Date.now();
     const { email, password } = req.body;
@@ -69,92 +67,35 @@ const login = async (req, res) => {
             url: req.originalUrl
         }));
 
-        // Step 2: Check if subdomain-based login or normal database login
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
-        
-        // Try multiple ways to get hostname (for different proxy configurations)
-        const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
-        const subdomain = extractSubdomain(hostname);
-        
-        logger.debug(`[AuthController] 🔍 Login Debug Info:`);
-        logger.debug(`  - req.get('host'): ${req.get('host')}`);
-        logger.debug(`  - req.get('x-forwarded-host'): ${req.get('x-forwarded-host')}`);
-        logger.debug(`  - req.hostname: ${req.hostname}`);
-        logger.debug(`  - req.headers.host: ${req.headers.host}`);
-        logger.debug(`  - Extracted hostname: ${hostname}`);
-        logger.debug(`  - Extracted subdomain: ${subdomain}`);
-        
-        const { checkTenantExists, getTenantPool } = require('../services/tenantService');
-        const defaultDb = require('../config/db');
-        let dbPool = defaultDb;
-        let isTenant = false;
-        let orgId = null;
-        let loginMode = 'normal'; // 'normal' or 'subdomain'
-        
-        // If subdomain exists, use subdomain-based login
-        if (subdomain) {
-            loginMode = 'subdomain';
-            orgId = await getOrgIdFromSubdomain(subdomain);
-            
-            logger.debug(`[AuthController] 🔍 Subdomain lookup result: org_id = ${orgId}`);
-            
-            if (!orgId) {
-                logger.error(`[AuthController] ❌ Organization not found for subdomain: ${subdomain}`);
-                return res.status(404).json({ 
-                    message: `Organization not found for subdomain: ${subdomain}` 
-                });
-            }
-            
-            logger.log(`[AuthController] ✅ Subdomain-based login: ${subdomain}, org_id: ${orgId}`);
-            
-            // Step 3: Log checking user in database
-            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId, subdomain }));
-            
-            // Check if this is a tenant organization
-            const tenantExists = await checkTenantExists(orgId);
-            logger.debug(`[AuthController] 🔍 Tenant check for org_id ${orgId}: ${tenantExists ? 'EXISTS' : 'NOT FOUND'}`);
-            
-            if (tenantExists) {
-                dbPool = await getTenantPool(orgId);
-                isTenant = true;
-                logger.log(`[AuthController] ✅ Using tenant database for org_id: ${orgId}`);
-            } else {
-                logger.warn(`[AuthController] ⚠️ Using default database for org_id: ${orgId} (tenant not found)`);
-            }
-        } else {
-            // No subdomain — use shared default database pool
-            logger.log('[AuthController] Normal database login (no subdomain) - using default database from .env');
-            safeAuthLog(() => logCheckingUserInDatabase({ email, orgId: null, subdomain: null }));
+        const {
+            getRequestHostname,
+            resolveTenantDatabase,
+        } = require('../utils/tenantAuthResolver');
+        const { extractTenantSubdomain } = require('../utils/subdomainUtils');
+
+        const hostname = getRequestHostname(req);
+        const subdomain = extractTenantSubdomain(hostname);
+        const tenantCtx = await resolveTenantDatabase({ hostname, email });
+
+        if (!tenantCtx?.dbPool) {
+            logger.warn(`[AuthController] No tenant database resolved for login: ${email}`);
+            return res.status(404).json({
+                message: 'No organization found for this account. Use your organization login URL or registered email.',
+            });
         }
+
+        const dbPool = tenantCtx.dbPool;
+        const orgId = tenantCtx.registryOrgId;
+        const resolvedLoginSubdomain = tenantCtx.subdomain;
+        const loginMode = subdomain ? 'subdomain' : 'email_registry';
+        const isTenant = true;
+
+        logger.log(`[AuthController] Tenant login (${loginMode}): org_id ${orgId}, subdomain ${resolvedLoginSubdomain || 'n/a'}`);
+        safeAuthLog(() => logCheckingUserInDatabase({ email, orgId, subdomain: resolvedLoginSubdomain }));
         
-        // Step 5: Find user in the appropriate database
-        logger.debug(`[AuthController] 🔍 Searching for user with email: "${email}" in ${isTenant ? 'tenant' : 'default'} database`);
+        // Step 5: Find user in tenant database
+        logger.debug(`[AuthController] Searching for user with email: "${email}" in tenant database`);
         const user = await findUserByEmail(email, dbPool);
-        
-        // For subdomain login on default DB (non-tenant), verify org_id when not using tenant pool
-        if (loginMode === 'subdomain' && user && !isTenant && user.org_id !== orgId) {
-            safeAuthLog(() => logUserNotFound({ email, orgId, reason: 'User belongs to different organization' }));
-            safeAuthLog(() => logFailedLogin({
-                email,
-                userId: null,
-                reason: 'User not found in this organization',
-                duration: Date.now() - startTime
-            }));
-            return res.status(404).json({ message: 'User not found in this organization' });
-        }
-        
-        // For tenant databases, update orgId from user if needed (for consistency)
-        if (loginMode === 'subdomain' && user && isTenant) {
-            logger.debug(`[AuthController] ℹ️ Tenant database login - using user's org_id: ${user.org_id} (tenant org_id: ${orgId})`);
-            // Keep the tenant orgId for database routing, but use user's org_id for token
-            // This ensures the token has the correct org_id for the user
-        }
-        
-        // For normal login, set orgId from user if found
-        if (loginMode === 'normal' && user) {
-            orgId = user.org_id;
-        }
-        
         if (!user) {
             // Step 3a: User not found
             safeAuthLog(() => logUserNotFound({ email }));
@@ -293,11 +234,11 @@ const login = async (req, res) => {
         safeAuthLog(() => logGeneratingToken({ email, userId: loginUser.user_id }));
         
         // Generate token with tenant information
-        // If tenant exists, don't set use_default_db flag so middleware uses tenant database
-        const token = generateToken(
-            { ...loginUser, language_code },
-            !isTenant
-        );
+        const tokenUser = { ...loginUser, language_code };
+        if (isTenant && orgId) {
+            tokenUser.org_id = String(orgId).toUpperCase();
+        }
+        const token = generateToken(tokenUser);
         
         // Step 7: Log token generated
         safeAuthLog(() => logTokenGenerated({ 
@@ -309,7 +250,7 @@ const login = async (req, res) => {
                 email: loginUser.email,
                 job_role_id: loginUser.job_role_id,
                 emp_int_id: loginUser.emp_int_id,
-                use_default_db: !isTenant,
+                use_default_db: false,
                 subdomain: subdomain || null,
                 loginMode: loginMode
             }
@@ -332,6 +273,33 @@ const login = async (req, res) => {
             }
         }));
 
+        let tenantName = null;
+        let tenantDatabase = null;
+        const registryOrgId = isTenant && orgId ? String(orgId).toUpperCase().trim() : null;
+
+        if (isTenant && registryOrgId) {
+            try {
+                const orgResult = await dbPool.query(
+                    `SELECT text FROM "tblOrgs" WHERE int_status = 1 ORDER BY org_id LIMIT 1`,
+                );
+                tenantName = orgResult.rows[0]?.text || null;
+            } catch (orgLookupErr) {
+                console.warn('[AuthController] Could not read tenant org name:', orgLookupErr.message);
+            }
+
+            try {
+                const { getTenantCredentials } = require('../services/tenantService');
+                const { getSubdomainByOrgId } = require('../services/tenantEmailRegistryService');
+                const creds = await getTenantCredentials(registryOrgId);
+                tenantDatabase = creds.database;
+                if (!resolvedLoginSubdomain) {
+                    resolvedLoginSubdomain = await getSubdomainByOrgId(registryOrgId);
+                }
+            } catch (credsErr) {
+                console.warn('[AuthController] Could not read tenant registry metadata:', credsErr.message);
+            }
+        }
+
         res.json({
             token,
             requiresPasswordChange: isInitialPassword, // Flag to indicate password needs to be changed
@@ -339,6 +307,11 @@ const login = async (req, res) => {
                 full_name: loginUser.full_name,
                 email: loginUser.email,
                 org_id: loginUser.org_id,
+                registry_org_id: registryOrgId,
+                tenant_name: tenantName,
+                subdomain: resolvedLoginSubdomain,
+                tenant_database: tenantDatabase,
+                is_tenant: isTenant,
                 user_id: loginUser.user_id,
                 job_role_id: loginUser.job_role_id, // Keep for backward compatibility
                 emp_int_id: loginUser.emp_int_id,
@@ -445,52 +418,27 @@ const forgotPassword = async (req, res) => {
             return res.status(400).json({ message: 'Email is required' });
         }
         
-        // Extract subdomain from request to identify tenant
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
-        const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
+        const {
+            getRequestHostname,
+            resolveTenantDatabase,
+        } = require('../utils/tenantAuthResolver');
+        const hostname = getRequestHostname(req);
         console.log('[ForgotPassword] Hostname extracted:', hostname);
-        
-        const subdomain = extractSubdomain(hostname);
-        console.log('[ForgotPassword] Subdomain extracted:', subdomain);
-        
-        let tenantPool = null;
-        let orgId = null;
-        
-        // If subdomain exists, get tenant database pool
-        if (subdomain) {
-            console.log('[ForgotPassword] Processing subdomain:', subdomain);
-            try {
-                orgId = await getOrgIdFromSubdomain(subdomain);
-                console.log('[ForgotPassword] Org ID from subdomain:', orgId);
-                
-                if (orgId) {
-                    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-                    const tenantExists = await checkTenantExists(orgId);
-                    console.log('[ForgotPassword] Tenant exists:', tenantExists);
-                    
-                    if (tenantExists) {
-                        tenantPool = await getTenantPool(orgId);
-                        console.log(`[ForgotPassword] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${orgId}`);
-                        logger.log(`[ForgotPassword] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${orgId}`);
-                    } else {
-                        console.log(`[ForgotPassword] ⚠️ Subdomain ${subdomain} found but tenant not active`);
-                        logger.warn(`[ForgotPassword] ⚠️ Subdomain ${subdomain} found but tenant not active`);
-                    }
-                } else {
-                    console.log(`[ForgotPassword] ⚠️ Subdomain ${subdomain} found but no org_id`);
-                    logger.warn(`[ForgotPassword] ⚠️ Subdomain ${subdomain} found but no org_id`);
-                }
-            } catch (subdomainError) {
-                console.error(`[ForgotPassword] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
-                logger.error(`[ForgotPassword] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
-            }
-        } else {
-            console.log(`[ForgotPassword] No subdomain found - using default database`);
-            logger.log(`[ForgotPassword] No subdomain found - using default database`);
+
+        const tenantCtx = await resolveTenantDatabase({ hostname, email });
+        const tenantPool = tenantCtx?.dbPool || null;
+        const orgId = tenantCtx?.registryOrgId || null;
+        const subdomain = tenantCtx?.subdomain || null;
+
+        if (!tenantPool) {
+            console.log('[ForgotPassword] No tenant database resolved for email:', email);
+            return res.status(200).json({ message: 'If that email exists, a password reset link has been sent' });
         }
+
+        console.log(`[ForgotPassword] Using tenant database for org_id: ${orgId}, subdomain: ${subdomain || 'n/a'}`);
         
-        // Find user in appropriate database (tenant or default)
-        console.log('[ForgotPassword] Searching for user with email:', email, 'in', tenantPool ? 'tenant database' : 'default database');
+        // Find user in tenant database only
+        console.log('[ForgotPassword] Searching for user with email:', email, 'in tenant database');
         const user = await findUserByEmail(email, tenantPool);
         
         console.log('[ForgotPassword] User found:', user ? `Yes (${user.user_id}, org: ${user.org_id})` : 'No');
@@ -565,7 +513,7 @@ const resetPassword = async (req, res) => {
     console.log('[ResetPassword] Request body:', { token: req.body.token ? 'Present' : 'Missing', newPassword: req.body.newPassword ? 'Present' : 'Missing' });
     
     try {
-        const { token, newPassword } = req.body;
+        const { token, newPassword, email: resetEmail } = req.body;
         
         if (!token || !newPassword) {
             console.log('[ResetPassword] ❌ Missing token or password');
@@ -577,52 +525,28 @@ const resetPassword = async (req, res) => {
             return res.status(400).json({ message: 'Password must be at least 6 characters long' });
         }
         
-        // Extract subdomain from request to identify tenant
-        const { getOrgIdFromSubdomain, extractSubdomain } = require('../utils/subdomainUtils');
-        const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
+        const {
+            getRequestHostname,
+            resolveTenantDatabase,
+        } = require('../utils/tenantAuthResolver');
+        const hostname = getRequestHostname(req);
         console.log('[ResetPassword] Hostname extracted:', hostname);
-        
-        const subdomain = extractSubdomain(hostname);
-        console.log('[ResetPassword] Subdomain extracted:', subdomain);
-        
-        let tenantPool = null;
-        let orgId = null;
-        
-        // If subdomain exists, get tenant database pool
-        if (subdomain) {
-            console.log('[ResetPassword] Processing subdomain:', subdomain);
-            try {
-                orgId = await getOrgIdFromSubdomain(subdomain);
-                console.log('[ResetPassword] Org ID from subdomain:', orgId);
-                
-                if (orgId) {
-                    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-                    const tenantExists = await checkTenantExists(orgId);
-                    console.log('[ResetPassword] Tenant exists:', tenantExists);
-                    
-                    if (tenantExists) {
-                        tenantPool = await getTenantPool(orgId);
-                        console.log(`[ResetPassword] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${orgId}`);
-                        logger.log(`[ResetPassword] ✅ Subdomain detected (${subdomain}) - Using tenant database for org_id: ${orgId}`);
-                    } else {
-                        console.log(`[ResetPassword] ⚠️ Subdomain ${subdomain} found but tenant not active`);
-                        logger.warn(`[ResetPassword] ⚠️ Subdomain ${subdomain} found but tenant not active`);
-                    }
-                } else {
-                    console.log(`[ResetPassword] ⚠️ Subdomain ${subdomain} found but no org_id`);
-                    logger.warn(`[ResetPassword] ⚠️ Subdomain ${subdomain} found but no org_id`);
-                }
-            } catch (subdomainError) {
-                console.error(`[ResetPassword] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
-                logger.error(`[ResetPassword] ❌ Error processing subdomain ${subdomain}:`, subdomainError);
-            }
-        } else {
-            console.log(`[ResetPassword] No subdomain found - using default database`);
-            logger.log(`[ResetPassword] No subdomain found - using default database`);
+
+        const tenantCtx = await resolveTenantDatabase({
+            hostname,
+            email: resetEmail || null,
+        });
+        const tenantPool = tenantCtx?.dbPool || null;
+        const subdomain = tenantCtx?.subdomain || null;
+
+        if (!tenantPool) {
+            console.log('[ResetPassword] No tenant database resolved');
+            return res.status(400).json({
+                message: 'Unable to determine organization. Use your organization password reset link or provide your registered email.',
+            });
         }
-        
-        // Find user by reset token in appropriate database
-        console.log('[ResetPassword] Searching for user with reset token in', tenantPool ? 'tenant database' : 'default database');
+
+        console.log('[ResetPassword] Searching for user with reset token in tenant database');
         const user = await findUserByResetToken(token, tenantPool);
         
         console.log('[ResetPassword] User found:', user ? `Yes (${user.user_id}, org: ${user.org_id})` : 'No');
@@ -675,29 +599,34 @@ const refreshToken = async (req, res) => {
     try {
         // Verify the existing token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-        let dbPool;
-        
-        // Check if this is a tenant user or normal user
+        const {
+            resolveTenantDatabase,
+            resolveTenantPoolByOrgId,
+        } = require('../utils/tenantAuthResolver');
+        const { getTenantFromEmail } = require('../services/tenantEmailRegistryService');
+
+        let tenantCtx = null;
         if (decoded.org_id) {
-            try {
-                const tenantExists = await checkTenantExists(decoded.org_id);
-                if (tenantExists) {
-                    // Tenant user - use tenant database
-                    dbPool = await getTenantPool(decoded.org_id);
-                } else {
-                    // Normal user - use default database
-                    dbPool = req.db || require('../config/db');
-                }
-            } catch (tenantError) {
-                // Fall back to default database for normal users
-                dbPool = db;
-            }
-        } else {
-            // No org_id - use default database
-            dbPool = require('../config/db');
+            tenantCtx = await resolveTenantPoolByOrgId(decoded.org_id);
         }
+        if (!tenantCtx && decoded.email) {
+            const emailMapping = await getTenantFromEmail(decoded.email);
+            if (emailMapping?.org_id) {
+                tenantCtx = await resolveTenantPoolByOrgId(emailMapping.org_id);
+            }
+        }
+        if (!tenantCtx) {
+            tenantCtx = await resolveTenantDatabase({ hostname: null, email: decoded.email, orgId: decoded.org_id });
+        }
+
+        if (!tenantCtx?.dbPool) {
+            return res.status(503).json({
+                success: false,
+                message: 'Unable to connect to your organization database. Please log in again.',
+            });
+        }
+
+        const dbPool = tenantCtx.dbPool;
         
         // Check if user still exists and is active (using appropriate database)
         const user = await findUserByEmail(decoded.email, dbPool);
@@ -731,7 +660,7 @@ const refreshToken = async (req, res) => {
             org_id: decoded.org_id, // Use org_id from token (tenant org_id), not from user record
             language_code
         };
-        const newToken = generateToken(refreshTokenUser, decoded.use_default_db || false);
+        const newToken = generateToken(refreshTokenUser);
         
         res.json({
             success: true,
@@ -766,8 +695,10 @@ const updateOwnPassword = async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     const { org_id, user_id } = req.user;
 
-    // Use tenant database from request context (set by middleware)
-    const dbPool = req.db || require("../config/db");
+    if (!req.db) {
+        return res.status(503).json({ message: 'Tenant database connection required' });
+    }
+    const dbPool = req.db;
     const result = await dbPool.query(
         'SELECT * FROM "tblUsers" WHERE org_id = $1 AND user_id = $2',
         [org_id, user_id]
@@ -806,15 +737,13 @@ const changePassword = async (req, res) => {
             return res.status(400).json({ message: 'Current password and new password are required' });
         }
 
-        // Use tenant database from request context (set by middleware), or default DB
-        const dbPool = req.db || require("../config/db");
-        
-        if (!dbPool) {
-            logger.error('[AuthController] No database pool available');
-            return res.status(500).json({ message: 'Database connection not available' });
+        if (!req.db) {
+            logger.error('[AuthController] No tenant database pool available');
+            return res.status(503).json({ message: 'Tenant database connection required' });
         }
-
-        logger.debug(`[AuthController] Using database pool: ${req.db ? 'tenant' : 'default'}`);
+        const dbPool = req.db;
+        
+        logger.debug('[AuthController] Using tenant database pool from request context');
 
         // Look up user in tblUsers within the current org
         const result = await dbPool.query(
@@ -1057,7 +986,7 @@ const tenantLogin = async (req, res) => {
             org_id: tenantOrgId, // Use tenant org_id, not generated org_id from user record
             language_code
         };
-        const token = generateToken(tokenUser, false);
+        const token = generateToken(tokenUser);
         
         // Step 7: Log token generated
         safeAuthLog(() => logTokenGenerated({ 

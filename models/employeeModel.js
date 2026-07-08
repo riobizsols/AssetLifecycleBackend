@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
+const { registerFromRequestContext, registerManyFromRequestContext } = require('../services/tenantEmailRegistryService');
 const { generateCustomId } = require("../utils/idGenerator");
 
 // Helper function to get database connection (tenant pool or default)
@@ -180,6 +181,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
     let updated = 0;
     let errors = 0;
     const errorDetails = [];
+    const emailsToRegister = [];
     
     console.log('=== Employee Model Bulk Upload Debug ===');
     console.log('org_id:', org_id);
@@ -287,6 +289,13 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
           ]);
           inserted++;
         }
+
+        if (row.email_id) {
+          emailsToRegister.push({
+            email: row.email_id,
+            employeeId: finalEmpIntId,
+          });
+        }
       } catch (error) {
         console.error(`Error processing employee ${row.employee_id || 'unknown'}:`, error);
         errors++;
@@ -298,6 +307,10 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
     }
     
     await client.query('COMMIT');
+
+    if (emailsToRegister.length) {
+      await registerManyFromRequestContext(emailsToRegister, 'bulk_employee_upload');
+    }
     
     return {
       inserted,
@@ -380,8 +393,17 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
     ]);
     
     await client.query('COMMIT');
+
+    const created = result.rows[0];
+    if (created?.email_id) {
+      await registerFromRequestContext({
+        email: created.email_id,
+        employeeId: created.emp_int_id,
+        source: 'create_employee',
+      });
+    }
     
-    return result.rows[0];
+    return created;
   } catch (error) {
     await client.query('ROLLBACK');
     throw error;
