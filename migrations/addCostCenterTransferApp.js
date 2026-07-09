@@ -12,6 +12,7 @@
 
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
+const { findGroupParentNavId } = require('../utils/navigationParentUtils');
 
 const getDb = () => getDbFromContext();
 
@@ -70,18 +71,15 @@ const addCostCenterTransferApp = async () => {
       );
       
       if (checkNav.rows.length === 0) {
-        // Find the parent navigation item (ASSETASSIGNMENT)
-        const parentNav = await dbPool.query(
-          'SELECT job_role_nav_id FROM "tblJobRoleNav" WHERE job_role_id = $1 AND app_id = $2 AND int_status = 1',
-          [jobRole.job_role_id, 'ASSETASSIGNMENT']
+        const parent_id = await findGroupParentNavId(
+          dbPool,
+          jobRole.job_role_id,
+          'ASSETASSIGNMENT',
         );
-        
-        let parent_id = null;
-        if (parentNav.rows.length > 0) {
-          parent_id = parentNav.rows[0].job_role_nav_id;
-          console.log(`Found parent ASSETASSIGNMENT for job role ${jobRole.job_role_id}: ${parent_id}`);
+        if (parent_id) {
+          console.log(`Found parent Asset Assignment for job role ${jobRole.job_role_id}: ${parent_id}`);
         } else {
-          console.log(`⚠️  No ASSETASSIGNMENT parent found for job role ${jobRole.job_role_id}, creating as top-level item`);
+          console.log(`⚠️  No Asset Assignment parent found for job role ${jobRole.job_role_id}, creating as top-level item`);
         }
         
         // Generate job_role_nav_id

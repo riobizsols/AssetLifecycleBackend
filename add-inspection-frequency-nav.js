@@ -6,6 +6,7 @@
 
 const { getDbFromContext } = require('./utils/dbContext');
 const db = require('./config/db');
+const { findAllGroupParents } = require('./utils/navigationParentUtils');
 
 const getDbPool = () => {
   try {
@@ -45,29 +46,17 @@ const addInspectionFrequencyNav = async () => {
       console.log('   ✓ Already in tblApps');
     }
     
-    // Step 2: Get MASTERDATA parent ID from tblJobRoleNav
-    console.log('\n📋 Step 2: Finding MASTERDATA parent in tblJobRoleNav...');
-    const parentResult = await dbPool.query(
-      'SELECT "job_role_nav_id", "job_role_id" FROM "tblJobRoleNav" WHERE "app_id" = $1 LIMIT 1',
-      ['MASTERDATA']
-    );
-    
-    if (parentResult.rows.length === 0) {
-      console.log('   ❌ MASTERDATA parent not found in tblJobRoleNav');
+    // Step 2–3: Add under Master Data group per job role
+    console.log('\n📋 Step 2: Finding Master Data parents in tblJobRoleNav...');
+    const jobRoles = await findAllGroupParents(dbPool, 'MASTERDATA');
+
+    if (jobRoles.length === 0) {
+      console.log('   ❌ Master Data parent not found in tblJobRoleNav');
       return;
     }
-    
-    console.log(`   ✓ Found MASTERDATA parent sample\n`);
-    
-    // Step 3: Add to tblJobRoleNav for all job roles with MASTERDATA
+
+    console.log(`   Found ${jobRoles.length} Master Data group(s) across roles\n`);
     console.log('📋 Step 3: Adding INSPECTIONFREQUENCY to tblJobRoleNav...');
-    const jobRolesResult = await dbPool.query(
-      'SELECT DISTINCT "job_role_id", "org_id", "job_role_nav_id" FROM "tblJobRoleNav" WHERE "app_id" = $1',
-      ['MASTERDATA']
-    );
-    
-    const jobRoles = jobRolesResult.rows;
-    console.log(`   Found ${jobRoles.length} instances of MASTERDATA across roles\n`);
     
     let totalAdded = 0;
     

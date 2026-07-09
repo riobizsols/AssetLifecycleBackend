@@ -1,5 +1,9 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const {
+    applyFullAccessToNavigationTree,
+    SYSTEM_ADMIN_JOB_ROLE_ID,
+} = require('../utils/systemAdmin');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -150,8 +154,8 @@ const getNavigationStructure = async (job_role_id, platform = 'D') => {
             children: []
         });
         
-        // Top-level items are those without parents OR are groups
-        if (!item.parent_id || item.is_group) {
+        // Top-level items are those without parents only (groups can be nested)
+        if (!item.parent_id) {
             topLevelItems.push(itemMap.get(item.id));
         }
     });
@@ -200,10 +204,16 @@ const getUserNavigation = async (user_id, platform = 'D') => {
         console.log(`[JobRoleNavModel] Job role IDs: ${job_role_ids.join(', ')}`);
         
         // Get navigation for all roles and combine permissions
-        const navigation = await getCombinedNavigationStructure(job_role_ids, platform);
+        let navigation = await getCombinedNavigationStructure(job_role_ids, platform);
         console.log(`[JobRoleNavModel] Navigation items returned: ${navigation.length}`);
-        
-        return navigation;
+
+        if (job_role_ids.includes(SYSTEM_ADMIN_JOB_ROLE_ID)) {
+            navigation = applyFullAccessToNavigationTree(navigation);
+        }
+
+        return ensureUsersInMasterData(
+            ensureDefaultDashboardNav(navigation, platform),
+        );
     } catch (error) {
         console.error(`[JobRoleNavModel] Error in getUserNavigation:`, error);
         throw error;
@@ -211,6 +221,133 @@ const getUserNavigation = async (user_id, platform = 'D') => {
 };
 
 // Get combined navigation structure for multiple job roles
+const normalizeGroupLabel = (label) =>
+    String(label || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** Legacy group menu labels map to app_id for permission checks after nav-group migration. */
+const GROUP_VIRTUAL_APP_IDS = {
+    'admin settings': 'ADMINSETTINGS',
+    'master data': 'MASTERDATA',
+    reports: 'REPORTS',
+    'asset assignment': 'ASSETASSIGNMENT',
+    inspection: 'INSPECTION',
+};
+
+const hasDashboardInNav = (items) => {
+    for (const item of items) {
+        if (item.app_id === 'DASHBOARD') return true;
+        if (item.children?.length && hasDashboardInNav(item.children)) return true;
+    }
+    return false;
+};
+
+/** Every authenticated user gets Dashboard in navigation unless already configured. */
+const ensureDefaultDashboardNav = (navigation, platform = 'D') => {
+    if (!Array.isArray(navigation) || hasDashboardInNav(navigation)) {
+        return navigation;
+    }
+
+    return [
+        {
+            id: 'default-dashboard',
+            combineKey: 'DASHBOARD',
+            job_role_id: null,
+            parent_id: null,
+            app_id: 'DASHBOARD',
+            label: 'Dashboard',
+            is_group: false,
+            seq: 0,
+            access_level: 'A',
+            mobile_desktop: platform,
+            job_role_name: 'Default',
+            roles: ['Default'],
+            children: [],
+        },
+        ...navigation,
+    ];
+};
+
+/** USERS app_id must display as "Users", not "User Roles". */
+const normalizeUsersNavLabels = (items) => {
+    if (!Array.isArray(items)) return items;
+    return items.map((item) => {
+        const next = {
+            ...item,
+            label: item.app_id === 'USERS' ? 'Users' : item.label,
+        };
+        if (item.children?.length) {
+            next.children = normalizeUsersNavLabels(item.children);
+        }
+        return next;
+    });
+};
+
+const flattenNavItems = (items, result = []) => {
+    for (const item of items) {
+        result.push(item);
+        if (item.children?.length) flattenNavItems(item.children, result);
+    }
+    return result;
+};
+
+const isMasterDataGroup = (item) =>
+    Boolean(
+        item?.is_group &&
+            (item.app_id === 'MASTERDATA' ||
+                normalizeGroupLabel(item.label) === 'master data'),
+    );
+
+/** Ensure Users appears under Master Data when the role has USERS access. */
+const ensureUsersInMasterData = (items) => {
+    if (!Array.isArray(items) || !items.length) return items;
+
+    const flat = flattenNavItems(items);
+    const usersItem = flat.find((item) => item.app_id === 'USERS');
+    if (!usersItem) return normalizeUsersNavLabels(items);
+
+    const walk = (nodes) =>
+        nodes.map((item) => {
+            if (isMasterDataGroup(item)) {
+                const children = normalizeUsersNavLabels(item.children || []);
+                const hasUsers = children.some((child) => child.app_id === 'USERS');
+                return {
+                    ...item,
+                    children: hasUsers
+                        ? children
+                        : [
+                              ...children,
+                              {
+                                  ...usersItem,
+                                  id: usersItem.id || 'default-users',
+                                  app_id: 'USERS',
+                                  label: 'Users',
+                                  is_group: false,
+                                  children: [],
+                              },
+                          ],
+                };
+            }
+            if (item.children?.length) {
+                return { ...item, children: walk(item.children) };
+            }
+            return item;
+        });
+
+    return walk(items);
+};
+
+const getCombineKey = (item) => {
+    if (item.app_id != null && item.app_id !== '') {
+        return String(item.app_id);
+    }
+    if (item.is_group) {
+        const virtualAppId = GROUP_VIRTUAL_APP_IDS[normalizeGroupLabel(item.label)];
+        if (virtualAppId) return virtualAppId;
+        return `group:${normalizeGroupLabel(item.label)}`;
+    }
+    return `nav:${item.id}`;
+};
+
 const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
     try {
         // Get navigation items for all job roles
@@ -240,68 +377,90 @@ const getCombinedNavigationStructure = async (job_role_ids, platform = 'D') => {
         
         console.log(`[JobRoleNavModel] Navigation items from database: ${allNavigationItems.rows.length}`);
 
-        // Group items by app_id and combine permissions
+        const rows = allNavigationItems.rows;
+        const rawIdToCombineKey = new Map();
+        rows.forEach((item) => {
+            rawIdToCombineKey.set(item.id, getCombineKey(item));
+        });
+
+        const resolveParentCombineKey = (parentId) => {
+            if (!parentId) return null;
+            return rawIdToCombineKey.get(parentId) || null;
+        };
+
+        const accessRank = { A: 3, D: 2, V: 1 };
         const combinedItems = {};
-        
-        allNavigationItems.rows.forEach(item => {
-            const appId = item.app_id;
-            
-            if (!combinedItems[appId]) {
-                // First time seeing this app_id
-                combinedItems[appId] = {
+
+        rows.forEach((item) => {
+            const combineKey = getCombineKey(item);
+            const parentKey = resolveParentCombineKey(item.parent_id);
+            const groupLabel = normalizeGroupLabel(item.label);
+            const virtualAppId = item.is_group
+                ? GROUP_VIRTUAL_APP_IDS[groupLabel] || null
+                : item.app_id;
+
+            if (!combinedItems[combineKey]) {
+                combinedItems[combineKey] = {
                     id: item.id,
+                    combineKey,
                     job_role_id: item.job_role_id,
-                    parent_id: item.parent_id,
-                    app_id: item.app_id,
+                    parent_id: parentKey,
+                    app_id: virtualAppId ?? item.app_id,
                     label: item.label,
                     is_group: item.is_group,
                     seq: item.seq,
                     access_level: item.access_level,
                     mobile_desktop: item.mobile_desktop,
                     job_role_name: item.job_role_name,
-                    roles: [item.job_role_name]
+                    roles: [item.job_role_name],
                 };
             } else {
-                // Combine permissions - use highest access level
-                const currentAccess = combinedItems[appId].access_level;
+                const currentAccess = combinedItems[combineKey].access_level;
                 const newAccess = item.access_level;
-                
-                // Access level hierarchy: A (Full) > D (Read) > V (View) > NULL (No Access)
-                const accessRank = { A: 3, D: 2, V: 1 };
                 const currentRank = accessRank[currentAccess] || 0;
                 const newRank = accessRank[newAccess] || 0;
                 if (newRank > currentRank) {
-                    combinedItems[appId].access_level = newAccess;
+                    combinedItems[combineKey].access_level = newAccess;
                 }
-                
-                // Add role name if not already present
-                if (!combinedItems[appId].roles.includes(item.job_role_name)) {
-                    combinedItems[appId].roles.push(item.job_role_name);
+
+                if (!combinedItems[combineKey].parent_id && parentKey) {
+                    combinedItems[combineKey].parent_id = parentKey;
+                }
+
+                if (!combinedItems[combineKey].roles.includes(item.job_role_name)) {
+                    combinedItems[combineKey].roles.push(item.job_role_name);
                 }
             }
         });
 
-        // Convert to array and sort
         const navigationItems = Object.values(combinedItems).sort((a, b) => a.seq - b.seq);
-        
-        // Build hierarchical structure
+
         const itemMap = new Map();
         const topLevelItems = [];
-        
-        // First pass: create all items
-        navigationItems.forEach(item => {
-            itemMap.set(item.id, { ...item, children: [] });
+
+        navigationItems.forEach((item) => {
+            itemMap.set(item.combineKey, { ...item, children: [] });
         });
-        
-        // Second pass: build hierarchy
-        navigationItems.forEach(item => {
+
+        navigationItems.forEach((item) => {
+            const node = itemMap.get(item.combineKey);
             if (item.parent_id && itemMap.has(item.parent_id)) {
-                itemMap.get(item.parent_id).children.push(itemMap.get(item.id));
-            } else {
-                topLevelItems.push(itemMap.get(item.id));
+                itemMap.get(item.parent_id).children.push(node);
+                return;
             }
+
+            const rawRow = rows.find((row) => getCombineKey(row) === item.combineKey);
+            if (rawRow?.parent_id) {
+                const parentCombineKey = rawIdToCombineKey.get(rawRow.parent_id);
+                if (parentCombineKey && itemMap.has(parentCombineKey)) {
+                    itemMap.get(parentCombineKey).children.push(node);
+                    return;
+                }
+            }
+
+            topLevelItems.push(node);
         });
-        
+
         return topLevelItems;
     } catch (error) {
         console.error('Error getting combined navigation structure:', error);

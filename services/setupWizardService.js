@@ -18,9 +18,13 @@ const {
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,
 } = require("../constants/setupDefaults");
+const {
+  filterScreenApps,
+  applyNavigationGroupModel,
+  resolveNavAppId,
+} = require("../utils/navigationGroupUtils");
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
-const { filterScreenApps } = require("../utils/navigationGroupUtils");
 const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
 
 const DUMP_FILE_PATH = path.join(
@@ -1134,7 +1138,6 @@ const seedReferenceTables = async (client, orgId, logs) => {
       FROM "tblApps"
       ORDER BY app_id
     `);
-
     console.log(`[SetupWizard] Found ${appsResult.rows.length} app entries in reference database`);
 
     const screenApps = filterScreenApps(appsResult.rows);
@@ -1152,7 +1155,6 @@ const seedReferenceTables = async (client, orgId, logs) => {
         [app.app_id, app.text, app.int_status !== false, orgId]
       );
     }
-
     console.log(`[SetupWizard] ✅ Synced ${screenApps.length} screen app entries to new database (excluded menu group apps)`);
     logs.push({
       message: `${screenApps.length} screen apps synced from reference database (menu groups are nav-only)`,
@@ -1162,7 +1164,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
     console.error('[SetupWizard] ❌ Error syncing tblApps:', error.message);
     // Fallback to DEFAULT_APPS if sync fails
     console.log('[SetupWizard] ⚠️ Falling back to DEFAULT_APPS...');
-    for (const app of DEFAULT_APPS) {
+    for (const app of filterScreenApps(DEFAULT_APPS, "id")) {
       await client.query(
         `
           INSERT INTO "tblApps" (app_id, text, int_status, org_id)
@@ -1374,6 +1376,8 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
   }
 
   await insertDefaultJobRoleNav(client, orgId);
+
+  await applyNavigationGroupModel(client, "SetupWizard");
 
   logs.push({ message: "System administrator role & navigation ready", scope: "roles" });
 };
@@ -1759,6 +1763,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
 
   // Ensure JR001 navigation matches the current System Administrator sidebar template
   await insertDefaultJobRoleNav(client, orgId);
+
+  await applyNavigationGroupModel(client, "SetupWizard");
 
   logs.push({ message: `Rio Admin user ${rioAdminUsername} provisioned in tblRioAdmin with user_id: ${rioAdminUserId}`, scope: "admin" });
   logs.push({ message: `Login credentials: username=${rioAdminUsername}, password=${initialPassword}`, scope: "admin" });
@@ -2186,6 +2192,17 @@ const getCatalog = () => ({
   auditEvents: DEFAULT_AUDIT_EVENTS,
 });
 
+/**
+ * Seed tblApps, tblJobRoles, and tblJobRoleNav for a tenant database.
+ * Safe to run on existing tenants (uses ON CONFLICT).
+ */
+const bootstrapTenantMenus = async (client, orgId) => {
+  const logs = [];
+  await seedReferenceTables(client, orgId, logs);
+  await seedJobRolesAndNavigation(client, orgId, logs);
+  return logs;
+};
+
 module.exports = {
   testConnection,
   runSetup,
@@ -2194,6 +2211,7 @@ module.exports = {
   getSchemaSqlSync, // Sync version (static file only, for backward compatibility)
   generateDynamicSchemaSql, // Export for direct use if needed
   clearSchemaCache, // Export to clear cache when DB structure changes
+  bootstrapTenantMenus,
   applyPostSchemaMigrations,
   CORE_TABLE_DDL,
 };

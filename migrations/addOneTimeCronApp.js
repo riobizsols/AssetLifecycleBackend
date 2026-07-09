@@ -11,13 +11,14 @@
 
 const { getDbFromContext } = require("../utils/dbContext");
 const { generateCustomId } = require("../utils/idGenerator");
+const { findGroupParentNavId } = require("../utils/navigationParentUtils");
 
 const getDb = () => getDbFromContext();
 
 const TARGET_APP_ID = "ONETIMECRON";
 const TARGET_LABEL = "One Time Cron";
 const TARGET_ROLES = ["JR001", "JR002", "JR003", "JR004"];
-const PARENT_APP_ID = "MASTERDATA";
+const PARENT_GROUP = "MASTERDATA";
 
 const addOneTimeCronApp = async () => {
   const dbPool = getDb();
@@ -70,23 +71,12 @@ const addOneTimeCronApp = async () => {
         continue;
       }
 
-      const parentNav = await dbPool.query(
-        `SELECT job_role_nav_id
-         FROM "tblJobRoleNav"
-         WHERE job_role_id = $1 AND app_id = $2 AND int_status = 1
-         LIMIT 1`,
-        [jobRole.job_role_id, PARENT_APP_ID],
-      );
-
-      let parent_id = null;
-      if (parentNav.rows.length > 0) {
-        parent_id = parentNav.rows[0].job_role_nav_id;
-        console.log(
-          `Parent ${PARENT_APP_ID} for ${jobRole.job_role_id}: ${parent_id}`,
-        );
+      const parent_id = await findGroupParentNavId(dbPool, jobRole.job_role_id, PARENT_GROUP);
+      if (parent_id) {
+        console.log(`Parent ${PARENT_GROUP} for ${jobRole.job_role_id}: ${parent_id}`);
       } else {
         console.log(
-          `⚠️ No ${PARENT_APP_ID} parent for ${jobRole.job_role_id}; inserting as top-level`,
+          `⚠️ No Master Data parent for ${jobRole.job_role_id}; inserting as top-level`,
         );
       }
 
