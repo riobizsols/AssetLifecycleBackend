@@ -21,7 +21,16 @@ const getBranches = async (req, res) => {
 const createBranch = async (req, res) => {
     try {
         const { org_id, user_id } = req.user;
-        const { text, city, branch_code } = req.body;
+        const text = String(req.body?.text || '').trim();
+        const city = String(req.body?.city || '').trim();
+        const branch_code = String(req.body?.branch_code || '').trim();
+
+        if (!text || !city || !branch_code) {
+            return res.status(400).json({
+                error: "Missing required fields",
+                message: "Branch name, city and branch code are required"
+            });
+        }
 
         // Fetch latest branch ID
         const newId = await generateCustomId("branch", 3); 
@@ -61,7 +70,9 @@ const deleteBranches = async (req, res) => {
 const updateBranch = async (req, res) => {
     try {
         const { branch_id } = req.params;
-        const { text, city, branch_code } = req.body;
+        const text = String(req.body?.text || '').trim();
+        const city = String(req.body?.city || '').trim();
+        const branch_code = String(req.body?.branch_code || '').trim();
         const { user_id } = req.user;
 
         // Validate required fields

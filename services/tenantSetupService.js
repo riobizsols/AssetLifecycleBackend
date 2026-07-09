@@ -177,7 +177,7 @@ async function ensureBranchAndDepartment(client, orgId) {
 
       await client.query(`
         INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
-        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, 'SYSTEM', NOW())
+        VALUES ($1, $2, 'Main Branch', '', 'HO', 1, 'SYSTEM', NOW())
         ON CONFLICT (branch_id) DO NOTHING
       `, [orgId, branchId]);
       if (!/^BR\d{3}$/.test(branchId)) {

@@ -54,7 +54,7 @@ async function uploadBuffer({
   }
 }
 
-async function getPresignedDownloadUrl(filePath, expirySeconds = 600) {
+async function getPresignedDownloadUrl(filePath, expirySeconds = 600, respHeaders = {}) {
   if (!filePath || filePath.startsWith(`${LOCAL_PREFIX}/`)) {
     return null;
   }
@@ -65,7 +65,40 @@ async function getPresignedDownloadUrl(filePath, expirySeconds = 600) {
     throw new Error('Invalid file path');
   }
 
-  return minioClient.presignedGetObject(bucket, objectName, expirySeconds);
+  const timeoutMs = Number(process.env.MINIO_PRESIGN_TIMEOUT_MS || 8000);
+  return withTimeout(
+    minioClient.presignedGetObject(bucket, objectName, expirySeconds, respHeaders),
+    timeoutMs,
+    `MinIO presign timed out after ${timeoutMs}ms (check MINIO_END_POINT / network)`,
+  );
+}
+
+/**
+ * Stream object bytes from MinIO (or local fallback path) with a hard timeout on connect.
+ */
+async function getObjectStream(filePath) {
+  const localPath = resolveLocalPath(filePath);
+  if (localPath) {
+    if (!fs.existsSync(localPath)) {
+      const err = new Error('Local file not found');
+      err.code = 'ENOENT';
+      throw err;
+    }
+    return fs.createReadStream(localPath);
+  }
+
+  const [bucket, ...keyParts] = (filePath || '').split('/');
+  const objectName = keyParts.join('/');
+  if (!bucket || !objectName) {
+    throw new Error('Invalid file path');
+  }
+
+  const timeoutMs = Number(process.env.MINIO_GET_TIMEOUT_MS || 10000);
+  return withTimeout(
+    minioClient.getObject(bucket, objectName),
+    timeoutMs,
+    `MinIO getObject timed out after ${timeoutMs}ms (check MINIO_END_POINT / network)`,
+  );
 }
 
 function resolveLocalPath(filePath) {
@@ -78,6 +111,8 @@ function resolveLocalPath(filePath) {
 module.exports = {
   uploadBuffer,
   getPresignedDownloadUrl,
+  getObjectStream,
   resolveLocalPath,
+  withTimeout,
   LOCAL_PREFIX,
 };

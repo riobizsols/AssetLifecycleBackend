@@ -6,7 +6,9 @@ const {
   MINIO_USE_SSL = process.env.MINIO_USE_SSL,
   MINIO_ACCESS_KEY = process.env.MINIO_ACCESS_KEY,
   MINIO_SECRET_KEY = process.env.MINIO_SECRET_KEY,
-  MINIO_BUCKET = process.env.MINIO_BUCKET || 'asset-docs'
+  MINIO_BUCKET = process.env.MINIO_BUCKET || 'asset-docs',
+  // Skip remote region lookup — prevents long hangs when MinIO is slow/unreachable
+  MINIO_REGION = process.env.MINIO_REGION || 'us-east-1',
 } = process.env;
 
 const minioClient = new Minio.Client({
@@ -15,15 +17,15 @@ const minioClient = new Minio.Client({
   useSSL: String(MINIO_USE_SSL).toLowerCase() === 'true',
   accessKey: MINIO_ACCESS_KEY || 'minioadmin',
   secretKey: MINIO_SECRET_KEY || 'minioadmin',
+  region: MINIO_REGION,
+  pathStyle: true,
 });
 
 async function ensureBucketExists(bucketName = MINIO_BUCKET) {
   const exists = await minioClient.bucketExists(bucketName).catch(() => false);
   if (!exists) {
-    await minioClient.makeBucket(bucketName, 'us-east-1');
+    await minioClient.makeBucket(bucketName, MINIO_REGION);
   }
 }
 
-module.exports = { minioClient, ensureBucketExists, MINIO_BUCKET };
-
-
+module.exports = { minioClient, ensureBucketExists, MINIO_BUCKET, MINIO_REGION };

@@ -1,10 +1,75 @@
 const { getQAAuditCertificates } = require('../models/qaAuditReportModel');
-const { minioClient } = require('../utils/minioClient');
 const path = require('path');
 const { getAssetMaintDocById } = require('../models/assetMaintDocsModel');
 const { getAssetDocById } = require('../models/assetDocsModel');
 const { getAssetTypeDocById } = require('../models/assetTypeDocsModel');
 const PropertiesModel = require('../models/propertiesModel');
+const {
+  getPresignedDownloadUrl,
+  getObjectStream,
+  resolveLocalPath,
+} = require('../utils/documentStorage');
+
+/**
+ * Resolve certificate/doc row by id + optional type hint
+ */
+async function resolveCertificateDocument(id, type) {
+  let docResult;
+  let docType;
+
+  if (type === 'quality') {
+    docResult = await getAssetDocById(id);
+    if (docResult.rows.length === 0) {
+      docResult = await getAssetTypeDocById(id);
+      docType = 'assetType';
+    } else {
+      docType = 'asset';
+    }
+  } else if (type === 'maintenance_completion' || type === 'maintenance') {
+    docResult = await getAssetMaintDocById(id);
+    if (docResult.rows.length === 0) {
+      docResult = await getAssetDocById(id);
+      if (docResult.rows.length === 0) {
+        docResult = await getAssetTypeDocById(id);
+        docType = 'assetType';
+      } else {
+        docType = 'asset';
+      }
+    } else {
+      docType = 'maintenance';
+    }
+  } else {
+    docResult = await getAssetMaintDocById(id);
+    if (docResult.rows.length === 0) {
+      docResult = await getAssetDocById(id);
+      if (docResult.rows.length === 0) {
+        docResult = await getAssetTypeDocById(id);
+        docType = 'assetType';
+      } else {
+        docType = 'asset';
+      }
+    } else {
+      docType = 'maintenance';
+    }
+  }
+
+  return { docResult, docType };
+}
+
+function guessContentType(fileName) {
+  const ext = String(fileName || '').split('.').pop()?.toLowerCase();
+  const map = {
+    pdf: 'application/pdf',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    csv: 'text/csv',
+    txt: 'text/plain',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    xls: 'application/vnd.ms-excel',
+  };
+  return map[ext] || 'application/octet-stream';
+}
 
 /**
  * Get QA/Audit certificates based on filters
@@ -24,13 +89,11 @@ const getCertificates = async (req, res) => {
       advancedFilters = []
     } = req.body;
 
-    // All filters are optional - but at least one should be provided
     const hasDateRange = fromDate && toDate;
     const hasAssetTypeFilter = assetTypes && Array.isArray(assetTypes) && assetTypes.length > 0;
     const hasAssetFilter = assets && Array.isArray(assets) && assets.length > 0;
     const hasAdvancedFilters = advancedFilters && Array.isArray(advancedFilters) && advancedFilters.length > 0;
-    
-    // At least one filter should be provided
+
     if (!hasDateRange && !hasAssetTypeFilter && !hasAssetFilter && !hasAdvancedFilters) {
       return res.status(400).json({
         success: false,
@@ -73,58 +136,18 @@ const getCertificates = async (req, res) => {
 /**
  * Download certificate file
  * GET /qa-audit/certificates/:id/download
+ *
+ * Prefer a short-lived MinIO URL. If MinIO is slow/unreachable, stream bytes via API
+ * so the browser still receives the file (avoids 60s front-end timeouts).
  */
 const downloadCertificate = async (req, res) => {
   try {
     const { id } = req.params;
-    const { type } = req.query; // 'quality' or 'maintenance_completion'
-    const mode = req.query.mode || 'download'; // 'download' or 'view'
+    const { type } = req.query;
+    const mode = req.query.mode || 'download';
+    const forceStream = String(req.query.stream || '').toLowerCase() === 'true';
 
-    let docResult;
-    let docType;
-
-    // Get document based on type
-    if (type === 'quality') {
-      // Try asset docs first
-      docResult = await getAssetDocById(id);
-      if (docResult.rows.length === 0) {
-        // Try asset type docs
-        docResult = await getAssetTypeDocById(id);
-        docType = 'assetType';
-      } else {
-        docType = 'asset';
-      }
-    } else if (type === 'maintenance_completion' || type === 'maintenance') {
-      // Try all possible sources since documents from tblAssetDocs can also be marked as maintenance
-      docResult = await getAssetMaintDocById(id);
-      if (docResult.rows.length === 0) {
-        // Try asset docs (since we're returning them with type='maintenance')
-        docResult = await getAssetDocById(id);
-        if (docResult.rows.length === 0) {
-          // Try asset type docs
-          docResult = await getAssetTypeDocById(id);
-          docType = 'assetType';
-        } else {
-          docType = 'asset';
-        }
-      } else {
-        docType = 'maintenance';
-      }
-    } else {
-      // Try all types
-      docResult = await getAssetMaintDocById(id);
-      if (docResult.rows.length === 0) {
-        docResult = await getAssetDocById(id);
-        if (docResult.rows.length === 0) {
-          docResult = await getAssetTypeDocById(id);
-          docType = 'assetType';
-        } else {
-          docType = 'asset';
-        }
-      } else {
-        docType = 'maintenance';
-      }
-    }
+    const { docResult } = await resolveCertificateDocument(id, type);
 
     if (!docResult || docResult.rows.length === 0) {
       return res.status(404).json({ message: 'Certificate not found' });
@@ -135,153 +158,84 @@ const downloadCertificate = async (req, res) => {
       return res.status(404).json({ message: 'Certificate file path not found' });
     }
 
-    // Ensure file_name exists
     if (!doc.file_name) {
-      doc.file_name = path.basename(doc.doc_path.split('/').pop());
+      doc.file_name = path.basename(String(doc.doc_path).split('/').pop() || 'document');
     }
 
-    // Parse bucket and object name from doc_path
-    const [bucket, ...keyParts] = doc.doc_path.split('/');
-    const objectName = keyParts.join('/');
+    const fileName = doc.file_name || 'document';
+    const contentType = guessContentType(fileName);
+    const disposition = mode === 'download'
+      ? `attachment; filename="${fileName}"`
+      : 'inline';
 
-    const fileName = doc.file_name || path.basename(objectName);
-    const fileExtension = fileName.split('.').pop()?.toLowerCase();
-    const returnContent = req.query.content === 'true'; // Check if frontend wants file content
+    // Local-upload fallback (dev when MinIO was down at upload time)
+    const localPath = resolveLocalPath(doc.doc_path);
+    if (localPath) {
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', disposition);
+      return res.sendFile(localPath);
+    }
 
-    // For files when content is requested (CSV, TXT, XLSX, images), return the file content directly
-    const supportedContentTypes = ['csv', 'txt', 'xlsx', 'xls', 'jpg', 'jpeg', 'png'];
-    if (returnContent && supportedContentTypes.includes(fileExtension)) {
+    // Prefer API stream when:
+    // - client requests stream=true (browser often cannot reach MINIO_END_POINT), OR
+    // - MINIO_FORCE_STREAM=true (local/dev when MinIO is only reachable server-side)
+    const envForceStream =
+      String(process.env.MINIO_FORCE_STREAM || '').toLowerCase() === 'true';
+    const shouldStream = forceStream || envForceStream;
+
+    if (!shouldStream) {
       try {
-        // Log the path for debugging
-        console.log('[QA Audit Download] Fetching content for:', {
-          doc_path: doc.doc_path,
-          bucket,
-          objectName,
-          fileName,
-          fileExtension
-        });
-        
-        // Try to get file content directly from MinIO
-        let buffer;
-        try {
-          // First verify the file exists
-          await minioClient.statObject(bucket, objectName);
-          
-          // Get the file content from MinIO
-          const dataStream = await minioClient.getObject(bucket, objectName);
-          const chunks = [];
-          
-          await new Promise((resolve, reject) => {
-            dataStream.on('data', (chunk) => {
-              chunks.push(chunk);
-            });
-            
-            dataStream.on('end', () => {
-              buffer = Buffer.concat(chunks);
-              resolve();
-            });
-            
-            dataStream.on('error', (err) => {
-              console.error('Error reading file stream from MinIO:', err);
-              reject(err);
-            });
-          });
-        } catch (minioError) {
-          console.error('[QA Audit Download] Error accessing MinIO directly:', minioError);
-          console.error('[QA Audit Download] Details:', {
-            bucket,
-            objectName,
-            error: minioError.message,
-            code: minioError.code
-          });
-          
-          // If direct access fails, return the presigned URL instead
-          // Frontend can fetch from the URL
-          const fallbackUrl = await minioClient.presignedGetObject(bucket, objectName, 60 * 60, {});
-          
+        const respHeaders = {};
+        if (mode === 'download') {
+          respHeaders['response-content-disposition'] = disposition;
+        } else if (mode === 'view') {
+          respHeaders['response-content-disposition'] = 'inline';
+        }
+
+        const url = await getPresignedDownloadUrl(doc.doc_path, 60 * 60, respHeaders);
+        if (url) {
           return res.json({
             success: true,
-            url: fallbackUrl, // Return URL for frontend to fetch
-            fileName: fileName,
+            url,
+            fileName,
             document: doc,
-            useUrl: true // Flag to indicate frontend should fetch from URL
           });
         }
-        
-        // Process the buffer based on file type
-        if (fileExtension === 'jpg' || fileExtension === 'jpeg' || fileExtension === 'png') {
-          const base64 = buffer.toString('base64');
-          const mimeType = fileExtension === 'png' ? 'image/png' : 'image/jpeg';
-          const dataUrl = `data:${mimeType};base64,${base64}`;
-          
-          return res.json({
-            success: true,
-            content: dataUrl,
-            fileName: fileName,
-            document: doc,
-            contentType: 'image'
-          });
-        } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-          // For Excel files, return as base64 (binary files)
-          const base64 = buffer.toString('base64');
-          
-          return res.json({
-            success: true,
-            content: base64,
-            fileName: fileName,
-            document: doc,
-            contentType: 'excel',
-            encoding: 'base64'
-          });
-        } else {
-          // For CSV and TXT, return as text
-          const content = buffer.toString('utf-8');
-          
-          return res.json({
-            success: true,
-            content: content,
-            fileName: fileName,
-            document: doc,
-            contentType: 'text'
-          });
-        }
-      } catch (error) {
-        console.error('[QA Audit Download] Unexpected error:', error);
-        return res.status(500).json({
-          success: false,
-          message: 'Failed to fetch file content',
-          error: error.message,
-          bucket,
-          objectName
-        });
+      } catch (presignError) {
+        console.warn(
+          '[QA Audit Download] Presign failed, falling back to API stream:',
+          presignError.message,
+        );
       }
     }
 
-    // Set response headers for presigned URL
-    const respHeaders = {};
-    if (mode === 'download') {
-      respHeaders['response-content-disposition'] = `attachment; filename="${fileName}"`;
-    } else if (mode === 'view') {
-      respHeaders['response-content-disposition'] = 'inline';
+    // Stream from MinIO through the API (browser never talks to MinIO directly)
+    try {
+      const stream = await getObjectStream(doc.doc_path);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Content-Disposition', disposition);
+      stream.on('error', (streamErr) => {
+        console.error('[QA Audit Download] Stream error:', streamErr);
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: 'Failed to stream certificate file',
+            error: streamErr.message,
+          });
+        } else {
+          res.destroy(streamErr);
+        }
+      });
+      return stream.pipe(res);
+    } catch (streamError) {
+      console.error('[QA Audit Download] Stream fallback failed:', streamError);
+      return res.status(504).json({
+        success: false,
+        message:
+          'Document storage unavailable from this server. MinIO at MINIO_END_POINT is not reachable. On production the API host must reach MinIO; for local use SSH tunnel or set a reachable MINIO_END_POINT.',
+        error: streamError.message,
+      });
     }
-
-    // Generate presigned URL for MinIO - this is more reliable for file downloads
-    // MinIO handles the file serving directly, preserving binary data integrity
-    const url = await minioClient.presignedGetObject(bucket, objectName, 60 * 60, respHeaders);
-
-    // Return the presigned URL - frontend will handle the download
-    // This approach is better because:
-    // 1. MinIO serves files directly without Express interference
-    // 2. No binary encoding issues
-    // 3. Better performance for large files
-    // 4. Preserves file integrity
-    return res.json({
-      success: true,
-      url,
-      fileName: fileName,
-      document: doc
-    });
-
   } catch (error) {
     console.error('Error in downloadCertificate:', error);
     return res.status(500).json({
@@ -308,7 +262,6 @@ const getFilterOptions = async (req, res) => {
       });
     }
 
-    // Get properties with their values for this asset type
     const properties = await PropertiesModel.getPropertiesWithValues(assetTypeId, orgId);
 
     return res.json({
@@ -331,4 +284,3 @@ module.exports = {
   downloadCertificate,
   getFilterOptions
 };
-
