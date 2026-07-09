@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 #
-# Docker deploy — BACKEND container (alm-main-backend).
-# Pushed with this repo; run on server from ~/alm-main/AssetLifecycleBackend
+# Docker deploy — TENANT backend (alm-tenant-backend, port 5001).
+# Run on server from ~/tenant-ALM-Wildcard/backend
 #
 #   ./deploy-docker.sh           # stash, pull backend, rebuild
-#   ./deploy-docker.sh --all     # backend + frontend
+#   ./deploy-docker.sh --all     # backend + frontend (../frontend)
 #   ./deploy-docker.sh --rebuild # rebuild only (no git pull)
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ALM_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY="${SCRIPT_DIR}/scripts/deploy/deploy-pull-rebuild.sh"
+
+export ALM_ROOT
+export BACKEND_DIR="${SCRIPT_DIR}"
+export FRONTEND_DIR="${ALM_ROOT}/frontend"
+export BACKEND_CONTAINER_NAME=alm-tenant-backend
+export FRONTEND_CONTAINER_NAME=alm-tenant-web
+export BACKEND_HOST_PORT=5001
+export FRONTEND_HOST_PORT=3001
 
 for arg in "$@"; do
   case "$arg" in
@@ -22,6 +31,7 @@ for arg in "$@"; do
       ;;
     --help|-h)
       echo "Usage: ./deploy-docker.sh [--all] [--rebuild]"
+      echo "Tenant stack: alm-tenant-backend:5001, alm-tenant-web:3001"
       exit 0
       ;;
   esac
