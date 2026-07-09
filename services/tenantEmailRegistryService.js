@@ -6,6 +6,35 @@ const logger = require('../utils/logger');
 
 let tenantUserEmailsTableReady = false;
 
+const TENANT_USER_EMAILS_DDL = `
+CREATE TABLE IF NOT EXISTS "tenant_user_emails" (
+    email_normalized character varying(320) PRIMARY KEY,
+    email_display character varying(320) NOT NULL,
+    org_id character varying(10) NOT NULL,
+    subdomain character varying(63) NOT NULL,
+    user_id character varying(50),
+    employee_id character varying(50),
+    source character varying(64) NOT NULL DEFAULT 'unknown',
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_user_emails_org_id
+    ON "tenant_user_emails"(org_id);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_user_emails_subdomain
+    ON "tenant_user_emails"(subdomain);
+`;
+
+function readTenantUserEmailsMigrationSql() {
+  const sqlPath = path.join(__dirname, '../migrations/create_tenant_user_emails_table.sql');
+  try {
+    return fs.readFileSync(sqlPath, 'utf8');
+  } catch {
+    return TENANT_USER_EMAILS_DDL;
+  }
+}
+
 async function getRegistryPool() {
   return initTenantRegistryPool();
 }
@@ -16,8 +45,7 @@ async function ensureTenantUserEmailsTable(pool = null) {
   }
 
   const registryPool = pool || await getRegistryPool();
-  const sqlPath = path.join(__dirname, '../migrations/create_tenant_user_emails_table.sql');
-  await registryPool.query(fs.readFileSync(sqlPath, 'utf8'));
+  await registryPool.query(readTenantUserEmailsMigrationSql());
   tenantUserEmailsTableReady = true;
   logger.log('[TenantEmailRegistry] tenant_user_emails table ready');
 }
@@ -43,26 +71,34 @@ async function getTenantFromEmail(email) {
     return null;
   }
 
-  const pool = await getRegistryPool();
-  const result = await pool.query(
-    `SELECT e.org_id, e.subdomain, t.is_active
-     FROM "tenant_user_emails" e
-     INNER JOIN "tenants" t ON t.org_id = e.org_id
-     WHERE e.email_normalized = $1
-       AND t.is_active = true
-     LIMIT 1`,
-    [emailNormalized],
-  );
+  try {
+    const pool = await getRegistryPool();
+    const result = await pool.query(
+      `SELECT e.org_id, e.subdomain, t.is_active
+       FROM "tenant_user_emails" e
+       INNER JOIN "tenants" t ON t.org_id = e.org_id
+       WHERE e.email_normalized = $1
+         AND t.is_active = true
+       LIMIT 1`,
+      [emailNormalized],
+    );
 
-  if (!result.rows.length) {
-    return null;
+    if (!result.rows.length) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      org_id: row.org_id,
+      subdomain: row.subdomain,
+    };
+  } catch (err) {
+    if (err?.code === '42P01') {
+      logger.warn('[TenantEmailRegistry] tenant_user_emails table missing — run create-tenant-user-emails-table.js');
+      return null;
+    }
+    throw err;
   }
-
-  const row = result.rows[0];
-  return {
-    org_id: row.org_id,
-    subdomain: row.subdomain,
-  };
 }
 
 /**

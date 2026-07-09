@@ -1251,6 +1251,92 @@ async function insertMissingJobRoleNavFromReference(referenceClient, tenantClien
 }
 
 /**
+ * Insert JR001 mobile nav rows (mob_desk = 'M') missing on the tenant.
+ * Desktop rows can share the same app_id, so app_id-only sync is not enough.
+ */
+async function insertMissingMobileNavFromReference(referenceClient, tenantClient, orgId) {
+  const refColumns = await getTableColumns(referenceClient, 'tblJobRoleNav');
+  const tenantColumns = await getTableColumns(tenantClient, 'tblJobRoleNav');
+  const commonColumns = tenantColumns.filter((col) => refColumns.includes(col));
+  if (!commonColumns.length) {
+    return { copied: 0, updated: 0, total: 0, skipped: true };
+  }
+
+  const selectColumns = commonColumns.map((col) => `"${col}"`).join(', ');
+  const navRows = await referenceClient.query(
+    `
+      SELECT ${selectColumns}
+      FROM "tblJobRoleNav"
+      WHERE "job_role_id" = 'JR001'
+        AND "int_status" = 1
+        AND "mob_desk" = 'M'
+    `,
+  );
+
+  const tenantIds = await tenantClient.query(
+    `
+      SELECT job_role_nav_id, app_id, mob_desk
+      FROM "tblJobRoleNav"
+      WHERE job_role_id = 'JR001' AND int_status = 1
+    `,
+  );
+  const tenantNavById = new Map(tenantIds.rows.map((row) => [row.job_role_nav_id, row]));
+
+  let copied = 0;
+  let updated = 0;
+
+  for (const row of navRows.rows) {
+    const existing = tenantNavById.get(row.job_role_nav_id);
+    if (!existing) {
+      const values = commonColumns.map((col) => {
+        if (col === 'org_id' && orgId) return orgId;
+        return row[col];
+      });
+      const valuePlaceholders = values.map((_, i) => `$${i + 1}`).join(', ');
+      const columnNames = commonColumns.map((col) => `"${col}"`).join(', ');
+
+      try {
+        const result = await tenantClient.query(
+          `
+            INSERT INTO "tblJobRoleNav" (${columnNames})
+            VALUES (${valuePlaceholders})
+            ON CONFLICT (job_role_nav_id) DO NOTHING
+          `,
+          values,
+        );
+        if (result.rowCount > 0) copied += 1;
+      } catch (insertErr) {
+        console.warn(`[TenantSetup] ⚠️ Error inserting mobile nav row:`, insertErr.message);
+      }
+      continue;
+    }
+
+    if (row.app_id && !existing.app_id) {
+      try {
+        const result = await tenantClient.query(
+          `
+            UPDATE "tblJobRoleNav"
+            SET app_id = $1,
+                label = COALESCE($2, label),
+                mob_desk = 'M',
+                access_level = COALESCE($3, access_level),
+                is_group = COALESCE($4, is_group)
+            WHERE job_role_nav_id = $5
+              AND (app_id IS NULL OR btrim(app_id) = '')
+          `,
+          [row.app_id, row.label, row.access_level, row.is_group, row.job_role_nav_id],
+        );
+        if (result.rowCount > 0) updated += 1;
+      } catch (updateErr) {
+        console.warn(`[TenantSetup] ⚠️ Error updating mobile nav row:`, updateErr.message);
+      }
+    }
+  }
+
+  return { copied, updated, total: navRows.rows.length, skipped: false };
+}
+
+/**
  * Keep JR001 navigation complete without overwriting custom tenant menu layout.
  * Empty tenants get DEFAULT_JOB_ROLE_NAV; existing tenants only gain missing app rows.
  */
@@ -1304,7 +1390,22 @@ async function ensureJobRoleNavigation(client, orgId) {
         );
         console.log(`[TenantSetup] ✅ Inserted missing JR001 nav rows (${syncResult.copied}/${syncResult.total})`);
         await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
-        return { synced: true, count: syncResult.copied };
+      }
+
+      const mobileSyncResult = await insertMissingMobileNavFromReference(referenceClient, client, orgId);
+      if (mobileSyncResult.copied > 0 || mobileSyncResult.updated > 0) {
+        console.log(
+          `[TenantSetup] ✅ Synced JR001 mobile nav for ${orgId} (inserted ${mobileSyncResult.copied}, updated ${mobileSyncResult.updated})`,
+        );
+        await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+        return {
+          synced: true,
+          count: tenantCount + mobileSyncResult.copied + mobileSyncResult.updated,
+        };
+      }
+
+      if (missingAppIds.length > 0) {
+        return { synced: true, count: tenantCount };
       }
 
       return { synced: false, count: tenantCount };

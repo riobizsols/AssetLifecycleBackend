@@ -21,6 +21,7 @@ uploads/
 # Database backups
 backups/
 *.sql
+!migrations/*.sql
 *.md5
 
 # OS files

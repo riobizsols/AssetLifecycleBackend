@@ -173,10 +173,27 @@ async function getTenantCredentials(orgId) {
 }
 
 /**
- * Create connection string for tenant database
+ * Create connection string for tenant database.
+ * Appends sslmode=disable when SSL is off (Docker alm_db / non-TLS Postgres).
  */
 function getTenantConnectionString(credentials) {
-  return `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${credentials.host}:${credentials.port}/${credentials.database}`;
+  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${credentials.host}:${credentials.port}/${credentials.database}`;
+
+  const lower = base.toLowerCase();
+  if (lower.includes('sslmode=')) {
+    return base;
+  }
+
+  const sslDisabled =
+    process.env.DB_SSL === 'false' ||
+    process.env.DATABASE_SSL === 'false' ||
+    /@(localhost|127\.0\.0\.1|alm_db|host\.docker\.internal)(:|\/|$)/.test(lower);
+
+  if (sslDisabled) {
+    return `${base}?sslmode=disable`;
+  }
+
+  return base;
 }
 
 /**

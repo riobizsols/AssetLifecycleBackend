@@ -86,7 +86,7 @@ const login = async (req, res) => {
 
         const dbPool = tenantCtx.dbPool;
         const orgId = tenantCtx.registryOrgId;
-        const resolvedLoginSubdomain = tenantCtx.subdomain;
+        let resolvedLoginSubdomain = tenantCtx.subdomain;
         const loginMode = subdomain ? 'subdomain' : 'email_registry';
         const isTenant = true;
 
