@@ -327,7 +327,7 @@ async function seedDefaultIdSequences(client) {
  * @param {Client} client - Tenant database client (MUST be connected to tenant database)
  * @param {string} orgId - Organization ID
  */
-async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001') {
+async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001', orgCity = '') {
   // CRITICAL: Validate client is connected to tenant database
   if (!client) {
     throw new Error('CRITICAL: Tenant database client is required. Cannot ensure branch/department without tenant database connection.');
@@ -361,9 +361,9 @@ async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001') 
           org_id, branch_id, text, city, branch_code, int_status,
           created_by, created_on, changed_by, changed_on
         )
-        VALUES ($1, $2, 'Main Branch', 'Default City', 'HO', 1, $3, NOW(), $3, NOW())
+        VALUES ($1, $2, 'Main Branch', $4, 'HO', 1, $3, NOW(), $3, NOW())
         ON CONFLICT (branch_id) DO NOTHING
-      `, [orgId, branchId, adminUserId]);
+      `, [orgId, branchId, adminUserId, (orgCity || '').trim()]);
       if (!/^BR\d{3}$/.test(branchId)) {
         throw new Error(`Generated branch_id "${branchId}" does not match expected format BR###`);
       }
@@ -1972,7 +1972,7 @@ async function createTenant(tenantData) {
       await seedDefaultIdSequences(tenantClient);
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
       const plannedAdminUserId = (adminUser.username || 'USR001').toUpperCase();
-      await ensureBranchAndDepartment(tenantClient, orgIdUpper, plannedAdminUserId);
+      await ensureBranchAndDepartment(tenantClient, orgIdUpper, plannedAdminUserId, orgCity);
       
       // Step 3: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);

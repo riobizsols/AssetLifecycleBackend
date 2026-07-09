@@ -15,12 +15,56 @@ const addBranch = async (branch) => {
     branch;
 
   const dbPool = getDb();
+
+  const payload = {
+    branch_id,
+    org_id,
+    int_status: 1,
+    text,
+    city,
+    branch_code,
+    created_by: created_by || "SYSTEM",
+    created_on: new Date(),
+    changed_by: created_by || "SYSTEM",
+    changed_on: new Date(),
+  };
+
+  // Defensive check: ensure all NOT NULL columns without defaults are populated.
+  // This prevents runtime 500s if schema evolves.
+  const requiredColsResult = await dbPool.query(
+    `SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = 'public'
+       AND table_name = 'tblBranches'
+       AND is_nullable = 'NO'
+       AND column_default IS NULL`
+  );
+  const missing = requiredColsResult.rows
+    .map((r) => r.column_name)
+    .filter((col) => payload[col] === null || payload[col] === undefined);
+  if (missing.length > 0) {
+    throw new Error(
+      `Missing required branch fields: ${missing.join(", ")}`
+    );
+  }
+
   const result = await dbPool.query(
     `INSERT INTO "tblBranches" (
-        branch_id, org_id, text, city, branch_code, created_by, created_on
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        branch_id, org_id, int_status, text, city, branch_code, created_by, created_on, changed_by, changed_on
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *`,
-    [branch_id, org_id, text, city, branch_code, created_by]
+    [
+      payload.branch_id,
+      payload.org_id,
+      payload.int_status,
+      payload.text,
+      payload.city,
+      payload.branch_code,
+      payload.created_by,
+      payload.created_on,
+      payload.changed_by,
+      payload.changed_on,
+    ]
   );
 
   return result.rows[0];
