@@ -22,6 +22,7 @@ const {
   filterScreenApps,
   applyNavigationGroupModel,
   resolveNavAppId,
+  ensureJobRoleNavAppIdNullable,
 } = require("../utils/navigationGroupUtils");
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
@@ -217,6 +218,14 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
   `);
+
+  const navSchema = await ensureJobRoleNavAppIdNullable(client, 'SetupWizard');
+  if (navSchema.altered) {
+    const message = 'tblJobRoleNav.app_id made nullable for menu groups';
+    console.log(`[SetupWizard] ✅ ${message}`);
+    logs.push({ message, scope: 'schema' });
+  }
+
   const message = "Post-schema migrations applied (removed deprecated tblAssetTypes columns)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {

@@ -12,11 +12,11 @@ const {
 } = require('./tenantSchemaAlignService');
 const { seedRequiredMasterData, alignTenantColumnsFromReference } = require('./tenantReferenceDataService');
 const { finalizeTenantForeignKeys } = require('./tenantForeignKeyService');
-const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
+const { applyNavigationGroupModel, ensureJobRoleNavAppIdNullable } = require('../utils/navigationGroupUtils');
 const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
-const { generateCustomIdForClient } = require('../utils/idGenerator');
+const { generateCustomIdForClient, syncJobRoleNavIdSequence } = require('../utils/idGenerator');
 const { DEFAULT_ID_SEQUENCES, DEFAULT_JOB_ROLES, DEFAULT_JOB_ROLE_NAV } = require('../constants/setupDefaults');
 const { sendWelcomeEmail } = require('../utils/mailer');
 const { registerTenantEmail } = require('./tenantEmailRegistryService');
@@ -1343,6 +1343,8 @@ async function insertMissingMobileNavFromReference(referenceClient, tenantClient
 async function ensureJobRoleNavigation(client, orgId) {
   if (!client || !orgId) return { synced: false, count: 0 };
 
+  let navResult = { synced: false, count: 0 };
+
   const tenantCountResult = await client.query(`
     SELECT COUNT(*)::int AS count
     FROM "tblJobRoleNav"
@@ -1375,10 +1377,8 @@ async function ensureJobRoleNavigation(client, orgId) {
         console.log(`[TenantSetup] JR001 navigation empty for ${orgId}; seeding default template...`);
         const seeded = await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
         await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
-        return { synced: true, count: seeded };
-      }
-
-      if (missingAppIds.length > 0) {
+        navResult = { synced: true, count: seeded };
+      } else if (missingAppIds.length > 0) {
         console.log(
           `[TenantSetup] JR001 missing ${missingAppIds.length} app(s) for ${orgId}; inserting without overwriting layout...`,
         );
@@ -1390,38 +1390,44 @@ async function ensureJobRoleNavigation(client, orgId) {
         );
         console.log(`[TenantSetup] ✅ Inserted missing JR001 nav rows (${syncResult.copied}/${syncResult.total})`);
         await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+        navResult = { synced: true, count: tenantCount + syncResult.copied };
       }
 
-      const mobileSyncResult = await insertMissingMobileNavFromReference(referenceClient, client, orgId);
-      if (mobileSyncResult.copied > 0 || mobileSyncResult.updated > 0) {
-        console.log(
-          `[TenantSetup] ✅ Synced JR001 mobile nav for ${orgId} (inserted ${mobileSyncResult.copied}, updated ${mobileSyncResult.updated})`,
-        );
-        await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
-        return {
-          synced: true,
-          count: tenantCount + mobileSyncResult.copied + mobileSyncResult.updated,
-        };
+      if (tenantCount > 0) {
+        const mobileSyncResult = await insertMissingMobileNavFromReference(referenceClient, client, orgId);
+        if (mobileSyncResult.copied > 0 || mobileSyncResult.updated > 0) {
+          console.log(
+            `[TenantSetup] ✅ Synced JR001 mobile nav for ${orgId} (inserted ${mobileSyncResult.copied}, updated ${mobileSyncResult.updated})`,
+          );
+          await copyTableDataDynamically(referenceClient, client, 'tblApps', orgId);
+          navResult = {
+            synced: true,
+            count: tenantCount + mobileSyncResult.copied + mobileSyncResult.updated,
+          };
+        } else if (missingAppIds.length > 0 && !navResult.synced) {
+          navResult = { synced: true, count: tenantCount };
+        } else if (!navResult.synced) {
+          navResult = { synced: false, count: tenantCount };
+        }
       }
-
-      if (missingAppIds.length > 0) {
-        return { synced: true, count: tenantCount };
-      }
-
-      return { synced: false, count: tenantCount };
     } catch (err) {
       console.warn(`[TenantSetup] Reference navigation sync failed: ${err.message}`);
     } finally {
       await referenceClient.end().catch(() => {});
     }
-  }
-
-  if (tenantCount === 0) {
+  } else if (tenantCount === 0) {
     const seeded = await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
-    return { synced: true, count: seeded };
+    navResult = { synced: true, count: seeded };
+  } else {
+    navResult = { synced: false, count: tenantCount };
   }
 
-  return { synced: false, count: tenantCount };
+  const lastNavNumber = await syncJobRoleNavIdSequence(client);
+  if (lastNavNumber > 0) {
+    console.log(`[TenantSetup] jobrolenav sequence synced to last_number=${lastNavNumber}`);
+  }
+
+  return navResult;
 }
 
 /**
@@ -1861,6 +1867,7 @@ async function createTenant(tenantData) {
         }));
         await ensureJobMonitorTables(tenantClient);
         await ensureAtInspCertStructure(tenantClient);
+        await ensureJobRoleNavAppIdNullable(tenantClient, 'TenantSetup');
         try {
           await refClient.connect();
           await ensureReferenceViews(tenantClient, refClient);

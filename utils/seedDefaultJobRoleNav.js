@@ -3,6 +3,7 @@ const {
   applyNavigationGroupModel,
   resolveNavAppId,
 } = require('./navigationGroupUtils');
+const { syncJobRoleNavIdSequence } = require('./idGenerator');
 
 /**
  * Insert JR001 System Administrator navigation for a new tenant.
@@ -41,6 +42,10 @@ async function seedDefaultJobRoleNav(client, orgId, logLabel = 'NavSeed') {
   }
 
   await applyNavigationGroupModel(client, logLabel);
+
+  const lastNavNumber = await syncJobRoleNavIdSequence(client);
+  console.log(`[${logLabel}] jobrolenav sequence synced to last_number=${lastNavNumber}`);
+
   return DEFAULT_JOB_ROLE_NAV.length;
 }
 
