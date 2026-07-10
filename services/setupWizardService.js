@@ -764,7 +764,7 @@ const CORE_TABLE_DDL = [
       org_id character varying(10) NOT NULL,
       job_role_id character varying(20) PRIMARY KEY,
       text character varying(50),
-      job_function character varying(50),
+      job_function character varying(100),
       int_status integer DEFAULT 1
     );
   `,
