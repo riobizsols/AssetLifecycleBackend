@@ -9,6 +9,45 @@ const defaultPrefixesFromSetup = Object.fromEntries(
     DEFAULT_ID_SEQUENCES.map((entry) => [entry.tableKey, entry.prefix])
 );
 
+/** tblIDSequences keys in DB vs keys used in generateCustomId() */
+const SEQUENCE_KEY_ALIASES = {
+    job_role_nav: 'jobrolenav',
+    job_role: 'jobrole',
+};
+
+function resolveSequenceKey(tableKey) {
+    return SEQUENCE_KEY_ALIASES[tableKey] || tableKey;
+}
+
+async function syncJobRoleNavSequence(dbPool) {
+    try {
+        const result = await dbPool.query(`
+            SELECT COALESCE(MAX(
+                CASE
+                    WHEN job_role_nav_id ~ '^JRN[0-9]+$'
+                    THEN CAST(SUBSTRING(job_role_nav_id FROM 4) AS INTEGER)
+                    ELSE 0
+                END
+            ), 0) AS max_seq
+            FROM "tblJobRoleNav"
+        `);
+        const maxSeq = Number(result.rows?.[0]?.max_seq || 0);
+        if (maxSeq <= 0) return;
+
+        await dbPool.query(
+            `
+                INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+                VALUES ('jobrolenav', 'JRN', $1)
+                ON CONFLICT (table_key) DO UPDATE
+                SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+            `,
+            [maxSeq],
+        );
+    } catch (error) {
+        console.warn('[idGenerator] Could not sync jobrolenav sequence:', error.message);
+    }
+}
+
 const defaultPrefixes = {
     ...defaultPrefixesFromSetup,
     'vendor_sla_rec': 'VSLAR',
@@ -34,22 +73,43 @@ const defaultPrefixes = {
 };
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
-    console.log(`🔢 Generating ID for tableKey: ${tableKey}`);
+    const sequenceKey = resolveSequenceKey(tableKey);
+    console.log(`🔢 Generating ID for tableKey: ${tableKey} (sequence: ${sequenceKey})`);
+
+    if (sequenceKey === 'jobrolenav') {
+        await syncJobRoleNavSequence(dbPool);
+    }
     
     let result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
-        [tableKey]
+        [sequenceKey]
     );
 
     // Auto-create entry if it doesn't exist
     if (result.rows.length === 0) {
-        console.log(`⚠️ Entry for ${tableKey} not found in tblIDSequences, creating it...`);
+        console.log(`⚠️ Entry for ${sequenceKey} not found in tblIDSequences, creating it...`);
 
-        const prefix = defaultPrefixes[tableKey] || tableKey.toUpperCase().substring(0, 5);
+        const prefix = defaultPrefixes[tableKey] || defaultPrefixes[sequenceKey] || sequenceKey.toUpperCase().substring(0, 5);
         
         // Insert new entry with last_number = 0 (or seed from existing table if needed)
         let initialLastNumber = 0;
-        if (tableKey === 'asset_scrap_det') {
+        if (sequenceKey === 'jobrolenav') {
+            try {
+                const r = await dbPool.query(`
+                    SELECT COALESCE(MAX(
+                        CASE
+                            WHEN job_role_nav_id ~ '^JRN[0-9]+$'
+                            THEN CAST(SUBSTRING(job_role_nav_id FROM 4) AS INTEGER)
+                            ELSE 0
+                        END
+                    ), 0) AS max_seq
+                    FROM "tblJobRoleNav"
+                `);
+                initialLastNumber = Number(r.rows?.[0]?.max_seq || 0);
+            } catch (e) {
+                initialLastNumber = 0;
+            }
+        } else if (tableKey === 'asset_scrap_det') {
             // tblAssetScrapDet already has data in most DBs (ASD0001, ASD0002, ...).
             // Seed tblIDSequences to avoid generating duplicates and doing many retries.
             try {
@@ -68,19 +128,19 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
 
         await dbPool.query(
             'INSERT INTO "tblIDSequences" (table_key, prefix, last_number) VALUES ($1, $2, $3)',
-            [tableKey, prefix, initialLastNumber]
+            [sequenceKey, prefix, initialLastNumber]
         );
         
-        console.log(`✅ Created new ID sequence entry: ${tableKey} with prefix ${prefix}`);
+        console.log(`✅ Created new ID sequence entry: ${sequenceKey} with prefix ${prefix}`);
         
         // Query again to get the newly created entry
         result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
-        [tableKey]
+        [sequenceKey]
     );
 
     if (result.rows.length === 0) {
-            throw new Error(`Failed to create ID sequence entry for ${tableKey}`);
+            throw new Error(`Failed to create ID sequence entry for ${sequenceKey}`);
         }
     }
 
@@ -92,7 +152,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
     // Update the last number
     await dbPool.query(
         'UPDATE "tblIDSequences" SET last_number = $1 WHERE table_key = $2',
-        [next, tableKey]
+        [next, sequenceKey]
     );
 
     // Generate the ID

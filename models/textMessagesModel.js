@@ -48,7 +48,8 @@ async function getMessageByIdWithLanguageFallback(tmdId, langCode) {
   const normalizedLang = String(langCode || "en").trim().toLowerCase();
   const isEnglish = normalizedLang === "en";
 
-  const res = await db.query(
+  try {
+    const res = await db.query(
     `
       SELECT
         d.tmd_id,
@@ -74,7 +75,13 @@ async function getMessageByIdWithLanguageFallback(tmdId, langCode) {
     [normalizedLang, isEnglish, tmdId],
   );
 
-  return res.rows[0] || null;
+    return res.rows[0] || null;
+  } catch (error) {
+    if (error.code === "42P01") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 module.exports = {

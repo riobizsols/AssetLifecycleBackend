@@ -69,7 +69,7 @@ const createNavigationEntry = async (data) => {
             sequence,
             parent_id,
             sub_menu
-        ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, '')
+        ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
         RETURNING *
     `;
 
@@ -165,7 +165,7 @@ const bulkCreateNavigationEntries = async (entries, org_id) => {
                 sequence,
                 parent_id,
                 sub_menu
-            ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, '')
+            ) VALUES ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
             RETURNING *
         `;
 
