@@ -9,6 +9,17 @@ const {
     insertNavigationForJobRole
 } = require("../models/jobRoleModel");
 const { generateCustomId } = require("../utils/idGenerator");
+const { JOB_FUNCTION_MAX_LENGTH } = require('../constants/jobRoleLimits');
+
+const validateJobFunctionLength = (job_function) => {
+    if (job_function && job_function.length > JOB_FUNCTION_MAX_LENGTH) {
+        return `Job Function must not exceed ${JOB_FUNCTION_MAX_LENGTH} characters (currently ${job_function.length})`;
+    }
+    return null;
+};
+
+const isJobFunctionLengthError = (error) =>
+    error?.code === '22001' && String(error?.message || '').includes('job_function');
 
 /**
  * Fetch all job roles for organization
@@ -94,6 +105,11 @@ const addJobRole = async (req, res) => {
             return res.status(400).json({ message: "Missing required fields (text)" });
         }
 
+        const jobFunctionError = validateJobFunctionLength(job_function);
+        if (jobFunctionError) {
+            return res.status(400).json({ message: jobFunctionError, field: 'job_function' });
+        }
+
         // Auto-generate job role ID
         const job_role_id = await generateCustomId('job_role', 3);
         console.log(`✅ Generated Job Role ID: ${job_role_id}`);
@@ -124,6 +140,13 @@ const addJobRole = async (req, res) => {
         if (error.code === '23505') { // Unique constraint violation
             return res.status(409).json({ message: "Job role ID already exists" });
         }
+
+        if (isJobFunctionLengthError(error)) {
+            return res.status(400).json({
+                message: `Job Function must not exceed ${JOB_FUNCTION_MAX_LENGTH} characters`,
+                field: 'job_function',
+            });
+        }
         
         res.status(500).json({ 
             message: "Failed to create job role",
@@ -143,6 +166,11 @@ const updateJobRole = async (req, res) => {
 
         if (!text) {
             return res.status(400).json({ message: "Role name (text) is required" });
+        }
+
+        const jobFunctionError = validateJobFunctionLength(job_function);
+        if (jobFunctionError) {
+            return res.status(400).json({ message: jobFunctionError, field: 'job_function' });
         }
 
         // Update the job role in tblJobRoles
@@ -176,6 +204,14 @@ const updateJobRole = async (req, res) => {
         });
     } catch (error) {
         console.error("Error updating job role:", error);
+
+        if (isJobFunctionLengthError(error)) {
+            return res.status(400).json({
+                message: `Job Function must not exceed ${JOB_FUNCTION_MAX_LENGTH} characters`,
+                field: 'job_function',
+            });
+        }
+
         res.status(500).json({ 
             message: "Failed to update job role",
             error: error.message 
