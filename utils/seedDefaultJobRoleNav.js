@@ -3,6 +3,7 @@ const {
   applyNavigationGroupModel,
   resolveNavAppId,
 } = require('./navigationGroupUtils');
+const { syncJobRoleNavIdSequence } = require('./idGenerator');
 
 /**
  * Insert JR001 System Administrator navigation for a new tenant.
@@ -42,24 +43,8 @@ async function seedDefaultJobRoleNav(client, orgId, logLabel = 'NavSeed') {
 
   await applyNavigationGroupModel(client, logLabel);
 
-  await client.query(
-    `
-      INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-      SELECT
-        'jobrolenav',
-        'JRN',
-        COALESCE(MAX(
-          CASE
-            WHEN job_role_nav_id ~ '^JRN[0-9]+$'
-            THEN CAST(SUBSTRING(job_role_nav_id FROM 4) AS INTEGER)
-            ELSE 0
-          END
-        ), 0)
-      FROM "tblJobRoleNav"
-      ON CONFLICT (table_key) DO UPDATE
-      SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
-    `,
-  );
+  const lastNavNumber = await syncJobRoleNavIdSequence(client);
+  console.log(`[${logLabel}] jobrolenav sequence synced to last_number=${lastNavNumber}`);
 
   return DEFAULT_JOB_ROLE_NAV.length;
 }
