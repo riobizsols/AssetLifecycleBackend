@@ -44,11 +44,18 @@ async function upsertTranslation({ tmd_id, lang_code, text }) {
 }
 
 async function getMessageByIdWithLanguageFallback(tmdId, langCode) {
-  const db = getDbFromContext();
+  let db;
+  try {
+    db = getDbFromContext();
+  } catch (error) {
+    return null;
+  }
+
   const normalizedLang = String(langCode || "en").trim().toLowerCase();
   const isEnglish = normalizedLang === "en";
 
-  const res = await db.query(
+  try {
+    const res = await db.query(
     `
       SELECT
         d.tmd_id,
@@ -74,7 +81,13 @@ async function getMessageByIdWithLanguageFallback(tmdId, langCode) {
     [normalizedLang, isEnglish, tmdId],
   );
 
-  return res.rows[0] || null;
+    return res.rows[0] || null;
+  } catch (error) {
+    if (error.code === "42P01" || error.code === "TENANT_DB_CONTEXT_REQUIRED") {
+      return null;
+    }
+    throw error;
+  }
 }
 
 module.exports = {

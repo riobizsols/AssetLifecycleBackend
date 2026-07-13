@@ -104,12 +104,17 @@ const getUserNotifications = async (req, res) => {
       branchId,
       hasSuperAccess: req.user?.hasSuperAccess || false,
     });
-    const expiryNotifications = await getExpiryNotificationsByUser({
-      empIntId: userId,
-      orgId,
-      branchId,
-      hasSuperAccess: req.user?.hasSuperAccess || false,
-    });
+    let expiryNotifications = [];
+    try {
+      expiryNotifications = await getExpiryNotificationsByUser({
+        empIntId: userId,
+        orgId,
+        branchId,
+        hasSuperAccess: req.user?.hasSuperAccess || false,
+      });
+    } catch (expiryError) {
+      console.warn('[getUserNotifications] Expiry notifications skipped:', expiryError.message);
+    }
     
     console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);
     console.log('🐛 [getUserNotifications] First 3 notifications:', notifications.slice(0, 3));

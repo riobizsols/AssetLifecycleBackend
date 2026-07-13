@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middlewares/authMiddleware");
+const { attachTenantDb } = require("../middlewares/attachTenantDb");
 const {
   getDefaults,
   getTranslationsByLang,
@@ -18,11 +19,11 @@ router.get("/translations/:langCode", protect, getTranslationsByLang);
 router.put("/translations/:langCode", protect, upsertTranslations);
 
 // GET /api/text-messages/:tmdId
-// Public for auto-generated toast ids (TMD_*); admin lookups stay protected.
+// Public for auto-generated toast ids (TMD_*); needs tenant DB from subdomain.
 router.get("/:tmdId", (req, res, next) => {
   const tmdId = String(req.params.tmdId || "");
   if (tmdId.startsWith("TMD_")) {
-    return getMessageById(req, res, next);
+    return attachTenantDb(req, res, () => getMessageById(req, res, next));
   }
   return protect(req, res, () => getMessageById(req, res, next));
 });

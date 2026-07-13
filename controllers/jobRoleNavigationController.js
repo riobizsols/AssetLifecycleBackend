@@ -91,6 +91,13 @@ const addJobRoleNavigation = async (req, res) => {
         if (error.code === '23505') { // Unique constraint violation
             return res.status(409).json({ message: "Navigation ID already exists" });
         }
+
+        if (error.code === '23503') {
+            return res.status(400).json({
+                message: "Invalid job role or parent navigation reference",
+                error: error.message,
+            });
+        }
         
         res.status(500).json({ 
             message: "Failed to create navigation entry",

@@ -217,7 +217,7 @@ const getUserWithBranch = async (userId, tenantPool = null) => {
             u.last_accessed,
             d.text as dept_name,
             d.branch_id,
-            b.branch_id,
+            b.branch_code,
             b.text as branch_name,
             jr.text as job_role_name
         FROM "tblUsers" u

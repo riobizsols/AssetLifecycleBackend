@@ -365,8 +365,9 @@ const getExpiryNotificationsByUser = async ({
     branchFilter = ` AND (a.branch_id = $${params.length} OR a.branch_id IS NULL)`;
   }
 
-  const res = await getDb().query(
-    `
+  try {
+    const res = await getDb().query(
+      `
       SELECT
         n.notify_id,
         n.asset_id,
@@ -391,17 +392,23 @@ const getExpiryNotificationsByUser = async ({
       ORDER BY n.created_on DESC
       LIMIT 200
     `,
-    params
-  );
+      params
+    );
 
-  return res.rows.filter((row) => {
-    if ((row.snooze_days || 0) <= 0 || !row.last_seen_on) {
-      return true;
+    return res.rows.filter((row) => {
+      if ((row.snooze_days || 0) <= 0 || !row.last_seen_on) {
+        return true;
+      }
+      const availableOn = new Date(row.last_seen_on);
+      availableOn.setDate(availableOn.getDate() + Number(row.snooze_days || 0));
+      return availableOn <= new Date();
+    });
+  } catch (error) {
+    if (error.code === '42P01') {
+      return [];
     }
-    const availableOn = new Date(row.last_seen_on);
-    availableOn.setDate(availableOn.getDate() + Number(row.snooze_days || 0));
-    return availableOn <= new Date();
-  });
+    throw error;
+  }
 };
 
 const markExpiryNotificationOpen = async ({ notifyId, orgId, empIntId }) => {

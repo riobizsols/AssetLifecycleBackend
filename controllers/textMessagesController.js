@@ -95,8 +95,32 @@ async function getMessageById(req, res) {
       },
     });
   } catch (error) {
+    // Missing message / missing tenant DB should not break the UI with a 500
+    if (
+      error.code === "42P01" ||
+      error.code === "TENANT_DB_CONTEXT_REQUIRED" ||
+      error.name === "TenantDbContextError"
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Text message not found",
+        data: {
+          tmd_id: req.params.tmdId,
+          text: "Failed to fetch data. Please try again.",
+          lang_code: "en",
+        },
+      });
+    }
     console.error("Error fetching text message by tmd_id:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch text message" });
+    return res.status(404).json({
+      success: false,
+      message: "Text message not found",
+      data: {
+        tmd_id: req.params.tmdId,
+        text: "Failed to fetch data. Please try again.",
+        lang_code: "en",
+      },
+    });
   }
 }
 

@@ -511,6 +511,7 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "user", prefix: "USR", lastNumber: 0 },
   { tableKey: "employee", prefix: "EMP", lastNumber: 0 },
   { tableKey: "emp_int_id", prefix: "EMP_INT_", lastNumber: 0 },
+  { tableKey: "amsbr", prefix: "AMSBR", lastNumber: 0 },
   { tableKey: "prod_serv", prefix: "PS", lastNumber: 0 },
   { tableKey: "jobrole", prefix: "JR", lastNumber: 0 },
   { tableKey: "jobrolenav", prefix: "JRN", lastNumber: 0 },
@@ -597,6 +598,7 @@ const DEFAULT_JOB_ROLE_NAV = [
 
   { id: "JRN043", jobRoleId: "JR001", parentId: null, appId: null, label: "Certificates", sequence: 16, accessLevel: "A", isGroup: true },
   { id: "JRN025", jobRoleId: "JR001", parentId: "JRN043", appId: "CERTIFICATIONS", label: "Certifications", sequence: 1, accessLevel: "A", isGroup: false },
+  // Canonical technician/employee cert screen (TECHCERTUPLOAD is a legacy alias of this app_id)
   { id: "JRN047", jobRoleId: "JR001", parentId: "JRN043", appId: "EMPLOYEE TECH CERTIFICATION", label: "Employee Tech Certificate", sequence: 2, accessLevel: "A", isGroup: false },
 
   { id: "JRN044", jobRoleId: "JR001", parentId: null, appId: null, label: "Report Breakdown", sequence: 17, accessLevel: "A", isGroup: true },

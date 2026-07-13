@@ -86,15 +86,15 @@ function clearStatusCodeCache() {
   idToCodeCache = null;
 }
 
-/** SQL fragment: compare integer status column to a status_code literal */
+/** SQL fragment: compare status column (varchar-stored numeric id) to a status_code literal */
 function statusEqualsSql(columnRef, statusCode) {
-  return `${columnRef} = (SELECT id FROM "tblStatusCodes" WHERE status_code = '${statusCode}' LIMIT 1)`;
+  return `NULLIF(${columnRef}::text, '')::bigint = (SELECT id FROM "tblStatusCodes" WHERE status_code = '${statusCode}' LIMIT 1)`;
 }
 
 /** SQL fragment: status IN (codes...) */
 function statusInSql(columnRef, codes) {
   const list = codes.map((c) => `'${c}'`).join(',');
-  return `${columnRef} IN (SELECT id FROM "tblStatusCodes" WHERE status_code IN (${list}))`;
+  return `NULLIF(${columnRef}::text, '')::bigint IN (SELECT id FROM "tblStatusCodes" WHERE status_code IN (${list}))`;
 }
 
 module.exports = {

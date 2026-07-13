@@ -7,6 +7,14 @@ const {
 
 const EXCLUDED_FROM_TENANTS = ['tblRioAdmin'];
 
+/** Never drop these even if absent from a stale reference dump. */
+const PROTECTED_RUNTIME_TABLES = [
+  'tblAssetMaintSch_BR_Hist',
+  'tblAssetExpiryNotify',
+  'tblJobs',
+  'tblJobHistory',
+];
+
 function getReferenceUrl() {
   return (
     process.env.TENANT_SCHEMA_REFERENCE_URL ||
@@ -110,6 +118,266 @@ async function ensureJobMonitorTables(client) {
 }
 
 /**
+ * Scrap workflow status must be numeric IDs from tblStatusCodes (integer/bigint),
+ * matching current scrapMaintenanceModel SQL.
+ * Older tenant generation used varchar status codes ('IN','IP','AP') + text CHECKs,
+ * which breaks approvals list with: varchar = bigint.
+ */
+async function ensureScrapWorkflowStatusInteger(client) {
+  const tables = ['tblWFScrap_H', 'tblWFScrap_D'];
+  const results = [];
+
+  for (const tableName of tables) {
+    const exists = await client.query(
+      `
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = $1
+      ) AS exists
+      `,
+      [tableName]
+    );
+    if (!exists.rows[0]?.exists) {
+      results.push({ table: tableName, status: 'missing' });
+      continue;
+    }
+
+    // Drop legacy text-code check constraints (IN/IP/AP as strings)
+    const checks = await client.query(
+      `
+      SELECT con.conname
+      FROM pg_constraint con
+      JOIN pg_class rel ON rel.oid = con.conrelid
+      JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+      WHERE nsp.nspname = 'public'
+        AND rel.relname = $1
+        AND con.contype = 'c'
+        AND (
+          con.conname ILIKE '%status%'
+          OR pg_get_constraintdef(con.oid) ILIKE '%''IN''%'
+        )
+      `,
+      [tableName]
+    );
+    for (const row of checks.rows) {
+      await client.query(`ALTER TABLE "${tableName}" DROP CONSTRAINT IF EXISTS "${row.conname}"`);
+    }
+
+    const col = await client.query(
+      `
+      SELECT data_type, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = $1
+        AND column_name = 'status'
+      `,
+      [tableName]
+    );
+    if (!col.rows[0]) {
+      results.push({ table: tableName, status: 'no_status_column' });
+      continue;
+    }
+
+    const dataType = String(col.rows[0].data_type || '').toLowerCase();
+    if (dataType === 'integer' || dataType === 'bigint' || dataType === 'smallint') {
+      // Ensure numeric default for IN (id=1) when possible
+      try {
+        await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN status DROP DEFAULT`);
+        await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN status SET DEFAULT 1`);
+      } catch (_) {
+        /* ignore */
+      }
+      results.push({ table: tableName, status: 'already_numeric', dataType });
+      continue;
+    }
+
+    // Convert varchar/text status codes or numeric strings → integer IDs
+    await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN status DROP DEFAULT`);
+    await client.query(
+      `
+      ALTER TABLE "${tableName}"
+      ALTER COLUMN status TYPE integer
+      USING (
+        CASE
+          WHEN NULLIF(TRIM(status::text), '') IS NULL THEN 1
+          WHEN TRIM(status::text) ~ '^[0-9]+$' THEN TRIM(status::text)::integer
+          ELSE COALESCE(
+            (SELECT sc.id FROM "tblStatusCodes" sc WHERE sc.status_code = TRIM(status::text) LIMIT 1),
+            1
+          )
+        END
+      )
+      `
+    );
+    await client.query(`ALTER TABLE "${tableName}" ALTER COLUMN status SET DEFAULT 1`);
+    results.push({ table: tableName, status: 'converted_to_integer', from: dataType });
+  }
+
+  console.log('[TenantSchemaAlign] Scrap workflow status schema:', JSON.stringify(results));
+  return results;
+}
+
+/**
+ * Runtime-critical schema that must exist even if the reference dump/template is stale.
+ * Fixes maintenance list 500 (hours_required), reopened breakdowns 500 (BR_Hist),
+ * and dashboard expiry notifications 500 (tblAssetExpiryNotify).
+ */
+async function ensureCriticalRuntimeSchema(client) {
+  const results = [];
+
+  // Maintenance list joins tblMaintTypes.hours_required
+  try {
+    await client.query(`
+      ALTER TABLE "tblMaintTypes"
+      ADD COLUMN IF NOT EXISTS "hours_required" DECIMAL(10,2)
+    `);
+    results.push({ object: 'tblMaintTypes.hours_required', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblMaintTypes.hours_required', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  // Optional maintenance time-tracking columns used alongside hours_required
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetMaintSch"
+      ADD COLUMN IF NOT EXISTS "hours_spent" DECIMAL(10,2)
+    `);
+    await client.query(`
+      ALTER TABLE "tblAssetMaintSch"
+      ADD COLUMN IF NOT EXISTS "maint_notes" TEXT
+    `);
+    results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes', status: 'ensured' });
+  } catch (err) {
+    if (err.code !== '42P01') throw err;
+    results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes', status: 'table_missing' });
+  }
+
+  // Reopened breakdowns report / history writes
+  try {
+    const brHistExists = await client.query(`
+      SELECT EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tblAssetMaintSch_BR_Hist'
+      ) AS exists
+    `);
+    if (!brHistExists.rows[0]?.exists) {
+      const parentExists = await client.query(`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.tables
+          WHERE table_schema = 'public' AND table_name = 'tblAssetMaintSch'
+        ) AS exists
+      `);
+      if (parentExists.rows[0]?.exists) {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS "tblAssetMaintSch_BR_Hist" (
+            amsbr_id    TEXT PRIMARY KEY,
+            ams_id      TEXT NOT NULL,
+            status      VARCHAR(20) NOT NULL,
+            created_on  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by  TEXT NOT NULL,
+            notes       TEXT,
+            CONSTRAINT fk_tblAssetMaintSch_BR_Hist_ams_id
+              FOREIGN KEY (ams_id)
+              REFERENCES "tblAssetMaintSch"(ams_id)
+              ON UPDATE CASCADE
+              ON DELETE CASCADE
+          )
+        `);
+      } else {
+        await client.query(`
+          CREATE TABLE IF NOT EXISTS "tblAssetMaintSch_BR_Hist" (
+            amsbr_id    TEXT PRIMARY KEY,
+            ams_id      TEXT NOT NULL,
+            status      VARCHAR(20) NOT NULL,
+            created_on  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_by  TEXT NOT NULL,
+            notes       TEXT
+          )
+        `);
+      }
+      results.push({ object: 'tblAssetMaintSch_BR_Hist', status: 'created' });
+    } else {
+      results.push({ object: 'tblAssetMaintSch_BR_Hist', status: 'exists' });
+    }
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetMaintSch_BR_Hist_ams_id
+        ON "tblAssetMaintSch_BR_Hist" (ams_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetMaintSch_BR_Hist_status
+        ON "tblAssetMaintSch_BR_Hist" (status)
+    `);
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblAssetMaintSch_BR_Hist:', err.message);
+    results.push({ object: 'tblAssetMaintSch_BR_Hist', status: 'error', message: err.message });
+  }
+
+  // Dashboard / expiry notifications
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS "tblAssetExpiryNotify" (
+        notify_id       VARCHAR(50) PRIMARY KEY,
+        notif_group_id  VARCHAR(50),
+        asset_id        VARCHAR(50) NOT NULL,
+        org_id          VARCHAR(50) NOT NULL,
+        status          VARCHAR(20) NOT NULL DEFAULT 'UNREAD',
+        title           VARCHAR(255),
+        body            TEXT,
+        last_seen_on    TIMESTAMPTZ,
+        snooze_days     INTEGER NOT NULL DEFAULT 0,
+        emp_int_id      VARCHAR(50),
+        created_on      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetExpiryNotify_asset_id
+        ON "tblAssetExpiryNotify" (asset_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetExpiryNotify_org_id
+        ON "tblAssetExpiryNotify" (org_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetExpiryNotify_emp_int_id
+        ON "tblAssetExpiryNotify" (emp_int_id)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetExpiryNotify_status
+        ON "tblAssetExpiryNotify" (status)
+    `);
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tblAssetExpiryNotify_created_on
+        ON "tblAssetExpiryNotify" (created_on DESC)
+    `);
+    results.push({ object: 'tblAssetExpiryNotify', status: 'ensured' });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblAssetExpiryNotify:', err.message);
+    results.push({ object: 'tblAssetExpiryNotify', status: 'error', message: err.message });
+  }
+
+  // ID sequence used when writing BR_Hist rows
+  try {
+    await client.query(`
+      INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+      VALUES ('amsbr', 'AMSBR', 0)
+      ON CONFLICT (table_key) DO NOTHING
+    `);
+    results.push({ object: 'tblIDSequences.amsbr', status: 'ensured' });
+  } catch (err) {
+    if (err.code !== '42P01') {
+      console.warn('[TenantSchemaAlign] Could not ensure amsbr sequence:', err.message);
+    }
+  }
+
+  console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));
+  return results;
+}
+
+/**
  * Hospitality uses tblATInspCert (table) + tblATInspCerts (view).
  * Older tenant templates used tblATInspCerts as a physical table.
  */
@@ -178,7 +446,9 @@ async function ensureReferenceViews(client, referenceClient) {
 async function removeExtraEmptyTables(client, referenceTables) {
   const refSet = new Set(referenceTables);
   const tenantTables = await listBaseTables(client);
-  const extra = tenantTables.filter((t) => !refSet.has(t));
+  const extra = tenantTables.filter(
+    (t) => !refSet.has(t) && !PROTECTED_RUNTIME_TABLES.includes(t)
+  );
 
   for (const tableName of extra) {
     try {
@@ -248,6 +518,12 @@ async function alignTenantSchema(client, options = {}) {
     console.log('[TenantSchemaAlign] Fixing tblATInspCert / tblATInspCerts structure...');
     await ensureAtInspCertStructure(client);
 
+    console.log('[TenantSchemaAlign] Ensuring scrap workflow status is integer IDs...');
+    await ensureScrapWorkflowStatusInteger(client);
+
+    console.log('[TenantSchemaAlign] Ensuring critical runtime tables/columns...');
+    await ensureCriticalRuntimeSchema(client);
+
     console.log('[TenantSchemaAlign] Ensuring reference views...');
     await ensureReferenceViews(client, refClient);
 
@@ -264,6 +540,10 @@ async function alignTenantSchema(client, options = {}) {
         `[TenantSchemaAlign] Column align: ${columnLog.summary.applied} applied, ${columnLog.summary.failed} failed`
       );
     }
+
+    // Re-apply after column align / cleanup so a stale reference cannot leave these missing
+    console.log('[TenantSchemaAlign] Re-ensuring critical runtime schema after align...');
+    await ensureCriticalRuntimeSchema(client);
 
     if (options.seedMasterData) {
       console.log('[TenantSchemaAlign] Seeding required master data from reference...');
@@ -308,5 +588,7 @@ module.exports = {
   alignTenantDatabase,
   ensureJobMonitorTables,
   ensureAtInspCertStructure,
+  ensureScrapWorkflowStatusInteger,
+  ensureCriticalRuntimeSchema,
   ensureReferenceViews,
 };
