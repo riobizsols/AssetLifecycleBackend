@@ -19,6 +19,7 @@ export BACKEND_CONTAINER_NAME=alm-tenant-backend
 export FRONTEND_CONTAINER_NAME=alm-tenant-web
 export BACKEND_HOST_PORT=5001
 export FRONTEND_HOST_PORT=3001
+export MINIO_BUCKET_VALUE=alm-tenant
 
 for arg in "$@"; do
   case "$arg" in
