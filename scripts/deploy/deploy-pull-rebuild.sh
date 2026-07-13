@@ -33,6 +33,9 @@ BACKEND_ONLY="${BACKEND_ONLY:-0}"
 FRONTEND_ONLY="${FRONTEND_ONLY:-0}"
 ENSURE_ALM_SHARED="${ENSURE_ALM_SHARED:-1}"
 ALM_SHARED_NETWORK="${ALM_SHARED_NETWORK:-alm-shared}"
+ENSURE_MINIO_NETWORK="${ENSURE_MINIO_NETWORK:-1}"
+MINIO_DOCKER_NETWORK="${MINIO_DOCKER_NETWORK:-mansoor-s-app-backend_mansoor-net}"
+MINIO_CONTAINER="${MINIO_CONTAINER:-mansoor-minio}"
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
@@ -177,6 +180,51 @@ ensure_alm_shared_network() {
   fi
 }
 
+# Join MinIO's Docker network so MINIO_END_POINT=mansoor-minio resolves after recreate.
+# Prefer compose `mansoor-net` external network; this is a safety net if compose attach fails.
+ensure_minio_network() {
+  local container_name="${1:-$BACKEND_CONTAINER_NAME}"
+
+  if [[ "$ENSURE_MINIO_NETWORK" != "1" ]]; then
+    log "ENSURE_MINIO_NETWORK=0 — skipping MinIO Docker network attach"
+    return
+  fi
+
+  if ! docker network inspect "$MINIO_DOCKER_NETWORK" >/dev/null 2>&1; then
+    log "WARN: MinIO network ${MINIO_DOCKER_NETWORK} not found — start ${MINIO_CONTAINER} first, or set ENSURE_MINIO_NETWORK=0"
+    return
+  fi
+
+  if ! docker inspect "$container_name" >/dev/null 2>&1; then
+    log "WARN: container ${container_name} not found — cannot attach to MinIO network"
+    return
+  fi
+
+  log "Ensuring ${container_name} is on MinIO network ${MINIO_DOCKER_NETWORK}..."
+  if docker network connect "$MINIO_DOCKER_NETWORK" "$container_name" 2>/dev/null; then
+    log "Attached ${container_name} → ${MINIO_DOCKER_NETWORK}"
+  else
+    log "Note: ${container_name} likely already on ${MINIO_DOCKER_NETWORK} (OK)."
+  fi
+
+  if docker inspect "$MINIO_CONTAINER" >/dev/null 2>&1; then
+    if docker exec "$container_name" node -e "
+      const http=require('http');
+      const req=http.get('http://${MINIO_CONTAINER}:9000/minio/health/live', res=>{
+        process.exit(res.statusCode===200?0:1);
+      });
+      req.on('error', ()=>process.exit(1));
+      req.setTimeout(4000, ()=>{ req.destroy(); process.exit(1); });
+    " >/dev/null 2>&1; then
+      log "MinIO health OK from ${container_name} → ${MINIO_CONTAINER}:9000"
+    else
+      log "WARN: MinIO reachability check failed from ${container_name} (check MINIO_END_POINT / networks)"
+    fi
+  else
+    log "WARN: MinIO container ${MINIO_CONTAINER} not running"
+  fi
+}
+
 compose_up() {
   local dir="$1"
   local label="$2"
@@ -206,6 +254,7 @@ main() {
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
     compose_up "$BACKEND_DIR" "backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
+    ensure_minio_network "$BACKEND_CONTAINER_NAME"
   fi
 
   if [[ "$BACKEND_ONLY" != "1" ]]; then
