@@ -20,6 +20,11 @@ export FRONTEND_CONTAINER_NAME=alm-tenant-web
 export BACKEND_HOST_PORT=5001
 export FRONTEND_HOST_PORT=3001
 export MINIO_BUCKET_VALUE=alm-tenant
+# Must match docker-compose ports "5001:5001" — never allow PORT=5000 from git .env
+export ENSURE_BACKEND_PORT=5001
+export ENSURE_REDIS_URL=redis://alm_redis:6379/0
+# alm_db / pressana db_host IPs have no TLS — never force SSL on tenant pools
+export ENSURE_DB_SSL=false
 
 for arg in "$@"; do
   case "$arg" in

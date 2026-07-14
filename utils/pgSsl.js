@@ -2,8 +2,22 @@
  * Postgres SSL options for pg Pool/Client.
  * - ?sslmode=disable in the URL → never use SSL (local dev + Docker alm_db)
  * - DB_SSL=false|true overrides when set
+ * - If primary DATABASE_URL / TENANT_DATABASE_URL disables SSL, tenant pools follow
  * - NODE_ENV=production enables SSL only when not disabled above and host is not local/Docker
  */
+
+function envUrlsPreferSslDisable() {
+  const urls = [
+    process.env.TENANT_DATABASE_URL,
+    process.env.DATABASE_URL,
+    process.env.GENERIC_URL,
+  ]
+    .filter(Boolean)
+    .map((u) => String(u).toLowerCase());
+  return urls.some(
+    (u) => u.includes('sslmode=disable') || u.includes('ssl=false'),
+  );
+}
 
 function pgSslOptions(connectionString) {
   if (!connectionString || typeof connectionString !== 'string') {
@@ -16,7 +30,8 @@ function pgSslOptions(connectionString) {
     lower.includes('sslmode=disable') ||
     lower.includes('ssl=false') ||
     process.env.DB_SSL === 'false' ||
-    process.env.DATABASE_SSL === 'false'
+    process.env.DATABASE_SSL === 'false' ||
+    envUrlsPreferSslDisable()
   ) {
     return false;
   }

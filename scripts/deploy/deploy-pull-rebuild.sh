@@ -238,6 +238,17 @@ ensure_minio_env_files() {
     upsert_minio_kv "$f" "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_BUCKET" "$MINIO_BUCKET_VALUE"
+    if [[ -n "${ENSURE_BACKEND_PORT:-}" ]]; then
+      upsert_minio_kv "$f" "PORT" "$ENSURE_BACKEND_PORT"
+      log "Ensured PORT=${ENSURE_BACKEND_PORT} in $(basename "$f")"
+    fi
+    if [[ -n "${ENSURE_REDIS_URL:-}" ]]; then
+      upsert_minio_kv "$f" "REDIS_URL" "$ENSURE_REDIS_URL"
+    fi
+    if [[ -n "${ENSURE_DB_SSL:-}" ]]; then
+      upsert_minio_kv "$f" "DB_SSL" "$ENSURE_DB_SSL"
+      log "Ensured DB_SSL=${ENSURE_DB_SSL} in $(basename "$f")"
+    fi
     # Strip leftover conflict markers if any
     sed -i.bak '/^<<<<<<< /d;/^=======/d;/^>>>>>>> /d' "$f" 2>/dev/null && rm -f "${f}.bak" || true
   done

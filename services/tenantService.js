@@ -173,23 +173,48 @@ async function getTenantCredentials(orgId) {
 }
 
 /**
+ * When the app reaches Postgres via Docker DNS (alm_db), rewrite public IPs
+ * stored in the tenants registry so SSL/host resolution matches the registry URL.
+ */
+function resolveTenantDbHost(host) {
+  const override = String(process.env.TENANT_DB_HOST_OVERRIDE || '').trim();
+  if (override) return override;
+
+  const registryUrl = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL || '';
+  if (/@alm_db([:/]|$)/i.test(registryUrl) && host && String(host).toLowerCase() !== 'alm_db') {
+    return 'alm_db';
+  }
+  return host;
+}
+
+function tenantSslShouldDisable(connectionHost) {
+  if (process.env.DB_SSL === 'false' || process.env.DATABASE_SSL === 'false') {
+    return true;
+  }
+  const urls = [process.env.TENANT_DATABASE_URL, process.env.DATABASE_URL, process.env.GENERIC_URL]
+    .filter(Boolean)
+    .map((u) => String(u).toLowerCase());
+  if (urls.some((u) => u.includes('sslmode=disable') || u.includes('ssl=false'))) {
+    return true;
+  }
+  const h = String(connectionHost || '').toLowerCase();
+  return h === 'alm_db' || h === 'localhost' || h === '127.0.0.1' || h === 'host.docker.internal';
+}
+
+/**
  * Create connection string for tenant database.
  * Appends sslmode=disable when SSL is off (Docker alm_db / non-TLS Postgres).
  */
 function getTenantConnectionString(credentials) {
-  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${credentials.host}:${credentials.port}/${credentials.database}`;
+  const host = resolveTenantDbHost(credentials.host);
+  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${host}:${credentials.port}/${credentials.database}`;
 
   const lower = base.toLowerCase();
   if (lower.includes('sslmode=')) {
     return base;
   }
 
-  const sslDisabled =
-    process.env.DB_SSL === 'false' ||
-    process.env.DATABASE_SSL === 'false' ||
-    /@(localhost|127\.0\.0\.1|alm_db|host\.docker\.internal)(:|\/|$)/.test(lower);
-
-  if (sslDisabled) {
+  if (tenantSslShouldDisable(host)) {
     return `${base}?sslmode=disable`;
   }
 
