@@ -36,9 +36,16 @@ const {
 require('dotenv').config();
 
 function pgClientOpts(base) {
+  const host = String(base?.host || '').toLowerCase();
+  const dockerLocalHost =
+    host === 'alm_db' ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === 'host.docker.internal';
   return {
     ...base,
-    ssl: getPgSslOption(),
+    // Domain/DB check + create-tenant clients must not force TLS against alm_db
+    ssl: dockerLocalHost ? false : getPgSslOption(),
     connectionTimeoutMillis: getPgClientConnectTimeoutMs(),
   };
 }

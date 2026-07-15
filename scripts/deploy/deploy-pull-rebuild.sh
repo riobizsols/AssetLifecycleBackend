@@ -249,6 +249,10 @@ ensure_minio_env_files() {
       upsert_minio_kv "$f" "DB_SSL" "$ENSURE_DB_SSL"
       log "Ensured DB_SSL=${ENSURE_DB_SSL} in $(basename "$f")"
     fi
+    if [[ -n "${ENSURE_DATABASE_SSL:-}" ]]; then
+      upsert_minio_kv "$f" "DATABASE_SSL" "$ENSURE_DATABASE_SSL"
+      log "Ensured DATABASE_SSL=${ENSURE_DATABASE_SSL} in $(basename "$f")"
+    fi
     # Strip leftover conflict markers if any
     sed -i.bak '/^<<<<<<< /d;/^=======/d;/^>>>>>>> /d' "$f" 2>/dev/null && rm -f "${f}.bak" || true
   done

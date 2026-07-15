@@ -1,20 +1,48 @@
 require('dotenv').config();
 
 /**
- * Node-pg `ssl` option for Pool/Client.
- * Local Postgres often has no TLS; use DATABASE_SSL=false when NODE_ENV=production
- * but the server does not accept SSL (e.g. Docker Postgres on a dev machine).
+ * Node-pg `ssl` option for Pool/Client (tenant setup + scripts).
  *
- * DATABASE_SSL=true  — force TLS ({ rejectUnauthorized: false }, typical for RDS-style hosts)
- * DATABASE_SSL=false — never use TLS for this process
- * (unset)            — TLS in production only, off in non-production (historical behavior)
+ * Prefer the same rules as utils/pgSsl.js:
+ * - DB_SSL / DATABASE_SSL = false → never TLS
+ * - Primary URLs with ?sslmode=disable → never TLS
+ * - DB_SSL / DATABASE_SSL = true → TLS
+ * - Otherwise: TLS in production only for unknown hosts (not used when URLs disable SSL)
+ */
+
+function envUrlsPreferSslDisable() {
+  const urls = [
+    process.env.TENANT_DATABASE_URL,
+    process.env.DATABASE_URL,
+    process.env.GENERIC_URL,
+  ]
+    .filter(Boolean)
+    .map((u) => String(u).toLowerCase());
+  return urls.some(
+    (u) => u.includes('sslmode=disable') || u.includes('ssl=false'),
+  );
+}
+
+function envFlagIsFalse(name) {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  return raw === 'false' || raw === '0' || raw === 'no' || raw === 'off';
+}
+
+function envFlagIsTrue(name) {
+  const raw = String(process.env[name] || '').trim().toLowerCase();
+  return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
+}
+
+/**
+ * Node-pg `ssl` option for Pool/Client.
+ * Local Postgres often has no TLS; use DB_SSL=false / DATABASE_SSL=false when
+ * NODE_ENV=production but the server does not accept SSL (Docker alm_db).
  */
 function getPgSslOption() {
-  const raw = (process.env.DATABASE_SSL || '').trim().toLowerCase();
-  if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') {
+  if (envFlagIsFalse('DB_SSL') || envFlagIsFalse('DATABASE_SSL') || envUrlsPreferSslDisable()) {
     return false;
   }
-  if (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on') {
+  if (envFlagIsTrue('DB_SSL') || envFlagIsTrue('DATABASE_SSL')) {
     return { rejectUnauthorized: false };
   }
   return process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
@@ -65,13 +93,25 @@ function parseDatabaseUrl(databaseUrl) {
 /** pg Client options from a database URL (avoids ?sslmode= leaking into database name). */
 function pgClientOptsFromDatabaseUrl(databaseUrl) {
   const { host, port, user, password, database } = parseDatabaseUrl(databaseUrl);
+  const lower = String(databaseUrl || '').toLowerCase();
+  let ssl = getPgSslOption();
+  if (lower.includes('sslmode=disable') || lower.includes('ssl=false')) {
+    ssl = false;
+  } else if (
+    host === 'alm_db' ||
+    host === 'localhost' ||
+    host === '127.0.0.1' ||
+    host === 'host.docker.internal'
+  ) {
+    ssl = false;
+  }
   return {
     host,
     port,
     user,
     password,
     database,
-    ssl: getPgSslOption(),
+    ssl,
     connectionTimeoutMillis: getPgClientConnectTimeoutMs(),
   };
 }

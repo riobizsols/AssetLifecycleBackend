@@ -25,6 +25,8 @@ export ENSURE_BACKEND_PORT=5001
 export ENSURE_REDIS_URL=redis://alm_redis:6379/0
 # alm_db / pressana db_host IPs have no TLS — never force SSL on tenant pools
 export ENSURE_DB_SSL=false
+# Tenant setup Domain/DB check uses DATABASE_SSL (legacy) — keep both off for alm_db
+export ENSURE_DATABASE_SSL=false
 
 for arg in "$@"; do
   case "$arg" in
