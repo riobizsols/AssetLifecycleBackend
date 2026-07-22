@@ -12,7 +12,9 @@ const createAssetGroup = async (req, res) => {
         const { text, asset_ids } = req.body;
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
-        const userBranchCode = branchCodeFromReq(req);
+        // Always persist the user's real branch_code when present.
+        // Super-access null (from branchCodeFromReq) would store NULL and break list filters.
+        const userBranchCode = req.user?.branch_code || branchCodeFromReq(req);
 
         // Log API call
         assetGroupLogger.logCreateAssetGroupApiCalled({

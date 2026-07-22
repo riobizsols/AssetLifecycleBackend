@@ -115,7 +115,9 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
     console.log('=== Asset Group Model Listing Debug ===');
     console.log('org_id:', org_id);
     console.log('userBranchCode:', userBranchCode);
-    
+
+    // Super-access passes null branch code = all branches for the org.
+    // Must use IS NULL / OR — SQL `branch_code = NULL` never matches rows.
     const query = `
         SELECT 
             h.assetgroup_h_id,
@@ -129,7 +131,8 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
             COUNT(d.asset_id) as asset_count
         FROM "tblAssetGroup_H" h
         LEFT JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
-        WHERE h.org_id = $1 AND h.branch_code = $2
+        WHERE h.org_id = $1
+          AND ($2::text IS NULL OR h.branch_code = $2 OR h.branch_code IS NULL)
         GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
         ORDER BY h.created_on DESC
     `;
@@ -162,7 +165,7 @@ const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id) 
         INNER JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
         INNER JOIN "tblAssets" a ON d.asset_id = a.asset_id
         WHERE h.org_id = $1
-          AND h.branch_code = $2
+          AND ($2::text IS NULL OR h.branch_code = $2 OR h.branch_code IS NULL)
         GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
         HAVING COUNT(DISTINCT a.asset_type_id) = 1
            AND MAX(a.asset_type_id) = $3
