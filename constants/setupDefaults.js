@@ -511,6 +511,7 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "user", prefix: "USR", lastNumber: 0 },
   { tableKey: "employee", prefix: "EMP", lastNumber: 0 },
   { tableKey: "emp_int_id", prefix: "EMP_INT_", lastNumber: 0 },
+  { tableKey: "amsbr", prefix: "AMSBR", lastNumber: 0 },
   { tableKey: "prod_serv", prefix: "PS", lastNumber: 0 },
   { tableKey: "jobrole", prefix: "JR", lastNumber: 0 },
   { tableKey: "jobrolenav", prefix: "JRN", lastNumber: 0 },

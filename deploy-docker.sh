@@ -29,4 +29,5 @@ done
 
 export BACKEND_ONLY="${BACKEND_ONLY:-1}"
 export FRONTEND_ONLY="${FRONTEND_ONLY:-0}"
+export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-main}"
 exec "$DEPLOY"
