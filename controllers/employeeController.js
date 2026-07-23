@@ -179,12 +179,22 @@ const assignRoleToEmployee = async (req, res) => {
             console.log(`Created new user for employee ${emp_int_id} with user_id: ${user_id}`);
         }
 
+        // Remove stale primary role on tblUsers that is not in tblUserJobRoles.
+        // Old COALESCE logic left these behind and getUserRoles UNION treated them as
+        // an extra automatically-assigned role.
+        await userJobRoleModel.clearOrphanPrimaryJobRole(user_id, assigned_by);
+
         // Check for existing roles to avoid duplicates
         const existingRoles = await userJobRoleModel.getEmployeeJobRoles(emp_int_id);
         const existingRoleIds = existingRoles.map(role => role.job_role_id);
+
+        // Deduplicate incoming ids and ignore empties
+        const requestedRoleIds = [...new Set(
+            (job_role_ids || []).map((id) => String(id || '').trim()).filter(Boolean),
+        )];
         
         // Filter out roles that are already assigned
-        const newRoleIds = job_role_ids.filter(roleId => !existingRoleIds.includes(roleId));
+        const newRoleIds = requestedRoleIds.filter(roleId => !existingRoleIds.includes(roleId));
         
         if (newRoleIds.length === 0) {
             return res.status(400).json({
@@ -194,7 +204,7 @@ const assignRoleToEmployee = async (req, res) => {
         }
 
         // Assign all new roles to the user
-        // The assignJobRole function will set tblUsers.job_role_id to the first role if it's null
+        // The assignJobRole function will set tblUsers.job_role_id to the latest assigned role
         // This allows users to have multiple roles while maintaining a primary role
         const roleAssignments = [];
         for (const job_role_id of newRoleIds) {
@@ -229,7 +239,7 @@ const assignRoleToEmployee = async (req, res) => {
             message: `Successfully assigned ${roleAssignments.length} role(s)`,
             data: roleAssignments,
             assignedRoles: newRoleIds,
-            skippedRoles: job_role_ids.filter(roleId => existingRoleIds.includes(roleId)),
+            skippedRoles: requestedRoleIds.filter(roleId => existingRoleIds.includes(roleId)),
             action: existingUser ? 'roles_added' : 'user_created_and_roles_added'
         });
 
