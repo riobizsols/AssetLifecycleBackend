@@ -545,6 +545,13 @@ async function alignTenantSchema(client, options = {}) {
     console.log('[TenantSchemaAlign] Re-ensuring critical runtime schema after align...');
     await ensureCriticalRuntimeSchema(client);
 
+    // Modern app schema: never keep these legacy columns even if a stale reference still has them
+    console.log('[TenantSchemaAlign] Dropping deprecated tblAssetTypes.maint_required / maint_type_id...');
+    await client.query(`
+      ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
+      ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
+    `);
+
     if (options.seedMasterData) {
       console.log('[TenantSchemaAlign] Seeding required master data from reference...');
       const orgId =

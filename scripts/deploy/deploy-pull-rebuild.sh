@@ -100,6 +100,41 @@ repo_has_local_changes() {
   [[ -n "$(cd "$dir" && git status --porcelain 2>/dev/null)" ]]
 }
 
+# .env / .env.production often conflict on stash pop. Reset them to HEAD so
+# stash/pull can proceed; ensure_minio_env_files re-applies MinIO values later.
+clear_env_merge_conflicts() {
+  local label="${1:-repo}"
+  local unmerged
+  unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -z "$unmerged" ]]; then
+    return 0
+  fi
+
+  log "[$label] Unmerged paths detected — clearing env merge conflicts..."
+  printf '%s\n' "$unmerged"
+
+  # Backup whatever is on disk before resetting
+  [[ -f .env ]] && cp -a .env ".env.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+  [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
+
+  # Prefer committed/HEAD versions; fall back to deleting index conflict entries
+  git checkout HEAD -- .env .env.production 2>/dev/null || true
+  git add -- .env .env.production 2>/dev/null || true
+
+  # If still unmerged (file only existed on one side), reset the index entry
+  if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
+    git reset HEAD -- .env .env.production 2>/dev/null || true
+    git checkout -- .env .env.production 2>/dev/null || true
+    git add -- .env .env.production 2>/dev/null || true
+  fi
+
+  if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
+    die "[$label] Could not clear .env merge conflicts. Run: git checkout HEAD -- .env .env.production && git add .env .env.production"
+  fi
+
+  log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
+}
+
 git_pull_with_stash() {
   local dir="$1"
   local label="${2:-$(basename "$dir")}"
@@ -114,9 +149,18 @@ git_pull_with_stash() {
     cd "$dir" || exit 1
     local stashed=0
 
+    # Stuck mid-merge from a previous failed stash pop blocks all git stash/pull
+    clear_env_merge_conflicts "$label"
+
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
-      git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      # Never stash .env* — they are server secrets and cause recurring merge conflicts
+      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production'; then
+        log "[$label] WARN: pathspec stash failed — trying full stash after resetting env files"
+        clear_env_merge_conflicts "$label"
+        git checkout HEAD -- .env .env.production 2>/dev/null || true
+        git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      fi
       stashed=1
     elif repo_has_local_changes "$dir"; then
       log "[$label] WARN: local changes present but GIT_STASH=0 — pull may fail or merge"
@@ -131,14 +175,7 @@ git_pull_with_stash() {
       log "[$label] git stash pop — restoring local changes..."
       if ! git stash pop; then
         log "[$label] WARN: stash pop had conflicts — auto-resolving .env / .env.production"
-        # Keep HEAD content for env files, then ensure_minio_env_files will re-apply correct MinIO values
-        git checkout --ours -- .env .env.production 2>/dev/null || true
-        git add -- .env .env.production 2>/dev/null || true
-        # Clear any remaining unmerged paths for env files
-        if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
-          git checkout HEAD -- .env .env.production 2>/dev/null || true
-          git add -- .env .env.production 2>/dev/null || true
-        fi
+        clear_env_merge_conflicts "$label"
         log "[$label] Env conflict auto-resolved (MinIO settings will be re-applied next)"
         log "[$label] Remaining stash (if any): git stash list"
       else
