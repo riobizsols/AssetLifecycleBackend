@@ -526,6 +526,29 @@ const generateMaintenanceSchedules = async (req, res) => {
                     }
                     
                     console.log(`Creating maintenance schedule for asset ${asset.asset_id} - trigger: ${triggerContext}`);
+
+                    // Require workflow sequences BEFORE creating header (avoids orphan H rows with no D)
+                    const workflowSequences = await model.getWorkflowAssetSequences(asset.asset_type_id);
+                    console.log(`Found ${workflowSequences.rows.length} workflow sequences for asset type ${asset.asset_type_id}`);
+                    if (workflowSequences.rows.length === 0) {
+                        console.log(`No workflow sequences found for asset type ${asset.asset_type_id} — skipping schedule create`);
+                        skippedAssets++;
+                        continue;
+                    }
+
+                    let canCreateDetails = false;
+                    for (const sequence of workflowSequences.rows) {
+                        const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
+                        if (workflowJobRoles.rows.length > 0) {
+                            canCreateDetails = true;
+                            break;
+                        }
+                    }
+                    if (!canCreateDetails) {
+                        console.log(`No workflow job roles configured for asset type ${asset.asset_type_id} — skipping schedule create`);
+                        skippedAssets++;
+                        continue;
+                    }
                     
                     // Step 3h & 3i: Create workflow maintenance schedule header
                     const wfamshId = await model.getNextWFAMSHId();
@@ -549,15 +572,6 @@ const generateMaintenanceSchedules = async (req, res) => {
                     console.log(`Created workflow maintenance schedule header: ${wfamshId}`);
                     
                     // Step 3j: Create workflow maintenance schedule details
-                    const workflowSequences = await model.getWorkflowAssetSequences(asset.asset_type_id);
-                    
-                    console.log(`Found ${workflowSequences.rows.length} workflow sequences for asset type ${asset.asset_type_id}`);
-                    
-                    if (workflowSequences.rows.length === 0) {
-                        console.log(`No workflow sequences found for asset type ${asset.asset_type_id}`);
-                        continue;
-                    }
-                    
                     let totalDetailsCreated = 0;
                     const sequenceRows = workflowSequences.rows;
                     
@@ -586,8 +600,8 @@ const generateMaintenanceSchedules = async (req, res) => {
                                 job_role_id: jobRole.job_role_id,
                                 user_id: jobRole.emp_int_id, // Use emp_int_id from tblWFJobRole
                                 dept_id: null, // department removed from tblWFJobRole
-                                sequence: sequence.seqs_no, // Use seqs_no (integer) instead of wf_at_seqs_id (string)
-                                status: status, // 'AP' for sequence 10, 'IN' for others
+                                sequence: Number.isNaN(seqNo) ? sequence.seqs_no : seqNo,
+                                status: status, // 'AP' for first sequence, 'IN' for others
                                 notes: null,
                                 created_by: 'system',
                                 org_id: asset.org_id
@@ -597,6 +611,17 @@ const generateMaintenanceSchedules = async (req, res) => {
                             console.log(`Created workflow maintenance schedule detail: ${wfamsdId} for sequence ${sequence.seqs_no}, job role ${jobRole.job_role_id}, user ${jobRole.emp_int_id}, status: ${status}`);
                             totalDetailsCreated++;
                         }
+                    }
+
+                    if (totalDetailsCreated === 0) {
+                        console.error(`No details created for header ${wfamshId} — removing orphan header`);
+                        try {
+                            await model.deleteWorkflowMaintenanceScheduleHeader(wfamshId);
+                        } catch (cleanupErr) {
+                            console.error(`Failed to cleanup orphan header ${wfamshId}:`, cleanupErr.message);
+                        }
+                        skippedAssets++;
+                        continue;
                     }
                     
                     console.log(`Total details created for header ${wfamshId}: ${totalDetailsCreated}`);

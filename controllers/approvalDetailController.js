@@ -42,7 +42,7 @@ const getApprovalDetail = async (req, res) => {
   
   try {
     const { assetId } = req.params; // can be asset_id or wfamsh_id
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Log API called (context-aware)
@@ -222,7 +222,7 @@ const approveMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
     const { empIntId, note, vendorId, maintenanceDate } = req.body;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Step 1: Log API called with full request data (context-aware)
@@ -446,7 +446,7 @@ const rejectMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
     const { empIntId, reason } = req.body;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Step 1: Log API called with full request data (context-aware)
@@ -648,7 +648,7 @@ const getWorkflowHistoryController = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
 
     // Log API called
     await logApiCall({
@@ -984,7 +984,7 @@ const getAllMaintenanceWorkflows = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
 
     // Log API called
     await logApiCall({
@@ -1068,7 +1068,7 @@ const getWorkflowHistoryByWfamshIdController = async (req, res) => {
   
   try {
     const { wfamshId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
 
     // Log API called
     await logApiCall({
@@ -1138,7 +1138,7 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
   
   try {
     const { wfamshId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
 
     // Log API called
     await logApiCall({
