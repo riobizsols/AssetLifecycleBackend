@@ -206,17 +206,16 @@ const updateDocArchiveStatus = async (req, res) => {
     } else {
       // Moving back from archived folder
       if (doc.archived_path) {
-        // doc.doc_path format: org_id/ASSET DOCUMENT/Archived Asset Document/asset_id/filename (without bucket name)
-        const pathParts = doc.doc_path.split('/');
-        const bucketName = MINIO_BUCKET; // Use the constant since doc_path doesn't include bucket
+        const pathParts = doc.archived_path.split('/');
+        const bucketName = MINIO_BUCKET;
         const fileName = pathParts[pathParts.length - 1];
         const assetId = pathParts[pathParts.length - 2];
-        const orgId = pathParts[0]; // org_id is at index 0 since no bucket name
-        
-        // Extract object key from doc_path (doc_path already doesn't have bucket name)
-        const objectKey = doc.doc_path;
-        
-        // Create new path: org_id/ASSET DOCUMENT/asset_id/filename
+        const orgId = doc.org_id || pathParts[0];
+
+        const objectKey = doc.archived_path.startsWith(`${bucketName}/`)
+          ? doc.archived_path.slice(bucketName.length + 1)
+          : doc.archived_path;
+
         const newObjectName = `${orgId}/ASSET DOCUMENT/${assetId}/${fileName}`;
         
         try {
