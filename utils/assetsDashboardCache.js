@@ -64,16 +64,16 @@ function hashQuery(value) {
 }
 
 async function getOrSet(key, ttlMs, fetcher) {
-  const l1 = memoryGet(key);
-  if (l1 != null) {
-    return { data: l1, fromCache: true };
-  }
-
+  // Shared cache first (Redis when enabled) so create/update/delete invalidation
+  // is visible across all API instances — do not return stale per-process L1 first.
   const cached = await cacheService.get(key);
   if (cached != null) {
     memorySet(key, cached, ttlMs);
     return { data: cached, fromCache: true };
   }
+
+  // Shared miss — clear any stale local L1 entry for this key
+  memoryL1.delete(key);
 
   const data = await fetcher();
   memorySet(key, data, ttlMs);
@@ -83,6 +83,7 @@ async function getOrSet(key, ttlMs, fetcher) {
 
 async function invalidateOrgApiCache(orgId) {
   if (!orgId) return;
+  // Org-scoped only — do NOT wipe all api:* keys (would clear every tenant on shared Redis)
   memoryInvalidateOrg(orgId);
   // Legacy prefix shape (api:{orgId}) for older keys
   memoryInvalidatePrefix(cacheService.buildKey('api', orgId));

@@ -275,6 +275,7 @@ ensure_minio_env_files() {
     upsert_minio_kv "$f" "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_BUCKET" "$MINIO_BUCKET_VALUE"
+    # Tenant deploy: pin PORT/Redis/SSL so main .env values never override stack (5001 / alm_db no TLS)
     if [[ -n "${ENSURE_BACKEND_PORT:-}" ]]; then
       upsert_minio_kv "$f" "PORT" "$ENSURE_BACKEND_PORT"
       log "Ensured PORT=${ENSURE_BACKEND_PORT} in $(basename "$f")"

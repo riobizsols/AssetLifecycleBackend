@@ -98,13 +98,21 @@ const getUserNotifications = async (req, res) => {
       req.user?.hasSuperAccess || false,
       req.user?.job_role_id || null
     );
-    const warrantyNotifications = await getWarrantyNotificationsByUser({
-      empIntId: userId,
-      orgId,
-      branchId,
-      hasSuperAccess: req.user?.hasSuperAccess || false,
-    });
+    // Warranty/expiry tables (or notify_type) may be missing on some tenants — never 500 the whole list
+    let warrantyNotifications = [];
     let expiryNotifications = [];
+    try {
+      warrantyNotifications = await getWarrantyNotificationsByUser({
+        empIntId: userId,
+        orgId,
+        branchId,
+        hasSuperAccess: req.user?.hasSuperAccess || false,
+      });
+    } catch (warrantyErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Warranty notifications skipped: ${warrantyErr.message}`
+      );
+    }
     try {
       expiryNotifications = await getExpiryNotificationsByUser({
         empIntId: userId,
@@ -112,8 +120,10 @@ const getUserNotifications = async (req, res) => {
         branchId,
         hasSuperAccess: req.user?.hasSuperAccess || false,
       });
-    } catch (expiryError) {
-      console.warn('[getUserNotifications] Expiry notifications skipped:', expiryError.message);
+    } catch (expiryErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Expiry notifications skipped: ${expiryErr.message}`
+      );
     }
     
     console.log(`🐛 [getUserNotifications] Found ${notifications.length} notifications for user ${userId}`);

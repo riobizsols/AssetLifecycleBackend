@@ -8,6 +8,9 @@ require('dotenv').config();
  * - Primary URLs with ?sslmode=disable → never TLS
  * - DB_SSL / DATABASE_SSL = true → TLS
  * - Otherwise: TLS in production only for unknown hosts (not used when URLs disable SSL)
+ *
+ * Local / Docker Postgres (alm_db) often has no TLS; keep DB_SSL=false /
+ * DATABASE_SSL=false when NODE_ENV=production but the server does not accept SSL.
  */
 
 function envUrlsPreferSslDisable() {
@@ -33,11 +36,6 @@ function envFlagIsTrue(name) {
   return raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on';
 }
 
-/**
- * Node-pg `ssl` option for Pool/Client.
- * Local Postgres often has no TLS; use DB_SSL=false / DATABASE_SSL=false when
- * NODE_ENV=production but the server does not accept SSL (Docker alm_db).
- */
 function getPgSslOption() {
   if (envFlagIsFalse('DB_SSL') || envFlagIsFalse('DATABASE_SSL') || envUrlsPreferSslDisable()) {
     return false;
@@ -48,15 +46,11 @@ function getPgSslOption() {
   return process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false;
 }
 
-/** Connect timeout for `pg` Client (tenant setup, scripts). Pool uses its own config. */
 function getPgClientConnectTimeoutMs() {
   const n = parseInt(process.env.PG_CLIENT_CONNECT_TIMEOUT_MS || '', 10);
   return Number.isFinite(n) && n > 0 ? n : 30000;
 }
 
-/**
- * Parse postgresql:// URL (strips ?sslmode= etc. from database name).
- */
 function parseDatabaseUrl(databaseUrl) {
   if (!databaseUrl) {
     throw new Error('Database URL is required');
@@ -90,7 +84,6 @@ function parseDatabaseUrl(databaseUrl) {
   }
 }
 
-/** pg Client options from a database URL (avoids ?sslmode= leaking into database name). */
 function pgClientOptsFromDatabaseUrl(databaseUrl) {
   const { host, port, user, password, database } = parseDatabaseUrl(databaseUrl);
   const lower = String(databaseUrl || '').toLowerCase();

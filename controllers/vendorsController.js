@@ -4,6 +4,14 @@ const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
+
+function invalidateVendorCaches(req, orgId) {
+  const oid = orgId || req.user?.org_id;
+  if (oid) {
+    operationalCache.invalidateOrgCaches(oid).catch(() => {});
+  }
+}
+
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -214,6 +222,7 @@ exports.createVendor = async (req, res) => {
       console.log(`[VendorController] ✅ Created/Updated vendor SLA record (vsla_id: ${vsla_id}) for vendor: ${newVendor.vendor_id}`);
     }
 
+    invalidateVendorCaches(req, org_id);
     res.status(201).json({
       message: "Vendor created successfully",
       data: newVendor,
@@ -285,6 +294,7 @@ exports.deleteVendor = async (req, res) => {
     const deleteQuery = 'DELETE FROM "tblVendors" WHERE vendor_id = $1 RETURNING *;';
     const { rows } = await dbPool.query(deleteQuery, [vendor_id]);
 
+    invalidateVendorCaches(req);
     res.json({ 
       success: true, 
       message: "Vendor deleted successfully",
@@ -362,6 +372,7 @@ exports.deleteVendors = async (req, res) => {
     const deleteQuery = 'DELETE FROM "tblVendors" WHERE vendor_id = ANY($1) RETURNING *;';
     const { rows } = await dbPool.query(deleteQuery, [ids]);
 
+    invalidateVendorCaches(req);
     res.json({ 
       success: true, 
       message: `${rows.length} vendor(s) deleted successfully`,
@@ -524,6 +535,7 @@ exports.updateVendor = async (req, res) => {
       console.log(`[VendorController] Updated vendor SLA record for vendor: ${vendor_id}`);
     }
 
+    invalidateVendorCaches(req, org_id);
     res.json({ success: true, message: "Vendor updated", vendor: rows[0] });
   } catch (error) {
     console.error(error);
