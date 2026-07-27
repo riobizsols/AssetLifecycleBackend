@@ -64,6 +64,23 @@ const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by
     
     try {
         await client.query('BEGIN');
+
+        // Prefer caller's branch; if missing (e.g. super access), derive from selected assets
+        let resolvedBranchCode = branch_code || null;
+        if (!resolvedBranchCode && asset_ids?.length) {
+            const branchResult = await client.query(
+                `
+                SELECT b.branch_code
+                FROM "tblAssets" a
+                INNER JOIN "tblBranches" b ON a.branch_id = b.branch_id
+                WHERE a.asset_id = ANY($1::text[])
+                  AND b.branch_code IS NOT NULL
+                LIMIT 1
+                `,
+                [asset_ids]
+            );
+            resolvedBranchCode = branchResult.rows[0]?.branch_code || null;
+        }
         
         // Generate asset group header ID
         let assetgroup_h_id = await generateAssetGroupHeaderId();
@@ -74,7 +91,7 @@ const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by
                 assetgroup_h_id, org_id, branch_code, text, created_by, created_on, changed_by, changed_on
             ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP, $5, CURRENT_TIMESTAMP)
             RETURNING *
-        `, [assetgroup_h_id, org_id, branch_code, text, created_by]);
+        `, [assetgroup_h_id, org_id, resolvedBranchCode, text, created_by]);
         
         // Generate sequential detail IDs
         const detailIds = await generateSequentialDetailIds(asset_ids.length);
@@ -110,13 +127,14 @@ const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by
     }
 };
 
-// Get all asset groups
-const getAllAssetGroups = async (org_id, userBranchCode) => {
+// Get all asset groups - supports super access users who can view all branches
+const getAllAssetGroups = async (org_id, userBranchCode, hasSuperAccess = false) => {
     console.log('=== Asset Group Model Listing Debug ===');
     console.log('org_id:', org_id);
     console.log('userBranchCode:', userBranchCode);
+    console.log('hasSuperAccess:', hasSuperAccess);
     
-    const query = `
+    let query = `
         SELECT 
             h.assetgroup_h_id,
             h.org_id,
@@ -129,7 +147,18 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
             COUNT(d.asset_id) as asset_count
         FROM "tblAssetGroup_H" h
         LEFT JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
-        WHERE h.org_id = $1 AND h.branch_code = $2
+        WHERE h.org_id = $1
+    `;
+    const params = [org_id];
+
+    // Apply branch filter only if user doesn't have super access
+    // Include NULL branch_code for legacy groups created without a branch
+    if (!hasSuperAccess && userBranchCode) {
+        query += ` AND (h.branch_code = $2 OR h.branch_code IS NULL)`;
+        params.push(userBranchCode);
+    }
+
+    query += `
         GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
         ORDER BY h.created_on DESC
     `;
@@ -137,7 +166,7 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
     const dbPool = getDb();
 
     
-    const result = await dbPool.query(query, [org_id, userBranchCode]);
+    const result = await dbPool.query(query, params);
     console.log('Query executed successfully, found asset groups:', result.rows.length);
     return result;
 };
@@ -146,8 +175,8 @@ const getAllAssetGroups = async (org_id, userBranchCode) => {
  * Get asset groups where ALL assets are of the given asset_type_id.
  * Used by Scrap flow to show "Grouped assets" option.
  */
-const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id) => {
-    const query = `
+const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id, hasSuperAccess = false) => {
+    let query = `
         SELECT
             h.assetgroup_h_id,
             h.org_id,
@@ -162,15 +191,26 @@ const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id) 
         INNER JOIN "tblAssetGroup_D" d ON h.assetgroup_h_id = d.assetgroup_h_id
         INNER JOIN "tblAssets" a ON d.asset_id = a.asset_id
         WHERE h.org_id = $1
-          AND h.branch_code = $2
+    `;
+    const params = [org_id];
+
+    if (!hasSuperAccess && userBranchCode) {
+        query += ` AND (h.branch_code = $${params.length + 1} OR h.branch_code IS NULL)`;
+        params.push(userBranchCode);
+    }
+
+    params.push(asset_type_id);
+    const assetTypeParam = `$${params.length}`;
+
+    query += `
         GROUP BY h.assetgroup_h_id, h.org_id, h.branch_code, h.text, h.created_by, h.created_on, h.changed_by, h.changed_on
         HAVING COUNT(DISTINCT a.asset_type_id) = 1
-           AND MAX(a.asset_type_id) = $3
+           AND MAX(a.asset_type_id) = ${assetTypeParam}
         ORDER BY h.created_on DESC
     `;
 
     const dbPool = getDb();
-    return await dbPool.query(query, [org_id, userBranchCode, asset_type_id]);
+    return await dbPool.query(query, params);
 };
 
 // Get asset group by ID with details

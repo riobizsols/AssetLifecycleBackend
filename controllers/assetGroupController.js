@@ -93,13 +93,14 @@ const getAllAssetGroups = async (req, res) => {
     try {
         const org_id = req.user.org_id;
         const userBranchCode = branchCodeFromReq(req);
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
 
         const { data: rows } = await operationalCache.cachedList(
             req,
             'asset-groups',
-            'list',
+            'list-v2',
             async () => {
-                const result = await model.getAllAssetGroups(org_id, userBranchCode);
+                const result = await model.getAllAssetGroups(org_id, userBranchCode, hasSuperAccess);
                 return result.rows;
             },
         );
@@ -139,8 +140,9 @@ const getAssetGroupsByAssetType = async (req, res) => {
         }
 
         const userBranchCode = branchCodeFromReq(req);
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
 
-        if (!userBranchCode && !req.user?.hasSuperAccess) {
+        if (!userBranchCode && !hasSuperAccess) {
             return res.status(400).json({ success: false, message: "branch_code not found for current user" });
         }
 
@@ -149,7 +151,12 @@ const getAssetGroupsByAssetType = async (req, res) => {
             'asset-groups',
             operationalCache.hashQuery({ asset_type_id, branch: userBranchCode || 'all' }),
             async () => {
-                const result = await model.getAssetGroupsByAssetType(org_id, userBranchCode, asset_type_id);
+                const result = await model.getAssetGroupsByAssetType(
+                    org_id,
+                    userBranchCode,
+                    asset_type_id,
+                    hasSuperAccess
+                );
                 return result.rows;
             },
         );
