@@ -209,14 +209,15 @@ const generateSetupReport = async (setupData) => {
 
 /**
  * Align freshly created tenant schemas with current application code.
- * GENERIC_URL may still include columns removed from the app layer.
+ * Always enforce modern tblAssetTypes (no maint_required / maint_type_id).
+ * Maintenance config lives in tblATMaintFreq only.
  */
 const applyPostSchemaMigrations = async (client, logs = []) => {
   await client.query(`
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
   `);
-  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes columns)";
+  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes.maint_required / maint_type_id)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {
     logs.push({ message, scope: "schema" });

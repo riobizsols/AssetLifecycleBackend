@@ -8,25 +8,6 @@ const getDb = () => {
   return contextDb;
 };
 
-/** Template DBs may still have maint_required NOT NULL; migrated DBs drop it. */
-let hasLegacyMaintRequiredColumn = null;
-
-const assetTypesHasMaintRequiredColumn = async (dbPool) => {
-  if (hasLegacyMaintRequiredColumn !== null) {
-    return hasLegacyMaintRequiredColumn;
-  }
-  const result = await dbPool.query(`
-    SELECT 1
-    FROM information_schema.columns
-    WHERE table_schema = 'public'
-      AND table_name = 'tblAssetTypes'
-      AND column_name = 'maint_required'
-    LIMIT 1
-  `);
-  hasLegacyMaintRequiredColumn = result.rows.length > 0;
-  return hasLegacyMaintRequiredColumn;
-};
-
 const insertAssetType = async (
     org_id,
     asset_type_id,
@@ -41,20 +22,9 @@ const insertAssetType = async (
     maint_lead_type = null,
     depreciation_type = 'ND'
 ) => {
-    const dbPool = getDb();
-    const hasLegacyMaintRequired = await assetTypesHasMaintRequiredColumn(dbPool);
-
-    const query = hasLegacyMaintRequired
-        ? `
-        INSERT INTO "tblAssetTypes" (
-            org_id, asset_type_id, int_status,
-            assignment_type, inspection_required, group_required, created_by,
-            created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_required, maint_lead_type, last_gen_seq_no, depreciation_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $7, CURRENT_TIMESTAMP, $8, $9, $10, false, $11, 0, $12)
-        RETURNING *
-    `
-        : `
+    // Modern schema: maint_required / maint_type_id were removed from tblAssetTypes.
+    // Maintenance is configured via tblATMaintFreq only.
+    const query = `
         INSERT INTO "tblAssetTypes" (
             org_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
@@ -71,6 +41,7 @@ const insertAssetType = async (
         is_child, parent_asset_type_id, maint_lead_type, depreciation_type
     ];
 
+    const dbPool = getDb();
     return await dbPool.query(query, values);
 };
 

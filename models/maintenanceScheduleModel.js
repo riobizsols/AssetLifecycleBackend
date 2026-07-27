@@ -556,6 +556,14 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData, dbClient = nu
   return result;
 };
 
+const deleteWorkflowMaintenanceScheduleHeader = async (wfamsh_id) => {
+  const dbPool = getDb();
+  return dbPool.query(
+    `DELETE FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 RETURNING wfamsh_id`,
+    [wfamsh_id],
+  );
+};
+
 // 12. Calculate planned schedule date based on frequency and UOM
 const calculatePlannedScheduleDate = (purchasedDate, frequency, uom) => {
   if (frequency == null || uom == null) {
@@ -1616,6 +1624,7 @@ module.exports = {
   getNextWFAMSDId,
   insertWorkflowMaintenanceScheduleHeader,
   insertWorkflowMaintenanceScheduleDetail,
+  deleteWorkflowMaintenanceScheduleHeader,
   calculatePlannedScheduleDate,
   isMaintenanceDue,
   getAssetUsageSinceDate,
