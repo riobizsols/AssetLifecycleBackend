@@ -463,7 +463,7 @@ async function getScrapMaintenanceApprovals({
       END AS asset_names,
       ps.current_seq
     FROM "tblWFScrap_H" wh
-    LEFT JOIN "tblStatusCodes" hsc ON hsc.id = wh.status
+    LEFT JOIN "tblStatusCodes" hsc ON hsc.id::bigint = NULLIF(wh.status::text, '')::bigint
     LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
     INNER JOIN "tblWFScrapSeq" seq ON seq.id::varchar = wh.wfscrapseq_id::varchar
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
@@ -509,7 +509,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
     FROM "tblWFScrap_H" wh
     INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
     INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
-    LEFT JOIN "tblStatusCodes" sc ON sc.id = wh.status
+    LEFT JOIN "tblStatusCodes" sc ON sc.id::bigint = NULLIF(wh.status::text, '')::bigint
     WHERE wh.id_d = $1
   `;
 
@@ -638,7 +638,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
       LEFT JOIN "tblAssetGroup_H" agh ON agh.assetgroup_h_id = wh.assetgroup_id
       INNER JOIN "tblWFScrapSeq" seq ON seq.id = wh.wfscrapseq_id
       INNER JOIN "tblAssetTypes" at ON at.asset_type_id = seq.asset_type_id
-      LEFT JOIN "tblStatusCodes" sc ON sc.id = wh.status
+      LEFT JOIN "tblStatusCodes" sc ON sc.id::bigint = NULLIF(wh.status::text, '')::bigint
       WHERE wh.id_d = $1 AND (agh.org_id = $2 OR (agh.org_id IS NULL AND seq.org_id = $2))
     `;
 
@@ -679,7 +679,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
         d.changed_by,
         d.changed_on
       FROM "tblWFScrap_D" d
-      LEFT JOIN "tblStatusCodes" dsc ON dsc.id = d.status
+      LEFT JOIN "tblStatusCodes" dsc ON dsc.id::bigint = NULLIF(d.status::text, '')::bigint
       LEFT JOIN "tblJobRoles" jr ON jr.job_role_id = d.job_role_id
       LEFT JOIN "tblDepartments" dep ON dep.dept_id = d.dept_id
       WHERE d.wfscrap_h_id = $1

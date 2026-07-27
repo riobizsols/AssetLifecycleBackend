@@ -1,4 +1,11 @@
 const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/minioClient');
+const {
+  resolveObjectKey,
+  formatStoredPath,
+  parseAssetMaintenanceActiveKey,
+  buildAssetMaintenanceActiveKey,
+  buildAssetMaintenanceArchivedKey,
+} = require('../utils/minioDocPath');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
@@ -153,7 +160,8 @@ const getDownloadUrl = async (req, res) => {
     }
 
     const doc = result.rows[0];
-    const [bucket, ...keyParts] = doc.doc_path.split('/');
+    const storedPath = doc.is_archived && doc.archived_path ? doc.archived_path : doc.doc_path;
+    const [bucket, ...keyParts] = storedPath.split('/');
     const objectName = keyParts.join('/');
 
     const respHeaders = {};
@@ -246,84 +254,76 @@ const updateDocArchiveStatus = async (req, res) => {
       return res.status(400).json({ message: 'is_archived must be a boolean value' });
     }
 
-    // Get current document details
     const currentDoc = await getAssetMaintDocById(amd_id);
     if (currentDoc.rows.length === 0) {
       return res.status(404).json({ message: 'Asset maintenance document not found' });
     }
 
     const doc = currentDoc.rows[0];
-    let newDocPath = doc.doc_path;
+    const activeMeta = parseAssetMaintenanceActiveKey(resolveObjectKey(doc.doc_path, MINIO_BUCKET));
+    const orgId = doc.org_id || activeMeta.orgId;
+    const assetId = doc.asset_id || activeMeta.assetId;
+    const fileName = activeMeta.fileName
+      || String(doc.doc_path || '').split('/').filter(Boolean).pop()
+      || '';
+
+    if (!orgId || !assetId || !fileName) {
+      return res.status(400).json({ message: 'Unable to resolve document path metadata for archive operation' });
+    }
+
     let archivedPath = null;
 
     if (is_archived) {
-      // Moving to archived folder
-      // doc.doc_path format: org_id/asset-maintenance/asset_id/filename (without bucket name)
-      const pathParts = doc.doc_path.split('/');
-      const bucketName = MINIO_BUCKET; // Use the constant since doc_path doesn't include bucket
-      const fileName = pathParts[pathParts.length - 1];
-      const assetId = pathParts[pathParts.length - 2];
-      const orgId = pathParts[0]; // org_id is at index 0 since no bucket name
-      
-      // Extract object key from doc_path (doc_path already doesn't have bucket name)
-      const objectKey = doc.doc_path;
-      
-      // Create new path: org_id/asset-maintenance/Archived Asset Maintenance Document/asset_id/filename
-      const newObjectName = `${orgId}/asset-maintenance/Archived Asset Maintenance Document/${assetId}/${fileName}`;
-      
+      const sourceKey = resolveObjectKey(doc.doc_path, MINIO_BUCKET);
+      const archivedObjectKey = buildAssetMaintenanceArchivedKey(orgId, assetId, fileName);
+
       try {
-        // Copy file to archived location
-        await minioClient.copyObject(bucketName, newObjectName, objectKey);
-        
-        // Delete file from original location
-        await minioClient.removeObject(bucketName, objectKey);
-        
-        // Update paths - keep doc_path unchanged, update archived_path
-        newDocPath = doc.doc_path; // Keep original path unchanged
-        archivedPath = newObjectName; // Store the new archived location
+        await minioClient.copyObject(MINIO_BUCKET, archivedObjectKey, `/${MINIO_BUCKET}/${sourceKey}`);
+        await minioClient.removeObject(MINIO_BUCKET, sourceKey);
+        archivedPath = formatStoredPath(archivedObjectKey, MINIO_BUCKET);
       } catch (minioErr) {
-        console.error('MinIO operation failed:', minioErr);
+        console.error('MinIO archive operation failed:', minioErr);
         return res.status(500).json({ message: 'Failed to move file to archived location', error: minioErr.message });
       }
-    } else {
-      // Moving back from archived folder
-      if (doc.archived_path) {
-        // doc.archived_path format: org_id/asset-maintenance/Archived Asset Maintenance Document/asset_id/filename (without bucket name)
-        const pathParts = doc.archived_path.split('/');
-        const bucketName = MINIO_BUCKET; // Use the constant since archived_path doesn't include bucket
-        const fileName = pathParts[pathParts.length - 1];
-        const assetId = pathParts[pathParts.length - 2];
-        const orgId = pathParts[0]; // org_id is at index 0 since no bucket name
-        
-        // Extract object key from archived_path (archived_path already doesn't have bucket name)
-        const objectKey = doc.archived_path;
-        
-        // Create new path: org_id/asset-maintenance/asset_id/filename
-        const newObjectName = `${orgId}/asset-maintenance/${assetId}/${fileName}`;
-        
+    } else if (doc.archived_path) {
+      const archivedObjectKey = resolveObjectKey(doc.archived_path, MINIO_BUCKET);
+      const activeObjectKey = buildAssetMaintenanceActiveKey(orgId, assetId, fileName);
+      const sourceCandidates = [
+        archivedObjectKey,
+        buildAssetMaintenanceArchivedKey(orgId, assetId, fileName),
+      ].filter((key, index, arr) => key && arr.indexOf(key) === index);
+
+      let restored = false;
+      let lastError = null;
+
+      for (const sourceKey of sourceCandidates) {
         try {
-          // Copy file back to active location
-          await minioClient.copyObject(bucketName, newObjectName, objectKey);
-          
-          // Delete file from archived location
-          await minioClient.removeObject(bucketName, objectKey);
-          
-          // Update paths - keep doc_path unchanged, clear archived_path
-          newDocPath = doc.doc_path; // Keep original path unchanged
-          archivedPath = null; // Clear archived path since we're unarchiving
+          await minioClient.copyObject(MINIO_BUCKET, activeObjectKey, `/${MINIO_BUCKET}/${sourceKey}`);
+          await minioClient.removeObject(MINIO_BUCKET, sourceKey);
+          restored = true;
+          break;
         } catch (minioErr) {
-          console.error('MinIO operation failed:', minioErr);
-          return res.status(500).json({ message: 'Failed to move file back to active location', error: minioErr.message });
+          lastError = minioErr;
+          console.warn(`MinIO unarchive attempt failed for key ${sourceKey}:`, minioErr.message);
         }
       }
+
+      if (!restored) {
+        console.error('MinIO unarchive operation failed:', lastError);
+        return res.status(500).json({
+          message: 'Failed to move file back to active location',
+          error: lastError?.message || 'Unknown MinIO error',
+        });
+      }
+
+      archivedPath = null;
     }
 
-    // Update database with new paths
     const result = await updateAssetMaintDocArchiveStatus(amd_id, is_archived, archivedPath);
 
     return res.json({
       message: 'Archive status updated successfully',
-      data: result.rows[0]
+      data: result.rows[0],
     });
   } catch (err) {
     console.error('Failed to update archive status', err);

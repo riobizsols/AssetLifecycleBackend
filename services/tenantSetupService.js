@@ -7,6 +7,7 @@ const setupWizardService = require('./setupWizardService');
 const {
   ensureJobMonitorTables,
   ensureAtInspCertStructure,
+  ensureCriticalRuntimeSchema,
   ensureReferenceViews,
   getReferenceUrl,
 } = require('./tenantSchemaAlignService');
@@ -162,27 +163,32 @@ async function ensureBranchAndDepartment(client, orgId) {
   
   await client.query('SET search_path TO public');
   
-  // 1. Ensure branch exists
+  // 1. Ensure branch exists — prefer BR### format (BR001, BR002, ...)
   let branchId;
   try {
     const existingBranch = await client.query(`
-      SELECT branch_id FROM public."tblBranches" WHERE org_id = $1 LIMIT 1
+      SELECT branch_id FROM public."tblBranches"
+      WHERE org_id = $1
+      ORDER BY
+        CASE WHEN branch_id ~ '^BR[0-9]+$' THEN 0 ELSE 1 END,
+        branch_id
+      LIMIT 1
     `, [orgId]);
     
-    if (existingBranch.rows.length > 0) {
+    if (existingBranch.rows.length > 0 && /^BR\d+$/.test(existingBranch.rows[0].branch_id)) {
       branchId = existingBranch.rows[0].branch_id;
       console.log(`[TenantSetup] Using existing branch: ${branchId}`);
     } else {
       branchId = await generateCustomIdForClient(client, 'branch', 3);
-
-      await client.query(`
-        INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
-        VALUES ($1, $2, 'Main Branch', '', 'HO', 1, 'SYSTEM', NOW())
-        ON CONFLICT (branch_id) DO NOTHING
-      `, [orgId, branchId]);
       if (!/^BR\d{3}$/.test(branchId)) {
         throw new Error(`Generated branch_id "${branchId}" does not match expected format BR###`);
       }
+
+      await client.query(`
+        INSERT INTO public."tblBranches" (org_id, branch_id, text, city, branch_code, int_status, created_by, created_on)
+        VALUES ($1, $2, 'Main Branch', '', $2, 1, 'SYSTEM', NOW())
+        ON CONFLICT (branch_id) DO NOTHING
+      `, [orgId, branchId]);
       console.log(`[TenantSetup] ✅ Created branch: ${branchId}`);
     }
   } catch (err) {
@@ -200,6 +206,11 @@ async function ensureBranchAndDepartment(client, orgId) {
     if (existingDept.rows.length > 0) {
       deptId = existingDept.rows[0].dept_id;
       console.log(`[TenantSetup] Using existing department: ${deptId}`);
+      await client.query(`
+        UPDATE public."tblDepartments"
+        SET branch_id = $1
+        WHERE dept_id = $2 AND (branch_id IS NULL OR btrim(branch_id) = '' OR branch_id !~ '^BR[0-9]+$')
+      `, [branchId, deptId]).catch(() => {});
     } else {
       deptId = await generateCustomIdForClient(client, 'department', 3);
 
@@ -280,7 +291,6 @@ async function createAdminUser(client, orgId, adminData) {
   const plainPassword = 'Initial1';
   const passwordHash = await bcrypt.hash(plainPassword, 10);
   const userId = username.toUpperCase();
-  const employeeId = 'EMP001'; // First employee in the organization
 
   await client.query('SET search_path TO public');
 
@@ -296,39 +306,54 @@ async function createAdminUser(client, orgId, adminData) {
     console.warn(`[TenantSetup] Job role creation note: ${err.message}`);
   }
 
-  // Get department ID (should already exist from ensureBranchAndDepartment)
+  // Branch + department should already exist from ensureBranchAndDepartment (BR### / DPT###)
+  let branchId = 'BR001';
   let deptId = 'DPT001';
   try {
-    const existingDept = await client.query(`
-      SELECT dept_id FROM public."tblDepartments" WHERE dept_id LIKE 'DPT%' AND org_id = $1 ORDER BY dept_id LIMIT 1
+    const existingBranch = await client.query(`
+      SELECT branch_id FROM public."tblBranches"
+      WHERE org_id = $1 AND branch_id ~ '^BR[0-9]+$'
+      ORDER BY branch_id
+      LIMIT 1
     `, [orgId]);
-    
+    if (existingBranch.rows.length > 0) {
+      branchId = existingBranch.rows[0].branch_id;
+    }
+
+    const existingDept = await client.query(`
+      SELECT dept_id FROM public."tblDepartments"
+      WHERE dept_id LIKE 'DPT%' AND org_id = $1
+      ORDER BY dept_id
+      LIMIT 1
+    `, [orgId]);
     if (existingDept.rows.length > 0) {
       deptId = existingDept.rows[0].dept_id;
-      console.log(`[TenantSetup] Using department: ${deptId}`);
-    } else {
-      console.warn(`[TenantSetup] No DPT format department found, using DPT001 as fallback`);
     }
+    console.log(`[TenantSetup] Admin employee will use branch=${branchId}, dept=${deptId}`);
   } catch (err) {
-    console.warn(`[TenantSetup] Error getting department: ${err.message}, using DPT001 as fallback`);
+    console.warn(`[TenantSetup] Error resolving branch/department: ${err.message}; using ${branchId}/${deptId}`);
+  }
+
+  const empIntId = await generateCustomIdForClient(client, 'emp_int_id', 4);
+  const employeeId = await generateCustomIdForClient(client, 'employee', 3);
+  if (!/^EMP_INT_\d+$/.test(empIntId)) {
+    throw new Error(`Generated emp_int_id "${empIntId}" does not match expected format EMP_INT_####`);
   }
 
   // Step 1: Create employee record in tblEmployees (with all required NOT NULL columns)
   try {
-    // Generate emp_int_id (first employee gets ID 1)
-    const empIntId = 1;
     const employeeType = 'PERMANENT';
     const languageCode = 'en';
     
     await client.query(`
       INSERT INTO public."tblEmployees" (
-        emp_int_id, employee_id, name, full_name, email_id, dept_id, 
+        emp_int_id, employee_id, name, full_name, email_id, dept_id, branch_id,
         phone_number, employee_type, joining_date, language_code,
         int_status, created_by, created_on, changed_by, changed_on, org_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE, $9, 1, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $10)
-    `, [empIntId, employeeId, fullName, fullName, email, deptId, phone, employeeType, languageCode, orgId]);
-    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId})`);
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_DATE, $10, 1, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, $11)
+    `, [empIntId, employeeId, fullName, fullName, email, deptId, branchId, phone, employeeType, languageCode, orgId]);
+    console.log(`[TenantSetup] Employee record created in tblEmployees: ${employeeId} (emp_int_id: ${empIntId}, branch_id: ${branchId})`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating employee record:`, err.message);
     throw new Error(`Failed to create employee record: ${err.message}`);
@@ -336,16 +361,14 @@ async function createAdminUser(client, orgId, adminData) {
 
   // Step 2: Add admin user to tblUsers with emp_int_id reference
   try {
-    const empIntId = 1; // Reference to the employee record we just created
-    
     await client.query(`
       INSERT INTO public."tblUsers" (
         org_id, user_id, emp_int_id, full_name, email, phone, job_role_id, password,
-        created_by, created_on, changed_by, changed_on, int_status, time_zone
+        dept_id, branch_id, created_by, created_on, changed_by, changed_on, int_status, time_zone
       )
-      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
-    `, [orgId, userId, empIntId.toString(), fullName, email, phone, passwordHash]);
-    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to emp_int_id: ${empIntId})`);
+      VALUES ($1, $2, $3, $4, $5, $6, 'JR001', $7, $8, $9, 'SETUP', CURRENT_DATE, 'SETUP', CURRENT_DATE, 1, 'IST')
+    `, [orgId, userId, empIntId, fullName, email, phone, passwordHash, deptId, branchId]);
+    console.log(`[TenantSetup] Admin user inserted into tblUsers: ${userId} (linked to emp_int_id: ${empIntId}, branch_id: ${branchId})`);
   } catch (err) {
     console.error(`[TenantSetup] Error creating user record:`, err.message);
     throw new Error(`Failed to create user record: ${err.message}`);
@@ -1409,6 +1432,7 @@ async function createTenant(tenantData) {
         }));
         await ensureJobMonitorTables(tenantClient);
         await ensureAtInspCertStructure(tenantClient);
+        await ensureCriticalRuntimeSchema(tenantClient);
         try {
           await refClient.connect();
           await ensureReferenceViews(tenantClient, refClient);
@@ -1421,6 +1445,7 @@ async function createTenant(tenantData) {
         console.log(
           `[TenantSetup] Column alignment: ${columnLog.summary.applied} applied, ${columnLog.summary.failed} failed`
         );
+        await ensureCriticalRuntimeSchema(tenantClient);
         console.log('[TenantSetup] ✅ Tenant schema extras applied');
       } catch (extrasError) {
         console.error('[TenantSetup] ❌ Tenant schema extras failed:', extrasError.message);

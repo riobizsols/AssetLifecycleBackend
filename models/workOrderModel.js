@@ -195,8 +195,8 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
           )
           AND ams.wo_id IS NOT NULL
           AND (
-            -- Include vendor-maintained work orders
-            ams.maintained_by = 'Vendor'
+            -- Include vendor-maintained work orders (case-insensitive; freq table stores 'vendor')
+            COALESCE(ams.maintained_by, '') ILIKE 'vendor'
             OR
             -- Include breakdown maintenance (MT004) even if not vendor-maintained
             ams.maint_type_id = 'MT004'

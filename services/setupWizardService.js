@@ -756,7 +756,8 @@ const CORE_TABLE_DDL = [
       maint_type_id character varying(20) PRIMARY KEY,
       org_id character varying(20) NOT NULL,
       text character varying(50) NOT NULL,
-      int_status integer NOT NULL DEFAULT 1
+      int_status integer NOT NULL DEFAULT 1,
+      hours_required decimal(10,2)
     );
   `,
   `
@@ -764,7 +765,7 @@ const CORE_TABLE_DDL = [
       org_id character varying(10) NOT NULL,
       job_role_id character varying(20) PRIMARY KEY,
       text character varying(50),
-      job_function character varying(50),
+      job_function character varying(100),
       int_status integer DEFAULT 1
     );
   `,

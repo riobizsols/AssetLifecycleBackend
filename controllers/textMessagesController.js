@@ -96,7 +96,15 @@ async function getMessageById(req, res) {
     });
   } catch (error) {
     console.error("Error fetching text message by tmd_id:", error);
-    return res.status(500).json({ success: false, message: "Failed to fetch text message" });
+    return res.status(404).json({
+      success: false,
+      message: "Text message not found",
+      data: {
+        tmd_id: req.params.tmdId,
+        text: "Failed to fetch data. Please try again.",
+        lang_code: "en",
+      },
+    });
   }
 }
 

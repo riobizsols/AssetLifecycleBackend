@@ -1207,8 +1207,8 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const atMainFreqId = freqResult.rows[0].at_main_freq_id;
       const maintTypeId = freqResult.rows[0].maint_type_id || "MT002";
 
-      // Lookup AT maintenance frequency to determine maintained_by and emp_int_id
       let empIntToSave = null;
+      let maintainedBy = asset.service_vendor_id ? "Vendor" : "Inhouse";
       try {
         if (atMainFreqId) {
           const mfRes = await client.query(
@@ -1218,6 +1218,9 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
           if (mfRes.rows.length > 0) {
             const mf = mfRes.rows[0];
             const mBy = mf.maintained_by || '';
+            if (mBy) {
+              maintainedBy = mBy;
+            }
             if (String(mBy).toLowerCase().includes('vendor')) {
               empIntToSave = null;
             } else {
@@ -1429,7 +1432,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 org_id,
                 branch_code,
                 emp_int_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, NULL, NULL, $11, $12, $13)
             RETURNING *
         `;
 
@@ -1545,7 +1548,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 org_id,
           branch_code,
           emp_int_id
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14, $15)
             ON CONFLICT (ams_id) DO UPDATE SET
                 wfamsh_id = EXCLUDED.wfamsh_id,
                 status = EXCLUDED.status,

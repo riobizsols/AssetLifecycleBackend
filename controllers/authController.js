@@ -527,25 +527,39 @@ const forgotPassword = async (req, res) => {
             logger.log(`[ForgotPassword] ✅ Password reset link sent to ${email}${subdomain ? ` (tenant: ${subdomain})` : ''}`);
             res.json({ message: 'Password reset link sent to email' });
         } catch (emailError) {
-            // Log the email error but don't fail the request
-            // Token is already set, user can request again if needed
+            // Token is already set — log link so local testing can continue when Gmail auth fails
             console.error(`[ForgotPassword] ❌ Failed to send email:`, emailError);
             console.error(`[ForgotPassword] ❌ Email error details:`, {
                 message: emailError.message,
                 code: emailError.code,
                 stack: emailError.stack
             });
+            if (emailError.resetLink) {
+                console.error(`[ForgotPassword] 🔗 Use this reset link manually: ${emailError.resetLink}`);
+            }
             logger.error(`[ForgotPassword] ❌ Failed to send email:`, emailError);
             logger.error(`[ForgotPassword] ❌ Email error details:`, {
                 message: emailError.message,
                 code: emailError.code,
                 stack: emailError.stack
             });
-            
-            // Return error to user so they know email wasn't sent
-            res.status(500).json({ 
+
+            const isLocalHost =
+                String(req.get('host') || '').includes('localhost') ||
+                String(process.env.FRONTEND_URL || '').includes('localhost');
+
+            // Local/dev: return link so reset flow can be tested without working SMTP
+            if (isLocalHost || process.env.NODE_ENV !== 'production') {
+                return res.status(200).json({
+                    message: 'Email could not be sent (Gmail auth failed). Use the resetLink below (local/dev only).',
+                    resetLink: emailError.resetLink || undefined,
+                    error: emailError.message,
+                });
+            }
+
+            res.status(500).json({
                 message: 'Password reset token was generated, but email could not be sent. Please check email configuration or try again later.',
-                error: process.env.NODE_ENV === 'development' ? emailError.message : undefined
+                error: process.env.NODE_ENV === 'development' ? emailError.message : undefined,
             });
         }
     } catch (error) {

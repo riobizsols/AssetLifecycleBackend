@@ -4,6 +4,9 @@ version: "3.9"
 # shares a user-defined Docker network with the Postgres container named alm_db.
 # One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db
 # Then deploy/restart this compose stack so alm-main-backend joins alm-shared.
+#
+# MinIO (mansoor-minio) lives on external network mansoor-s-app-backend_mansoor-net.
+# Compose joins that network so MINIO_END_POINT=mansoor-minio works after every recreate.
 
 services:
   alm-backend:
@@ -21,6 +24,7 @@ services:
     networks:
       - default
       - alm-shared
+      - mansoor-net
 
   alm-redis:
     image: redis:7-alpine
@@ -38,4 +42,6 @@ volumes:
 networks:
   alm-shared:
     external: true
-
+  mansoor-net:
+    external: true
+    name: mansoor-s-app-backend_mansoor-net
