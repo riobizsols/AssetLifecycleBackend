@@ -582,6 +582,7 @@ const mapAssetTypeProperties = async (req, res) => {
                 });
             }
             
+            invalidateAssetTypeCaches(req);
             return res.status(200).json({
                 success: true,
                 message: "Property added successfully",
@@ -592,6 +593,7 @@ const mapAssetTypeProperties = async (req, res) => {
         // For multiple properties, use the replace function
         await model.mapAssetTypeToProperties(id, properties, org_id, created_by);
         
+        invalidateAssetTypeCaches(req);
         res.status(200).json({
             success: true,
             message: "Properties mapped successfully",
@@ -628,6 +630,7 @@ const deleteAssetTypeProperty = async (req, res) => {
             });
         }
         
+        invalidateAssetTypeCaches(req);
         res.status(200).json({
             success: true,
             message: "Property mapping deleted successfully"

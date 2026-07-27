@@ -1,5 +1,6 @@
 const model = require("../models/maintenanceScheduleModel");
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
+const operationalCache = require('../utils/operationalCache');
 
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
@@ -7,6 +8,8 @@ const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEven
 function bustMaintenanceSupervisorCaches(req, orgId) {
   const oid = orgId || req.user?.org_id;
   maintenanceSupervisorCache.invalidateOrgCaches(oid).catch(() => {});
+  // Maintenance Approval list is cached under operationalCache (slug: maintenance-approval)
+  operationalCache.invalidateOrgCaches(oid).catch(() => {});
 }
 
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
@@ -613,6 +616,7 @@ const generateMaintenanceSchedules = async (req, res) => {
         console.log(`Assets skipped: ${skippedAssets}`);
         console.log(`Total schedules created: ${totalSchedulesCreated}`);
         
+        bustMaintenanceSupervisorCaches(req, req.user?.org_id);
         res.status(200).json({
             message: "Maintenance schedules generated successfully",
             asset_types_processed: assetTypes.length,
@@ -934,6 +938,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
         console.log(`Workflow schedules created: ${workflowSchedulesCreated}`);
         console.log(`Direct schedules created: ${directSchedulesCreated}`);
         
+        bustMaintenanceSupervisorCaches(req, req.user?.org_id);
         res.status(200).json({
             message: "Maintenance schedules generated successfully with workflow bypass logic",
             asset_types_processed: assetTypes.length,

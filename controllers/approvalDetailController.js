@@ -354,6 +354,7 @@ const approveMaintenanceAction = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     res.json({
       success: true,
       message: result.message,
@@ -558,6 +559,7 @@ const rejectMaintenanceAction = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
+    operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     res.json({
       success: true,
       message: result.message,
@@ -1288,6 +1290,7 @@ const updateWorkflowHeaderAction = async (req, res) => {
     const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, technicianId, userId, orgId);
     
     if (result.success) {
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
       return res.json(result);
     } else {
       return res.status(400).json(result);
