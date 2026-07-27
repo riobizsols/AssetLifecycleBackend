@@ -334,6 +334,14 @@ const approveMaintenanceAction = async (req, res) => {
       });
     }
 
+    // Bust list caches so Maintenance List / Work Order show new AMS rows immediately
+    try {
+      const oid = orgId || req.user?.org_id;
+      await operationalCache.invalidateOrgCaches(oid);
+    } catch (cacheErr) {
+      console.warn('Cache invalidation after approval failed:', cacheErr?.message || cacheErr);
+    }
+
     // Step 6: Log success (context-aware)
     if (context === 'SUPERVISORAPPROVAL') {
       supervisorApprovalLogger.logSupervisorApprovalCompleted({
