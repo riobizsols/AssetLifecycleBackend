@@ -44,6 +44,7 @@ const createBranch = async (req, res) => {
             created_by: user_id,
         });
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
         res.status(201).json(newBranch);
     } catch (error) {
         console.error("Error creating branch:", error);
@@ -60,6 +61,7 @@ const deleteBranches = async (req, res) => {
         }
 
         const deletedCount = await branchModel.deleteBranches(ids);
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
         res.json({ message: `${deletedCount} branch(es) deleted` });
     } catch (error) {
         console.error("Error deleting branches:", error);
@@ -73,7 +75,7 @@ const updateBranch = async (req, res) => {
         const text = String(req.body?.text || '').trim();
         const city = String(req.body?.city || '').trim();
         const branch_code = String(req.body?.branch_code || '').trim();
-        const { user_id } = req.user;
+        const { user_id, org_id } = req.user;
 
         // Validate required fields
         if (!text || !city || !branch_code) {
@@ -84,7 +86,7 @@ const updateBranch = async (req, res) => {
         }
 
         // Check if branch exists
-        const branches = await branchModel.getAllBranches();
+        const branches = await branchModel.getAllBranches(org_id);
         const branchExists = branches.find(b => b.branch_id === branch_id);
         
         if (!branchExists) {
@@ -112,6 +114,7 @@ const updateBranch = async (req, res) => {
             user_id
         );
 
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
         res.json({
             message: "Branch updated successfully",
             data: updatedBranch

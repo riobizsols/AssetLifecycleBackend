@@ -42,25 +42,30 @@ function parseTtlMs(envValue, fallbackMs) {
 }
 
 async function get(key) {
-  const l1 = memoryGet(key);
-  if (l1 != null) return l1;
-
-  if (!isCacheEnabled()) return null;
-  const redis = getRedis();
-  if (!redis || redis.status !== 'ready') return null;
-
-  try {
-    const raw = await redis.get(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return parsed;
-  } catch (err) {
-    if (!warnedUnavailable) {
-      console.warn('[CacheService] get failed:', err.message);
-      warnedUnavailable = true;
+  // Prefer Redis when available so invalidation on one instance is visible on all.
+  if (isCacheEnabled()) {
+    const redis = getRedis();
+    if (redis && redis.status === 'ready') {
+      try {
+        const raw = await redis.get(key);
+        if (!raw) {
+          // Shared miss (deleted/expired) — drop any stale in-process copy
+          memoryDelete(key);
+          return null;
+        }
+        const parsed = JSON.parse(raw);
+        return parsed;
+      } catch (err) {
+        if (!warnedUnavailable) {
+          console.warn('[CacheService] get failed:', err.message);
+          warnedUnavailable = true;
+        }
+        // Fall through to L1 if Redis errors
+      }
     }
-    return null;
   }
+
+  return memoryGet(key);
 }
 
 async function set(key, value, ttlMs) {
