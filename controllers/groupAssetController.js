@@ -14,10 +14,11 @@ const getAvailableAssetsByAssetType = async (req, res) => {
         // Get user's org_id and branch_id from the authenticated request
         const org_id = req.user?.org_id || null;
         const branch_id = req.user?.branch_id || null;
+        const hasSuperAccess = req.user?.hasSuperAccess || false;
 
-        console.log(`[getAvailableAssetsByAssetType] Fetching assets for asset_type_id: ${asset_type_id}, org_id: ${org_id}, branch_id: ${branch_id}`);
+        console.log(`[getAvailableAssetsByAssetType] Fetching assets for asset_type_id: ${asset_type_id}, org_id: ${org_id}, branch_id: ${branch_id}, hasSuperAccess: ${hasSuperAccess}`);
         
-        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id, branch_id, req.user?.hasSuperAccess || false);
+        const result = await model.getAvailableAssetsByAssetType(asset_type_id, org_id, branch_id, hasSuperAccess);
         
         // Verify that all returned assets match the requested asset type
         const mismatchedAssets = result.rows.filter(asset => asset.asset_type_id !== asset_type_id);
@@ -30,8 +31,11 @@ const getAvailableAssetsByAssetType = async (req, res) => {
         const filteredAssets = result.rows.filter(asset => asset.asset_type_id === asset_type_id);
         
         // Also verify org_id and branch_id match (additional safety check)
+        // Super-access users must not be re-filtered by branch (model already skipped branch filter)
         const orgMismatched = filteredAssets.filter(asset => org_id && asset.org_id !== org_id);
-        const branchMismatched = filteredAssets.filter(asset => branch_id && asset.branch_id !== branch_id);
+        const branchMismatched = (!hasSuperAccess && branch_id)
+            ? filteredAssets.filter(asset => asset.branch_id !== branch_id)
+            : [];
         
         if (orgMismatched.length > 0) {
             console.error(`[getAvailableAssetsByAssetType] ERROR: Found ${orgMismatched.length} assets with mismatched org_id!`);
@@ -43,7 +47,7 @@ const getAvailableAssetsByAssetType = async (req, res) => {
         // Final filter for org_id and branch_id
         const finalFilteredAssets = filteredAssets.filter(asset => {
             const orgMatch = !org_id || asset.org_id === org_id;
-            const branchMatch = !branch_id || asset.branch_id === branch_id;
+            const branchMatch = hasSuperAccess || !branch_id || asset.branch_id === branch_id;
             return orgMatch && branchMatch;
         });
         
