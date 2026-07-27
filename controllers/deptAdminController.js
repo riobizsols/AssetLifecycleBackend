@@ -160,12 +160,8 @@ const createDeptAdmin = async (req, res) => {
             [newDeptAdminId, org_id, userBranchId, dept_id, user_id, created_by]
         );
 
-        // 🔥 Update job_role_id in tblUsers to "admin/<dept_id>"
-        const updatedRoleId = `admin/${dept_id}`;
-        await dbPool.query(
-            `UPDATE "tblUsers" SET job_role_id = $1 WHERE user_id = $2`,
-            [updatedRoleId, user_id]
-        );
+        // Do not overwrite tblUsers.job_role_id with "admin/<dept_id>" —
+        // that value is not a valid tblJobRoles id and fails tblUsers_job_role_id_fkey.
 
         res.status(201).json({
             message: "Department admin created successfully",
@@ -225,12 +221,6 @@ const deleteDeptAdmin = async (req, res) => {
         }
 
         await DeptAdminModel.deleteDeptAdmin({ dept_id, user_id });
-        
-        // Reset job_role_id in tblUsers
-        await dbPool.query(
-            `UPDATE "tblUsers" SET job_role_id = NULL WHERE user_id = $1`,
-            [user_id]
-        );
         
         res.status(200).json({ 
             message: 'Admin removed successfully',

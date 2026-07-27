@@ -357,8 +357,7 @@ const getWarrantyNotificationsByUser = async ({
     branchFilter = ` AND (a.branch_id = $${params.length} OR a.branch_id IS NULL)`;
   }
 
-  const res = await getDb().query(
-    `
+  const selectSql = (notifyTypeFilter) => `
       SELECT
         n.notify_id,
         n.asset_id,
@@ -379,13 +378,29 @@ const getWarrantyNotificationsByUser = async ({
         AND n.org_id = $2
         AND UPPER(n.status) <> 'RESOLVED'
         AND UPPER(n.status) <> 'CLOSED'
-        AND COALESCE(n.notify_type, 'WARRANTY') = 'WARRANTY'
+        ${notifyTypeFilter}
         ${branchFilter}
       ORDER BY n.created_on DESC
       LIMIT 200
-    `,
-    params
-  );
+    `;
+
+  let res;
+  try {
+    res = await getDb().query(
+      selectSql(`AND COALESCE(n.notify_type, 'WARRANTY') = 'WARRANTY'`),
+      params
+    );
+  } catch (error) {
+    // 42P01 = table missing; 42703 = notify_type column not yet migrated
+    if (error.code === "42P01") {
+      return [];
+    }
+    if (error.code === "42703") {
+      res = await getDb().query(selectSql(""), params);
+    } else {
+      throw error;
+    }
+  }
 
   return filterSnoozedNotifications(res.rows);
 };

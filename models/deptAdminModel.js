@@ -114,6 +114,7 @@ const createDeptAdmin = async ({ dept_id, user_id, org_id, created_by }) => {
 
 // Delete a department admin
 const deleteDeptAdmin = async ({ dept_id, user_id }) => {
+    const dbPool = getDb();
     await dbPool.query(`DELETE FROM "tblDeptAdmins" WHERE dept_id = $1 AND user_id = $2`, [dept_id, user_id]);
 };
 

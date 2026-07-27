@@ -313,6 +313,30 @@ const syncPrimaryJobRole = async (user_id, changed_by = 'SYSTEM') => {
     return primaryRoleId;
 };
 
+/**
+ * Clear stale tblUsers.job_role_id values that are not present in tblUserJobRoles.
+ * These orphans were previously surfaced as an extra "automatic" role via getUserRoles UNION.
+ */
+const clearOrphanPrimaryJobRole = async (user_id, changed_by = 'SYSTEM') => {
+    const dbPool = getDb();
+    await dbPool.query(
+        `UPDATE "tblUsers" u
+         SET job_role_id = NULL,
+             changed_by = $2,
+             changed_on = CURRENT_TIMESTAMP
+         WHERE u.user_id = $1
+           AND u.job_role_id IS NOT NULL
+           AND btrim(u.job_role_id) <> ''
+           AND NOT EXISTS (
+             SELECT 1
+             FROM "tblUserJobRoles" ujr
+             WHERE ujr.user_id = u.user_id
+               AND ujr.job_role_id = u.job_role_id
+           )`,
+        [user_id, changed_by],
+    );
+};
+
 // Assign job role to user (insert into tblUserJobRoles and update tblUsers.job_role_id)
 const assignJobRole = async (user_id, job_role_id, assigned_by) => {
     try {
@@ -323,6 +347,19 @@ const assignJobRole = async (user_id, job_role_id, assigned_by) => {
         console.log(`Generated user_job_role_id: ${user_job_role_id}`);
         
         const dbPool = getDb();
+
+        // Avoid duplicate rows for the same user+role
+        const existing = await dbPool.query(
+            `SELECT user_job_role_id, user_id, job_role_id
+             FROM "tblUserJobRoles"
+             WHERE user_id = $1 AND job_role_id = $2
+             LIMIT 1`,
+            [user_id, job_role_id],
+        );
+        if (existing.rows[0]) {
+            await syncPrimaryJobRole(user_id, assigned_by);
+            return existing.rows[0];
+        }
         
         // Insert into tblUserJobRoles
         const result = await dbPool.query(
@@ -377,7 +414,9 @@ const getEmployeeJobRoles = async (emp_int_id) => {
 };
 
 // Get all roles for a specific user by user_id
-// If tenantPool is provided, use it; otherwise use default db
+// Only return real assignments from tblUserJobRoles.
+// Do NOT union tblUsers.job_role_id — that legacy primary field caused an extra
+// "automatic" role to appear when it differed from tblUserJobRoles.
 const getUserRoles = async (user_id, tenantPool = null) => {
     try {
         const connection = tenantPool || getDb();
@@ -388,19 +427,7 @@ const getUserRoles = async (user_id, tenantPool = null) => {
              FROM "tblUserJobRoles" ujr
              JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
              WHERE ujr.user_id = $1
-             UNION
-             SELECT NULL AS user_job_role_id, u.user_id, u.job_role_id,
-                    jr.text as job_role_name, jr.job_function
-             FROM "tblUsers" u
-             LEFT JOIN "tblJobRoles" jr ON jr.job_role_id = u.job_role_id
-             WHERE u.user_id = $1
-               AND u.job_role_id IS NOT NULL
-               AND btrim(u.job_role_id) <> ''
-               AND NOT EXISTS (
-                 SELECT 1 FROM "tblUserJobRoles" ujr2
-                 WHERE ujr2.user_id = u.user_id AND ujr2.job_role_id = u.job_role_id
-               )
-             ORDER BY job_role_id`,
+             ORDER BY ujr.user_job_role_id DESC`,
             [user_id]
         );
         
@@ -527,4 +554,5 @@ module.exports = {
     getUserRoleCount,
     deactivateUser,
     syncPrimaryJobRole,
+    clearOrphanPrimaryJobRole,
 };

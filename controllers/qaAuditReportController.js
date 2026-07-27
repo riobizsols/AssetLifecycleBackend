@@ -1,5 +1,6 @@
 const { getQAAuditCertificates } = require('../models/qaAuditReportModel');
 const path = require('path');
+const axios = require('axios');
 const { getAssetMaintDocById } = require('../models/assetMaintDocsModel');
 const { getAssetDocById } = require('../models/assetDocsModel');
 const { getAssetTypeDocById } = require('../models/assetTypeDocsModel');
@@ -10,6 +11,87 @@ const {
   resolveLocalPath,
 } = require('../utils/documentStorage');
 
+/**
+ * When local MinIO is unreachable (common on developer machines), proxy the
+ * file bytes through a reachable remote API that can access MinIO server-side.
+ */
+async function proxyCertificateDownloadFromRemote(req, res, { id, type, mode, fileName, contentType, disposition }) {
+  const remoteBase = String(
+    process.env.REMOTE_FILE_API_BASE_URL || process.env.API_BASE_URL || '',
+  ).replace(/\/$/, '');
+
+  if (!remoteBase || /localhost|127\.0\.0\.1/i.test(remoteBase)) {
+    return false;
+  }
+
+  const authHeader = req.headers.authorization;
+  if (!authHeader) {
+    return false;
+  }
+
+  const url = `${remoteBase}/qa-audit/certificates/${encodeURIComponent(id)}/download`;
+  console.warn(`[QA Audit Download] Local MinIO unreachable — proxying via ${remoteBase}`);
+
+  const remoteResp = await axios.get(url, {
+    params: {
+      type: type || 'maintenance',
+      mode: mode || 'download',
+      stream: 'true',
+    },
+    headers: {
+      Authorization: authHeader,
+      Accept: '*/*',
+    },
+    responseType: 'arraybuffer',
+    timeout: Number(process.env.REMOTE_FILE_PROXY_TIMEOUT_MS || 120000),
+    validateStatus: () => true,
+    maxRedirects: 5,
+  });
+
+  const remoteContentType = String(remoteResp.headers['content-type'] || '');
+
+  // Remote returned JSON (presigned URL or error) — try to fetch the URL server-side
+  // only if it is not a bare MinIO IP the local network cannot reach; prefer error.
+  if (remoteContentType.includes('application/json')) {
+    let payload = {};
+    try {
+      payload = JSON.parse(Buffer.from(remoteResp.data).toString('utf8'));
+    } catch {
+      payload = {};
+    }
+
+    if (payload?.url && !/103\.27\.234\.248|:9000\b/i.test(payload.url)) {
+      const fileResp = await axios.get(payload.url, {
+        responseType: 'arraybuffer',
+        timeout: Number(process.env.REMOTE_FILE_PROXY_TIMEOUT_MS || 120000),
+      });
+      res.setHeader('Content-Type', fileResp.headers['content-type'] || contentType);
+      res.setHeader('Content-Disposition', disposition);
+      res.send(Buffer.from(fileResp.data));
+      return true;
+    }
+
+    console.error('[QA Audit Download] Remote proxy returned JSON without usable file URL:', payload?.message || payload);
+    return false;
+  }
+
+  if (remoteResp.status >= 400 || !remoteResp.data || !remoteResp.data.byteLength) {
+    console.error(
+      '[QA Audit Download] Remote proxy failed:',
+      remoteResp.status,
+      remoteContentType,
+    );
+    return false;
+  }
+
+  res.setHeader('Content-Type', remoteContentType || contentType);
+  res.setHeader(
+    'Content-Disposition',
+    remoteResp.headers['content-disposition'] || disposition,
+  );
+  res.status(200).send(Buffer.from(remoteResp.data));
+  return true;
+}
 /**
  * Resolve certificate/doc row by id + optional type hint
  */
@@ -176,12 +258,14 @@ const downloadCertificate = async (req, res) => {
       return res.sendFile(localPath);
     }
 
-    // Prefer API stream when:
-    // - client requests stream=true (browser often cannot reach MINIO_END_POINT), OR
-    // - MINIO_FORCE_STREAM=true (local/dev when MinIO is only reachable server-side)
+    // Always prefer API stream: browsers (and many local networks) cannot reach
+    // MINIO_END_POINT:9000 — returning a presigned URL causes ERR_CONNECTION_TIMED_OUT.
+    // Set MINIO_ALLOW_PRESIGN=true only when clients can open MinIO URLs directly.
+    const allowPresign =
+      String(process.env.MINIO_ALLOW_PRESIGN || '').toLowerCase() === 'true';
     const envForceStream =
       String(process.env.MINIO_FORCE_STREAM || '').toLowerCase() === 'true';
-    const shouldStream = forceStream || envForceStream;
+    const shouldStream = forceStream || envForceStream || !allowPresign;
 
     if (!shouldStream) {
       try {
@@ -209,33 +293,58 @@ const downloadCertificate = async (req, res) => {
       }
     }
 
-    // Stream from MinIO through the API (browser never talks to MinIO directly)
-    try {
-      const stream = await getObjectStream(doc.doc_path);
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('Content-Disposition', disposition);
-      stream.on('error', (streamErr) => {
-        console.error('[QA Audit Download] Stream error:', streamErr);
-        if (!res.headersSent) {
-          res.status(500).json({
-            success: false,
-            message: 'Failed to stream certificate file',
-            error: streamErr.message,
-          });
-        } else {
-          res.destroy(streamErr);
-        }
-      });
-      return stream.pipe(res);
-    } catch (streamError) {
-      console.error('[QA Audit Download] Stream fallback failed:', streamError);
-      return res.status(504).json({
-        success: false,
-        message:
-          'Document storage unavailable from this server. MinIO at MINIO_END_POINT is not reachable. On production the API host must reach MinIO; for local use SSH tunnel or set a reachable MINIO_END_POINT.',
-        error: streamError.message,
-      });
+    // Stream from MinIO through the API (browser never talks to MinIO directly).
+    // Skip local MinIO when known-unreachable (avoids 10s timeout on every download).
+    const skipLocalMinio =
+      String(process.env.MINIO_SKIP_LOCAL || '').toLowerCase() === 'true';
+
+    if (!skipLocalMinio) {
+      try {
+        const stream = await getObjectStream(doc.doc_path);
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', disposition);
+        stream.on('error', (streamErr) => {
+          console.error('[QA Audit Download] Stream error:', streamErr);
+          if (!res.headersSent) {
+            res.status(500).json({
+              success: false,
+              message: 'Failed to stream certificate file',
+              error: streamErr.message,
+            });
+          } else {
+            res.destroy(streamErr);
+          }
+        });
+        return stream.pipe(res);
+      } catch (streamError) {
+        console.error('[QA Audit Download] Stream fallback failed:', streamError);
+      }
+    } else {
+      console.warn('[QA Audit Download] MINIO_SKIP_LOCAL=true — using remote file proxy');
     }
+
+    try {
+      const proxied = await proxyCertificateDownloadFromRemote(req, res, {
+        id,
+        type,
+        mode,
+        fileName,
+        contentType,
+        disposition,
+      });
+      if (proxied) {
+        return undefined;
+      }
+    } catch (proxyError) {
+      console.error('[QA Audit Download] Remote file proxy failed:', proxyError.message);
+    }
+
+    return res.status(504).json({
+      success: false,
+      message:
+        'Document storage (MinIO) is not reachable from this API server. Downloads are proxied via API_BASE_URL when possible — check that remote API can access MinIO, or open an SSH tunnel to MinIO for local use.',
+      error: 'MinIO unreachable and remote file proxy failed',
+    });
   } catch (error) {
     console.error('Error in downloadCertificate:', error);
     return res.status(500).json({
