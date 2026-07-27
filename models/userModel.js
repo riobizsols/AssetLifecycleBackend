@@ -206,13 +206,13 @@ const getUserWithBranch = async (userId, tenantPool = null) => {
             u.changed_on,
             u.last_accessed,
             d.text as dept_name,
-            d.branch_id,
-            b.branch_id,
+            COALESCE(d.branch_id, u.branch_id) as branch_id,
+            b.branch_code,
             b.text as branch_name,
             jr.text as job_role_name
         FROM "tblUsers" u
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
-        LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id
+        LEFT JOIN "tblBranches" b ON COALESCE(d.branch_id, u.branch_id) = b.branch_id
         LEFT JOIN "tblJobRoles" jr ON u.job_role_id = jr.job_role_id
         WHERE u.user_id = $1
     `;
@@ -238,6 +238,7 @@ const getAllUsersWithBranch = async (orgId) => {
             d.text as dept_name,
             d.branch_id,
             b.branch_id,
+            b.branch_code,
             b.text as branch_name,
             jr.text as job_role_name
         FROM "tblUsers" u
