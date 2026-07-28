@@ -25,29 +25,28 @@ const createDepartment = async (req, res) => {
         // Use user's branch_id instead of null
         const branch_id = userBranchId;
 
-        // 🔹 Generate unique department id: DPT01, DPT02, ...  
+        // Generate next dept_id from numeric max for this org (then bump sequence)
         const dbPool = req.db || require("../config/db");
-  
-        const deptIdResult = await dbPool.query(
-            "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
+
+        const maxResult = await dbPool.query(
+            `SELECT COALESCE(MAX(
+                CAST(SUBSTRING(dept_id FROM 4) AS INTEGER)
+             ), 0) AS max_num
+             FROM "tblDepartments"
+             WHERE org_id = $1
+               AND dept_id ~ '^DPT[0-9]+$'`,
             [org_id]
         );
+        const maxNum = Number(maxResult.rows[0]?.max_num || 0);
+        const newDeptId = `DPT${String(maxNum + 1).padStart(3, "0")}`;
 
-        let newDeptId;
-        if (deptIdResult.rows.length > 0) {
-            // Extract the numeric part from the last department ID
-            const lastDeptId = deptIdResult.rows[0].dept_id;
-            const match = lastDeptId.match(/\d+/);
-            if (match) {
-                const nextNum = parseInt(match[0]) + 1;
-                newDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
-            } else {
-                newDeptId = "DPT001";
-            }
-        } else {
-            // No departments exist yet, start with DPT001
-            newDeptId = "DPT001";
-        }
+        await dbPool.query(
+            `INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+             VALUES ('department', 'DPT', $1)
+             ON CONFLICT (table_key) DO UPDATE
+             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)`,
+            [maxNum + 1]
+        );
 
         // 🔹 Create department
         const newDept = await DepartmentModel.createDepartment({
@@ -72,34 +71,33 @@ const createDepartment = async (req, res) => {
 const getNextDepartmentId = async (req, res) => {
     try {
         const org_id = req.user.org_id;
-
-        // Get the highest department ID for this organization
         const dbPool = req.db || require("../config/db");
 
+        // Numeric max — lexicographic ORDER BY dept_id can mis-order once IDs exceed DPT999
         const result = await dbPool.query(
-            "SELECT dept_id FROM \"tblDepartments\" WHERE org_id = $1 ORDER BY dept_id DESC LIMIT 1",
+            `SELECT COALESCE(MAX(
+                CAST(SUBSTRING(dept_id FROM 4) AS INTEGER)
+             ), 0) AS max_num
+             FROM "tblDepartments"
+             WHERE org_id = $1
+               AND dept_id ~ '^DPT[0-9]+$'`,
             [org_id]
         );
 
-        let nextDeptId;
-        if (result.rows.length > 0) {
-            // Extract the numeric part from the last department ID
-            const lastDeptId = result.rows[0].dept_id;
-            const match = lastDeptId.match(/\d+/);
-            if (match) {
-                const nextNum = parseInt(match[0]) + 1;
-                nextDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
-            } else {
-                nextDeptId = "DPT001";
-            }
-        } else {
-            // No departments exist yet, start with DPT001
-            nextDeptId = "DPT001";
-        }
+        const nextNum = Number(result.rows[0]?.max_num || 0) + 1;
+        const nextDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
+
+        // Keep sequence table aligned so generateCustomId stays in sync
+        await dbPool.query(
+            `INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+             VALUES ('department', 'DPT', $1)
+             ON CONFLICT (table_key) DO UPDATE
+             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)`,
+            [result.rows[0]?.max_num || 0]
+        );
 
         console.log('Next department ID:', nextDeptId);
-
-        res.status(200).json({ nextDeptId: nextDeptId });
+        res.status(200).json({ nextDeptId });
     } catch (err) {
         console.error('Error getting next dept_id:', err);
         res.status(500).json({ error: 'Failed to fetch next department ID' });
