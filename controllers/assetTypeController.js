@@ -2,7 +2,6 @@ const model = require("../models/assetTypeModel");
 const operationalCache = require('../utils/operationalCache');
 const assignmentCache = require('../utils/assignmentCache');
 const { generateCustomId } = require("../utils/idGenerator");
-const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
 
 const invalidateAssetTypeCaches = (req) => {
     const orgId = req.user?.org_id;
@@ -62,19 +61,6 @@ const addAssetType = async (req, res) => {
         if (!trimmedText) {
             return res.status(400).json({ 
                 error: "Asset type name (text) is required" 
-            });
-        }
-
-        const existingTypes = await model.getAllAssetTypes(org_id);
-        const conflictingName = findConflictingAssetTypeName(
-            trimmedText,
-            existingTypes.rows
-        );
-        if (conflictingName) {
-            return res.status(409).json({
-                error: "Similar asset type name exists",
-                message: `An asset type with a similar name already exists: "${conflictingName}"`,
-                existingName: conflictingName,
             });
         }
 
@@ -372,21 +358,6 @@ const updateAssetType = async (req, res) => {
         if (!proposedText) {
             return res.status(400).json({
                 error: "Asset type name (text) is required",
-            });
-        }
-
-        const orgIdForCheck = org_id || existingAsset.rows[0].org_id;
-        const existingTypes = await model.getAllAssetTypes(orgIdForCheck);
-        const conflictingName = findConflictingAssetTypeName(
-            proposedText,
-            existingTypes.rows,
-            id
-        );
-        if (conflictingName) {
-            return res.status(409).json({
-                error: "Similar asset type name exists",
-                message: `An asset type with a similar name already exists: "${conflictingName}"`,
-                existingName: conflictingName,
             });
         }
 

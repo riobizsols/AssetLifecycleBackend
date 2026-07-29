@@ -3,27 +3,8 @@ const assetsDashboardCache = require("../utils/assetsDashboardCache");
 const operationalCache = require("../utils/operationalCache");
 const assignmentCache = require("../utils/assignmentCache");
 const { resolveAssetBranchId } = require("../utils/branchAccessUtils");
-const { findConflictingAssetName } = require("../utils/assetTypeNameValidation");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
 
-const respondDuplicateAssetName = (res, existingName) =>
-  res.status(409).json({
-    error: "Similar asset name exists",
-    message: `An asset with a similar name already exists: "${existingName}"`,
-    existingName,
-  });
-
-const checkDuplicateAssetDescription = async (
-  description,
-  org_id,
-  excludeAssetId = null
-) => {
-  const trimmed = String(description || "").trim();
-  if (!trimmed || !org_id) return null;
-
-  const assets = await model.getAssetsByOrg(org_id);
-  return findConflictingAssetName(trimmed, assets.rows, excludeAssetId);
-};
 const {
     // Generic helpers
     logApiCall,
@@ -239,14 +220,6 @@ const addAsset = async (req, res) => {
                 
                 return res.status(409).json({ error: "Asset with this asset_id already exists" });
             }
-        }
-
-        const conflictingAssetName = await checkDuplicateAssetDescription(
-            description,
-            org_id
-        );
-        if (conflictingAssetName) {
-            return respondDuplicateAssetName(res, conflictingAssetName);
         }
 
         const trimmedDescription = String(description || "").trim();
@@ -520,19 +493,6 @@ const updateAsset = async (req, res) => {
           error: "Service vendor is required for vendor-maintained asset types",
         });
       }
-    }
-
-    const descriptionToValidate =
-      Object.prototype.hasOwnProperty.call(body, 'description')
-        ? description
-        : existingAssetRow.description;
-    const conflictingAssetName = await checkDuplicateAssetDescription(
-      descriptionToValidate,
-      finalOrgId,
-      asset_id
-    );
-    if (conflictingAssetName) {
-      return respondDuplicateAssetName(res, conflictingAssetName);
     }
 
     const trimmedDescription =
@@ -1926,14 +1886,6 @@ const createAsset = async (req, res) => {
             if (existingSerial.rows.length > 0) {
                 return res.status(409).json({ error: "Asset with this serial number already exists" });
             }
-        }
-
-        const conflictingAssetName = await checkDuplicateAssetDescription(
-            description,
-            org_id
-        );
-        if (conflictingAssetName) {
-            return respondDuplicateAssetName(res, conflictingAssetName);
         }
 
         const trimmedDescription = String(description || "").trim();
