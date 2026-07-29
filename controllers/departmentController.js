@@ -4,10 +4,17 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 const createDepartment = async (req, res) => {
     try {
-        const { text } = req.body;
+        const text = String(req.body?.text || '').trim();
 
         const org_id = req.user.org_id;
         const created_by = req.user.user_id;
+
+        if (!text) {
+            return res.status(400).json({
+                error: "Missing required fields",
+                message: "Department name is required"
+            });
+        }
 
         // Get user's branch information
         const userModel = require("../models/userModel");
@@ -17,6 +24,15 @@ const createDepartment = async (req, res) => {
         console.log('=== Department Creation Debug ===');
         console.log('User org_id:', org_id);
         console.log('User branch_id:', userBranchId);
+
+        // Unique department name within org (case-insensitive)
+        const duplicateName = await DepartmentModel.findDepartmentByName(org_id, text);
+        if (duplicateName) {
+            return res.status(400).json({
+                error: "Duplicate department name",
+                message: "A department with this name already exists"
+            });
+        }
 
         const int_status = 1;
         const parent_id = null;
@@ -147,13 +163,27 @@ const deleteDepartment = async (req, res) => {
 
 const updateDepartment = async (req, res) => {
     try {
-        const { dept_id, text } = req.body;
+        const { dept_id } = req.body;
+        const text = String(req.body?.text || '').trim();
 
         const org_id = req.user.org_id;
         const changed_by = req.user.user_id;
 
-        if (!dept_id || !text?.trim()) {
+        if (!dept_id || !text) {
             return res.status(400).json({ error: "Missing dept_id or text" });
+        }
+
+        // Unique department name within org (case-insensitive), excluding current dept
+        const duplicateName = await DepartmentModel.findDepartmentByName(
+            org_id,
+            text,
+            dept_id
+        );
+        if (duplicateName) {
+            return res.status(400).json({
+                error: "Duplicate department name",
+                message: "A department with this name already exists"
+            });
         }
 
         const updatedDept = await DepartmentModel.updateDepartment({
