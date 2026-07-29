@@ -32,6 +32,30 @@ const createBranch = async (req, res) => {
             });
         }
 
+        const branches = await branchModel.getAllBranches(org_id);
+        const nameKey = text.toLowerCase();
+        const codeKey = branch_code.toLowerCase();
+
+        const duplicateBranchName = branches.find(
+            (b) => String(b.text || '').trim().toLowerCase() === nameKey
+        );
+        if (duplicateBranchName) {
+            return res.status(400).json({
+                error: "Duplicate branch name",
+                message: "A branch with this name already exists"
+            });
+        }
+
+        const duplicateBranchCode = branches.find(
+            (b) => String(b.branch_code || '').trim().toLowerCase() === codeKey
+        );
+        if (duplicateBranchCode) {
+            return res.status(400).json({
+                error: "Duplicate branch code",
+                message: "This branch code is already in use"
+            });
+        }
+
         // Fetch latest branch ID
         const newId = await generateCustomId("branch", 3); 
 
@@ -98,13 +122,27 @@ const updateBranch = async (req, res) => {
 
         // Check if branch code is unique (excluding current branch)
         const duplicateBranchCode = branches.find(b => 
-            b.branch_code === branch_code && b.branch_id !== branch_id
+            String(b.branch_code || '').trim().toLowerCase() === branch_code.toLowerCase()
+            && b.branch_id !== branch_id
         );
 
         if (duplicateBranchCode) {
             return res.status(400).json({ 
                 error: "Duplicate branch code",
                 message: "This branch code is already in use" 
+            });
+        }
+
+        // Check if branch name is unique (excluding current branch)
+        const duplicateBranchName = branches.find(b =>
+            String(b.text || '').trim().toLowerCase() === text.toLowerCase()
+            && b.branch_id !== branch_id
+        );
+
+        if (duplicateBranchName) {
+            return res.status(400).json({
+                error: "Duplicate branch name",
+                message: "A branch with this name already exists"
             });
         }
 

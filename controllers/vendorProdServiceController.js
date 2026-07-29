@@ -85,6 +85,28 @@ const getVendorProdServicesByProdServ = async (req, res) => {
     }
 };
 
+// GET /api/vendor-prod-services/check/:prod_serv_id - Whether a product/service is linked to vendors
+const checkVendorAssociations = async (req, res) => {
+    try {
+        const { prod_serv_id } = req.params;
+        const result = await model.getVendorProdServicesByProdServ(prod_serv_id);
+        const vendors = (result.rows || []).map((row) => ({
+            vendor_id: row.vendor_id,
+            vendor_name: row.vendor_name || row.vendor_id,
+            company_name: row.company_name || null,
+            ven_prod_serv_id: row.ven_prod_serv_id,
+        }));
+        res.status(200).json({
+            hasAssociations: vendors.length > 0,
+            vendors,
+            count: vendors.length,
+        });
+    } catch (err) {
+        console.error("Error checking vendor associations:", err);
+        res.status(500).json({ error: "Failed to check vendor associations" });
+    }
+};
+
 // GET /api/vendor-prod-services/org/:org_id - Get vendor product services by organization
 const getVendorProdServicesByOrg = async (req, res) => {
     try {
@@ -356,6 +378,7 @@ module.exports = {
     getVendorProdServicesByVendor,
     getVendorProdServicesByProdServ,
     getVendorProdServicesByOrg,
+    checkVendorAssociations,
     addVendorProdService,
     updateVendorProdService,
     deleteVendorProdService,

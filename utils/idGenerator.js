@@ -345,21 +345,20 @@ exports.syncJobRoleNavIdSequence = syncJobRoleNavIdSequence;
 
 exports.peekNextId = async (prefix, table, column, padding = 3) => {
     const dbPool = getDb();
+    // Prefer numeric suffix ordering so DPT016 > DPT009
     const result = await dbPool.query(
-        `SELECT ${column} FROM ${table} 
-       ORDER BY CAST(SUBSTRING(${column} FROM '[0-9]+$') AS INTEGER) DESC 
-       LIMIT 1`
+        `SELECT ${column} AS id FROM ${table}
+         WHERE ${column} ~ ('^' || $1 || '[0-9]+$')
+         ORDER BY CAST(SUBSTRING(${column} FROM ($2)::int) AS INTEGER) DESC
+         LIMIT 1`,
+        [prefix, prefix.length + 1]
     );
 
     let nextNum = 1;
     if (result.rows.length > 0) {
-        const lastId = result.rows[0][column];
-        const match = lastId.match(/[0-9]+/g); // extract all numeric parts
-        if (match) {
-            // Pick the last numeric part for sequencing
-            const lastPart = match[match.length - 1];
-            nextNum = parseInt(lastPart) + 1;
-        }
+        const lastId = result.rows[0].id;
+        const match = String(lastId).match(/[0-9]+$/);
+        if (match) nextNum = parseInt(match[0], 10) + 1;
     }
 
     return `${prefix}${String(nextNum).padStart(padding, "0")}`;
