@@ -1306,24 +1306,50 @@ let finalSerialNumber = serial_number;
   }
 };
 
+// Active assignment in selected department:
+// - department assignment stores dept_id on tblAssetAssignments
+// - employee assignment also stores dept_id; fallback to employee.dept_id
+const ACM_DEPT_ASSIGNMENT_EXISTS = (assetAlias, paramIndex) => `
+  AND EXISTS (
+    SELECT 1
+    FROM "tblAssetAssignments" aa_acm
+    LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+    WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+      AND aa_acm.action = 'A'
+      AND aa_acm.latest_assignment_flag = true
+      AND (
+        aa_acm.dept_id = $${paramIndex}
+        OR e_acm.dept_id = $${paramIndex}
+      )
+  )
+`;
+
 // Get total count of assets - supports super access users who can view all branches
 const getAssetsCount = async (
   orgId,
   branchId = null,
   hasSuperAccess = false,
+  deptId = null,
 ) => {
   let query = `
     SELECT COUNT(*) as count
-    FROM "tblAssets"
-    WHERE org_id = $1
+    FROM "tblAssets" a
+    WHERE a.org_id = $1
   `;
 
   const params = [orgId];
+  let paramIndex = 2;
 
   // Apply branch filter only if user doesn't have super access
   if (!hasSuperAccess && branchId) {
-    query += ` AND branch_id = $2`;
+    query += ` AND a.branch_id = $${paramIndex}`;
     params.push(branchId);
+    paramIndex++;
+  }
+
+  if (deptId) {
+    query += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
+    params.push(deptId);
   }
 
   const dbPool = getDb();
@@ -1339,6 +1365,7 @@ const getAssetsByUserContext = async (
   branchId = null,
   dbConnection = null,
   hasSuperAccess = false,
+  deptId = null,
 ) => {
   const dbPool = getDb(dbConnection);
 
@@ -1360,12 +1387,19 @@ const getAssetsByUserContext = async (
   `;
 
   const params = [orgId];
+  let paramIndex = 2;
 
   // Apply branch filter only if user doesn't have super access
   // If hasSuperAccess is true, user can see all branches (no filter applied)
   if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $2`;
+    query += ` AND a.branch_id = $${paramIndex}`;
     params.push(branchId);
+    paramIndex++;
+  }
+
+  if (deptId) {
+    query += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
+    params.push(deptId);
   }
 
   query += ` ORDER BY a.created_on DESC`;
@@ -1389,7 +1423,7 @@ const ASSETS_LIST_SELECT = `
     LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
 `;
 
-function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters = {}, hasSuperAccess = false) {
+function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters = {}, hasSuperAccess = false, deptId = null) {
   let clause = ` WHERE a.org_id = $1`;
   const params = [userOrgId];
   let paramIndex = 2;
@@ -1397,6 +1431,12 @@ function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters 
   if (!hasSuperAccess && userBranchId) {
     clause += ` AND a.branch_id = $${paramIndex}`;
     params.push(userBranchId);
+    paramIndex++;
+  }
+
+  if (deptId) {
+    clause += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
+    params.push(deptId);
     paramIndex++;
   }
 
@@ -1450,6 +1490,7 @@ const getAssetsByUserContextWithFilters = async (
   dbConnection = null,
   hasSuperAccess = false,
   pagination = null,
+  deptId = null,
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params, paramIndex } = buildAssetsListFilterClause(
@@ -1457,6 +1498,7 @@ const getAssetsByUserContextWithFilters = async (
     userBranchId,
     additionalFilters,
     hasSuperAccess,
+    deptId,
   );
 
   let query = `${ASSETS_LIST_SELECT}${clause} ORDER BY a.created_on DESC`;
@@ -1476,6 +1518,7 @@ const countAssetsByUserContextWithFilters = async (
   additionalFilters = {},
   dbConnection = null,
   hasSuperAccess = false,
+  deptId = null,
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params } = buildAssetsListFilterClause(
@@ -1483,6 +1526,7 @@ const countAssetsByUserContextWithFilters = async (
     userBranchId,
     additionalFilters,
     hasSuperAccess,
+    deptId,
   );
 
   const query = `SELECT COUNT(*)::int AS total_count FROM "tblAssets" a${clause}`;

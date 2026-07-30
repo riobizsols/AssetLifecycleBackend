@@ -382,21 +382,20 @@ const addAsset = async (req, res) => {
 };
 
 
-// GET /api/assets - Get all assets (filtered by user's org and branch)
+// GET /api/assets - Get all assets (filtered by ACM context / user's org and branch)
 const getAllAssets = async (req, res) => {
   const startTime = Date.now();
   const userId = req.user?.user_id;
   
   try {
-    const userOrgId = req.user?.org_id;
-    const userBranchId = req.user?.branch_id;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
     const { data: assets } = await operationalCache.cachedList(
       req,
       'assets',
       'list',
-      () => model.getAssetsByUserContext(userOrgId, userBranchId, req.db, hasSuperAccess),
+      () => model.getAssetsByUserContext(userOrgId, userBranchId, req.db, hasSuperAccess, deptId),
     );
     
     await logAssetsRetrieved({
@@ -437,12 +436,12 @@ const updateAsset = async (req, res) => {
       return res.status(404).json({ error: "Asset not found" });
     }
 
-    // Get user's branch information (MOVED INSIDE TRY BLOCK)
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
+    // Get user's branch from active ACM context (overlaid on req.user)
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const userBranchId = acmCtx.branchId || req.user?.branch_id || null;
     
-    console.log("User branch ID for update:", userBranchId);
+    console.log("ACM branch ID for update:", userBranchId);
 
     const body = req.body || {};
     const pickField = (key) =>
@@ -754,11 +753,8 @@ const getPrinterAssets = async (req, res) => {
             });
         }
         
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
         
         console.log('=== Printer Assets Controller Debug ===');
         console.log('User org_id:', userOrgId);
@@ -779,7 +775,7 @@ const getPrinterAssets = async (req, res) => {
             req,
             'printer-assets',
             'list',
-            () => model.getPrinterAssets(userOrgId, userBranchId, req.user?.hasSuperAccess || false).then((result) => result.rows || []),
+            () => model.getPrinterAssets(userOrgId, userBranchId, hasSuperAccess).then((result) => result.rows || []),
         );
         res.status(200).json({
             success: true,
@@ -859,11 +855,8 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
     const { context } = req.query; // SCRAPASSETS or ASSETS
     
     try {
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(userId);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
 
         if (!userOrgId) {
             return res.status(400).json({ error: "User organization not found" });
@@ -880,7 +873,7 @@ const getAssetsExpiringWithin30Days = async (req, res) => {
             scrapAssetsLogger.logQueryingNearingExpiryAssets({ userId }).catch(err => console.error('Logging error:', err));
         }
         
-        const result = await model.getAssetsExpiringWithin30Days(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+        const result = await model.getAssetsExpiringWithin30Days(userOrgId, userBranchId, hasSuperAccess);
         
         if (context === 'SCRAPASSETS') {
             scrapAssetsLogger.logNearingExpiryAssetsRetrieved({
@@ -915,11 +908,8 @@ const getAssetsByExpiryDate = async (req, res) => {
     const { context } = req.query; // SCRAPASSETS or ASSETS
     
     try {
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(userId);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
 
         if (!userOrgId) {
             return res.status(400).json({ error: "User organization not found" });
@@ -945,7 +935,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                 }
                 
                 // Get expired assets
-                const expiredResult = await model.getAssetsByExpiryDate('expired', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const expiredResult = await model.getAssetsByExpiryDate('expired', null, userOrgId, userBranchId, hasSuperAccess);
                 
                 if (context === 'SCRAPASSETS') {
                     scrapAssetsLogger.logExpiredAssetsRetrieved({
@@ -970,7 +960,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Days parameter must be a positive number" 
                     });
                 }
-                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const expiringSoonResult = await model.getAssetsByExpiryDate('expiring_soon', daysNumber, userOrgId, userBranchId, hasSuperAccess);
                 res.status(200).json({
                     message: `Found ${expiringSoonResult.rows.length} assets expiring within ${daysNumber} days`,
                     filter_type: 'expiring_soon',
@@ -987,7 +977,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date parameter is required for 'expiring_on' filter" 
                     });
                 }
-                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const expiringOnResult = await model.getAssetsByExpiryDate('expiring_on', value, userOrgId, userBranchId, hasSuperAccess);
                 res.status(200).json({
                     message: `Found ${expiringOnResult.rows.length} assets expiring on ${value}`,
                     filter_type: 'expiring_on',
@@ -1004,7 +994,7 @@ const getAssetsByExpiryDate = async (req, res) => {
                         error: "Date range parameter is required for 'expiring_between' filter (format: startDate,endDate)" 
                     });
                 }
-                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const expiringBetweenResult = await model.getAssetsByExpiryDate('expiring_between', value, userOrgId, userBranchId, hasSuperAccess);
                 const [startDate, endDate] = value.split(',');
                 res.status(200).json({
                     message: `Found ${expiringBetweenResult.rows.length} assets expiring between ${startDate} and ${endDate}`,
@@ -1018,7 +1008,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'no_expiry':
                 // Get assets with no expiry date
-                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const noExpiryResult = await model.getAssetsByExpiryDate('no_expiry', null, userOrgId, userBranchId, hasSuperAccess);
                 res.status(200).json({
                     message: `Found ${noExpiryResult.rows.length} assets with no expiry date`,
                     filter_type: 'no_expiry',
@@ -1029,7 +1019,7 @@ const getAssetsByExpiryDate = async (req, res) => {
 
             case 'all':
                 // Get all assets with expiry date info
-                const allResult = await model.getAssetsByExpiryDate('all', null, userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+                const allResult = await model.getAssetsByExpiryDate('all', null, userOrgId, userBranchId, hasSuperAccess);
                 res.status(200).json({
                     message: `Found ${allResult.rows.length} assets with expiry date information`,
                     filter_type: 'all',
@@ -1109,8 +1099,12 @@ const getInactiveAssetsByAssetType = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const userOrgId = req.user?.org_id;
-        const userBranchId = req.user?.branch_id || null;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const {
+          orgId: userOrgId,
+          branchId: acmBranchId,
+          hasSuperAccess,
+        } = getEffectiveListContext(req);
         
         let assignmentType = null;
         if (context === 'DEPTASSIGNMENT') {
@@ -1121,11 +1115,16 @@ const getInactiveAssetsByAssetType = async (req, res) => {
 
         const isAssignmentContext = context === 'DEPTASSIGNMENT' || context === 'EMPASSIGNMENT';
 
+        // Prefer explicit branch from client (assignment screen), else ACM branch.
+        // Org-wide ACM (hasSuperAccess) only skips branch when no branch was chosen.
+        const requestedBranch = String(req.query.branch_id || '').trim() || null;
+        const branchFilter = requestedBranch || (hasSuperAccess ? null : acmBranchId);
+
         const fetchInactiveRows = async () => {
             const result = await model.getInactiveAssetsByAssetType(
                 asset_type_id,
                 userOrgId,
-                userBranchId,
+                branchFilter,
                 assignmentType,
             );
             return result.rows;
@@ -1227,9 +1226,8 @@ const getAssetsWithFilters = async (req, res) => {
             all: allParam,
         } = req.query;
 
-        const userOrgId = req.user?.org_id;
-        const userBranchId = req.user?.branch_id || null;
-        const hasSuperAccess = req.user?.hasSuperAccess || false;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
         const additionalFilters = {
             asset_type_id,
@@ -1285,8 +1283,9 @@ const getAssetsWithFilters = async (req, res) => {
                         model.getAssetsByUserContextWithFilters(
                             ...modelArgs,
                             { limit, offset },
+                            deptId,
                         ),
-                        model.countAssetsByUserContextWithFilters(...modelArgs),
+                        model.countAssetsByUserContextWithFilters(...modelArgs, deptId),
                     ]);
                     return {
                         rows: result.rows,
@@ -1299,7 +1298,11 @@ const getAssetsWithFilters = async (req, res) => {
                     };
                 }
 
-                const result = await model.getAssetsByUserContextWithFilters(...modelArgs);
+                const result = await model.getAssetsByUserContextWithFilters(
+                    ...modelArgs,
+                    null,
+                    deptId,
+                );
                 return result.rows;
             },
         );
@@ -1826,7 +1829,13 @@ const createAsset = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        if (!text || !org_id) {
+        // Active ACM context is the source of truth for org/branch (ignore user-table home IDs)
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const finalOrgId = acmCtx.orgId || org_id;
+        const preferredBranchId = branch_id || acmCtx.branchId || null;
+
+        if (!text || !finalOrgId) {
             return res.status(400).json({ error: "text, and org_id are required fields" });
         }
 
@@ -1839,7 +1848,7 @@ const createAsset = async (req, res) => {
 
         // Enforce service vendor when asset type maintenance is vendor-managed.
         if (asset_type_id) {
-            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, org_id);
+            const vendorMaintained = await model.isAssetTypeVendorMaintained(asset_type_id, finalOrgId);
             if (vendorMaintained && !service_vendor_id) {
                 return res.status(400).json({
                     error: "Service vendor is required for vendor-maintained asset types"
@@ -1873,7 +1882,7 @@ const createAsset = async (req, res) => {
             const existingVendorProdService = await dbPool.query(
                 `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
                  WHERE prod_serv_id = $1 AND vendor_id = $2 AND org_id = $3`,
-                [prod_serv_id, purchase_vendor_id, org_id]
+                [prod_serv_id, purchase_vendor_id, finalOrgId]
             );
             
             if (existingVendorProdService.rows.length === 0) {
@@ -1899,7 +1908,7 @@ const createAsset = async (req, res) => {
                 await dbPool.query(
                     `INSERT INTO "tblVendorProdService" (ven_prod_serv_id, prod_serv_id, vendor_id, org_id)
                      VALUES ($1, $2, $3, $4)`,
-                    [ven_prod_serv_id, prod_serv_id, purchase_vendor_id, org_id]
+                    [ven_prod_serv_id, prod_serv_id, purchase_vendor_id, finalOrgId]
                 );
                 
                 console.log('✅ Created vendor product service record:', ven_prod_serv_id);
@@ -1930,14 +1939,18 @@ const createAsset = async (req, res) => {
 
         const conflictingAssetName = await checkDuplicateAssetDescription(
             description,
-            org_id
+            finalOrgId
         );
         if (conflictingAssetName) {
             return respondDuplicateAssetName(res, conflictingAssetName);
         }
 
         const trimmedDescription = String(description || "").trim();
-        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
+        const resolvedBranchId = await resolveAssetBranchId(preferredBranchId, {
+            ...req.user,
+            org_id: finalOrgId,
+            branch_id: acmCtx.branchId || req.user.branch_id,
+        }, req.db);
         
         // Get asset type's depreciation method to calculate correct rate
         let calculatedDepreciationRate = 0;
@@ -2009,8 +2022,9 @@ if (useful_life_years && useful_life_years > 0) {
         console.log('  Depreciation Method:', depreciationType);
         console.log('  Useful Life Years:', useful_life_years);
         console.log('  Calculated Depreciation Rate:', calculatedDepreciationRate);
-        console.log('  Branch ID from request:', branch_id);
+        console.log('  Branch ID from request:', preferredBranchId);
         console.log('  Resolved Branch ID:', resolvedBranchId);
+        console.log('  ACM Org ID:', finalOrgId);
         
         // Prepare asset data (now includes prod_serv_id and depreciation fields)
         const assetData = {
@@ -2032,7 +2046,7 @@ if (useful_life_years && useful_life_years > 0) {
             warranty_period,
             parent_asset_id,
             group_id,
-            org_id,
+            org_id: finalOrgId,
             created_by,
             // Depreciation fields
             salvage_value: parseFloat(salvage_value) || 0,
@@ -2075,7 +2089,7 @@ if (useful_life_years && useful_life_years > 0) {
                     if (value) {
                         await model.insertAssetPropValue({
                             asset_id: insertedAssetId,
-                            org_id,
+                            org_id: finalOrgId,
                             asset_type_prop_id: propId,
                             value
                         });
@@ -2090,7 +2104,7 @@ if (useful_life_years && useful_life_years > 0) {
                 asset: result.rows[0]
             });
 
-            assetsDashboardCache.invalidateOrgApiCache(org_id || req.user?.org_id).catch(() => {});
+            assetsDashboardCache.invalidateOrgApiCache(finalOrgId || req.user?.org_id).catch(() => {});
             
         } catch (error) {
             await client.query('ROLLBACK');
@@ -2121,17 +2135,14 @@ const getAssetsExpiringWithin30DaysByType = async (req, res) => {
     const { context } = req.query; // SCRAPASSETS or ASSETS
     
     try {
-        // Get user's organization and branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(userId);
-        const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-        const userBranchId = userWithBranch?.branch_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
 
         if (!userOrgId) {
             return res.status(400).json({ error: "User organization not found" });
         }
 
-        const result = await model.getAssetsExpiringWithin30DaysByType(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+        const result = await model.getAssetsExpiringWithin30DaysByType(userOrgId, userBranchId, hasSuperAccess);
         
         // Calculate total count
         const totalCount = result.rows.reduce((sum, type) => sum + parseInt(type.asset_count), 0);
@@ -2167,14 +2178,11 @@ const getAssetsCount = async (req, res) => {
   const userId = req.user?.user_id;
   
   try {
-    // Get user's organization and branch information
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
-    // Get count with user context filtering - pass hasSuperAccess flag
-    const count = await model.getAssetsCount(userOrgId, userBranchId, req.user?.hasSuperAccess || false);
+    // Get count with ACM / user context filtering
+    const count = await model.getAssetsCount(userOrgId, userBranchId, hasSuperAccess, deptId);
     
     res.json({
       success: true,
@@ -2198,14 +2206,8 @@ const getAssetsCount = async (req, res) => {
 // GET /api/assets/assigned - Get count of assigned assets
 const getAssignedAssetsCount = async (req, res) => {
   try {
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
     
     // Debug: Check total assignments with different conditions
     const debugQuery = `
@@ -2273,14 +2275,8 @@ const getAssignedAssetsCount = async (req, res) => {
 // GET /api/assets/under-maintenance - Get count of assets under maintenance
 const getUnderMaintenanceAssetsCount = async (req, res) => {
   try {
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
     
     // Debug: Check different ways assets can be under maintenance
     const debugQuery = `
@@ -2359,9 +2355,8 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
 // GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
 const getDashboardSummary = async (req, res) => {
   try {
-    const userOrgId = req.user?.org_id;
-    const userBranchId = req.user?.branch_id || null;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'summary');
     const { data: payload } = await assetsDashboardCache.getOrSet(
@@ -2394,6 +2389,15 @@ const getDashboardSummary = async (req, res) => {
         LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
         WHERE a.org_id = $1
           ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
+          ${deptId ? `AND EXISTS (
+            SELECT 1 FROM "tblAssetAssignments" aa_acm
+            LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+            WHERE aa_acm.asset_id = a.asset_id
+              AND aa_acm.action = 'A'
+              AND aa_acm.latest_assignment_flag = true
+              AND (aa_acm.dept_id = $${(!hasSuperAccess && userBranchId) ? 3 : 2}
+                   OR e_acm.dept_id = $${(!hasSuperAccess && userBranchId) ? 3 : 2})
+          )` : ''}
       )
       SELECT 
         COUNT(*) as total_assets,
@@ -2407,7 +2411,9 @@ const getDashboardSummary = async (req, res) => {
         SUM(CASE WHEN is_assigned = 0 AND is_under_maintenance = 0 AND is_decommissioned = 0 THEN 1 ELSE 0 END) as none
       FROM asset_status
     `;
-        const params = (!hasSuperAccess && userBranchId) ? [userOrgId, userBranchId] : [userOrgId];
+        const params = [userOrgId];
+        if (!hasSuperAccess && userBranchId) params.push(userBranchId);
+        if (deptId) params.push(deptId);
         const dbPool = req.db || require("../config/db");
         const result = await dbPool.query(summaryQuery, params);
         const summary = result.rows[0];
@@ -2450,14 +2456,8 @@ const getDashboardSummary = async (req, res) => {
 // GET /api/assets/decommissioned - Get count of decommissioned assets
 const getDecommissionedAssetsCount = async (req, res) => {
   try {
-    const userModel = require("../models/userModel");
-    const userId = req.user?.user_id;
-    const userWithBranch = await userModel.getUserWithBranch(userId);
-    const userOrgId = req.user?.org_id || userWithBranch?.org_id;
-    const userBranchId = userWithBranch?.branch_id;
-
-    // Check if user has super access
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess } = getEffectiveListContext(req);
     
     // Debug: Check breakdown of decommissioned/scrapped assets
     const debugQuery = `
@@ -2526,9 +2526,8 @@ const getDecommissionedAssetsCount = async (req, res) => {
 const getDepartmentWiseAssetDistribution = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
-    const userOrgId = req.user?.org_id;
-    const userBranchId = req.user?.branch_id || null;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'dept-dist');
     const { data: payload } = await assetsDashboardCache.getOrSet(
@@ -2561,8 +2560,18 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND d.int_status = 1
     `;
 
+        if (deptId) {
+          params.push(deptId);
+          query += ` AND d.dept_id = $${paramIndex}`;
+          paramIndex++;
+        }
+
         if (!hasSuperAccess && userBranchId) {
-          query += ` AND d.branch_id = $${paramIndex - 1}`;
+          // branch param is still at index 2 when present
+          query += ` AND EXISTS (
+            SELECT 1 FROM "tblBR_DEPT" bd
+            WHERE bd.dept_id = d.dept_id AND bd.branch_id = $2 AND bd.int_status = 1
+          )`;
         }
 
         query += `
@@ -2631,9 +2640,8 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
 const getTop5AssetTypes = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
-    const userOrgId = req.user?.org_id;
-    const userBranchId = req.user?.branch_id || null;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'top5');
     const { data: payload } = await assetsDashboardCache.getOrSet(
@@ -2656,6 +2664,19 @@ const getTop5AssetTypes = async (req, res) => {
         if (!hasSuperAccess && userBranchId) {
           params.push(userBranchId);
           query += ` AND a.branch_id = $${paramIndex}`;
+          paramIndex++;
+        }
+
+        if (deptId) {
+          params.push(deptId);
+          query += ` AND EXISTS (
+            SELECT 1 FROM "tblAssetAssignments" aa_acm
+            LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+            WHERE aa_acm.asset_id = a.asset_id
+              AND aa_acm.action = 'A'
+              AND aa_acm.latest_assignment_flag = true
+              AND (aa_acm.dept_id = $${paramIndex} OR e_acm.dept_id = $${paramIndex})
+          )`;
           paramIndex++;
         }
 

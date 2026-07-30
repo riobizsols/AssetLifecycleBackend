@@ -9,6 +9,7 @@ function buildAuthCacheKey(decoded) {
     return cacheService.buildKey(
         'auth',
         'ctx',
+        'acm-v1',
         decoded.user_id,
         decoded.org_id || 'none',
         decoded.use_default_db ? '1' : '0',
@@ -122,6 +123,27 @@ async function buildUserContext(decoded, dbPool, isTenant) {
         hasSuperAccess(decoded.user_id, internalOrgId)
     );
 
+    // Data access scope from tblACM (screen access stays role/nav based)
+    const { getAcmRowsByUserId } = require('../models/acmModel');
+    const { buildAcmScope } = require('../utils/acmAccess');
+    let acmRows = [];
+    try {
+        acmRows = await retryOnPoolExhaustion(dbPool, () =>
+            getAcmRowsByUserId(decoded.user_id, dbPool)
+        );
+    } catch (acmError) {
+        console.warn('[AuthMiddleware] Could not load tblACM:', acmError.message);
+    }
+
+    const acm = buildAcmScope(acmRows, {
+        org_id: internalOrgId || decoded.org_id,
+        branch_id: userWithBranch?.branch_id || null,
+        dept_id: userWithBranch?.dept_id || null,
+    });
+
+    // ACM with full wildcards acts as data-level "super" for list filters
+    const acmUnrestricted = acm.hasAcm && acm.allOrgs && acm.allBranches && acm.allDepts;
+
     return {
         user: {
             org_id: internalOrgId,
@@ -137,7 +159,8 @@ async function buildUserContext(decoded, dbPool, isTenant) {
             branch_code: userWithBranch?.branch_code || null,
             dept_id: userWithBranch?.dept_id || null,
             dept_name: userWithBranch?.dept_name || null,
-            hasSuperAccess: hasSuperAccessFlag,
+            hasSuperAccess: hasSuperAccessFlag || acmUnrestricted,
+            acm,
             isTenant,
         },
         isTenant,
@@ -164,7 +187,10 @@ const protect = async (req, res, next) => {
             req.db = dbPool;
             req.tenantPool = isTenant ? dbPool : null;
             req.isTenant = isTenant;
-            req.user = cached.user;
+            // Clone so ACM overlay never mutates the cached auth user object
+            req.user = { ...cached.user };
+            const { attachAcmFilterFromHeaders } = require('../utils/acmAccess');
+            await attachAcmFilterFromHeaders(req);
             return runWithDb(dbPool, () => next());
         }
 
@@ -174,8 +200,11 @@ const protect = async (req, res, next) => {
 
         return runWithDb(dbPool, async () => {
             const context = await buildUserContext(decoded, dbPool, isTenant);
-            req.user = context.user;
+            // Cache the pristine user; clone for this request before ACM overlay
             await cacheService.set(cacheKey, { user: context.user }, cacheService.getAuthCacheTtlMs());
+            req.user = { ...context.user };
+            const { attachAcmFilterFromHeaders } = require('../utils/acmAccess');
+            await attachAcmFilterFromHeaders(req);
             next();
         });
     } catch (err) {

@@ -4,26 +4,44 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 const createDepartment = async (req, res) => {
     try {
-        const { text } = req.body;
+        const { text, branch_id: bodyBranchId } = req.body;
+        const { isResourceInAcmScope, getRequestAcm } = require('../utils/acmAccess');
+        const acm = getRequestAcm(req);
 
-        const org_id = req.user.org_id;
+        if (!acm?.canWrite) {
+            return res.status(403).json({
+                error: 'Access denied',
+                message: 'Write access is not granted in Access Control Management (tblACM)',
+            });
+        }
+
+        if (!text?.trim()) {
+            return res.status(400).json({ error: "Department name is required" });
+        }
+        if (!bodyBranchId) {
+            return res.status(400).json({ error: "Branch is required" });
+        }
+
+        const branchModel = require("../models/branchModel");
+        const branch = await branchModel.getBranchById(bodyBranchId);
+        if (!branch) {
+            return res.status(400).json({ error: "Invalid branch selected" });
+        }
+
+        if (!isResourceInAcmScope(acm, { org_id: branch.org_id, branch_id: branch.branch_id })) {
+            return res.status(403).json({
+                error: "Access denied",
+                message: "Selected branch is outside your ACM data scope"
+            });
+        }
+
+        const org_id = branch.org_id || req.user.org_id;
+        const branch_id = branch.branch_id;
         const created_by = req.user.user_id;
-
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
-
-        console.log('=== Department Creation Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
 
         const int_status = 1;
         const parent_id = null;
         const changed_by = null;
-
-        // Use user's branch_id instead of null
-        const branch_id = userBranchId;
 
         // 🔹 Generate unique department id: DPT01, DPT02, ...  
         const dbPool = req.db || require("../config/db");
@@ -49,19 +67,25 @@ const createDepartment = async (req, res) => {
             newDeptId = "DPT001";
         }
 
-        // 🔹 Create department
+        // 🔹 Create department (branch lives in tblBR_DEPT, not tblDepartments)
         const newDept = await DepartmentModel.createDepartment({
             org_id,
             dept_id: newDeptId,
             int_status,
             text,
             parent_id,
-            branch_id,
             created_by,
             changed_by
         });
 
-        res.status(201).json(newDept);
+        const mapping = await DepartmentModel.mapDepartmentToBranch({
+            branch_id,
+            dept_id: newDeptId,
+            org_id,
+            created_by,
+        });
+
+        res.status(201).json({ ...newDept, branch_id: mapping.branch_id });
         operationalCache.invalidateOrgCaches(org_id).catch(() => {});
     } catch (err) {
         console.error("Error creating department:", err);
@@ -182,14 +206,23 @@ const updateDepartment = async (req, res) => {
 module.exports = {
     createDepartment,
     getAllDepartments: async (req, res) => {
-        const org_id = req.user.org_id;
-        const branch_id = req.user.branch_id;   
+        const { getRequestAcm, getEffectiveListContext } = require('../utils/acmAccess');
+        const acm = getRequestAcm(req);
+        const { orgId, branchId, hasSuperAccess } = getEffectiveListContext(req);
+        const cacheKey = acm?.hasAcm
+            ? `list-acm-v2-${acm.allOrgs ? '*' : (acm.orgIds || []).join(',')}-${acm.allBranches ? '*' : (acm.branchIds || []).join(',')}-${(acm.selection && acm.selection.orgId) || ''}-${(acm.selection && acm.selection.branchId) || ''}-${(acm.selection && acm.selection.deptId) || ''}`
+            : 'list-legacy';
 
         const { data: departments } = await operationalCache.cachedList(
             req,
             'departments',
-            'list',
-            () => DepartmentModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false),
+            cacheKey,
+            () => DepartmentModel.getAllDepartments(
+                orgId || req.user.org_id,
+                branchId || req.user.branch_id,
+                hasSuperAccess,
+                acm
+            ),
         );
         res.status(200).json(departments);
     },

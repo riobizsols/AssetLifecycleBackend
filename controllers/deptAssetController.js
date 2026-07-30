@@ -60,6 +60,8 @@ const addDeptAsset = async (req, res) => {
 
         await model.insertDeptAsset(dept_asset_type_id, dept_id, asset_type_id, org_id, created_by);
 
+        assignmentCache.invalidateOrgCaches(org_id || req.user?.org_id).catch(() => {});
+
         res.status(201).json({ 
             message: "Department asset mapping created successfully",
             data: { dept_asset_type_id, dept_id, asset_type_id }
@@ -158,6 +160,7 @@ const deleteDeptAsset = async (req, res) => {
         if (!dept_asset_type_id) return res.status(400).json({ error: "Department Asset Type ID is required" });
 
         await model.deleteDeptAsset(dept_asset_type_id);
+        assignmentCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
         res.status(200).json({ message: "Department asset type mapping deleted successfully" });
     } catch (err) {
         console.error("Error deleting dept asset:", err);

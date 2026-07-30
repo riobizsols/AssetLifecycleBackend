@@ -843,8 +843,20 @@ const CORE_TABLE_DDL = [
       created_on date,
       changed_on date,
       changed_by character varying(10),
-      created_by character varying(10),
-      branch_id character varying(50)
+      created_by character varying(10)
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblBR_DEPT" (
+      branch_id character varying(20) NOT NULL,
+      dept_id character varying(20) NOT NULL,
+      org_id character varying(20),
+      int_status integer DEFAULT 1,
+      created_by character varying(20),
+      created_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      changed_by character varying(20),
+      changed_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (branch_id, dept_id)
     );
   `,
   `
@@ -1592,15 +1604,24 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId 
       await client.query(
         `
           INSERT INTO "tblDepartments"
-            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by, branch_id)
+            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by)
           VALUES
-            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4, $5)
+            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4)
           ON CONFLICT (dept_id) DO UPDATE
           SET text = EXCLUDED.text,
-              branch_id = EXCLUDED.branch_id,
               org_id = EXCLUDED.org_id
         `,
-        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId, branchId]
+        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId]
+      );
+
+      await client.query(
+        `
+          INSERT INTO "tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_by, created_on)
+          VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
+          ON CONFLICT (branch_id, dept_id) DO UPDATE
+          SET int_status = 1, org_id = EXCLUDED.org_id
+        `,
+        [branchId, deptId, orgId, adminUserId]
       );
 
       deptMappings.push({
@@ -1815,7 +1836,7 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
     ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
     ['JRN022', orgId, 1, 'JR001', null, null, 'Master Data', null, 22, 'A', true, 'D'],
-    ['JRN023', orgId, 0, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
+    ['JRN023', orgId, 1, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
     ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
     ['JRN028', orgId, 1, 'JR001', 'JRN022', 'BRANCHES', 'Branches', null, 25, 'A', false, 'D'],
     ['JRN025', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTS', 'Departments', null, 26, 'A', false, 'D'],

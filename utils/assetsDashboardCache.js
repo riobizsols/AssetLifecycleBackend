@@ -27,9 +27,17 @@ function memoryInvalidatePrefix(prefix) {
 }
 
 function branchScope(req) {
+  const sel = req.user?.acmSelection || {};
+  if (sel.branchId) return String(sel.branchId);
+  if (sel.orgId && !sel.branchId) return 'all';
   const hasSuperAccess = req.user?.hasSuperAccess || false;
   const branchId = req.user?.branch_id || null;
   return hasSuperAccess ? 'all' : (branchId || 'none');
+}
+
+function acmScope(req) {
+  const sel = req.user?.acmSelection || {};
+  return `acm:${sel.orgId || '*'}:${sel.branchId || '*'}:${sel.deptId || '*'}`;
 }
 
 function tenantScope(req) {
@@ -41,8 +49,9 @@ function tenantScope(req) {
 }
 
 function scopeKey(req, ...parts) {
-  const orgId = req.user?.org_id || 'unknown';
-  return cacheService.buildKey('api', tenantScope(req), orgId, branchScope(req), ...parts);
+  const selOrg = req.user?.acmSelection?.orgId;
+  const orgId = selOrg || req.user?.org_id || 'unknown';
+  return cacheService.buildKey('api', tenantScope(req), orgId, branchScope(req), acmScope(req), ...parts);
 }
 
 function hashQuery(value) {

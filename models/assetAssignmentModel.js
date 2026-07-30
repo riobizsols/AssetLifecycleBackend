@@ -356,9 +356,11 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
   // Get department details and employee count with org_id and branch_id filter
   let deptQuery = `
         SELECT 
-            d.dept_id, d.text as department_name, d.org_id, d.branch_id,
+            d.dept_id, d.text as department_name, d.org_id,
+            bd.branch_id,
             COUNT(DISTINCT e.employee_id) as employee_count
         FROM "tblDepartments" d
+        LEFT JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
         LEFT JOIN "tblEmployees" e ON d.dept_id = e.dept_id
         WHERE d.dept_id = $1 AND d.org_id = $2
     `;
@@ -366,11 +368,11 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
   
   // Apply branch filter only if user doesn't have super access
   if (!hasSuperAccess && branch_id) {
-    deptQuery += ` AND d.branch_id = $3`;
+    deptQuery += ` AND bd.branch_id = $3`;
     deptParams.push(branch_id);
   }
   
-  deptQuery += ` GROUP BY d.dept_id, d.text, d.org_id, d.branch_id`;
+  deptQuery += ` GROUP BY d.dept_id, d.text, d.org_id, bd.branch_id`;
 
   const dbPool = getDb();
   const deptResult = await dbPool.query(deptQuery, deptParams);

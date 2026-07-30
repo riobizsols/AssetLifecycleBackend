@@ -4,19 +4,33 @@ const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 
 
-// GET /departments
+// GET /departments — data filtered by tblACM (role only opens the screen)
 const fetchDepartments = async (req, res) => {
     try {
         const org_id = req.user.org_id;
         const branch_id = req.user.branch_id;
-        const cacheKey = assignmentCache.scopeKey(req, 'assignment', 'departments');
+        const { getRequestAcm } = require('../utils/acmAccess');
+        const acm = getRequestAcm(req);
+        const cacheKey = assignmentCache.scopeKey(
+            req,
+            'assignment',
+            acm?.hasAcm
+                ? `departments-acm-v2-${acm.allOrgs ? '*' : (acm.orgIds || []).join(',')}-${acm.allBranches ? '*' : (acm.branchIds || []).join(',')}-${acm.allDepts ? '*' : (acm.deptIds || []).join(',')}-${(acm.selection && acm.selection.orgId) || ''}-${(acm.selection && acm.selection.branchId) || ''}-${(acm.selection && acm.selection.deptId) || ''}`
+                : `departments-legacy-${branch_id || 'none'}`
+        );
         const { data } = await assignmentCache.getOrSet(
             cacheKey,
             assignmentCache.getTtlMs(),
-            async () => DeptAdminModel.getAllDepartments(org_id, branch_id, req.user?.hasSuperAccess || false),
+            async () => DeptAdminModel.getAllDepartments(
+                org_id,
+                branch_id,
+                Boolean(req.user?.hasSuperAccess),
+                acm
+            ),
         );
         res.json(data);
     } catch (err) {
+        console.error('Failed to fetch departments:', err);
         res.status(500).json({ error: 'Failed to fetch departments' });
     }
 };
@@ -94,17 +108,15 @@ const createDeptAdmin = async (req, res) => {
             });
         }
 
-        const org_id = req.user.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId, branchId, hasSuperAccess } = getEffectiveListContext(req);
+        const org_id = orgId || req.user.org_id;
         const created_by = req.user.user_id;
-        
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
+        const userBranchId = branchId || null;
         
         console.log('=== Department Admin Creation Debug ===');
-        console.log('User org_id:', org_id);
-        console.log('User branch_id:', userBranchId);
+        console.log('ACM org_id:', org_id);
+        console.log('ACM branch_id:', userBranchId);
 
         // Use tenant database from request context (set by middleware)
         const dbPool = req.db || require("../config/db");
@@ -122,11 +134,24 @@ const createDeptAdmin = async (req, res) => {
             });
         }
 
-        // Check if department exists and belongs to user's branch
-        const deptCheck = await dbPool.query(
-            `SELECT text FROM "tblDepartments" WHERE dept_id = $1 AND org_id = $2 AND branch_id = $3`,
+        // Check if department exists in ACM org (and branch when selected)
+        let deptCheck;
+        if (!hasSuperAccess && userBranchId) {
+          deptCheck = await dbPool.query(
+            `SELECT d.text
+             FROM "tblDepartments" d
+             INNER JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
+             WHERE d.dept_id = $1 AND d.org_id = $2 AND bd.branch_id = $3`,
             [dept_id, org_id, userBranchId]
-        );
+          );
+        } else {
+          deptCheck = await dbPool.query(
+            `SELECT d.text
+             FROM "tblDepartments" d
+             WHERE d.dept_id = $1 AND d.org_id = $2`,
+            [dept_id, org_id]
+          );
+        }
 
         if (deptCheck.rows.length === 0) {
             return res.status(404).json({ 

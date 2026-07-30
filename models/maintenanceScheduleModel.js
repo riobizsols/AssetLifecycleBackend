@@ -1460,10 +1460,8 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       headerEmpInt,
     ]);
 
-    // Create workflow details
-    const minSeq = Math.min(...sequences.map((s) => Number(s.seqs_no)));
-    let detailCreated = 0;
-
+    // Create workflow details — first sequence that has job roles gets AP
+    const sequencesWithRoles = [];
     for (const seq of sequences) {
       const jobRolesResult = await client.query(
         `SELECT wf_job_role_id, wf_steps_id, job_role_id, emp_int_id
@@ -1472,10 +1470,17 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                  ORDER BY wf_job_role_id ASC`,
         [seq.wf_steps_id],
       );
-
       if (jobRolesResult.rows.length === 0) continue;
+      sequencesWithRoles.push({ seq, jobRoles: jobRolesResult.rows });
+    }
 
-      for (const jr of jobRolesResult.rows) {
+    const minSeq = sequencesWithRoles.length
+      ? Math.min(...sequencesWithRoles.map(({ seq }) => Number(seq.seqs_no)))
+      : null;
+    let detailCreated = 0;
+
+    for (const { seq, jobRoles } of sequencesWithRoles) {
+      for (const jr of jobRoles) {
         // Generate WFAMSD ID within transaction
         const wfamsdQuery = `
                     SELECT wfamsd_id 

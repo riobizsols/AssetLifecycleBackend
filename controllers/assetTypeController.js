@@ -177,8 +177,9 @@ const addAssetType = async (req, res) => {
 // GET /api/asset-types - Get all asset types
 const getAllAssetTypes = async (req, res) => {
     try {
-        // Filter by user's org_id to show only asset types from their database
-        const org_id = req.user?.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId } = getEffectiveListContext(req);
+        const org_id = orgId || req.user?.org_id;
         const { data: rows } = await operationalCache.cachedList(
             req,
             'asset-types',
@@ -198,7 +199,9 @@ const getAllAssetTypes = async (req, res) => {
 // GET /api/asset-types/parents - Get all parent asset types
 const getParentAssetTypes = async (req, res) => {
     try {
-        const org_id = req.user?.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId } = getEffectiveListContext(req);
+        const org_id = orgId || req.user?.org_id;
         const result = await model.getParentAssetTypes(org_id);
         res.status(200).json(result.rows);
     } catch (err) {

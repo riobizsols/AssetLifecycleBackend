@@ -4,12 +4,17 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 const getBranches = async (req, res) => {
     try {
-        const org_id = req.user.org_id;
+        const { getRequestAcm } = require('../utils/acmAccess');
+        const acm = getRequestAcm(req);
+        const cacheSuffix = acm?.hasAcm
+            ? `acm-${acm.allOrgs ? 'allOrgs' : (acm.orgIds || []).join(',')}-${acm.allBranches ? 'allBr' : (acm.branchIds || []).join(',')}-${(acm.selection && acm.selection.orgId) || ''}-${(acm.selection && acm.selection.branchId) || ''}`
+            : `legacy-${req.user?.branch_id || 'none'}`;
+
         const { data: branches } = await operationalCache.cachedList(
             req,
             'branches',
-            'list',
-            () => branchModel.getAllBranches(org_id),
+            `list-acm-v2-${cacheSuffix}`,
+            () => branchModel.getAllBranches(null, acm),
         );
         res.json(branches);
     } catch (error) {
@@ -20,20 +25,44 @@ const getBranches = async (req, res) => {
 
 const createBranch = async (req, res) => {
     try {
-        const { org_id, user_id } = req.user;
-        const text = String(req.body?.text || '').trim();
-        const city = String(req.body?.city || '').trim();
-        const branch_code = String(req.body?.branch_code || '').trim();
-
-        if (!text || !city || !branch_code) {
-            return res.status(400).json({
-                error: "Missing required fields",
-                message: "Branch name, city and branch code are required"
+        const { isResourceInAcmScope, getRequestAcm } = require('../utils/acmAccess');
+        const acm = getRequestAcm(req);
+        if (!acm?.canWrite) {
+            return res.status(403).json({
+                error: 'Access denied',
+                message: 'Write access is not granted in Access Control Management (tblACM)',
             });
         }
 
-        // Fetch latest branch ID
-        const newId = await generateCustomId("branch", 3); 
+        const { user_id, org_id: tokenOrgId } = req.user;
+        const text = String(req.body?.text || '').trim();
+        const city = String(req.body?.city || '').trim();
+        const branch_code = String(req.body?.branch_code || '').trim();
+        const org_id = String(req.body?.org_id || tokenOrgId || '').trim();
+
+        if (!org_id || !text || !city || !branch_code) {
+            return res.status(400).json({
+                error: "Missing required fields",
+                message: "Organization, branch name, city and branch code are required"
+            });
+        }
+
+        if (!isResourceInAcmScope(acm, { org_id })) {
+            return res.status(403).json({
+                error: 'Access denied',
+                message: 'Selected organization is outside your ACM data scope',
+            });
+        }
+
+        const orgExists = await branchModel.orgExists(org_id);
+        if (!orgExists) {
+            return res.status(400).json({
+                error: "Invalid organization",
+                message: "Selected organization does not exist"
+            });
+        }
+
+        const newId = await generateCustomId("branch", 3);
 
         const newBranch = await branchModel.addBranch({
             branch_id: newId,
@@ -45,10 +74,13 @@ const createBranch = async (req, res) => {
         });
 
         operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+        if (tokenOrgId && tokenOrgId !== org_id) {
+            operationalCache.invalidateOrgCaches(tokenOrgId).catch(() => {});
+        }
         res.status(201).json(newBranch);
     } catch (error) {
         console.error("Error creating branch:", error);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ error: "Internal server error", message: error.message });
     }
 };
 
@@ -85,9 +117,8 @@ const updateBranch = async (req, res) => {
             });
         }
 
-        // Check if branch exists
-        const branches = await branchModel.getAllBranches(org_id);
-        const branchExists = branches.find(b => b.branch_id === branch_id);
+        // Check if branch exists (any org)
+        const branchExists = await branchModel.getBranchById(branch_id);
         
         if (!branchExists) {
             return res.status(404).json({ 
@@ -96,7 +127,8 @@ const updateBranch = async (req, res) => {
             });
         }
 
-        // Check if branch code is unique (excluding current branch)
+        // Check if branch code is unique within the same org (excluding current branch)
+        const branches = await branchModel.getAllBranches(branchExists.org_id);
         const duplicateBranchCode = branches.find(b => 
             b.branch_code === branch_code && b.branch_id !== branch_id
         );
@@ -114,7 +146,7 @@ const updateBranch = async (req, res) => {
             user_id
         );
 
-        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+        operationalCache.invalidateOrgCaches(branchExists.org_id || org_id).catch(() => {});
         res.json({
             message: "Branch updated successfully",
             data: updatedBranch

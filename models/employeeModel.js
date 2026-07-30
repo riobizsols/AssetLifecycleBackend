@@ -5,20 +5,43 @@ const { generateCustomId } = require("../utils/idGenerator");
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// GET all employees
-const getAllEmployees = async () => {
-  const query = `
+// GET all employees — scoped by ACM / request user org-branch-dept
+const getAllEmployees = async (orgId = null, branchId = null, deptId = null, hasSuperAccess = false) => {
+  let query = `
         SELECT 
             emp_int_id, employee_id, name, first_name, last_name, 
             middle_name, full_name, email_id, dept_id, phone_number, 
             employee_type, joining_date, releiving_date, language_code, 
-            int_status, created_by, created_on, changed_by, changed_on
+            int_status, created_by, created_on, changed_by, changed_on,
+            org_id, branch_id
         FROM "tblEmployees"
-        ORDER BY created_on DESC
+        WHERE 1=1
     `;
+  const params = [];
+  let i = 1;
+
+  if (orgId) {
+    query += ` AND org_id = $${i}`;
+    params.push(orgId);
+    i += 1;
+  }
+
+  if (!hasSuperAccess && branchId) {
+    query += ` AND branch_id = $${i}`;
+    params.push(branchId);
+    i += 1;
+  }
+
+  if (deptId) {
+    query += ` AND dept_id = $${i}`;
+    params.push(deptId);
+    i += 1;
+  }
+
+  query += ` ORDER BY created_on DESC`;
 
   const dbPool = getDb();
-  return await dbPool.query(query);
+  return await dbPool.query(query, params);
 };
 
 // GET employee by ID

@@ -207,18 +207,23 @@ async function ensureBranchAndDepartment(client, orgId) {
       deptId = existingDept.rows[0].dept_id;
       console.log(`[TenantSetup] Using existing department: ${deptId}`);
       await client.query(`
-        UPDATE public."tblDepartments"
-        SET branch_id = $1
-        WHERE dept_id = $2 AND (branch_id IS NULL OR btrim(branch_id) = '' OR branch_id !~ '^BR[0-9]+$')
-      `, [branchId, deptId]).catch(() => {});
+        INSERT INTO public."tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_on)
+        VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT (branch_id, dept_id) DO NOTHING
+      `, [branchId, deptId, orgId]).catch(() => {});
     } else {
       deptId = await generateCustomIdForClient(client, 'department', 3);
 
       await client.query(`
-        INSERT INTO public."tblDepartments" (org_id, dept_id, text, branch_id, int_status)
-        VALUES ($1, $2, 'Administration', $3, 1)
+        INSERT INTO public."tblDepartments" (org_id, dept_id, text, int_status)
+        VALUES ($1, $2, 'Administration', 1)
         ON CONFLICT (dept_id) DO NOTHING
-      `, [orgId, deptId, branchId]);
+      `, [orgId, deptId]);
+      await client.query(`
+        INSERT INTO public."tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_on)
+        VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT (branch_id, dept_id) DO NOTHING
+      `, [branchId, deptId, orgId]);
       console.log(`[TenantSetup] ✅ Created department: ${deptId}`);
     }
     

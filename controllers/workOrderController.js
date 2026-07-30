@@ -6,15 +6,16 @@ const getAllWorkOrders = async (req, res) => {
     try {
         console.log('Fetching all work orders with status "IN" and maintained_by "Vendor"...');
         
-        // Get organization ID and branch ID from request or use default
-        const orgId = req.query.org_id || req.user?.org_id || 'ORG001';
-        const userBranchId = req.query.branch_id || req.user?.branch_id || 'BR001';
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId, branchId, hasSuperAccess } = getEffectiveListContext(req);
+        // Prefer explicit query overrides, else ACM / user scope (no hard-coded BR001)
+        const finalOrgId = req.query.org_id || orgId || null;
+        const userBranchId = req.query.branch_id || branchId || null;
         
         console.log('=== CONTROLLER DEBUG ===');
-        console.log('req.user:', req.user);
-        console.log('req.user.branch_id:', req.user?.branch_id);
-        console.log('req.user.branch_code:', req.user?.branch_code);
+        console.log('Final orgId:', finalOrgId);
         console.log('Final userBranchId:', userBranchId);
+        console.log('hasSuperAccess:', hasSuperAccess);
         console.log('=== END CONTROLLER DEBUG ===');
         
         const { data: formattedData } = await operationalCache.cachedList(
@@ -22,7 +23,7 @@ const getAllWorkOrders = async (req, res) => {
             'work-orders',
             'all',
             async () => {
-                const result = await model.getAllWorkOrders(orgId, userBranchId, req.user?.hasSuperAccess || false);
+                const result = await model.getAllWorkOrders(finalOrgId, userBranchId, hasSuperAccess);
                 if (result.rows.length === 0) {
                     return [];
                 }
