@@ -27,17 +27,25 @@ function memoryInvalidatePrefix(prefix) {
 }
 
 function branchScope(req) {
+  if (req.user?.hasSuperAccess || req.user?.acmAllBranches) return 'all';
+  const acmBranchIds = Array.isArray(req.user?.acmBranchIds)
+    ? req.user.acmBranchIds.map(String).filter(Boolean).sort()
+    : [];
+  if (acmBranchIds.length) return acmBranchIds.join(',');
   const sel = req.user?.acmSelection || {};
   if (sel.branchId) return String(sel.branchId);
-  if (sel.orgId && !sel.branchId) return 'all';
-  const hasSuperAccess = req.user?.hasSuperAccess || false;
-  const branchId = req.user?.branch_id || null;
-  return hasSuperAccess ? 'all' : (branchId || 'none');
+  return req.user?.branch_id || 'none';
 }
 
 function acmScope(req) {
   const sel = req.user?.acmSelection || {};
-  return `acm:${sel.orgId || '*'}:${sel.branchId || '*'}:${sel.deptId || '*'}`;
+  const acmDeptIds = Array.isArray(req.user?.acmDeptIds)
+    ? req.user.acmDeptIds.map(String).filter(Boolean).sort()
+    : [];
+  const deptPart = acmDeptIds.length
+    ? acmDeptIds.join(',')
+    : (sel.deptId || req.user?.dept_id || '*');
+  return `acm:${sel.orgId || '*'}:${branchScope(req)}:${deptPart}`;
 }
 
 function tenantScope(req) {

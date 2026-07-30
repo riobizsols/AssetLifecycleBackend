@@ -1,20 +1,20 @@
 /** Branch context from auth middleware — avoids redundant getUserWithBranch + tblBranches queries. */
 
 function branchCodeFromReq(req) {
+  if (req.user?.hasSuperAccess || req.user?.acmAllBranches) return null;
   const sel = req.user?.acmSelection || {};
-  if (sel.orgId || sel.branchId || sel.deptId) {
-    // Org-only ACM selection → all branches in that org
-    if (!sel.branchId) return null;
+  if (sel.branchId) {
     return req.user?.acmSelectionBranchCode || req.user?.branch_code || null;
   }
-  if (req.user?.hasSuperAccess) return null;
+  // Org-only (or default ACM): use overlaid branch_code when locked to a single grant
   return req.user?.branch_code || null;
 }
 
 function branchIdFromReq(req) {
+  if (req.user?.hasSuperAccess || req.user?.acmAllBranches) return null;
   const sel = req.user?.acmSelection || {};
   if (sel.branchId) return sel.branchId;
-  if (sel.orgId && !sel.branchId) return null;
+  // Org-only: prefer ACM overlay (single granted branch) on req.user.branch_id
   return req.user?.branch_id || null;
 }
 

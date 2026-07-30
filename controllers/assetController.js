@@ -331,6 +331,29 @@ const addAsset = async (req, res) => {
             }
         }
 
+        // Auto department assignment from ACM context (same as createAsset)
+        try {
+            const { getEffectiveListContext } = require('../utils/acmAccess');
+            const acmCtx = getEffectiveListContext(req);
+            const acmDeptId = acmCtx.deptId || null;
+            const assignOrgId = acmCtx.orgId || org_id;
+            if (acmDeptId && assignOrgId) {
+                const assignmentModel = require('../models/assetAssignmentModel');
+                await assignmentModel.insertAssetAssignment({
+                    asset_assign_id: `AA${Date.now()}`,
+                    dept_id: acmDeptId,
+                    asset_id: insertedAssetId,
+                    org_id: assignOrgId,
+                    employee_int_id: null,
+                    action: 'A',
+                    action_by: created_by,
+                    latest_assignment_flag: true,
+                });
+            }
+        } catch (assignErr) {
+            console.warn('Auto dept assignment on addAsset failed:', assignErr.message);
+        }
+
         // Step 6: Asset created successfully (final summary)
         await logAssetCreated({
             assetId: insertedAssetId,
@@ -389,13 +412,21 @@ const getAllAssets = async (req, res) => {
   
   try {
     const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+    const {
+      orgId: userOrgId,
+      branchId: userBranchId,
+      hasSuperAccess,
+      deptId,
+      branchIds,
+      deptIds,
+    } = getEffectiveListContext(req);
+    const acmScope = { branchIds, deptIds };
 
     const { data: assets } = await operationalCache.cachedList(
       req,
       'assets',
       'list',
-      () => model.getAssetsByUserContext(userOrgId, userBranchId, req.db, hasSuperAccess, deptId),
+      () => model.getAssetsByUserContext(userOrgId, userBranchId, req.db, hasSuperAccess, deptId, acmScope),
     );
     
     await logAssetsRetrieved({
@@ -1227,7 +1258,15 @@ const getAssetsWithFilters = async (req, res) => {
         } = req.query;
 
         const { getEffectiveListContext } = require('../utils/acmAccess');
-        const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+        const {
+          orgId: userOrgId,
+          branchId: userBranchId,
+          hasSuperAccess,
+          deptId,
+          branchIds,
+          deptIds,
+        } = getEffectiveListContext(req);
+        const acmScope = { branchIds, deptIds };
 
         const additionalFilters = {
             asset_type_id,
@@ -1284,8 +1323,9 @@ const getAssetsWithFilters = async (req, res) => {
                             ...modelArgs,
                             { limit, offset },
                             deptId,
+                            acmScope,
                         ),
-                        model.countAssetsByUserContextWithFilters(...modelArgs, deptId),
+                        model.countAssetsByUserContextWithFilters(...modelArgs, deptId, acmScope),
                     ]);
                     return {
                         rows: result.rows,
@@ -1302,6 +1342,7 @@ const getAssetsWithFilters = async (req, res) => {
                     ...modelArgs,
                     null,
                     deptId,
+                    acmScope,
                 );
                 return result.rows;
             },
@@ -2097,6 +2138,23 @@ if (useful_life_years && useful_life_years > 0) {
                 }
             }
 
+            // When ACM context is department-scoped, map the new asset to that dept
+            // so it appears in Assets lists filtered by department assignment.
+            const acmDeptId = acmCtx.deptId || null;
+            if (acmDeptId) {
+                const asset_assign_id = `AA${Date.now()}`;
+                await client.query(
+                    `INSERT INTO "tblAssetAssignments" (
+                        asset_assign_id, dept_id, asset_id, org_id, employee_int_id,
+                        action, action_on, action_by, latest_assignment_flag
+                     ) VALUES ($1, $2, $3, $4, NULL, 'A', CURRENT_TIMESTAMP, $5, true)`,
+                    [asset_assign_id, acmDeptId, insertedAssetId, finalOrgId, created_by]
+                );
+                console.log(
+                    `✅ Auto-assigned asset ${insertedAssetId} to ACM dept ${acmDeptId} (${asset_assign_id})`
+                );
+            }
+
             await client.query('COMMIT');
             
             res.status(201).json({
@@ -2105,6 +2163,10 @@ if (useful_life_years && useful_life_years > 0) {
             });
 
             assetsDashboardCache.invalidateOrgApiCache(finalOrgId || req.user?.org_id).catch(() => {});
+            try {
+                const assignmentCache = require('../utils/assignmentCache');
+                assignmentCache.invalidateOrgCaches(finalOrgId || req.user?.org_id).catch(() => {});
+            } catch (_) { /* optional */ }
             
         } catch (error) {
             await client.query('ROLLBACK');
@@ -2179,10 +2241,20 @@ const getAssetsCount = async (req, res) => {
   
   try {
     const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+    const {
+      orgId: userOrgId,
+      branchId: userBranchId,
+      hasSuperAccess,
+      deptId,
+      branchIds,
+      deptIds,
+    } = getEffectiveListContext(req);
 
     // Get count with ACM / user context filtering
-    const count = await model.getAssetsCount(userOrgId, userBranchId, hasSuperAccess, deptId);
+    const count = await model.getAssetsCount(userOrgId, userBranchId, hasSuperAccess, deptId, {
+      branchIds,
+      deptIds,
+    });
     
     res.json({
       success: true,
@@ -2355,14 +2427,16 @@ const getUnderMaintenanceAssetsCount = async (req, res) => {
 // GET /api/assets/dashboard-summary - Get comprehensive dashboard summary with overlaps
 const getDashboardSummary = async (req, res) => {
   try {
-    const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+    const { getEffectiveListContext, buildAssetListScopeSql } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const { orgId: userOrgId, branchId: userBranchId } = acmCtx;
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'summary');
     const { data: payload } = await assetsDashboardCache.getOrSet(
       cacheKey,
       assetsDashboardCache.getDashboardTtlMs(),
       async () => {
+        const scope = buildAssetListScopeSql(acmCtx, { startIndex: 2 });
         const summaryQuery = `
       WITH asset_status AS (
         SELECT DISTINCT a.asset_id,
@@ -2388,16 +2462,7 @@ const getDashboardSummary = async (req, res) => {
           AND wfh.org_id = $1
         LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
         WHERE a.org_id = $1
-          ${!hasSuperAccess && userBranchId ? 'AND a.branch_id = $2' : ''}
-          ${deptId ? `AND EXISTS (
-            SELECT 1 FROM "tblAssetAssignments" aa_acm
-            LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
-            WHERE aa_acm.asset_id = a.asset_id
-              AND aa_acm.action = 'A'
-              AND aa_acm.latest_assignment_flag = true
-              AND (aa_acm.dept_id = $${(!hasSuperAccess && userBranchId) ? 3 : 2}
-                   OR e_acm.dept_id = $${(!hasSuperAccess && userBranchId) ? 3 : 2})
-          )` : ''}
+          ${scope.sql}
       )
       SELECT 
         COUNT(*) as total_assets,
@@ -2411,9 +2476,7 @@ const getDashboardSummary = async (req, res) => {
         SUM(CASE WHEN is_assigned = 0 AND is_under_maintenance = 0 AND is_decommissioned = 0 THEN 1 ELSE 0 END) as none
       FROM asset_status
     `;
-        const params = [userOrgId];
-        if (!hasSuperAccess && userBranchId) params.push(userBranchId);
-        if (deptId) params.push(deptId);
+        const params = [userOrgId, ...scope.params];
         const dbPool = req.db || require("../config/db");
         const result = await dbPool.query(summaryQuery, params);
         const summary = result.rows[0];
@@ -2527,7 +2590,19 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
     const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+    const acmCtx = getEffectiveListContext(req);
+    const {
+      orgId: userOrgId,
+      branchId: userBranchId,
+      hasSuperAccess,
+      deptId,
+      branchIds,
+      deptIds,
+    } = acmCtx;
+    const effectiveBranchIds = (branchIds?.length ? branchIds : (userBranchId ? [userBranchId] : []))
+      .map(String);
+    const effectiveDeptIds = (deptIds?.length ? deptIds : (deptId ? [deptId] : []))
+      .map(String);
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'dept-dist');
     const { data: payload } = await assetsDashboardCache.getOrSet(
@@ -2549,10 +2624,16 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND a.org_id = $1
     `;
 
-        if (!hasSuperAccess && userBranchId) {
-          params.push(userBranchId);
+        if (!hasSuperAccess && effectiveBranchIds.length === 1) {
+          params.push(effectiveBranchIds[0]);
           query += ` AND a.branch_id = $${paramIndex}`;
           paramIndex++;
+        } else if (!hasSuperAccess && effectiveBranchIds.length > 1) {
+          params.push(effectiveBranchIds);
+          query += ` AND a.branch_id = ANY($${paramIndex}::text[])`;
+          paramIndex++;
+        } else if (!hasSuperAccess && Array.isArray(branchIds)) {
+          query += ' AND 1=0';
         }
 
         query += `
@@ -2560,17 +2641,25 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         AND d.int_status = 1
     `;
 
-        if (deptId) {
-          params.push(deptId);
+        if (effectiveDeptIds.length === 1) {
+          params.push(effectiveDeptIds[0]);
           query += ` AND d.dept_id = $${paramIndex}`;
+          paramIndex++;
+        } else if (effectiveDeptIds.length > 1) {
+          params.push(effectiveDeptIds);
+          query += ` AND d.dept_id = ANY($${paramIndex}::text[])`;
           paramIndex++;
         }
 
-        if (!hasSuperAccess && userBranchId) {
-          // branch param is still at index 2 when present
+        if (!hasSuperAccess && effectiveBranchIds.length === 1) {
           query += ` AND EXISTS (
             SELECT 1 FROM "tblBR_DEPT" bd
             WHERE bd.dept_id = d.dept_id AND bd.branch_id = $2 AND bd.int_status = 1
+          )`;
+        } else if (!hasSuperAccess && effectiveBranchIds.length > 1) {
+          query += ` AND EXISTS (
+            SELECT 1 FROM "tblBR_DEPT" bd
+            WHERE bd.dept_id = d.dept_id AND bd.branch_id = ANY($2::text[]) AND bd.int_status = 1
           )`;
         }
 
@@ -2590,22 +2679,27 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
     `;
 
         const unassignedParams = [userOrgId];
-        let unassignedParamIndex = 2;
-
-        if (!hasSuperAccess && userBranchId) {
-          unassignedQuery += ` AND a.branch_id = $${unassignedParamIndex}`;
-          unassignedParams.push(userBranchId);
+        // Dept-scoped ACM users should not see org-wide unassigned assets
+        let unassignedCount = 0;
+        if (!effectiveDeptIds.length) {
+          if (!hasSuperAccess && effectiveBranchIds.length === 1) {
+            unassignedQuery += ` AND a.branch_id = $2`;
+            unassignedParams.push(effectiveBranchIds[0]);
+          } else if (!hasSuperAccess && effectiveBranchIds.length > 1) {
+            unassignedQuery += ` AND a.branch_id = ANY($2::text[])`;
+            unassignedParams.push(effectiveBranchIds);
+          }
+          const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
+          unassignedCount = parseInt(unassignedResult.rows[0]?.unassigned_count || 0);
         }
 
         const result = await dbPool.query(query, params);
-        const unassignedResult = await dbPool.query(unassignedQuery, unassignedParams);
 
         const departments = result.rows.map(row => ({
           name: row.department_name,
           value: parseInt(row.asset_count) || 0
         }));
 
-        const unassignedCount = parseInt(unassignedResult.rows[0]?.unassigned_count || 0);
         if (unassignedCount > 0) {
           departments.push({
             name: 'Unassigned',
@@ -2640,18 +2734,18 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
 const getTop5AssetTypes = async (req, res) => {
   try {
     const dbPool = req.db || require("../config/db");
-    const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId: userOrgId, branchId: userBranchId, hasSuperAccess, deptId } = getEffectiveListContext(req);
+    const { getEffectiveListContext, buildAssetListScopeSql } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const { orgId: userOrgId, branchId: userBranchId } = acmCtx;
 
     const cacheKey = assetsDashboardCache.scopeKey(req, 'dashboard', 'top5');
     const { data: payload } = await assetsDashboardCache.getOrSet(
       cacheKey,
       assetsDashboardCache.getDashboardTtlMs(),
       async () => {
-        const params = [userOrgId];
-        let paramIndex = 2;
+        const scope = buildAssetListScopeSql(acmCtx, { startIndex: 2 });
 
-        let query = `
+        const query = `
       SELECT 
         at.asset_type_id,
         at.text as asset_type_name,
@@ -2659,39 +2753,15 @@ const getTop5AssetTypes = async (req, res) => {
       FROM "tblAssetTypes" at
       LEFT JOIN "tblAssets" a ON at.asset_type_id = a.asset_type_id
         AND a.org_id = $1
-    `;
-
-        if (!hasSuperAccess && userBranchId) {
-          params.push(userBranchId);
-          query += ` AND a.branch_id = $${paramIndex}`;
-          paramIndex++;
-        }
-
-        if (deptId) {
-          params.push(deptId);
-          query += ` AND EXISTS (
-            SELECT 1 FROM "tblAssetAssignments" aa_acm
-            LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
-            WHERE aa_acm.asset_id = a.asset_id
-              AND aa_acm.action = 'A'
-              AND aa_acm.latest_assignment_flag = true
-              AND (aa_acm.dept_id = $${paramIndex} OR e_acm.dept_id = $${paramIndex})
-          )`;
-          paramIndex++;
-        }
-
-        query += `
+        ${scope.sql}
       WHERE at.org_id = $1
         AND at.int_status = 1
-    `;
-
-        query += `
       GROUP BY at.asset_type_id, at.text
       ORDER BY asset_count DESC, at.text ASC
       LIMIT 5
     `;
 
-        const result = await dbPool.query(query, params);
+        const result = await dbPool.query(query, [userOrgId, ...scope.params]);
 
         const assetTypes = result.rows.map(row => ({
           asset_type_id: row.asset_type_id,

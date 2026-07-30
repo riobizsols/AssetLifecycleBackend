@@ -25,11 +25,14 @@ const applyBranchFilter = (options = {}) => {
     const {
         hasSuperAccess = false,
         userBranchId = null,
+        branchIds = null,
         tableAlias = '',
         branchColumn = 'branch_id',
         paramIndex = 1,
         existingConditions = [],
-        existingParams = []
+        existingParams = [],
+        /** When true and no branch ids, deny rows instead of skipping the filter */
+        denyIfNoBranch = false,
     } = options;
 
     let conditions = [...existingConditions];
@@ -37,11 +40,29 @@ const applyBranchFilter = (options = {}) => {
     let nextIndex = paramIndex;
 
     // If user has super access, skip branch filter (user can see all branches)
-    if (!hasSuperAccess && userBranchId) {
-        const branchColRef = tableAlias ? `${tableAlias}.${branchColumn}` : branchColumn;
+    if (hasSuperAccess) {
+        return {
+            conditions,
+            params,
+            nextParamIndex: nextIndex
+        };
+    }
+
+    const branchColRef = tableAlias ? `${tableAlias}.${branchColumn}` : branchColumn;
+    const ids = Array.isArray(branchIds) && branchIds.length
+        ? branchIds.map((id) => String(id).trim()).filter(Boolean)
+        : (userBranchId ? [String(userBranchId).trim()] : []);
+
+    if (ids.length === 1) {
         conditions.push(`${branchColRef} = $${nextIndex}`);
-        params.push(userBranchId);
+        params.push(ids[0]);
         nextIndex++;
+    } else if (ids.length > 1) {
+        conditions.push(`${branchColRef} = ANY($${nextIndex}::text[])`);
+        params.push(ids);
+        nextIndex++;
+    } else if (denyIfNoBranch) {
+        conditions.push('1=0');
     }
 
     return {

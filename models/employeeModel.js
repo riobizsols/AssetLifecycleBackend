@@ -6,7 +6,7 @@ const { generateCustomId } = require("../utils/idGenerator");
 const getDb = () => getDbFromContext();
 
 // GET all employees — scoped by ACM / request user org-branch-dept
-const getAllEmployees = async (orgId = null, branchId = null, deptId = null, hasSuperAccess = false) => {
+const getAllEmployees = async (orgId = null, branchId = null, deptId = null, hasSuperAccess = false, scope = {}) => {
   let query = `
         SELECT 
             emp_int_id, employee_id, name, first_name, last_name, 
@@ -26,15 +26,34 @@ const getAllEmployees = async (orgId = null, branchId = null, deptId = null, has
     i += 1;
   }
 
-  if (!hasSuperAccess && branchId) {
-    query += ` AND branch_id = $${i}`;
-    params.push(branchId);
-    i += 1;
+  const branchIds = Array.isArray(scope.branchIds) && scope.branchIds.length
+    ? scope.branchIds.map((id) => String(id).trim()).filter(Boolean)
+    : (branchId ? [String(branchId).trim()] : []);
+  const deptIds = Array.isArray(scope.deptIds) && scope.deptIds.length
+    ? scope.deptIds.map((id) => String(id).trim()).filter(Boolean)
+    : (deptId ? [String(deptId).trim()] : []);
+
+  if (!hasSuperAccess) {
+    if (branchIds.length === 1) {
+      query += ` AND branch_id = $${i}`;
+      params.push(branchIds[0]);
+      i += 1;
+    } else if (branchIds.length > 1) {
+      query += ` AND branch_id = ANY($${i}::text[])`;
+      params.push(branchIds);
+      i += 1;
+    } else if (Array.isArray(scope.branchIds)) {
+      query += ' AND 1=0';
+    }
   }
 
-  if (deptId) {
+  if (deptIds.length === 1) {
     query += ` AND dept_id = $${i}`;
-    params.push(deptId);
+    params.push(deptIds[0]);
+    i += 1;
+  } else if (deptIds.length > 1) {
+    query += ` AND dept_id = ANY($${i}::text[])`;
+    params.push(deptIds);
     i += 1;
   }
 

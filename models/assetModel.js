@@ -1324,12 +1324,79 @@ const ACM_DEPT_ASSIGNMENT_EXISTS = (assetAlias, paramIndex) => `
   )
 `;
 
+const ACM_DEPT_ASSIGNMENT_EXISTS_ANY = (assetAlias, paramIndex) => `
+  AND EXISTS (
+    SELECT 1
+    FROM "tblAssetAssignments" aa_acm
+    LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+    WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+      AND aa_acm.action = 'A'
+      AND aa_acm.latest_assignment_flag = true
+      AND (
+        aa_acm.dept_id = ANY($${paramIndex}::text[])
+        OR e_acm.dept_id = ANY($${paramIndex}::text[])
+      )
+  )
+`;
+
+function normalizeScopeIds(singleId, ids) {
+  if (Array.isArray(ids) && ids.length) {
+    return ids.map((id) => String(id).trim()).filter(Boolean);
+  }
+  if (singleId) return [String(singleId).trim()];
+  return [];
+}
+
+/** Apply ACM branch + dept assignment filters to an assets query fragment. */
+function applyAssetAcmScopeFilters(query, params, paramIndex, {
+  hasSuperAccess = false,
+  branchId = null,
+  deptId = null,
+  branchIds = null,
+  deptIds = null,
+  assetAlias = 'a',
+} = {}) {
+  const bIds = normalizeScopeIds(branchId, branchIds);
+  const dIds = normalizeScopeIds(deptId, deptIds);
+  let q = query;
+  let i = paramIndex;
+  const p = params;
+
+  if (!hasSuperAccess) {
+    if (bIds.length === 1) {
+      q += ` AND ${assetAlias}.branch_id = $${i}`;
+      p.push(bIds[0]);
+      i += 1;
+    } else if (bIds.length > 1) {
+      q += ` AND ${assetAlias}.branch_id = ANY($${i}::text[])`;
+      p.push(bIds);
+      i += 1;
+    } else if (Array.isArray(branchIds)) {
+      // Explicit empty ACM branch grant → no rows
+      q += ' AND 1=0';
+    }
+  }
+
+  if (dIds.length === 1) {
+    q += ACM_DEPT_ASSIGNMENT_EXISTS(assetAlias, i);
+    p.push(dIds[0]);
+    i += 1;
+  } else if (dIds.length > 1) {
+    q += ACM_DEPT_ASSIGNMENT_EXISTS_ANY(assetAlias, i);
+    p.push(dIds);
+    i += 1;
+  }
+
+  return { query: q, params: p, paramIndex: i };
+}
+
 // Get total count of assets - supports super access users who can view all branches
 const getAssetsCount = async (
   orgId,
   branchId = null,
   hasSuperAccess = false,
   deptId = null,
+  scope = {},
 ) => {
   let query = `
     SELECT COUNT(*) as count
@@ -1340,17 +1407,13 @@ const getAssetsCount = async (
   const params = [orgId];
   let paramIndex = 2;
 
-  // Apply branch filter only if user doesn't have super access
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $${paramIndex}`;
-    params.push(branchId);
-    paramIndex++;
-  }
-
-  if (deptId) {
-    query += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
-    params.push(deptId);
-  }
+  ({ query, paramIndex } = applyAssetAcmScopeFilters(query, params, paramIndex, {
+    hasSuperAccess,
+    branchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
@@ -1366,6 +1429,7 @@ const getAssetsByUserContext = async (
   dbConnection = null,
   hasSuperAccess = false,
   deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
 
@@ -1389,18 +1453,13 @@ const getAssetsByUserContext = async (
   const params = [orgId];
   let paramIndex = 2;
 
-  // Apply branch filter only if user doesn't have super access
-  // If hasSuperAccess is true, user can see all branches (no filter applied)
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $${paramIndex}`;
-    params.push(branchId);
-    paramIndex++;
-  }
-
-  if (deptId) {
-    query += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
-    params.push(deptId);
-  }
+  ({ query, paramIndex } = applyAssetAcmScopeFilters(query, params, paramIndex, {
+    hasSuperAccess,
+    branchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   query += ` ORDER BY a.created_on DESC`;
 
@@ -1423,22 +1482,25 @@ const ASSETS_LIST_SELECT = `
     LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
 `;
 
-function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters = {}, hasSuperAccess = false, deptId = null) {
+function buildAssetsListFilterClause(
+  userOrgId,
+  userBranchId,
+  additionalFilters = {},
+  hasSuperAccess = false,
+  deptId = null,
+  scope = {},
+) {
   let clause = ` WHERE a.org_id = $1`;
   const params = [userOrgId];
   let paramIndex = 2;
 
-  if (!hasSuperAccess && userBranchId) {
-    clause += ` AND a.branch_id = $${paramIndex}`;
-    params.push(userBranchId);
-    paramIndex++;
-  }
-
-  if (deptId) {
-    clause += ACM_DEPT_ASSIGNMENT_EXISTS('a', paramIndex);
-    params.push(deptId);
-    paramIndex++;
-  }
+  ({ query: clause, paramIndex } = applyAssetAcmScopeFilters(clause, params, paramIndex, {
+    hasSuperAccess,
+    branchId: userBranchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   if (additionalFilters.asset_type_id) {
     clause += ` AND a.asset_type_id = $${paramIndex}`;
@@ -1491,6 +1553,7 @@ const getAssetsByUserContextWithFilters = async (
   hasSuperAccess = false,
   pagination = null,
   deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params, paramIndex } = buildAssetsListFilterClause(
@@ -1499,6 +1562,7 @@ const getAssetsByUserContextWithFilters = async (
     additionalFilters,
     hasSuperAccess,
     deptId,
+    scope,
   );
 
   let query = `${ASSETS_LIST_SELECT}${clause} ORDER BY a.created_on DESC`;
@@ -1519,6 +1583,7 @@ const countAssetsByUserContextWithFilters = async (
   dbConnection = null,
   hasSuperAccess = false,
   deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params } = buildAssetsListFilterClause(
@@ -1527,6 +1592,7 @@ const countAssetsByUserContextWithFilters = async (
     additionalFilters,
     hasSuperAccess,
     deptId,
+    scope,
   );
 
   const query = `SELECT COUNT(*)::int AS total_count FROM "tblAssets" a${clause}`;

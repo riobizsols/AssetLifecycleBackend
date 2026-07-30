@@ -27,13 +27,16 @@ const getOrganizationNameFromEmployee = async (emp_int_id) => {
 const getAllEmployees = async (req, res) => {
     try {
         const { getEffectiveListContext } = require('../utils/acmAccess');
-        const { orgId, branchId, deptId, hasSuperAccess } = getEffectiveListContext(req);
+        const { orgId, branchId, deptId, hasSuperAccess, branchIds, deptIds } = getEffectiveListContext(req);
         const { data: rows } = await operationalCache.cachedList(
             req,
             'employees',
             'list',
             async () => {
-                const result = await model.getAllEmployees(orgId, branchId, deptId, hasSuperAccess);
+                const result = await model.getAllEmployees(orgId, branchId, deptId, hasSuperAccess, {
+                  branchIds,
+                  deptIds,
+                });
                 return result.rows;
             },
         );

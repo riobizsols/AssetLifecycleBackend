@@ -1,6 +1,5 @@
 const vendorsModel = require("../models/vendorsModel");
 const operationalCache = require('../utils/operationalCache');
-const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
@@ -16,10 +15,8 @@ function invalidateVendorCaches(req, orgId) {
 exports.getAllVendors = async (req, res) => {
   try {
     const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { orgId, hasSuperAccess } = getEffectiveListContext(req);
+    const { orgId } = getEffectiveListContext(req);
     const org_id = orgId || req.user.org_id;
-    
-    const userBranchCode = branchCodeFromReq(req);
     
     // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
     const type = req.query.type ? String(req.query.type).toLowerCase() : '';
@@ -30,9 +27,9 @@ exports.getAllVendors = async (req, res) => {
       operationalCache.hashQuery({ type, serviceOnly }),
       () => {
         if (type === 'product' || type === 'service') {
-          return vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+          return vendorsModel.getVendorsBySupplyType(org_id, type, null, true);
         }
-        return vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+        return vendorsModel.getAllVendors(org_id, null, true, serviceOnly);
       },
     );
     res.json(vendors);
@@ -116,14 +113,14 @@ exports.createVendor = async (req, res) => {
 
     // Active ACM context is the source of truth (overlayed onto req.user)
     const { getEffectiveListContext } = require('../utils/acmAccess');
-    const { branchCodeFromReq } = require('../utils/reqUserBranch');
     const { orgId } = getEffectiveListContext(req);
     const org_id = orgId || req.user.org_id;
-    const branch_code = branchCodeFromReq(req);
+    // Vendors are org-level master data — do not stamp a branch
+    const branch_code = null;
     
     console.log('=== Vendor Creation Debug ===');
     console.log('ACM org_id:', org_id);
-    console.log('ACM branch_code:', branch_code);
+    console.log('branch_code (org-level):', branch_code);
     
     const changed_on = new Date();
     const created_on = new Date();

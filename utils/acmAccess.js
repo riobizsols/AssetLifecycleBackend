@@ -9,9 +9,9 @@
  * Controllers should use getEffectiveListContext(req) / overlaid req.user.org_id|branch_id|dept_id.
  * Never treat tblUsers home Organization/Branch/Department as the active runtime context.
  *
- * Header selection narrows the effective filter:
- *   - Org only → data for that org (ACM-allowed branches/depts)
- *   - Org + Branch → filter by branch
+ * Header selection narrows the effective filter (always intersected with ACM grants):
+ *   - Org only → that org, only ACM-allowed branches/depts (wildcard branch → all branches)
+ *   - Org + Branch → filter by that branch (and ACM-allowed depts)
  *   - Org + Branch + Dept → filter by department
  */
 
@@ -261,13 +261,21 @@ function attachAcmFilterFromHeaders(req) {
       return undefined;
     };
 
-    if (!b || !req.db) {
+    // Resolve branch_code for explicit selection OR single ACM-granted branch (org-only)
+    const acm = req.user.acmFilter;
+    const branchForCode =
+      b ||
+      (!acm?.allBranches && Array.isArray(acm?.branchIds) && acm.branchIds.length === 1
+        ? acm.branchIds[0]
+        : null);
+
+    if (!branchForCode || !req.db) {
       finish();
       return Promise.resolve();
     }
 
     return req.db
-      .query(`SELECT branch_code FROM "tblBranches" WHERE branch_id = $1 LIMIT 1`, [b])
+      .query(`SELECT branch_code FROM "tblBranches" WHERE branch_id = $1 LIMIT 1`, [branchForCode])
       .then((r) => {
         req.user.acmSelectionBranchCode = r.rows[0]?.branch_code || null;
         finish();
@@ -287,6 +295,43 @@ function attachAcmFilterFromHeaders(req) {
   }
 
   return loadBranchCodeThenFinish(orgId, branchId, deptId);
+}
+
+/**
+ * Derive branch/dept scope from resolved ACM + optional header selection.
+ * Org-only selection is NOT org-wide unless ACM grants wildcard branches.
+ */
+function deriveAcmListScope(acm, selection = {}) {
+  const selOrg = cleanId(selection.orgId);
+  const selBranch = cleanId(selection.branchId);
+  const selDept = cleanId(selection.deptId);
+
+  const allBranches = Boolean(acm?.allBranches) && !selBranch;
+  const allDepts = Boolean(acm?.allDepts) && !selDept;
+
+  const branchIds = selBranch
+    ? [selBranch]
+    : allBranches
+      ? []
+      : [...(acm?.branchIds || [])].map((id) => String(id)).filter(Boolean);
+
+  const deptIds = selDept
+    ? [selDept]
+    : allDepts
+      ? []
+      : [...(acm?.deptIds || [])].map((id) => String(id)).filter(Boolean);
+
+  return {
+    orgId: selOrg || (acm?.orgIds?.length === 1 ? acm.orgIds[0] : null),
+    branchId: selBranch || (branchIds.length === 1 ? branchIds[0] : null),
+    deptId: selDept || (deptIds.length === 1 ? deptIds[0] : null),
+    branchIds,
+    deptIds,
+    allBranches,
+    allDepts,
+    // Super / org-wide branch access only when ACM grants wildcard branches
+    hasSuperAccess: allBranches,
+  };
 }
 
 /**
@@ -313,30 +358,45 @@ function applyAcmSelectionToRequestUser(req) {
     };
   }
 
+  const acm = getRequestAcm(req);
+  const scope = deriveAcmListScope(acm, selection);
+
   if (selOrg) {
     req.user.org_id = selOrg;
   }
 
+  req.user.acmBranchIds = scope.branchIds;
+  req.user.acmDeptIds = scope.deptIds;
+  req.user.acmAllBranches = scope.allBranches;
+  req.user.acmAllDepts = scope.allDepts;
+  req.user.hasSuperAccess = scope.hasSuperAccess;
+
   if (selBranch) {
     req.user.branch_id = selBranch;
     req.user.branch_code = req.user.acmSelectionBranchCode || req.user.branch_code || null;
-    req.user.hasSuperAccess = false;
   } else if (selOrg) {
-    // Org-only ACM selection → all branches in that org
-    req.user.branch_id = null;
-    req.user.branch_code = null;
-    req.user.hasSuperAccess = true;
+    // Org-only → ACM-granted branches only (wildcard branch → all branches in org)
+    if (scope.branchId) {
+      req.user.branch_id = scope.branchId;
+      req.user.branch_code = req.user.acmSelectionBranchCode || null;
+    } else {
+      req.user.branch_id = null;
+      req.user.branch_code = null;
+    }
   }
 
   if (selDept) {
     req.user.dept_id = selDept;
+  } else if (selOrg || selBranch) {
+    // Lock to ACM-granted department(s); multi-dept kept on acmDeptIds
+    req.user.dept_id = scope.deptId;
   }
 }
 
 /**
  * Effective org/branch/dept + super-access for list APIs.
  * Header ACM selection (X-ACM-*) overrides the user's login org/branch so
- * screens filter to the saved context picker values.
+ * screens filter to the saved context picker values — intersected with ACM grants.
  */
 function getEffectiveListContext(req) {
   const selection = req.user?.acmSelection || {};
@@ -347,22 +407,57 @@ function getEffectiveListContext(req) {
   const acm = getRequestAcm(req);
 
   if (hasSelection) {
-    // Org-only → all branches in that org; org+branch → lock to branch
-    const hasSuperAccess = !selBranch;
+    const scope = deriveAcmListScope(acm, selection);
     return {
-      orgId: selOrg || req.user?.org_id || null,
-      branchId: selBranch || null,
-      deptId: selDept || null,
-      hasSuperAccess,
+      orgId: scope.orgId || selOrg || req.user?.org_id || null,
+      branchId: scope.branchId,
+      deptId: scope.deptId,
+      branchIds: scope.branchIds,
+      deptIds: scope.deptIds,
+      allBranches: scope.allBranches,
+      allDepts: scope.allDepts,
+      hasSuperAccess: scope.hasSuperAccess,
       hasSelection: true,
       acm,
     };
   }
 
+  // No header selection: still prefer resolved ACM filter when present
+  if (acm?.hasAcm) {
+    const scope = deriveAcmListScope(acm, {});
+    return {
+      orgId: req.user?.org_id || scope.orgId || null,
+      branchId: req.user?.branch_id || scope.branchId || null,
+      deptId: req.user?.dept_id || scope.deptId || null,
+      branchIds: scope.branchIds.length
+        ? scope.branchIds
+        : req.user?.branch_id
+          ? [req.user.branch_id]
+          : [],
+      deptIds: scope.deptIds.length
+        ? scope.deptIds
+        : req.user?.dept_id
+          ? [req.user.dept_id]
+          : [],
+      allBranches: scope.allBranches,
+      allDepts: scope.allDepts,
+      // ACM grants win over org-settings super access
+      hasSuperAccess: scope.hasSuperAccess,
+      hasSelection: false,
+      acm,
+    };
+  }
+
+  const branchId = req.user?.branch_id || null;
+  const deptId = req.user?.dept_id || null;
   return {
     orgId: req.user?.org_id || null,
-    branchId: req.user?.branch_id || null,
-    deptId: req.user?.dept_id || null,
+    branchId,
+    deptId,
+    branchIds: branchId ? [branchId] : [],
+    deptIds: deptId ? [deptId] : [],
+    allBranches: Boolean(req.user?.hasSuperAccess),
+    allDepts: false,
     hasSuperAccess: Boolean(req.user?.hasSuperAccess),
     hasSelection: false,
     acm,
@@ -465,6 +560,70 @@ function filterRowsByAcm(rows, acm, mapFn) {
   return rows.filter((row) => isResourceInAcmScope(acm, mapFn(row)));
 }
 
+/**
+ * Build AND-clauses for asset lists from getEffectiveListContext().
+ * Handles multi branch/dept ACM grants (ANY / EXISTS assignment dept).
+ */
+function buildAssetListScopeSql(ctx, { branchCol = 'a.branch_id', assetAlias = 'a', startIndex = 1 } = {}) {
+  const parts = [];
+  const params = [];
+  let i = startIndex;
+
+  const hasSuper = Boolean(ctx?.hasSuperAccess);
+  const branchIds = Array.isArray(ctx?.branchIds) && ctx.branchIds.length
+    ? ctx.branchIds.map(String)
+    : (ctx?.branchId ? [String(ctx.branchId)] : []);
+  const deptIds = Array.isArray(ctx?.deptIds) && ctx.deptIds.length
+    ? ctx.deptIds.map(String)
+    : (ctx?.deptId ? [String(ctx.deptId)] : []);
+
+  if (!hasSuper) {
+    if (branchIds.length === 1) {
+      parts.push(`${branchCol} = $${i}`);
+      params.push(branchIds[0]);
+      i += 1;
+    } else if (branchIds.length > 1) {
+      parts.push(`${branchCol} = ANY($${i}::text[])`);
+      params.push(branchIds);
+      i += 1;
+    } else {
+      parts.push('1=0');
+    }
+  }
+
+  if (deptIds.length === 1) {
+    parts.push(`EXISTS (
+      SELECT 1
+      FROM "tblAssetAssignments" aa_acm
+      LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+      WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+        AND aa_acm.action = 'A'
+        AND aa_acm.latest_assignment_flag = true
+        AND (aa_acm.dept_id = $${i} OR e_acm.dept_id = $${i})
+    )`);
+    params.push(deptIds[0]);
+    i += 1;
+  } else if (deptIds.length > 1) {
+    parts.push(`EXISTS (
+      SELECT 1
+      FROM "tblAssetAssignments" aa_acm
+      LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+      WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+        AND aa_acm.action = 'A'
+        AND aa_acm.latest_assignment_flag = true
+        AND (aa_acm.dept_id = ANY($${i}::text[]) OR e_acm.dept_id = ANY($${i}::text[]))
+    )`);
+    params.push(deptIds);
+    i += 1;
+  }
+
+  return {
+    sql: parts.length ? ` AND ${parts.join(' AND ')}` : '',
+    params,
+    nextIndex: i,
+  };
+}
+
 module.exports = {
   WILDCARD,
   isWild,
@@ -475,9 +634,11 @@ module.exports = {
   resolveDefaultAcmSelection,
   getRequestAcm,
   attachAcmFilterFromHeaders,
+  deriveAcmListScope,
   applyAcmSelectionToRequestUser,
   getEffectiveListContext,
   applyAcmSqlFilters,
+  buildAssetListScopeSql,
   isResourceInAcmScope,
   requireAcmWrite,
   filterRowsByAcm,

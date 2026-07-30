@@ -161,21 +161,41 @@ const getAcmOptions = async (req, res) => {
           `SELECT DISTINCT d.dept_id, d.text, d.org_id, bd.branch_id
            FROM "tblDepartments" d
            INNER JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
+           INNER JOIN "tblBranches" b ON b.branch_id = bd.branch_id
            WHERE d.int_status = 1 AND bd.branch_id = $1
+             AND d.org_id = b.org_id
            ORDER BY d.text`,
           [draftBranch]
         );
         departments = r.rows;
       } else if (deptIdSet.size) {
+        // Prefer departments mapped to this branch in tblBR_DEPT (same org as branch)
         const r = await db.query(
           `SELECT DISTINCT d.dept_id, d.text, d.org_id, bd.branch_id
            FROM "tblDepartments" d
            INNER JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
+           INNER JOIN "tblBranches" b ON b.branch_id = bd.branch_id
            WHERE d.int_status = 1 AND bd.branch_id = $1 AND d.dept_id = ANY($2::text[])
+             AND d.org_id = b.org_id
            ORDER BY d.text`,
           [draftBranch, [...deptIdSet]]
         );
         departments = r.rows;
+
+        // ACM-explicit dept grants must still appear even if tblBR_DEPT mapping is missing
+        const found = new Set(departments.map((d) => String(d.dept_id)));
+        const missing = [...deptIdSet].filter((id) => !found.has(String(id)));
+        if (missing.length) {
+          const r2 = await db.query(
+            `SELECT d.dept_id, d.text, d.org_id, $1::text AS branch_id
+             FROM "tblDepartments" d
+             WHERE d.int_status = 1 AND d.dept_id = ANY($2::text[])
+               AND ($3::text IS NULL OR d.org_id = $3)
+             ORDER BY d.text`,
+            [draftBranch, missing, draftOrg]
+          );
+          departments = [...departments, ...r2.rows];
+        }
       }
     }
 
