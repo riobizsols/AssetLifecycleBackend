@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS "tenants" (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
     is_active boolean DEFAULT true,
-    subdomain character varying(63) UNIQUE
+    subdomain character varying(63) UNIQUE,
+    email character varying(320)
 );
 
 -- Upgrade: add subdomain if table was created from an older migration without this column
@@ -26,6 +27,20 @@ BEGIN
         WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'subdomain'
     ) THEN
         ALTER TABLE "tenants" ADD COLUMN subdomain character varying(63) UNIQUE;
+    END IF;
+END $$;
+
+-- Upgrade: add organization contact email for account-deletion lookup
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tenants'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'email'
+    ) THEN
+        ALTER TABLE "tenants" ADD COLUMN email character varying(320);
     END IF;
 END $$;
 
@@ -43,6 +58,7 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_tenants_org_id ON "tenants"(org_id);
 CREATE INDEX IF NOT EXISTS idx_tenants_is_active ON "tenants"(is_active);
 CREATE INDEX IF NOT EXISTS idx_tenants_subdomain ON "tenants"(subdomain);
+CREATE INDEX IF NOT EXISTS idx_tenants_email_lower ON "tenants"(LOWER(email)) WHERE email IS NOT NULL;
 
 -- Add comment
 COMMENT ON TABLE "tenants" IS 'Stores database credentials for each organization in multi-tenant setup';
@@ -53,3 +69,4 @@ COMMENT ON COLUMN "tenants".db_name IS 'Database name for this organization';
 COMMENT ON COLUMN "tenants".db_user IS 'Database username';
 COMMENT ON COLUMN "tenants".db_password IS 'Encrypted database password';
 COMMENT ON COLUMN "tenants".subdomain IS 'Subdomain for tenant URL (e.g., orgname.example.com)';
+COMMENT ON COLUMN "tenants".email IS 'Organization admin / registered contact email for account deletion lookup';

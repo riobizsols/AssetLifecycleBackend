@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { PORT, CORS_ORIGINS } = require("./config/environment");
 const authRoutes = require("./routes/authRoutes");
+const accountDeletionRoutes = require("./routes/accountDeletionRoutes");
 const jobRoleRoutes = require("./routes/jobRoleRoutes");
 const jobRoleNavigationRoutes = require("./routes/jobRoleNavigationRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -184,6 +185,7 @@ app.use(
 // PORT is now imported from environment config
 
 app.use("/api/auth", authRoutes);
+app.use("/api/account-deletion", accountDeletionRoutes);
 app.use("/api/setup", setupWizardRoutes);
 app.use("/api/tenant-setup", tenantSetupRoutes);
 app.use("/api/text-messages", textMessagesRoutes);

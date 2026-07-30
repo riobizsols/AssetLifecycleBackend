@@ -60,8 +60,39 @@ function initTenantRegistryPool() {
       }),
     );
     attachPoolErrorHandler(tenantRegistryPool, 'TENANT REGISTRY POOL');
+    // Ensure schema upgrades (e.g. tenants.email) exist
+    ensureTenantsEmailColumn(tenantRegistryPool).catch((err) => {
+      logger.warn(`[TenantService] ensureTenantsEmailColumn on init: ${err.message}`);
+    });
   }
   return tenantRegistryPool;
+}
+
+let tenantsEmailColumnEnsured = false;
+
+async function ensureTenantsEmailColumn(pool = null) {
+  if (tenantsEmailColumnEnsured) return;
+  const registry = pool || initTenantRegistryPool();
+  await registry.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tenants'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'email'
+      ) THEN
+        ALTER TABLE "tenants" ADD COLUMN email character varying(320);
+      END IF;
+    END $$;
+  `);
+  await registry.query(`
+    CREATE INDEX IF NOT EXISTS idx_tenants_email_lower
+      ON "tenants" (LOWER(email))
+      WHERE email IS NOT NULL
+  `).catch(() => {});
+  tenantsEmailColumnEnsured = true;
 }
 
 /**
@@ -306,11 +337,19 @@ async function registerTenant(orgId, dbConfig) {
     
     const hasSubdomainColumn = subdomainColumnCheck.rows[0].exists;
     const subdomain = dbConfig.subdomain || null;
+    // Organization admin email — used for org management / account deletion
+    const email = dbConfig.email ? String(dbConfig.email).trim().toLowerCase() : null;
+
+    try {
+      await ensureTenantsEmailColumn(pool);
+    } catch (colErr) {
+      logger.warn(`[TenantService] Could not ensure tenants.email column: ${colErr.message}`);
+    }
 
     if (hasSubdomainColumn && subdomain) {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, subdomain, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
+        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, subdomain, email, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
          ON CONFLICT (org_id) DO UPDATE
          SET db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
@@ -318,6 +357,7 @@ async function registerTenant(orgId, dbConfig) {
              db_user = EXCLUDED.db_user,
              db_password = EXCLUDED.db_password,
              subdomain = EXCLUDED.subdomain,
+             email = COALESCE(EXCLUDED.email, "tenants".email),
              updated_at = CURRENT_TIMESTAMP,
              is_active = true`,
         [
@@ -328,19 +368,21 @@ async function registerTenant(orgId, dbConfig) {
           dbConfig.user,
           encryptedPassword,
           subdomain,
+          email,
         ]
       );
       logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
     } else {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, true)
+        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, email, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
          ON CONFLICT (org_id) DO UPDATE
          SET db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
              db_name = EXCLUDED.db_name,
              db_user = EXCLUDED.db_user,
              db_password = EXCLUDED.db_password,
+             email = COALESCE(EXCLUDED.email, "tenants".email),
              updated_at = CURRENT_TIMESTAMP,
              is_active = true`,
         [
@@ -350,6 +392,7 @@ async function registerTenant(orgId, dbConfig) {
           dbConfig.database,
           dbConfig.user,
           encryptedPassword,
+          email,
         ]
       );
       logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
@@ -491,5 +534,6 @@ module.exports = {
   testTenantConnection,
   initTenantRegistryPool,
   clearTenantPoolCache,
+  ensureTenantsEmailColumn,
 };
 

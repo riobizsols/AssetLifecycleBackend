@@ -106,11 +106,137 @@ const sendResetEmail = async (to, token, subdomain = null) => {
     }
 };
 
+const sendOrganizationDeletionOtpEmail = async ({ to, organizationName, subdomain, otp }) => {
+    const { user, pass } = getEmailCredentials();
+    if (!user || !pass) {
+        const errorMsg = 'Email configuration missing: EMAIL_USER or EMAIL_PASS not set';
+        console.error(`[Mailer] ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+
+    const transporter = createMailTransporter();
+    const orgLabel = organizationName || subdomain || 'Your organization';
+
+    try {
+        const info = await transporter.sendMail({
+            from: `"ALM Account Security" <${user}>`,
+            to,
+            subject: 'Organization Deletion Verification',
+            html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a;">
+          <div style="background:#0E2F4B; color:#fff; padding:20px 24px; border-radius:8px 8px 0 0;">
+            <h2 style="margin:0; font-size:18px;">Organization Deletion Verification</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb; border-top:none; padding:24px; border-radius:0 0 8px 8px;">
+            <p>We received a request to <strong>permanently delete</strong> your organization.</p>
+            <p style="margin:16px 0;">
+              <strong>Organization:</strong> ${orgLabel}<br/>
+              ${subdomain ? `<strong>Subdomain:</strong> ${subdomain}<br/>` : ''}
+            </p>
+            <p style="color:#b45309; background:#fffbeb; border:1px solid #fcd34d; padding:12px; border-radius:6px;">
+              Deleting the organization permanently removes all company data — users, assets, documents, and settings. This cannot be undone.
+            </p>
+            <p>Your verification code:</p>
+            <p style="font-size:32px; letter-spacing:8px; font-weight:700; text-align:center; color:#0E2F4B; margin:24px 0;">
+              ${otp}
+            </p>
+            <p style="color:#6b7280; font-size:14px;">This code expires in <strong>10 minutes</strong>.</p>
+            <p style="color:#6b7280; font-size:14px;">If you did not request this, ignore this email. Your organization will remain unchanged.</p>
+            <hr style="border:none; border-top:1px solid #e5e7eb; margin:24px 0;" />
+            <p style="font-size:12px; color:#9ca3af; margin:0;">— ALM Security Team</p>
+          </div>
+        </div>
+      `,
+            text: `Organization Deletion Verification
+
+We received a request to permanently delete your organization: ${orgLabel}${subdomain ? ` (${subdomain})` : ''}.
+
+Your verification code: ${otp}
+This code expires in 10 minutes.
+
+Deleting the organization permanently removes all data.
+
+If you did not request this, ignore this email.`,
+        });
+
+        console.log('[Mailer] Organization deletion OTP email sent:', info.messageId);
+        return { messageId: info.messageId };
+    } catch (err) {
+        console.error('[Mailer] Error sending organization deletion OTP:', err);
+        // Still log OTP in non-production for local testing when SMTP fails
+        if (process.env.NODE_ENV !== 'production') {
+            console.warn('[Mailer] DEV OTP (email failed):', otp);
+        }
+        throw new Error(`Failed to send verification email: ${err.message}`);
+    }
+};
+
+const sendOrganizationDeletedEmail = async ({ to, organizationName, subdomain }) => {
+    const { user, pass } = getEmailCredentials();
+    if (!user || !pass) {
+        const errorMsg = 'Email configuration missing: EMAIL_USER or EMAIL_PASS not set';
+        console.error(`[Mailer] ${errorMsg}`);
+        throw new Error(errorMsg);
+    }
+
+    const transporter = createMailTransporter();
+    const orgLabel = organizationName || subdomain || 'Your organization';
+    const subdomainLine = subdomain ? `<strong>Subdomain:</strong> ${subdomain}<br/>` : '';
+    const subdomainText = subdomain ? ` (${subdomain})` : '';
+
+    try {
+        const info = await transporter.sendMail({
+            from: `"ALM Account Security" <${user}>`,
+            to,
+            subject: 'Organization Account Deleted',
+            html: `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; color: #1a1a1a;">
+          <div style="background:#0E2F4B; color:#fff; padding:20px 24px; border-radius:8px 8px 0 0;">
+            <h2 style="margin:0; font-size:18px;">Organization Account Deleted</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb; border-top:none; padding:24px; border-radius:0 0 8px 8px;">
+            <p>This email confirms that your organization account has been <strong>permanently deleted</strong>.</p>
+            <p style="margin:16px 0;">
+              <strong>Organization:</strong> ${orgLabel}<br/>
+              ${subdomainLine}
+            </p>
+            <p style="color:#991b1b; background:#fef2f2; border:1px solid #fecaca; padding:12px; border-radius:6px;">
+              All associated data — including users, assets, documents, and settings — has been permanently removed and cannot be restored.
+            </p>
+            <p>If you did not authorize this deletion, contact ALM support immediately.</p>
+            <hr style="border:none; border-top:1px solid #e5e7eb; margin:24px 0;" />
+            <p style="font-size:12px; color:#9ca3af; margin:0;">— ALM Security Team</p>
+          </div>
+        </div>
+      `,
+            text: `Organization Account Deleted
+
+This email confirms that your organization account has been permanently deleted.
+
+Organization: ${orgLabel}${subdomainText}
+
+All associated data — including users, assets, documents, and settings — has been permanently removed and cannot be restored.
+
+If you did not authorize this deletion, contact ALM support immediately.
+
+— ALM Security Team`,
+        });
+
+        console.log('[Mailer] Organization deleted confirmation email sent:', info.messageId);
+        return { messageId: info.messageId };
+    } catch (err) {
+        console.error('[Mailer] Error sending organization deleted confirmation:', err);
+        throw new Error(`Failed to send deletion confirmation email: ${err.message}`);
+    }
+};
+
 const { sendWelcomeEmail, sendRoleAssignmentEmail, sendWorkflowNotificationToRole } = require('../services/emailService');
 
 module.exports = {
     sendResetEmail,
     buildResetLink,
+    sendOrganizationDeletionOtpEmail,
+    sendOrganizationDeletedEmail,
     sendWelcomeEmail,
     sendRoleAssignmentEmail,
     sendWorkflowNotificationToRole,

@@ -1,7 +1,6 @@
 const { Client } = require('pg');
 const bcrypt = require('bcrypt');
-const { registerTenant, deactivateTenant, testTenantConnection: testConnection } = require('./tenantService');
-const { initTenantRegistryPool } = require('./tenantService');
+const { registerTenant, deactivateTenant, testTenantConnection: testConnection, initTenantRegistryPool, ensureTenantsEmailColumn } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
 const {
@@ -184,8 +183,9 @@ async function getTenantRegistryRow(orgId) {
 
 async function getTenantRegistryRowBySubdomain(subdomain) {
   const pool = initTenantRegistryPool();
+  await ensureTenantsEmailColumn(pool).catch(() => {});
   const result = await pool.query(
-    `SELECT org_id, db_name, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
+    `SELECT org_id, db_name, subdomain, is_active, email FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
     [String(subdomain || '').trim().toLowerCase()],
   );
   return result.rows[0] || null;
@@ -234,6 +234,24 @@ async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgNam
   }
 
   const effectiveSubdomain = rowSubdomain || subdomain;
+  const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
+
+  // Backfill tenants.email when missing on an existing registry row
+  if (adminEmail && !row.email) {
+    try {
+      const pool = initTenantRegistryPool();
+      await ensureTenantsEmailColumn(pool);
+      await pool.query(
+        `UPDATE "tenants"
+         SET email = $1, updated_at = CURRENT_TIMESTAMP
+         WHERE org_id = $2 AND (email IS NULL OR TRIM(email) = '')`,
+        [adminEmail, row.org_id],
+      );
+      console.log(`[TenantSetup] Backfilled tenants.email for ${row.org_id}: ${adminEmail}`);
+    } catch (backfillErr) {
+      console.warn(`[TenantSetup] Could not backfill tenants.email: ${backfillErr.message}`);
+    }
+  }
 
   return {
     orgId: orgIdUpper,
@@ -1686,16 +1704,21 @@ async function createTenant(tenantData) {
     await adminClient.query(`CREATE DATABASE "${dbName}"`);
     console.log(`[TenantSetup] Created database: ${dbName}`);
 
-    // Register tenant in tenant table using DATABASE_URL credentials
-    // Note: registerTenant will be updated to accept subdomain
+    // Register tenant in registry (includes admin email on tenants.email for org management)
+    const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
+    if (!adminEmail) {
+      throw new Error('Admin user email is required');
+    }
     await registerTenant(registryOrgId, {
       host: dbConfig.host,
       port: dbConfig.port,
       database: dbName,
       user: dbConfig.user,
       password: dbConfig.password,
-      subdomain: subdomain, // Add subdomain to tenant registration
+      subdomain: subdomain,
+      email: adminEmail,
     });
+    console.log(`[TenantSetup] Registered tenants.email for ${registryOrgId}: ${adminEmail}`);
 
     // Create all tables in the new database using DATABASE_URL credentials
     const tenantClient = new Client(pgClientOpts({
