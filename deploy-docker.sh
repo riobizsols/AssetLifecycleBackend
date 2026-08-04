@@ -34,4 +34,6 @@ export FRONTEND_CONTAINER_NAME="${FRONTEND_CONTAINER_NAME:-alm-pressana-frontend
 export BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-5003}"
 export FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3003}"
 export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-pressana}"
+# Prevent clobbering ~/alm-main compose project (same folder name AssetLifecycleBackend)
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pressana-alm}"
 exec "$DEPLOY"

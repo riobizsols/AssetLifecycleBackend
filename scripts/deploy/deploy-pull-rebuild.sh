@@ -376,7 +376,15 @@ compose_up() {
   local label="$2"
   local cmd
   cmd="$(detect_compose)"
-  log "Compose ($label): cd $dir && $cmd up -d --build"
+  # Isolate stacks that share the same directory basename (AssetLifecycleBackend)
+  if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]]; then
+      export COMPOSE_PROJECT_NAME="pressana-alm"
+    elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-tenant-web" ]]; then
+      export COMPOSE_PROJECT_NAME="tenant-alm"
+    fi
+  fi
+  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build"
   ( cd "$dir" && $cmd up -d --build )
   ( cd "$dir" && $cmd ps -a )
 }
