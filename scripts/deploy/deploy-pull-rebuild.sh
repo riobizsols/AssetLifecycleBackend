@@ -44,10 +44,12 @@ MINIO_PORT_VALUE="${MINIO_PORT_VALUE:-9000}"
 MINIO_USE_SSL_VALUE="${MINIO_USE_SSL_VALUE:-false}"
 MINIO_ACCESS_KEY_VALUE="${MINIO_ACCESS_KEY_VALUE:-minioadmin}"
 MINIO_SECRET_KEY_VALUE="${MINIO_SECRET_KEY_VALUE:-minioadmin123}"
-# Separate buckets: main vs tenant (override with MINIO_BUCKET_VALUE)
+# Separate buckets: main vs tenant vs pressana (override with MINIO_BUCKET_VALUE)
 if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   if [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]]; then
     MINIO_BUCKET_VALUE="alm-tenant"
+  elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]]; then
+    MINIO_BUCKET_VALUE="alm-pressana"
   else
     MINIO_BUCKET_VALUE="alm-main"
   fi

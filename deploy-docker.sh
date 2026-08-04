@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Docker deploy — BACKEND container (alm-main-backend).
-# Pushed with this repo; run on server from ~/alm-main/AssetLifecycleBackend
+# Docker deploy — Pressana BACKEND (alm-pressana-backend :5003).
+# Run on server from ~/pressana-ALM/AssetLifecycleBackend (or this repo path).
 #
-#   ./deploy-docker.sh           # stash, pull backend, rebuild
+#   ./deploy-docker.sh           # backend only
 #   ./deploy-docker.sh --all     # backend + frontend
 #   ./deploy-docker.sh --rebuild # rebuild only (no git pull)
 #
@@ -29,5 +29,9 @@ done
 
 export BACKEND_ONLY="${BACKEND_ONLY:-1}"
 export FRONTEND_ONLY="${FRONTEND_ONLY:-0}"
-export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-main}"
+export BACKEND_CONTAINER_NAME="${BACKEND_CONTAINER_NAME:-alm-pressana-backend}"
+export FRONTEND_CONTAINER_NAME="${FRONTEND_CONTAINER_NAME:-alm-pressana-frontend}"
+export BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-5003}"
+export FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3003}"
+export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-pressana}"
 exec "$DEPLOY"
