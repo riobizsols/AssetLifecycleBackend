@@ -192,6 +192,7 @@ app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
 app.use("/api/job-role-navigation", jobRoleNavigationRoutes);
 app.use("/api/departments", departmentRoutes);
+app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/admin", deptAdminRoutes);
