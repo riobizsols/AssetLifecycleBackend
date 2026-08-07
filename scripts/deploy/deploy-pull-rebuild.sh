@@ -137,6 +137,41 @@ clear_env_merge_conflicts() {
   log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
 }
 
+# Backup server .env files, reset tracked copies so git pull can proceed,
+# then restore the backup after pull (server secrets win over remote template).
+preserve_env_across_pull() {
+  local label="${1:-repo}"
+  local ts
+  ts="$(date -u +%Y%m%d%H%M%S)"
+  ENV_PULL_BACKUP_DIR=""
+
+  if [[ ! -f .env && ! -f .env.production ]]; then
+    return 0
+  fi
+
+  ENV_PULL_BACKUP_DIR=".env-pull-backup.${ts}"
+  mkdir -p "$ENV_PULL_BACKUP_DIR"
+  [[ -f .env ]] && cp -a .env "$ENV_PULL_BACKUP_DIR/.env"
+  [[ -f .env.production ]] && cp -a .env.production "$ENV_PULL_BACKUP_DIR/.env.production"
+  log "[$label] Backed up env files → ${ENV_PULL_BACKUP_DIR}/"
+
+  # Drop local modifications so pull is not blocked (excludes from stash leave these dirty)
+  git checkout HEAD -- .env .env.production 2>/dev/null || true
+}
+
+restore_env_after_pull() {
+  local label="${1:-repo}"
+  [[ -n "${ENV_PULL_BACKUP_DIR:-}" && -d "$ENV_PULL_BACKUP_DIR" ]] || return 0
+
+  log "[$label] Restoring server env files from ${ENV_PULL_BACKUP_DIR}/"
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env" .env
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env.production" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env.production" .env.production
+  # Keep one dated bak alongside; remove temp dir to avoid clutter growth
+  [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.${ENV_PULL_BACKUP_DIR##*.}" 2>/dev/null || true
+  rm -rf "$ENV_PULL_BACKUP_DIR"
+  ENV_PULL_BACKUP_DIR=""
+}
+
 git_pull_with_stash() {
   local dir="$1"
   local label="${2:-$(basename "$dir")}"
@@ -150,9 +185,13 @@ git_pull_with_stash() {
   (
     cd "$dir" || exit 1
     local stashed=0
+    local ENV_PULL_BACKUP_DIR=""
 
     # Stuck mid-merge from a previous failed stash pop blocks all git stash/pull
     clear_env_merge_conflicts "$label"
+
+    # Always preserve server .env* then reset tracked copies before stash/pull
+    preserve_env_across_pull "$label"
 
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
@@ -172,6 +211,8 @@ git_pull_with_stash() {
 
     log "[$label] git pull"
     git pull
+
+    restore_env_after_pull "$label"
 
     if [[ "$stashed" == "1" ]]; then
       log "[$label] git stash pop — restoring local changes..."
