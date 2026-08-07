@@ -1286,6 +1286,37 @@ const updateMaintenanceSchedule = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Status is required' });
         }
 
+        // Notes (maint_notes) required only when actual hours exceed the maintenance time limit
+        if (context === 'SUPERVISORAPPROVAL' && updateData.hours_spent != null && updateData.hours_spent !== '') {
+            const hoursSpent = parseFloat(updateData.hours_spent);
+            if (!Number.isNaN(hoursSpent)) {
+                const existing = await model.getMaintenanceScheduleById(
+                    id,
+                    orgId,
+                    req.user?.branch_id,
+                    req.user?.hasSuperAccess || false
+                );
+                const hoursRequired = parseFloat(existing.rows[0]?.hours_required || 0);
+                if (hoursRequired > 0 && hoursSpent > hoursRequired) {
+                    const delayNotes = updateData.maint_notes != null ? String(updateData.maint_notes).trim() : '';
+                    if (!delayNotes) {
+                        if (context === 'SUPERVISORAPPROVAL') {
+                            supervisorApprovalLogger.logMissingRequiredFields({
+                                operation: 'Update Supervisor Maintenance',
+                                missingFields: ['maint_notes'],
+                                userId,
+                                duration: Date.now() - startTime
+                            }).catch(err => console.error('Logging error:', err));
+                        }
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Notes are required when actual hours spent exceed the time limit'
+                        });
+                    }
+                }
+            }
+        }
+
         const result = await model.updateMaintenanceSchedule(id, { ...updateData, changed_by: changedBy, changed_on: changedOn }, orgId);
 
         if (result.rows.length === 0) {

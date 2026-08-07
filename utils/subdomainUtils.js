@@ -8,7 +8,7 @@ const db = require('../config/db');
 const { initTenantRegistryPool } = require('../services/tenantService');
 const logger = require('./logger');
 
-const RESERVED_SUBDOMAINS = (process.env.RESERVED_SUBDOMAINS || 'web,www,api')
+const RESERVED_SUBDOMAINS = (process.env.RESERVED_SUBDOMAINS || 'web,www,api,pressanaorg')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
@@ -52,7 +52,7 @@ function isReservedSubdomain(subdomain) {
 }
 
 /**
- * Subdomain for tenant routing — ignores reserved hosts like web/www/api.
+ * Subdomain for tenant routing — ignores reserved hosts like web/www/api/pressanaorg.
  */
 function extractTenantSubdomain(hostname) {
   const subdomain = extractSubdomain(hostname);
