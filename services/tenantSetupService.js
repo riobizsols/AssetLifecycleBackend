@@ -255,6 +255,7 @@ async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgNam
 
   return {
     orgId: orgIdUpper,
+    orgCode: orgIdUpper,
     orgName,
     orgCity,
     subdomain: effectiveSubdomain,
@@ -1622,6 +1623,7 @@ async function createTenant(tenantData) {
   const {
     orgId,
     orgName,
+    orgCode: orgCodeInput,
     subdomain: subdomainInput,
     orgCity,
     adminUser,
@@ -1644,15 +1646,16 @@ async function createTenant(tenantData) {
   const subdomain = validateSubdomain(subdomainInput);
   const registryOrgId = deriveRegistryOrgId(subdomain);
 
-  const orgIdUpper = orgId.toUpperCase().trim();
-  if (orgIdUpper.length > 10) {
+  // User-facing org code (e.g. PRESSANA). Internal tblOrgs.org_id is always ORG###.
+  const orgCodeUpper = (orgCodeInput || orgId).toUpperCase().trim();
+  if (orgCodeUpper.length > 10) {
     throw new Error('Organization ID must be 10 characters or less.');
   }
 
   const subdomainExists = await checkSubdomainExists(subdomain);
   if (subdomainExists) {
     const existingTenant = await tryResolveExistingTenant(
-      orgIdUpper,
+      orgCodeUpper,
       subdomain,
       adminUser,
       orgName,
@@ -1666,8 +1669,8 @@ async function createTenant(tenantData) {
 
   console.log(`[TenantSetup] Using user-specified subdomain: ${subdomain}`);
 
-  // Generate unique database name
-  const dbName = await generateUniqueDatabaseName(orgIdUpper, subdomain);
+  // Generate unique database name from org code (not internal ORG###)
+  const dbName = await generateUniqueDatabaseName(orgCodeUpper, subdomain);
 
   // CRITICAL: Use TENANT_DATABASE_URL for all tenant database operations
   // This ensures we never accidentally use the default DATABASE_URL
@@ -2017,12 +2020,22 @@ async function createTenant(tenantData) {
         // This is not critical, continue
       }
 
-      // Step 1: Create organization record in tblOrgs using the user-specified org_id
+      // Step 1: Seed ID sequences, then generate canonical org_id (ORG###)
       await tenantClient.query('SET search_path TO public');
-      console.log(`[TenantSetup] Using user-specified org_id across tenant database: ${orgIdUpper}`);
-      
-      // Create organization record in tblOrgs with user-specified org_id and subdomain
-      // Check if subdomain column exists before inserting
+      console.log(`[TenantSetup] Seeding default ID sequences...`);
+      await seedDefaultIdSequences(tenantClient);
+
+      const internalOrgId = await generateCustomIdForClient(tenantClient, 'org');
+      if (!/^ORG\d{3}$/.test(internalOrgId)) {
+        throw new Error(
+          `Generated org_id "${internalOrgId}" does not match expected format ORG###`,
+        );
+      }
+      console.log(
+        `[TenantSetup] Using internal org_id=${internalOrgId}, org_code=${orgCodeUpper} across tenant database`,
+      );
+
+      // Step 2: Create organization record — org_id is ORG###, org_code is user-facing code
       const subdomainColumnCheck = await tenantClient.query(`
         SELECT EXISTS (
           SELECT 1 FROM information_schema.columns 
@@ -2043,7 +2056,7 @@ async function createTenant(tenantData) {
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city,
               subdomain = EXCLUDED.subdomain
-        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '', subdomain]);
+        `, [internalOrgId, orgName, orgCodeUpper, orgCity || '', subdomain]);
       } else {
         await tenantClient.query(`
           INSERT INTO public."tblOrgs" (org_id, text, org_code, org_city, int_status)
@@ -2052,20 +2065,20 @@ async function createTenant(tenantData) {
           SET text = EXCLUDED.text,
               org_code = EXCLUDED.org_code,
               org_city = EXCLUDED.org_city
-        `, [orgIdUpper, orgName, orgIdUpper, orgCity || '']);
+        `, [internalOrgId, orgName, orgCodeUpper, orgCity || '']);
       }
-      console.log(`[TenantSetup] Organization record created in tblOrgs: ${orgIdUpper} with subdomain: ${subdomain}`);
+      console.log(
+        `[TenantSetup] Organization record created in tblOrgs: ${internalOrgId} (code: ${orgCodeUpper}) with subdomain: ${subdomain}`,
+      );
 
-      // Step 2: Seed ID sequences, then ensure branch and department exist
-      console.log(`[TenantSetup] Seeding default ID sequences...`);
-      await seedDefaultIdSequences(tenantClient);
+      // Step 3: Ensure branch and department exist (tagged with internal org_id)
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
       const plannedAdminUserId = (adminUser.username || 'USR001').toUpperCase();
-      await ensureBranchAndDepartment(tenantClient, orgIdUpper, plannedAdminUserId, orgCity);
+      await ensureBranchAndDepartment(tenantClient, internalOrgId, plannedAdminUserId, orgCity);
       
-      // Step 3: Create admin user and add to tblUsers in the created database
+      // Step 4: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
-      const adminCredentials = await createAdminUser(tenantClient, orgIdUpper, adminUser, {
+      const adminCredentials = await createAdminUser(tenantClient, internalOrgId, adminUser, {
         registryOrgId,
         subdomain,
       });
@@ -2087,16 +2100,16 @@ async function createTenant(tenantData) {
         console.warn('[TenantSetup] Failed to send welcome email to admin user:', emailErr.message);
       }
 
-      // Step 4: Seed default data (ID sequences, job roles, navigation, asset types, etc.)
+      // Step 5: Seed default data (maint types, job roles, navigation, etc.) with ORG###
       console.log(`[TenantSetup] Seeding default tenant data...`);
-      await seedTenantDefaultData(tenantClient, orgIdUpper, adminCredentials.userId, adminCredentials.employeeId);
+      await seedTenantDefaultData(tenantClient, internalOrgId, adminCredentials.userId, adminCredentials.employeeId);
       
       // Apply foreign key constraints after all data has been seeded
       if (tenantClient._foreignKeysSql && tenantClient._foreignKeysSql.length > 0) {
         console.log('[TenantSetup] 🔗 Finalizing foreign key constraints (org_id remap + apply)...');
         await finalizeTenantForeignKeys(
           tenantClient,
-          orgIdUpper,
+          internalOrgId,
           tenantClient._foreignKeysSql,
           {
             expectedCount: tenantClient._foreignKeysValidCount || 0,
@@ -2133,7 +2146,9 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
 
       return {
-        orgId: orgIdUpper,
+        orgId: orgCodeUpper,
+        generatedOrgId: internalOrgId,
+        orgCode: orgCodeUpper,
         orgName,
         orgCity,
         subdomain,
