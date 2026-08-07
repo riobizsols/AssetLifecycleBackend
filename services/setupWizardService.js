@@ -27,6 +27,7 @@ const {
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
 const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
+const { generateCustomIdForClient } = require("../utils/idGenerator");
 
 const DUMP_FILE_PATH = path.join(
   __dirname,
@@ -1054,7 +1055,8 @@ const withClient = async (dbConfig, handler) => {
 
 const normalizeOrg = (org = {}) => ({
   name: (org.name || "Primary Organization").trim(),
-  code: (org.code || "ORG001").trim().toUpperCase(),
+  // Business/org code only — never used as tblOrgs.org_id (that is always ORG###).
+  code: (org.code || "").trim().toUpperCase(),
   city: (org.city || "Head Office").trim(),
   address: (org.address || "").trim(),
   gstNumber: (org.gstNumber || "").trim().toUpperCase(),
@@ -1951,9 +1953,23 @@ const runSetup = async (payload = {}) => {
       
       logs.push({ message: "Core tables verified", scope: "schema" });
 
-      const orgId = org.code.slice(0, 10);
+      // Seed ID sequences first so we can generate canonical org_id (ORG###).
+      // Never use org.code as org_id — that caused maint types / other seeds to
+      // be tagged with the business code (e.g. PRESSANA) while APIs filter by ORG001.
+      await seedIdSequences(client);
+      const orgId = await generateCustomIdForClient(client, "org");
+      if (!/^ORG\d{3}$/.test(orgId)) {
+        throw new Error(
+          `Generated org_id "${orgId}" does not match expected format ORG###`,
+        );
+      }
+      const orgCode = (org.code || "").trim().toUpperCase().slice(0, 50) || orgId;
+      logs.push({
+        message: `Using internal org_id=${orgId}, org_code=${orgCode}`,
+        scope: "org",
+      });
 
-      await upsertOrganization(client, orgId, org, logs);
+      await upsertOrganization(client, orgId, { ...org, code: orgCode }, logs);
       await seedReferenceTables(client, orgId, logs);
       await seedJobRolesAndNavigation(client, orgId, logs);
 
@@ -2094,6 +2110,8 @@ const runSetup = async (payload = {}) => {
       const setupResult = {
         success: true,
         orgId,
+        orgCode,
+        generatedOrgId: orgId,
         summary: {
           auditRules: auditCount,
           branches: structureMappings.branchMappings.length,
