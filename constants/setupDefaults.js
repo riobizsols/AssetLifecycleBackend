@@ -427,6 +427,8 @@ const DEFAULT_APPS = [
   { id: "BRANCHES", label: "Branches" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
+  { id: "SPAREPARTS", label: "Spare Parts" },
+  { id: "SPAREPARTSCONFIG", label: "Spare Parts Configuration" },
   { id: "USERS", label: "Users" },
   { id: "AUDITLOGS", label: "Audit Logs" },
   { id: "AUDITLOGCONFIG", label: "Audit Log Config" },
@@ -524,7 +526,11 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "vendor", prefix: "V", lastNumber: 0 },
   { tableKey: "vendor_prod_serv", prefix: "VPS", lastNumber: 0 },
   { tableKey: "org", prefix: "ORG", lastNumber: 0 },
-  { tableKey: "aplv", prefix: "APLV", lastNumber: 0 }
+  { tableKey: "aplv", prefix: "APLV", lastNumber: 0 },
+  { tableKey: "sp_category", prefix: "SPC", lastNumber: 0 },
+  { tableKey: "sp_lot_det", prefix: "SPLD", lastNumber: 0 },
+  { tableKey: "sp_ind_det", prefix: "SPID", lastNumber: 0 },
+  { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -678,12 +684,32 @@ const DEFAULT_JOB_ROLE_NAV = [
     isGroup: false
   },
   {
+    id: "JRN014B",
+    jobRoleId: "JR001",
+    parentId: "JRN007",
+    appId: "SPAREPARTS",
+    label: "Spare Parts",
+    sequence: 8,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
+    id: "JRN014C",
+    jobRoleId: "JR001",
+    parentId: "JRN007",
+    appId: "SPAREPARTSCONFIG",
+    label: "Spare Parts Configuration",
+    sequence: 9,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
     id: "JRN015",
     jobRoleId: "JR001",
     parentId: "JRN007",
     appId: "USERS",
     label: "Users",
-    sequence: 8,
+    sequence: 10,
     accessLevel: "A",
     isGroup: false
   },
