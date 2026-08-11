@@ -75,6 +75,8 @@ const defaultPrefixes = {
     'sp_lot_det': 'SPLD',
     'sp_ind_det': 'SPID',
     'sp_cat_at_map': 'SPCATM',
+    'vsp_map': 'VSPM',
+    'spare_history': 'SPH',
 };
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
@@ -219,6 +221,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'sp_lot_det': 'tblSPLotDet',
         'sp_ind_det': 'tblSPIndDet',
         'sp_cat_at_map': 'tblSPCatATMap',
+        'vsp_map': 'tblVSPMap',
+        'spare_history': 'tblSpareHistory',
     };
 
     const targetTable = tableMap[tableKey];
@@ -276,6 +280,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
               'sp_lot_det': 'spld_id',
               'sp_ind_det': 'spid_id',
               'sp_cat_at_map': 'spcatm_id',
+              'vsp_map': 'vspm_id',
+              'spare_history': 'sph_id',
         };
 
         const columnName = columnMap[tableKey];

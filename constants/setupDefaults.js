@@ -530,7 +530,9 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "sp_category", prefix: "SPC", lastNumber: 0 },
   { tableKey: "sp_lot_det", prefix: "SPLD", lastNumber: 0 },
   { tableKey: "sp_ind_det", prefix: "SPID", lastNumber: 0 },
-  { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 }
+  { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 },
+  { tableKey: "vsp_map", prefix: "VSPM", lastNumber: 0 },
+  { tableKey: "spare_history", prefix: "SPH", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
