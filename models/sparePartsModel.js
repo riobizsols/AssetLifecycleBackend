@@ -34,6 +34,72 @@ const buildSpareSerialNumber = (spcId, sequence) => {
 };
 
 /**
+ * Extract trailing 5-digit running number from a serial (asset-style).
+ * Returns null if the value is not a 11-digit numeric serial.
+ */
+const extractSequenceFromSerial = (serialNumber) => {
+  const s = String(serialNumber || '').trim();
+  if (!/^\d{11}$/.test(s)) return null;
+  const seq = parseInt(s.slice(-5), 10);
+  return Number.isFinite(seq) ? seq : null;
+};
+
+/**
+ * Atomically reserve the next N sequences on tblSPCategory.last_gen_seq_no
+ * (same technique as tblAssetTypes for assets). Counter only increases —
+ * deleting a tblSPIndDet row never frees a sequence, so serials are never reused.
+ */
+const allocateAutoSerialNumbers = async (client, { spc_id, org_id, count }) => {
+  const serials = [];
+  for (let i = 0; i < count; i += 1) {
+    const seqResult = await client.query(
+      `
+        UPDATE "tblSPCategory"
+        SET last_gen_seq_no = COALESCE(last_gen_seq_no, 0) + 1,
+            changed_on = CURRENT_TIMESTAMP
+        WHERE spc_id = $1
+          AND org_id = $2
+        RETURNING last_gen_seq_no
+      `,
+      [spc_id, org_id]
+    );
+    if (!seqResult.rows.length) {
+      const err = new Error('Failed to allocate spare part serial sequence');
+      err.statusCode = 500;
+      throw err;
+    }
+    const nextSequence = parseInt(seqResult.rows[0].last_gen_seq_no, 10);
+    serials.push(buildSpareSerialNumber(spc_id, nextSequence));
+  }
+  return serials;
+};
+
+/**
+ * If manual serials look like our generated format, advance last_gen_seq_no
+ * to at least the highest sequence used (same idea as asset create).
+ * Never decreases the counter.
+ */
+const bumpSeqFromManualSerials = async (client, { spc_id, org_id, serials }) => {
+  let maxSeq = 0;
+  for (const serial of serials) {
+    const seq = extractSequenceFromSerial(serial);
+    if (seq != null && seq > maxSeq) maxSeq = seq;
+  }
+  if (maxSeq <= 0) return;
+
+  await client.query(
+    `
+      UPDATE "tblSPCategory"
+      SET last_gen_seq_no = GREATEST(COALESCE(last_gen_seq_no, 0), $1),
+          changed_on = CURRENT_TIMESTAMP
+      WHERE spc_id = $2
+        AND org_id = $3
+    `,
+    [maxSeq, spc_id, org_id]
+  );
+};
+
+/**
  * Spare-part categories for an org (tblSPCategory).
  * @param {boolean} activeOnly - when true, only int_status = 1
  */
@@ -393,44 +459,38 @@ const createSparePartLot = async ({
         throw err;
       }
 
+      // Org-wide uniqueness (same idea as asset serial check)
       const existing = await client.query(
         `
           SELECT serial_number
           FROM "tblSPIndDet"
           WHERE org_id = $1
-            AND spc_id = $2
             AND serial_number IS NOT NULL
-            AND LOWER(serial_number) = ANY($3::text[])
+            AND BTRIM(serial_number) <> ''
+            AND LOWER(serial_number) = ANY($2::text[])
         `,
-        [org_id, spc_id, resolvedSerials.map((s) => s.toLowerCase())]
+        [org_id, resolvedSerials.map((s) => s.toLowerCase())]
       );
       if (existing.rows.length) {
         const dupes = existing.rows.map((r) => r.serial_number).join(', ');
-        const err = new Error(`Serial number(s) already exist for this category: ${dupes}`);
+        const err = new Error(`Serial number(s) already exist: ${dupes}`);
         err.statusCode = 400;
         throw err;
       }
+
+      // Advance category counter so future auto-serials stay continuous / unique
+      await bumpSeqFromManualSerials(client, {
+        spc_id,
+        org_id,
+        serials: resolvedSerials,
+      });
     } else {
-      // Auto-generate unique sequential serials (asset creation format)
-      for (let i = 0; i < unitCount; i += 1) {
-        const seqResult = await client.query(
-          `
-            UPDATE "tblSPCategory"
-            SET last_gen_seq_no = COALESCE(last_gen_seq_no, 0) + 1,
-                changed_on = CURRENT_TIMESTAMP
-            WHERE spc_id = $1 AND org_id = $2
-            RETURNING last_gen_seq_no
-          `,
-          [spc_id, org_id]
-        );
-        if (!seqResult.rows.length) {
-          const err = new Error('Failed to allocate spare part serial sequence');
-          err.statusCode = 500;
-          throw err;
-        }
-        const nextSequence = parseInt(seqResult.rows[0].last_gen_seq_no, 10);
-        resolvedSerials.push(buildSpareSerialNumber(spc_id, nextSequence));
-      }
+      // Auto-generate: increment last_gen_seq_no per unit (never reused after delete)
+      resolvedSerials = await allocateAutoSerialNumbers(client, {
+        spc_id,
+        org_id,
+        count: unitCount,
+      });
     }
 
     const spld_id = await generateCustomIdForClient(client, 'sp_lot_det', 3);
@@ -567,4 +627,5 @@ module.exports = {
   getIndividualsByLotId,
   convertSpcToSerialFormat,
   buildSpareSerialNumber,
+  extractSequenceFromSerial,
 };
