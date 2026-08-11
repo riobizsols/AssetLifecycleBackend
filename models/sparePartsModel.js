@@ -4,6 +4,36 @@ const { generateCustomIdForClient } = require('../utils/idGenerator');
 const getDb = () => getDbFromContext();
 
 /**
+ * Convert spare category ID to serial prefix (same idea as asset types).
+ * SPC001 -> 01, SPC012 -> 12, SPC101 -> 01 (last 2 digits).
+ * Format: [CategoryCode 2][ReversedYear 2][Month 2][Running 5]
+ */
+const convertSpcToSerialFormat = (spcId) => {
+  const id = String(spcId || '');
+  if (id.toUpperCase().startsWith('SPC')) {
+    const numericPart = id.replace(/^SPC/i, '');
+    const n = parseInt(numericPart, 10);
+    if (Number.isFinite(n)) {
+      return String(n % 100).padStart(2, '0');
+    }
+  }
+  const digits = id.replace(/\D/g, '');
+  if (digits) {
+    return String(parseInt(digits, 10) % 100).padStart(2, '0');
+  }
+  return '00';
+};
+
+const buildSpareSerialNumber = (spcId, sequence) => {
+  const now = new Date();
+  const year = now.getFullYear().toString().slice(-2);
+  const reversedYear = year.split('').reverse().join('');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const prefix = convertSpcToSerialFormat(spcId);
+  return `${prefix}${reversedYear}${month}${String(sequence).padStart(5, '0')}`;
+};
+
+/**
  * Spare-part categories for an org (tblSPCategory).
  * @param {boolean} activeOnly - when true, only int_status = 1
  */
@@ -335,11 +365,14 @@ const createSparePartLot = async ({
     }
 
     const unitCount = Math.floor(qty);
-    if (has_serial_number && unitCount !== qty) {
-      const err = new Error('Quantity must be a whole number when serial numbers are enabled');
+    // Each quantity unit gets one serial (manual or auto-generated)
+    if (unitCount !== qty) {
+      const err = new Error('Quantity must be a whole number so each unit can have a serial number');
       err.statusCode = 400;
       throw err;
     }
+
+    let resolvedSerials = [];
 
     if (has_serial_number) {
       if (!Array.isArray(serial_numbers) || serial_numbers.length !== unitCount) {
@@ -347,17 +380,56 @@ const createSparePartLot = async ({
         err.statusCode = 400;
         throw err;
       }
-      const cleaned = serial_numbers.map((s) => String(s || '').trim());
-      if (cleaned.some((s) => !s)) {
+      resolvedSerials = serial_numbers.map((s) => String(s || '').trim());
+      if (resolvedSerials.some((s) => !s)) {
         const err = new Error('All serial numbers are required');
         err.statusCode = 400;
         throw err;
       }
-      const unique = new Set(cleaned.map((s) => s.toLowerCase()));
-      if (unique.size !== cleaned.length) {
+      const unique = new Set(resolvedSerials.map((s) => s.toLowerCase()));
+      if (unique.size !== resolvedSerials.length) {
         const err = new Error('Serial numbers must be unique');
         err.statusCode = 400;
         throw err;
+      }
+
+      const existing = await client.query(
+        `
+          SELECT serial_number
+          FROM "tblSPIndDet"
+          WHERE org_id = $1
+            AND spc_id = $2
+            AND serial_number IS NOT NULL
+            AND LOWER(serial_number) = ANY($3::text[])
+        `,
+        [org_id, spc_id, resolvedSerials.map((s) => s.toLowerCase())]
+      );
+      if (existing.rows.length) {
+        const dupes = existing.rows.map((r) => r.serial_number).join(', ');
+        const err = new Error(`Serial number(s) already exist for this category: ${dupes}`);
+        err.statusCode = 400;
+        throw err;
+      }
+    } else {
+      // Auto-generate unique sequential serials (asset creation format)
+      for (let i = 0; i < unitCount; i += 1) {
+        const seqResult = await client.query(
+          `
+            UPDATE "tblSPCategory"
+            SET last_gen_seq_no = COALESCE(last_gen_seq_no, 0) + 1,
+                changed_on = CURRENT_TIMESTAMP
+            WHERE spc_id = $1 AND org_id = $2
+            RETURNING last_gen_seq_no
+          `,
+          [spc_id, org_id]
+        );
+        if (!seqResult.rows.length) {
+          const err = new Error('Failed to allocate spare part serial sequence');
+          err.statusCode = 500;
+          throw err;
+        }
+        const nextSequence = parseInt(seqResult.rows[0].last_gen_seq_no, 10);
+        resolvedSerials.push(buildSpareSerialNumber(spc_id, nextSequence));
       }
     }
 
@@ -402,13 +474,10 @@ const createSparePartLot = async ({
     );
 
     const individuals = [];
-    const rowsToCreate = has_serial_number ? unitCount : unitCount;
 
-    for (let i = 0; i < rowsToCreate; i += 1) {
+    for (let i = 0; i < unitCount; i += 1) {
       const spid_id = await generateCustomIdForClient(client, 'sp_ind_det', 3);
-      const serial_number = has_serial_number
-        ? String(serial_numbers[i]).trim()
-        : null;
+      const serial_number = resolvedSerials[i];
 
       const indResult = await client.query(
         `
@@ -448,6 +517,7 @@ const createSparePartLot = async ({
     return {
       lot: lotResult.rows[0],
       individuals,
+      serials_auto_generated: !has_serial_number,
     };
   } catch (error) {
     try {
@@ -495,4 +565,6 @@ module.exports = {
   createCategoryMapping,
   createSparePartLot,
   getIndividualsByLotId,
+  convertSpcToSerialFormat,
+  buildSpareSerialNumber,
 };
