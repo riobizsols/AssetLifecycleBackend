@@ -1,0 +1,25 @@
+# Shared Redis for ALM stacks (run once per server, or when alm_redis is missing).
+#
+# First-time / recovery:
+#   docker compose -f docker-compose.redis.yml up -d
+#
+# Backend deploy uses docker-compose.yml only and connects to hostname alm_redis
+# on network alm-shared (see REDIS_URL in .env.production).
+
+services:
+  alm-redis:
+    image: redis:7-alpine
+    container_name: alm_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks:
+      - alm-shared
+
+volumes:
+  redis-data:
+
+networks:
+  alm-shared:
+    external: true

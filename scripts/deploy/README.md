@@ -47,9 +47,22 @@ cd ~/alm-main/AssetLifecycleBackend
 1. Stash local changes (if any) — keeps `.env.production` safe
 2. `git pull`
 3. `stash pop`
-4. Remove old container (docker-compose 1.29 workaround)
-5. `docker compose up -d --build`
-6. HTTP health check
+4. Ensure shared network `alm-shared` and reuse/create `alm_redis` (Redis is **not** recreated on every backend deploy)
+5. Remove old backend/frontend containers by name (Compose v1 + v2 safe)
+6. `docker compose up -d --build --force-recreate` for the target service only
+7. HTTP health check
+
+## Redis (one-time per server)
+
+Redis runs as a **shared** container `alm_redis` on network `alm-shared`. Backend connects via `REDIS_URL=redis://alm_redis:6379/0`.
+
+If `alm_redis` is missing:
+
+```bash
+cd ~/alm-main/AssetLifecycleBackend
+docker network create alm-shared 2>/dev/null || true
+docker compose -f docker-compose.redis.yml up -d
+```
 
 ## Env overrides
 

@@ -53,6 +53,8 @@ if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   fi
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
+REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
+REDIS_COMPOSE_FILE="${REDIS_COMPOSE_FILE:-docker-compose.redis.yml}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -93,6 +95,18 @@ compose_v1_remove_container_if_exists() {
     log "Removing container ${id} (name filter: ${cname}; avoids docker-compose 1.29.x recreate bug)..."
     docker rm -f "$id" || true
   done < <(docker ps -aq --filter "name=${cname}" 2>/dev/null)
+}
+
+# Compose v2 does not hit the 1.29 recreate bug, but fixed container_name values
+# (alm-main-backend / alm-main-frontend) still conflict with containers left
+# from an older compose project (e.g. assetlifecyclebackend). Always remove
+# by exact name before force-recreate.
+remove_named_container_if_exists() {
+  local cname="$1"
+  if docker inspect "$cname" >/dev/null 2>&1; then
+    log "Removing existing container ${cname} before recreate..."
+    docker rm -f "$cname" || true
+  fi
 }
 
 repo_has_local_changes() {
@@ -283,6 +297,26 @@ ensure_alm_shared_network() {
   fi
 }
 
+# Shared Redis (alm_redis) is managed separately from backend deploy to avoid
+# container name conflicts when an older compose project already created it.
+ensure_redis() {
+  if ! docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+    log "Redis container ${REDIS_CONTAINER} not found — creating from ${REDIS_COMPOSE_FILE}..."
+    ensure_alm_shared_network
+    local cmd
+    cmd="$(detect_compose)"
+    ( cd "$BACKEND_DIR" && $cmd -f "$REDIS_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$REDIS_CONTAINER"; then
+    log "Starting stopped Redis container ${REDIS_CONTAINER}..."
+    docker start "$REDIS_CONTAINER"
+  else
+    log "Redis ${REDIS_CONTAINER} already running — reusing existing container"
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$REDIS_CONTAINER" 2>/dev/null \
+    || log "Note: ${REDIS_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+}
+
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
 # Prevents git pull/stash from restoring the dead 103.27.234.248 / wrong keys.
 ensure_minio_env_files() {
@@ -413,10 +447,16 @@ ensure_minio_bucket() {
 compose_up() {
   local dir="$1"
   local label="$2"
+  local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
-  log "Compose ($label): cd $dir && $cmd up -d --build"
-  ( cd "$dir" && $cmd up -d --build )
+  if [[ -n "$service" ]]; then
+    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
+    ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
+  else
+    log "Compose ($label): cd $dir && $cmd up -d --build"
+    ( cd "$dir" && $cmd up -d --build )
+  fi
   ( cd "$dir" && $cmd ps -a )
 }
 
@@ -437,8 +477,10 @@ main() {
     git_pull_with_stash "$BACKEND_DIR" "backend"
     ensure_minio_env_files "$BACKEND_DIR"
     ensure_alm_shared_network
+    ensure_redis
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
-    compose_up "$BACKEND_DIR" "backend"
+    remove_named_container_if_exists "$BACKEND_CONTAINER_NAME"
+    compose_up "$BACKEND_DIR" "backend" "alm-backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
     ensure_minio_network "$BACKEND_CONTAINER_NAME"
     ensure_minio_bucket "$BACKEND_CONTAINER_NAME"
@@ -448,7 +490,8 @@ main() {
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
     compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-    compose_up "$FRONTEND_DIR" "frontend"
+    remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
+    compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
     verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
   fi
 
