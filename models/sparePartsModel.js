@@ -1,7 +1,913 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
+const fcmService = require('../services/fcmService');
 
 const getDb = () => getDbFromContext();
+
+const SPARE_ISSUE_STATUS = {
+  REQUESTED: 'RQ',
+  ISSUED: 'IS',
+};
+
+const parseIssueRemarks = (remarks) => {
+  if (!remarks) return {};
+  try {
+    const parsed = JSON.parse(remarks);
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+};
+
+const buildIssueRemarks = ({ spc_id, note = null }) =>
+  JSON.stringify({ spc_id, ...(note ? { note } : {}) });
+
+const resolveIssueSpcId = (row) => {
+  if (!row) return null;
+  const fromRemarks = parseIssueRemarks(row.remarks).spc_id;
+  if (fromRemarks) return fromRemarks;
+  return row.spc_id || null;
+};
+
+const ensureDefaultSpareStore = async (client, { org_id, branch_id, created_by }) => {
+  const existing = await client.query(
+    `
+      SELECT ss_id FROM "tblSpareStore"
+      WHERE org_id = $1
+      ORDER BY created_on ASC NULLS LAST, ss_id ASC
+      LIMIT 1
+    `,
+    [org_id]
+  );
+  if (existing.rows.length) return existing.rows[0].ss_id;
+
+  const ss_id = await generateCustomIdForClient(client, 'sp_store', 3);
+  await client.query(
+    `
+      INSERT INTO "tblSpareStore" (
+        ss_id, store_code, store_name, contact, store_location,
+        org_id, branch_id, created_by, created_on, changed_by, changed_on
+      ) VALUES (
+        $1, 'DEFAULT', 'Default Spare Store', NULL, NULL,
+        $2, $3, $4, CURRENT_TIMESTAMP, $4, CURRENT_TIMESTAMP
+      )
+    `,
+    [ss_id, org_id, branch_id || null, created_by || null]
+  );
+  return ss_id;
+};
+
+const getAvailableQuantity = async (spc_id, org_id) => {
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `
+      SELECT COUNT(*)::int AS available_qty
+      FROM "tblSPIndDet"
+      WHERE org_id = $1
+        AND spc_id = $2
+        AND COALESCE(is_used, 0) = 0
+    `,
+    [org_id, spc_id]
+  );
+  return result.rows[0]?.available_qty || 0;
+};
+
+const getCategoryMappingsByAssetType = async (
+  org_id,
+  asset_type_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [org_id, asset_type_id];
+  let query = `
+    SELECT DISTINCT
+      m.spc_id,
+      c.text AS category_name,
+      c.uom,
+      m.brand,
+      m.model,
+      m.asset_type_id
+    FROM "tblSPCatATMap" m
+    INNER JOIN "tblSPCategory" c ON c.spc_id = m.spc_id AND c.org_id = m.org_id
+    WHERE m.org_id = $1
+      AND m.asset_type_id = $2
+      AND m.int_status = 1
+      AND c.int_status = 1
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND (m.branch_id IS NULL OR m.branch_id = $${params.length})`;
+  }
+  query += ` ORDER BY c.text ASC, m.brand ASC, m.model ASC`;
+  const result = await dbPool.query(query, params);
+  return result.rows;
+};
+
+const getSparePartMaintenanceList = async (
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [org_id];
+  let query = `
+    SELECT
+      ams.ams_id,
+      ams.asset_id,
+      ams.maint_type_id,
+      ams.vendor_id,
+      ams.status AS maintenance_status,
+      a.asset_type_id,
+      a.serial_number,
+      a.description AS asset_description,
+      at.text AS asset_type_name,
+      mt.text AS maintenance_type_name,
+      v.vendor_name,
+      (
+        SELECT si.status
+        FROM "tblSpareIssue" si
+        WHERE si.assetmaintsch_id = ams.ams_id
+          AND si.org_id = ams.org_id
+        ORDER BY
+          CASE si.status WHEN 'IS' THEN 1 WHEN 'RQ' THEN 2 ELSE 3 END,
+          si.created_on DESC NULLS LAST
+        LIMIT 1
+      ) AS spare_status
+    FROM "tblAssetMaintSch" ams
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+    WHERE ams.org_id = $1
+      AND a.org_id = $1
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND a.branch_id = $${params.length}`;
+  }
+  query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
+  const result = await dbPool.query(query, params);
+  return result.rows;
+};
+
+const getSparePartMaintenanceDetail = async (
+  ams_id,
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [ams_id, org_id];
+  let query = `
+    SELECT
+      ams.*,
+      a.asset_type_id,
+      a.serial_number,
+      a.description AS asset_description,
+      at.text AS asset_type_name,
+      mt.text AS maintenance_type_name,
+      v.vendor_name,
+      (
+        SELECT si.status
+        FROM "tblSpareIssue" si
+        WHERE si.assetmaintsch_id = ams.ams_id
+          AND si.org_id = ams.org_id
+        ORDER BY
+          CASE si.status WHEN 'IS' THEN 1 WHEN 'RQ' THEN 2 ELSE 3 END,
+          si.created_on DESC NULLS LAST
+        LIMIT 1
+      ) AS spare_status
+    FROM "tblAssetMaintSch" ams
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+    WHERE ams.ams_id = $1
+      AND ams.org_id = $2
+      AND a.org_id = $2
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND a.branch_id = $${params.length}`;
+  }
+  const result = await dbPool.query(query, params);
+  return result.rows[0] || null;
+};
+
+const createSpareIssueRequests = async ({
+  org_id,
+  branch_id,
+  assetmaintsch_id,
+  items,
+  created_by,
+}) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    if (!assetmaintsch_id) {
+      const err = new Error('Maintenance schedule is required');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      const err = new Error('Select at least one spare part category');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const maint = await client.query(
+      `
+        SELECT ams.ams_id, ams.org_id, ams.vendor_id, a.asset_type_id, a.branch_id
+        FROM "tblAssetMaintSch" ams
+        INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        WHERE ams.ams_id = $1
+          AND ams.org_id = $2
+      `,
+      [assetmaintsch_id, org_id]
+    );
+    if (!maint.rows.length) {
+      const err = new Error('Maintenance schedule not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const { asset_type_id } = maint.rows[0];
+    const ss_id = await ensureDefaultSpareStore(client, {
+      org_id,
+      branch_id: branch_id || maint.rows[0].branch_id,
+      created_by,
+    });
+
+    const created = [];
+
+    for (const item of items) {
+      const spc_id = item?.spc_id;
+      const qty = Number(item?.quantity);
+      if (!spc_id) {
+        const err = new Error('Category is required for each item');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (!Number.isFinite(qty) || qty <= 0 || Math.floor(qty) !== qty) {
+        const err = new Error('Quantity must be a positive whole number');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const stock = await client.query(
+        `
+          SELECT COUNT(*)::int AS available_qty
+          FROM "tblSPIndDet"
+          WHERE org_id = $1
+            AND spc_id = $2
+            AND COALESCE(is_used, 0) = 0
+        `,
+        [org_id, spc_id]
+      );
+      const available = stock.rows[0]?.available_qty || 0;
+      if (available < qty) {
+        const err = new Error(`Insufficient stock. Available: ${available}, Requested: ${qty}`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const mapping = await client.query(
+        `
+          SELECT 1
+          FROM "tblSPCatATMap" m
+          INNER JOIN "tblSPCategory" c ON c.spc_id = m.spc_id AND c.org_id = m.org_id
+          WHERE m.org_id = $1
+            AND m.asset_type_id = $2
+            AND m.spc_id = $3
+            AND m.int_status = 1
+            AND c.int_status = 1
+          LIMIT 1
+        `,
+        [org_id, asset_type_id, spc_id]
+      );
+      if (!mapping.rows.length) {
+        const err = new Error(`Category ${spc_id} is not mapped to this asset type`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const si_id = await generateCustomIdForClient(client, 'sp_issue', 3);
+      const insert = await client.query(
+        `
+          INSERT INTO "tblSpareIssue" (
+            si_id, org_id, branch_id, ss_id, spid_id, quantity_issued,
+            issued_to, issued_by, remarks, status, assetmaintsch_id,
+            created_by, created_on, changed_by, changed_on
+          ) VALUES (
+            $1, $2, $3, $4, NULL, $5,
+            NULL, NULL, $6, $7, $8,
+            $9, CURRENT_TIMESTAMP, $9, CURRENT_TIMESTAMP
+          )
+          RETURNING *
+        `,
+        [
+          si_id,
+          org_id,
+          branch_id || maint.rows[0].branch_id || null,
+          ss_id,
+          qty,
+          buildIssueRemarks({ spc_id }),
+          SPARE_ISSUE_STATUS.REQUESTED,
+          assetmaintsch_id,
+          created_by || null,
+        ]
+      );
+      created.push(insert.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    return created;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const getSpareIssueApprovals = async (
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [org_id];
+  let query = `
+    SELECT
+      si.si_id,
+      si.status,
+      si.quantity_issued,
+      si.remarks,
+      si.created_on,
+      si.changed_on,
+      si.assetmaintsch_id,
+      si.spid_id,
+      ams.maint_type_id,
+      a.asset_type_id,
+      a.serial_number,
+      at.text AS asset_type_name,
+      mt.text AS maintenance_type_name,
+      v.vendor_name,
+      ind.spc_id AS issued_spc_id
+    FROM "tblSpareIssue" si
+    INNER JOIN "tblAssetMaintSch" ams ON si.assetmaintsch_id = ams.ams_id
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+    LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
+    WHERE si.org_id = $1
+      AND si.status IN ('RQ', 'IS')
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND (si.branch_id IS NULL OR si.branch_id = $${params.length})`;
+  }
+  query += ` ORDER BY si.created_on DESC, si.si_id DESC`;
+  const result = await dbPool.query(query, params);
+
+  const spcIds = [
+    ...new Set(
+      result.rows
+        .map((row) => row.issued_spc_id || resolveIssueSpcId(row))
+        .filter(Boolean)
+    ),
+  ];
+  let categoryMap = {};
+  if (spcIds.length) {
+    const cats = await dbPool.query(
+      `
+        SELECT spc_id, text AS category_name
+        FROM "tblSPCategory"
+        WHERE org_id = $1
+          AND spc_id = ANY($2::text[])
+      `,
+      [org_id, spcIds]
+    );
+    categoryMap = Object.fromEntries(cats.rows.map((c) => [c.spc_id, c.category_name]));
+  }
+
+  return result.rows.map((row) => {
+    const spc_id = row.issued_spc_id || resolveIssueSpcId(row);
+    return {
+      ...row,
+      spc_id,
+      category_name: categoryMap[spc_id] || null,
+      is_approved: row.status === SPARE_ISSUE_STATUS.ISSUED,
+    };
+  });
+};
+
+const getSpareIssueApprovalDetail = async (
+  si_id,
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [si_id, org_id];
+  let query = `
+    SELECT
+      si.*,
+      ams.maint_type_id,
+      ams.vendor_id,
+      a.asset_type_id,
+      a.serial_number,
+      at.text AS asset_type_name,
+      mt.text AS maintenance_type_name,
+      v.vendor_name,
+      ind.spc_id AS issued_spc_id
+    FROM "tblSpareIssue" si
+    INNER JOIN "tblAssetMaintSch" ams ON si.assetmaintsch_id = ams.ams_id
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+    LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
+    WHERE si.si_id = $1
+      AND si.org_id = $2
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND (si.branch_id IS NULL OR si.branch_id = $${params.length})`;
+  }
+  const result = await dbPool.query(query, params);
+  const row = result.rows[0];
+  if (!row) return null;
+
+  const spc_id = row.issued_spc_id || resolveIssueSpcId(row);
+  let category_name = null;
+  if (spc_id) {
+    const cat = await dbPool.query(
+      `SELECT text AS category_name FROM "tblSPCategory" WHERE spc_id = $1 AND org_id = $2 LIMIT 1`,
+      [spc_id, org_id]
+    );
+    category_name = cat.rows[0]?.category_name || null;
+  }
+  const available_qty = spc_id ? await getAvailableQuantity(spc_id, org_id) : 0;
+
+  return {
+    ...row,
+    spc_id,
+    category_name,
+    available_qty,
+    is_approved: row.status === SPARE_ISSUE_STATUS.ISSUED,
+  };
+};
+
+const ensureSpareIssuedPreference = async (dbPool, userId) => {
+  if (!userId) return;
+  const prefCheck = await dbPool.query(
+    `
+      SELECT preference_id
+      FROM "tblNotificationPreferences"
+      WHERE user_id = $1 AND notification_type = $2
+      LIMIT 1
+    `,
+    [userId, 'spare_part_issued'],
+  );
+  if (prefCheck.rows.length) return;
+
+  const preferenceId = `PREF${Math.random().toString(36).slice(2, 15).toUpperCase()}`;
+  try {
+    await dbPool.query(
+      `
+        INSERT INTO "tblNotificationPreferences" (
+          preference_id, user_id, notification_type,
+          is_enabled, email_enabled, push_enabled
+        ) VALUES ($1, $2, 'spare_part_issued', true, true, true)
+      `,
+      [preferenceId, userId],
+    );
+  } catch (prefErr) {
+    console.warn('Could not create spare_part_issued preference:', prefErr.message);
+  }
+};
+
+const getSystemAdminUserIds = async (dbPool, orgId = null) => {
+  const params = [];
+  let orgFilter = '';
+  if (orgId) {
+    params.push(orgId);
+    orgFilter = ` AND (u.org_id = $${params.length} OR u.org_id IS NULL)`;
+  }
+  const result = await dbPool.query(
+    `
+      SELECT DISTINCT u.user_id
+      FROM "tblUsers" u
+      INNER JOIN "tblUserJobRoles" ujr ON ujr.user_id = u.user_id
+      INNER JOIN "tblJobRoles" jr ON jr.job_role_id = ujr.job_role_id
+      WHERE u.int_status = 1
+        AND (
+          ujr.job_role_id = 'JR001'
+          OR LOWER(TRIM(jr.text)) = 'system administrator'
+        )
+        ${orgFilter}
+    `,
+    params,
+  );
+  return result.rows.map((r) => r.user_id).filter(Boolean);
+};
+
+const isSystemAdminByEmpIntId = async (dbPool, empIntId) => {
+  if (!empIntId) return false;
+  const result = await dbPool.query(
+    `
+      SELECT 1
+      FROM "tblUsers" u
+      INNER JOIN "tblUserJobRoles" ujr ON ujr.user_id = u.user_id
+      INNER JOIN "tblJobRoles" jr ON jr.job_role_id = ujr.job_role_id
+      WHERE u.int_status = 1
+        AND u.emp_int_id = $1
+        AND (
+          ujr.job_role_id = 'JR001'
+          OR LOWER(TRIM(jr.text)) = 'system administrator'
+        )
+      LIMIT 1
+    `,
+    [empIntId],
+  );
+  return result.rows.length > 0;
+};
+
+const notifySparePartIssued = async ({ issueRow, org_id }) => {
+  try {
+    const spc_id = resolveIssueSpcId(issueRow) || issueRow.spc_id;
+    if (!spc_id) return { success: false };
+
+    const dbPool = getDb();
+    const meta = await dbPool.query(
+      `
+        SELECT
+          at.text AS asset_type_name,
+          c.text AS category_name,
+          a.asset_type_id,
+          si.assetmaintsch_id,
+          si.quantity_issued
+        FROM "tblSpareIssue" si
+        INNER JOIN "tblAssetMaintSch" ams
+          ON si.assetmaintsch_id = ams.ams_id AND ams.org_id = si.org_id
+        INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        INNER JOIN "tblSPCategory" c
+          ON c.spc_id = $2 AND c.org_id = si.org_id AND c.int_status = 1
+        LEFT JOIN "tblSPCatATMap" m
+          ON m.org_id = si.org_id
+         AND m.spc_id = c.spc_id
+         AND m.asset_type_id = a.asset_type_id
+         AND m.int_status = 1
+        WHERE si.si_id = $1
+          AND si.org_id = $3
+        LIMIT 1
+      `,
+      [issueRow.si_id, spc_id, org_id],
+    );
+
+    let assetTypeName = meta.rows[0]?.asset_type_name;
+    let categoryName = meta.rows[0]?.category_name;
+    let maintenanceId =
+      meta.rows[0]?.assetmaintsch_id || issueRow.assetmaintsch_id || '';
+    const quantityIssued =
+      meta.rows[0]?.quantity_issued ?? issueRow.quantity_issued ?? '';
+
+    if (!assetTypeName || !categoryName) {
+      const fallback = await dbPool.query(
+        `
+          SELECT
+            at.text AS asset_type_name,
+            c.text AS category_name,
+            si.assetmaintsch_id
+          FROM "tblSpareIssue" si
+          INNER JOIN "tblAssetMaintSch" ams ON si.assetmaintsch_id = ams.ams_id
+          INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+          INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+          LEFT JOIN "tblSPCategory" c ON c.spc_id = $2 AND c.org_id = si.org_id
+          WHERE si.si_id = $1 AND si.org_id = $3
+          LIMIT 1
+        `,
+        [issueRow.si_id, spc_id, org_id],
+      );
+      assetTypeName = assetTypeName || fallback.rows[0]?.asset_type_name || 'Asset';
+      categoryName = categoryName || fallback.rows[0]?.category_name || spc_id;
+      maintenanceId =
+        maintenanceId || fallback.rows[0]?.assetmaintsch_id || '';
+    }
+
+    const title = 'Spare Part Issued';
+    const body = `Maintenance ${maintenanceId || '-'}: ${assetTypeName} / ${categoryName} — spare part issued${
+      quantityIssued !== '' && quantityIssued != null
+        ? ` (qty ${quantityIssued})`
+        : ''
+    }`;
+    const payload = {
+      type: 'spare_part_issued',
+      si_id: issueRow.si_id,
+      assetmaintsch_id: maintenanceId || '',
+      maintenance_id: maintenanceId || '',
+      asset_type_name: assetTypeName,
+      category_name: categoryName,
+      quantity_issued: String(quantityIssued ?? ''),
+      status: 'Issued',
+      spc_id,
+      route: `/spare-part-list-detail/${maintenanceId || ''}`,
+    };
+
+    const adminUserIds = await getSystemAdminUserIds(dbPool, org_id);
+    const targetUserIds = new Set(adminUserIds);
+    if (issueRow.created_by) targetUserIds.add(issueRow.created_by);
+
+    for (const userId of targetUserIds) {
+      await ensureSpareIssuedPreference(dbPool, userId);
+      try {
+        await fcmService.sendNotificationToUser({
+          userId,
+          title,
+          body,
+          data: payload,
+          notificationType: 'spare_part_issued',
+        });
+      } catch (sendErr) {
+        console.warn(
+          `notifySparePartIssued: push failed for ${userId}:`,
+          sendErr.message,
+        );
+      }
+    }
+
+    return { success: true, notifiedUsers: [...targetUserIds] };
+  } catch (error) {
+    console.error('notifySparePartIssued error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * In-app notifications after spare parts are Issued.
+ * Requesters see their own; System Administrators see all org issued rows.
+ */
+const getSpareIssuedNotificationsByUser = async ({
+  empIntId,
+  orgId,
+  branchId,
+  hasSuperAccess = false,
+}) => {
+  const dbPool = getDb();
+  const isAdmin =
+    hasSuperAccess || (await isSystemAdminByEmpIntId(dbPool, empIntId));
+
+  const params = [orgId];
+  let branchFilter = '';
+  if (!hasSuperAccess && branchId) {
+    params.push(branchId);
+    branchFilter = ` AND (a.branch_id = $${params.length} OR a.branch_id IS NULL OR si.branch_id = $${params.length})`;
+  }
+
+  let requesterJoin = '';
+  if (!isAdmin) {
+    params.push(empIntId);
+    requesterJoin = `
+      INNER JOIN "tblUsers" u
+        ON u.user_id = si.created_by
+       AND u.emp_int_id = $${params.length}
+       AND u.int_status = 1
+    `;
+  }
+
+  const result = await dbPool.query(
+    `
+      SELECT
+        si.si_id,
+        si.status,
+        si.quantity_issued,
+        si.remarks,
+        si.created_on,
+        si.changed_on,
+        si.assetmaintsch_id,
+        ams.act_maint_st_date AS due_date,
+        COALESCE(issuer.full_name, changer.full_name, creator.full_name) AS action_by_name,
+        at.asset_type_id,
+        at.text AS asset_type_name,
+        c.spc_id,
+        c.text AS category_name
+      FROM "tblSpareIssue" si
+      ${requesterJoin}
+      INNER JOIN "tblAssetMaintSch" ams
+        ON ams.ams_id = si.assetmaintsch_id
+       AND ams.org_id = si.org_id
+      INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
+      INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      LEFT JOIN "tblUsers" issuer ON issuer.user_id = si.issued_by
+      LEFT JOIN "tblUsers" changer ON changer.user_id = si.changed_by
+      LEFT JOIN "tblUsers" creator ON creator.user_id = si.created_by
+      LEFT JOIN "tblSPCategory" c
+        ON c.org_id = si.org_id
+       AND c.int_status = 1
+       AND c.spc_id = COALESCE(
+             CASE
+               WHEN si.remarks ~ '^\\s*\\{' THEN (si.remarks::jsonb ->> 'spc_id')
+               ELSE NULL
+             END,
+             NULL
+           )
+      WHERE si.org_id = $1
+        AND si.status = $${params.length + 1}
+        ${branchFilter}
+      ORDER BY COALESCE(si.changed_on, si.created_on) DESC
+      LIMIT 100
+    `,
+    [...params, SPARE_ISSUE_STATUS.ISSUED],
+  );
+
+  const rows = [];
+  for (const row of result.rows) {
+    let spc_id = row.spc_id || resolveIssueSpcId(row);
+    let category_name = row.category_name;
+    if (!category_name && spc_id) {
+      const cat = await dbPool.query(
+        `
+          SELECT text AS category_name
+          FROM "tblSPCategory"
+          WHERE spc_id = $1 AND org_id = $2 AND int_status = 1
+          LIMIT 1
+        `,
+        [spc_id, orgId],
+      );
+      category_name = cat.rows[0]?.category_name || spc_id;
+    }
+    if (!spc_id && !category_name) continue;
+    rows.push({
+      ...row,
+      spc_id,
+      category_name: category_name || spc_id,
+      status_label: 'Issued',
+    });
+  }
+  return rows;
+};
+
+const approveSpareIssue = async ({
+  si_id,
+  org_id,
+  branch_id,
+  approved_by,
+}) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    let lockQuery = `
+      SELECT *
+      FROM "tblSpareIssue"
+      WHERE si_id = $1
+        AND org_id = $2
+      FOR UPDATE
+    `;
+    const lockParams = [si_id, org_id];
+    const locked = await client.query(lockQuery, lockParams);
+    if (!locked.rows.length) {
+      const err = new Error('Spare part request not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const issue = locked.rows[0];
+    if (issue.status === SPARE_ISSUE_STATUS.ISSUED) {
+      const err = new Error('This spare part request has already been approved');
+      err.statusCode = 409;
+      err.code = 'ALREADY_APPROVED';
+      throw err;
+    }
+    if (issue.status !== SPARE_ISSUE_STATUS.REQUESTED) {
+      const err = new Error('This spare part request is not pending approval');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const spc_id = resolveIssueSpcId(issue);
+    if (!spc_id) {
+      const err = new Error('Category not found on spare part request');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const qty = Number(issue.quantity_issued);
+    const available = await client.query(
+      `
+        SELECT spid_id
+        FROM "tblSPIndDet"
+        WHERE org_id = $1
+          AND spc_id = $2
+          AND COALESCE(is_used, 0) = 0
+        ORDER BY created_on ASC, spid_id ASC
+        LIMIT $3
+        FOR UPDATE
+      `,
+      [org_id, spc_id, qty]
+    );
+
+    if (available.rows.length < qty) {
+      const err = new Error(
+        `Insufficient stock. Available: ${available.rows.length}, Requested: ${qty}`
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const spidIds = available.rows.map((r) => r.spid_id);
+    await client.query(
+      `
+        UPDATE "tblSPIndDet"
+        SET is_used = 1,
+            changed_by = $2,
+            changed_on = CURRENT_TIMESTAMP
+        WHERE spid_id = ANY($1::text[])
+          AND org_id = $3
+      `,
+      [spidIds, approved_by || null, org_id]
+    );
+
+    const updateResult = await client.query(
+      `
+        UPDATE "tblSpareIssue"
+        SET status = $1,
+            spid_id = $2,
+            issued_by = $3,
+            changed_by = $3,
+            changed_on = CURRENT_TIMESTAMP
+        WHERE si_id = $4
+          AND org_id = $5
+          AND status = $6
+        RETURNING *
+      `,
+      [
+        SPARE_ISSUE_STATUS.ISSUED,
+        spidIds[0],
+        approved_by || null,
+        si_id,
+        org_id,
+        SPARE_ISSUE_STATUS.REQUESTED,
+      ]
+    );
+
+    if (!updateResult.rows.length) {
+      const err = new Error('Spare part request was already processed');
+      err.statusCode = 409;
+      err.code = 'ALREADY_APPROVED';
+      throw err;
+    }
+
+    const sph_id = await generateCustomIdForClient(client, 'spare_history', 3);
+    await client.query(
+      `
+        INSERT INTO "tblSpareHistory" (
+          sph_id, si_id, status, remarks, org_id, branch_id, created_by, created_on
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
+        )
+      `,
+      [
+        sph_id,
+        si_id,
+        SPARE_ISSUE_STATUS.ISSUED,
+        `Issued ${qty} unit(s) for category ${spc_id}`,
+        org_id,
+        branch_id || issue.branch_id || null,
+        approved_by || null,
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    const approvedRow = updateResult.rows[0];
+    await notifySparePartIssued({ issueRow: approvedRow, org_id });
+
+    return approvedRow;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
 
 /**
  * Convert spare category ID to serial prefix (same idea as asset types).
@@ -170,18 +1076,18 @@ const createCategory = async ({
       throw err;
     }
 
-    const minStock = Number(minimum_stock);
-    const reorder = Number(re_order_level);
-    if (!Number.isFinite(minStock) || minStock < 0) {
-      const err = new Error('Minimum stock must be a valid non-negative number');
-      err.statusCode = 400;
-      throw err;
-    }
-    if (!Number.isFinite(reorder) || reorder < 0) {
-      const err = new Error('Reorder level must be a valid non-negative number');
-      err.statusCode = 400;
-      throw err;
-    }
+    const parseOptionalNonNegative = (value, label) => {
+      if (value === undefined || value === null || value === '') return null;
+      const num = Number(value);
+      if (!Number.isFinite(num) || num < 0) {
+        const err = new Error(`${label} must be a valid non-negative number`);
+        err.statusCode = 400;
+        throw err;
+      }
+      return num;
+    };
+    const minStock = parseOptionalNonNegative(minimum_stock, 'Minimum stock');
+    const reorder = parseOptionalNonNegative(re_order_level, 'Reorder level');
 
     const dup = await client.query(
       `
@@ -298,6 +1204,16 @@ const createCategoryMapping = async ({
 
     const brandVal = brand != null ? String(brand).trim() : '';
     const modelVal = model != null ? String(model).trim() : '';
+    if (!brandVal) {
+      const err = new Error('Brand is required');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!modelVal) {
+      const err = new Error('Model is required');
+      err.statusCode = 400;
+      throw err;
+    }
 
     const cat = await client.query(
       `
@@ -381,6 +1297,43 @@ const createCategoryMapping = async ({
   } finally {
     client.release();
   }
+};
+
+const getSparePartLots = async (
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [org_id];
+  let query = `
+    SELECT
+      l.spld_id,
+      l.spc_id,
+      c.text AS category_name,
+      l.quantity,
+      l.unit_price,
+      l.invoice_no,
+      l.lot_purchase_date,
+      l.invoice_item_no,
+      l.remarks,
+      l.org_id,
+      l.branch_id,
+      l.created_by,
+      l.created_on
+    FROM "tblSPLotDet" l
+    LEFT JOIN "tblSPCategory" c
+      ON c.spc_id = l.spc_id
+     AND c.org_id = l.org_id
+    WHERE l.org_id = $1
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    query += ` AND (l.branch_id IS NULL OR l.branch_id = $${params.length})`;
+  }
+  query += ` ORDER BY l.created_on DESC, l.spld_id DESC`;
+  const result = await dbPool.query(query, params);
+  return result.rows;
 };
 
 /**
@@ -618,14 +1571,159 @@ const getIndividualsByLotId = async (spld_id, org_id) => {
   return result.rows;
 };
 
+/**
+ * Link vendor to spare part categories (tblVSPMap) in one transaction.
+ * items: [{ spc_id, brand, model }]
+ */
+const createVendorSpareMappings = async ({
+  org_id,
+  branch_id,
+  vendor_id,
+  items,
+  created_by,
+}) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    if (!vendor_id) {
+      const err = new Error('Vendor is required');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      const err = new Error('At least one spare supply item is required');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const vendorCheck = await client.query(
+      `SELECT vendor_id FROM "tblVendors" WHERE vendor_id = $1 AND org_id = $2`,
+      [vendor_id, org_id]
+    );
+    if (!vendorCheck.rows.length) {
+      const err = new Error('Vendor not found');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const created = [];
+
+    for (const item of items) {
+      const spc_id = item?.spc_id;
+      const brandVal = item?.brand != null ? String(item.brand).trim() : '';
+      const modelVal = item?.model != null ? String(item.model).trim() : '';
+
+      if (!spc_id) {
+        const err = new Error('Category is required for each spare supply item');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (!brandVal) {
+        const err = new Error('Brand is required for each spare supply item');
+        err.statusCode = 400;
+        throw err;
+      }
+      if (!modelVal) {
+        const err = new Error('Model is required for each spare supply item');
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const cat = await client.query(
+        `
+          SELECT spc_id FROM "tblSPCategory"
+          WHERE spc_id = $1 AND org_id = $2 AND int_status = 1
+        `,
+        [spc_id, org_id]
+      );
+      if (!cat.rows.length) {
+        const err = new Error(`Invalid or inactive spare part category: ${spc_id}`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const dup = await client.query(
+        `
+          SELECT 1 FROM "tblVSPMap"
+          WHERE org_id = $1
+            AND vendor_id = $2
+            AND spc_id = $3
+            AND COALESCE(LOWER(TRIM(brand)), '') = LOWER($4)
+            AND COALESCE(LOWER(TRIM(model)), '') = LOWER($5)
+            AND int_status = 1
+          LIMIT 1
+        `,
+        [org_id, vendor_id, spc_id, brandVal, modelVal]
+      );
+      if (dup.rows.length) {
+        continue;
+      }
+
+      const vspm_id = await generateCustomIdForClient(client, 'vsp_map', 3);
+      const result = await client.query(
+        `
+          INSERT INTO "tblVSPMap" (
+            vspm_id, vendor_id, spc_id, brand, model, int_status,
+            org_id, branch_id, created_by, created_on, changed_by, changed_on
+          ) VALUES (
+            $1, $2, $3, $4, $5, 1,
+            $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP
+          )
+          RETURNING *
+        `,
+        [
+          vspm_id,
+          vendor_id,
+          spc_id,
+          brandVal,
+          modelVal,
+          org_id,
+          branch_id || null,
+          created_by || null,
+        ]
+      );
+      created.push(result.rows[0]);
+    }
+
+    await client.query('COMMIT');
+    return created;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getCategories,
   createCategory,
   getCategoryMappings,
   createCategoryMapping,
+  getSparePartLots,
   createSparePartLot,
   getIndividualsByLotId,
+  createVendorSpareMappings,
   convertSpcToSerialFormat,
   buildSpareSerialNumber,
   extractSequenceFromSerial,
+  SPARE_ISSUE_STATUS,
+  getCategoryMappingsByAssetType,
+  getSparePartMaintenanceList,
+  getSparePartMaintenanceDetail,
+  createSpareIssueRequests,
+  getSpareIssueApprovals,
+  getSpareIssueApprovalDetail,
+  approveSpareIssue,
+  getAvailableQuantity,
+  resolveIssueSpcId,
+  getSpareIssuedNotificationsByUser,
+  notifySparePartIssued,
 };

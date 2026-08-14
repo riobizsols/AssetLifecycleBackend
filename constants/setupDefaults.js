@@ -427,7 +427,7 @@ const DEFAULT_APPS = [
   { id: "BRANCHES", label: "Branches" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
-  { id: "SPAREPARTS", label: "Spare Parts" },
+  { id: "SPAREPARTS", label: "Spare Part Lot" },
   { id: "SPAREPARTSCONFIG", label: "Spare Parts Configuration" },
   { id: "USERS", label: "Users" },
   { id: "AUDITLOGS", label: "Audit Logs" },
@@ -435,7 +435,9 @@ const DEFAULT_APPS = [
   { id: "COLUMNACCESSCONFIG", label: "Column Access Config" },
   { id: "BULKUPLOAD", label: "Bulk Upload" },
   { id: "MAINTENANCEAPPROVAL", label: "Maintenance Approval" },
-  { id: "SUPERVISORAPPROVAL", label: "Supervisor Approval" }
+  { id: "SUPERVISORAPPROVAL", label: "Supervisor Approval" },
+  { id: "SPAREPARTLIST", label: "Spare Part List" },
+  { id: "SPAREPARTAPPROVAL", label: "Spare Part Approval" }
 ];
 
 const DEFAULT_AUDIT_EVENTS = [
@@ -532,7 +534,9 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "sp_ind_det", prefix: "SPID", lastNumber: 0 },
   { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 },
   { tableKey: "vsp_map", prefix: "VSPM", lastNumber: 0 },
-  { tableKey: "spare_history", prefix: "SPH", lastNumber: 0 }
+  { tableKey: "spare_history", prefix: "SPH", lastNumber: 0 },
+  { tableKey: "sp_issue", prefix: "SPI", lastNumber: 0 },
+  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -611,7 +615,7 @@ const DEFAULT_JOB_ROLE_NAV = [
     parentId: null,
     appId: null,
     label: "Master Data",
-    sequence: 5,
+    sequence: 6,
     accessLevel: "A",
     isGroup: true
   },
@@ -686,12 +690,42 @@ const DEFAULT_JOB_ROLE_NAV = [
     isGroup: false
   },
   {
+    id: "JRN014A",
+    jobRoleId: "JR001",
+    parentId: null,
+    appId: null,
+    label: "Spare Parts",
+    sequence: 5,
+    accessLevel: "A",
+    isGroup: true
+  },
+  {
     id: "JRN014B",
     jobRoleId: "JR001",
-    parentId: "JRN007",
+    parentId: "JRN014A",
     appId: "SPAREPARTS",
-    label: "Spare Parts",
-    sequence: 8,
+    label: "Spare Part Lot",
+    sequence: 1,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
+    id: "JRN014D",
+    jobRoleId: "JR001",
+    parentId: "JRN014A",
+    appId: "SPAREPARTLIST",
+    label: "Spare Part List",
+    sequence: 2,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
+    id: "JRN014E",
+    jobRoleId: "JR001",
+    parentId: "JRN014A",
+    appId: "SPAREPARTAPPROVAL",
+    label: "Spare Part Approval",
+    sequence: 3,
     accessLevel: "A",
     isGroup: false
   },
@@ -701,7 +735,7 @@ const DEFAULT_JOB_ROLE_NAV = [
     parentId: "JRN007",
     appId: "SPAREPARTSCONFIG",
     label: "Spare Parts Configuration",
-    sequence: 9,
+    sequence: 8,
     accessLevel: "A",
     isGroup: false
   },
@@ -711,7 +745,7 @@ const DEFAULT_JOB_ROLE_NAV = [
     parentId: "JRN007",
     appId: "USERS",
     label: "Users",
-    sequence: 10,
+    sequence: 9,
     accessLevel: "A",
     isGroup: false
   },

@@ -77,6 +77,8 @@ const defaultPrefixes = {
     'sp_cat_at_map': 'SPCATM',
     'vsp_map': 'VSPM',
     'spare_history': 'SPH',
+    'sp_issue': 'SPI',
+    'sp_store': 'SS',
 };
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
@@ -223,6 +225,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'sp_cat_at_map': 'tblSPCatATMap',
         'vsp_map': 'tblVSPMap',
         'spare_history': 'tblSpareHistory',
+        'sp_issue': 'tblSpareIssue',
+        'sp_store': 'tblSpareStore',
     };
 
     const targetTable = tableMap[tableKey];
@@ -282,6 +286,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
               'sp_cat_at_map': 'spcatm_id',
               'vsp_map': 'vspm_id',
               'spare_history': 'sph_id',
+              'sp_issue': 'si_id',
+              'sp_store': 'ss_id',
         };
 
         const columnName = columnMap[tableKey];
