@@ -94,13 +94,30 @@ const getCategoryMappings = async (req, res) => {
   }
 };
 
+const getIspModels = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const models = await model.getIspModels(org_id);
+    return res.status(200).json({
+      success: true,
+      data: models,
+    });
+  } catch (error) {
+    console.error('Error fetching ISP brand models:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch brand / model list',
+    });
+  }
+};
+
 const createCategoryMapping = async (req, res) => {
   try {
     const org_id = req.user.org_id;
     const created_by = req.user.user_id;
     const branch_id = req.user.branch_id || null;
 
-    const { spc_id, asset_type_id, brand, model: modelName } = req.body;
+    const { spc_id, asset_type_id, spbm_id, prod_serv_id } = req.body;
 
     if (!spc_id) {
       return res.status(400).json({ success: false, error: 'Category is required' });
@@ -114,8 +131,8 @@ const createCategoryMapping = async (req, res) => {
       branch_id,
       spc_id,
       asset_type_id,
-      brand,
-      model: modelName,
+      spbm_id,
+      prod_serv_id,
       created_by,
     });
 
@@ -240,6 +257,7 @@ module.exports = {
   createCategory,
   getCategoryMappings,
   createCategoryMapping,
+  getIspModels,
   createSparePartLot,
   getLotIndividuals,
 };

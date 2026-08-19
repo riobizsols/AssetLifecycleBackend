@@ -37,6 +37,45 @@ const getEmployeeById = async (employee_id) => {
   return await dbPool.query(query, [employee_id]);
 };
 
+/**
+ * Find employee by email within an org (case-insensitive).
+ * @param {string} email
+ * @param {string} orgId
+ * @param {{ excludeEmpIntId?: string, excludeEmployeeId?: string }} [opts]
+ */
+const findEmployeeByEmail = async (email, orgId, opts = {}) => {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized || !orgId) return null;
+
+  const params = [normalized, orgId];
+  let excludeSql = '';
+
+  if (opts.excludeEmpIntId) {
+    params.push(opts.excludeEmpIntId);
+    excludeSql += ` AND emp_int_id <> $${params.length}`;
+  }
+  if (opts.excludeEmployeeId) {
+    params.push(opts.excludeEmployeeId);
+    excludeSql += ` AND employee_id <> $${params.length}`;
+  }
+
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `
+      SELECT emp_int_id, employee_id, full_name, email_id, org_id, int_status
+      FROM "tblEmployees"
+      WHERE org_id = $2
+        AND email_id IS NOT NULL
+        AND lower(btrim(email_id)) = $1
+        ${excludeSql}
+      ORDER BY created_on ASC
+      LIMIT 1
+    `,
+    params,
+  );
+  return result.rows[0] || null;
+};
+
 // GET employees by department
 const getEmployeesByDepartment = async (dept_id) => {
   const query = `
@@ -233,6 +272,18 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
           'SELECT employee_id FROM "tblEmployees" WHERE employee_id = $1',
           [finalEmployeeId]
         );
+
+        const emailId = String(row.email_id || '').trim();
+        if (emailId) {
+          const emailOwner = await findEmployeeByEmail(emailId, org_id, {
+            excludeEmployeeId: finalEmployeeId,
+          });
+          if (emailOwner) {
+            throw new Error(
+              `Email "${emailId}" is already used by employee ${emailOwner.employee_id}`,
+            );
+          }
+        }
         
         if (existingEmployee.rows.length > 0) {
           // Update existing employee
@@ -371,6 +422,18 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
     if (employeeData.middle_name) nameParts.push(employeeData.middle_name.trim());
     if (employeeData.last_name) nameParts.push(employeeData.last_name.trim());
     const fullName = nameParts.join(' ').trim();
+
+    const emailId = String(employeeData.email_id || '').trim();
+    const existingByEmail = await findEmployeeByEmail(emailId, org_id);
+    if (existingByEmail) {
+      const err = new Error(
+        `Email "${emailId}" is already used by employee ${existingByEmail.employee_id}`,
+      );
+      err.code = 'EMAIL_ALREADY_EXISTS';
+      err.statusCode = 409;
+      err.existingEmployee = existingByEmail;
+      throw err;
+    }
     
     // Insert new employee
     const result = await client.query(`
@@ -391,7 +454,7 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
       employeeData.last_name || null,
       employeeData.middle_name || null,
       fullName || null,
-      employeeData.email_id,
+      emailId,
       employeeData.dept_id,
       employeeData.phone_number,
       employeeData.employee_type || null,
@@ -418,6 +481,7 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
 module.exports = {
   getAllEmployees,
   getEmployeeById,
+  findEmployeeByEmail,
   getEmployeesByDepartment,
   getAllEmployeesWithJobRoles,
   updateEmployeeStatus,

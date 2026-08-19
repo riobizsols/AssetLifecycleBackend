@@ -64,6 +64,22 @@ docker network create alm-shared 2>/dev/null || true
 docker compose -f docker-compose.redis.yml up -d
 ```
 
+## PgBouncer (main stack — web.rioassetmanagement.net)
+
+Shared container `alm_pgbouncer` on `alm-shared`. `./deploy-docker.sh` for `alm-main-backend` starts/refreshes it automatically.
+
+One-time enable app traffic through PgBouncer:
+
+```bash
+cd ~/alm-main/AssetLifecycleBackend
+./scripts/db/enable-pgbouncer-main.sh
+node scripts/db/migrate-tenants-to-pgbouncer.js   # if tenants table uses alm_db
+node scripts/db/verify-pgbouncer.js
+./deploy-docker.sh --rebuild
+```
+
+Full guide: [docs/PGBOUNCER.md](../docs/PGBOUNCER.md)
+
 ## Env overrides
 
 ```bash

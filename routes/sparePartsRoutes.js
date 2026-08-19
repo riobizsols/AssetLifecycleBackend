@@ -6,6 +6,7 @@ const {
   createCategory,
   getCategoryMappings,
   createCategoryMapping,
+  getIspModels,
   createSparePartLot,
   getLotIndividuals,
 } = require('../controllers/sparePartsController');
@@ -17,6 +18,7 @@ router.post('/categories', createCategory);
 
 router.get('/category-mappings', getCategoryMappings);
 router.post('/category-mappings', createCategoryMapping);
+router.get('/isp-models', getIspModels);
 
 router.post('/lots', createSparePartLot);
 router.get('/lots/:spld_id/individuals', getLotIndividuals);

@@ -20,7 +20,9 @@ Rough memory: each connection ≈ **5–10 MB** base (+ `work_mem` when sorting)
 Example: **200 connections × ~8 MB ≈ 1.6 GB** just for sessions, plus `shared_buffers`.
 
 **Recommended for this shared ALM + Attendance host: `200`.**  
-Only go to `250–300` if `alm_db` has ≥4 GB RAM. Prefer PgBouncer over `500`.
+Only go to `250–300` if `alm_db` has ≥4 GB RAM. Prefer **PgBouncer** over raising raw `max_connections` above ~300.
+
+See **[docs/PGBOUNCER.md](../../docs/PGBOUNCER.md)** for ALM main stack rollout (`web.rioassetmanagement.net`).
 
 ## Increase max_connections
 ```bash

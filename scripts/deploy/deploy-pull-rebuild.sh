@@ -55,6 +55,9 @@ fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
 REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
 REDIS_COMPOSE_FILE="${REDIS_COMPOSE_FILE:-docker-compose.redis.yml}"
+PGBOUNCER_CONTAINER="${PGBOUNCER_CONTAINER:-alm_pgbouncer}"
+PGBOUNCER_COMPOSE_FILE="${PGBOUNCER_COMPOSE_FILE:-docker-compose.pgbouncer.yml}"
+ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -317,6 +320,34 @@ ensure_redis() {
     || log "Note: ${REDIS_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
 }
 
+ensure_pgbouncer() {
+  if [[ "$ENSURE_PGBOUNCER" != "1" ]]; then
+    log "ENSURE_PGBOUNCER=0 — skipping PgBouncer setup"
+    return
+  fi
+
+  ensure_alm_shared_network
+  log "Rendering PgBouncer config from .env.production..."
+  ( cd "$BACKEND_DIR" && node scripts/db/render-pgbouncer-config.js )
+
+  local cmd
+  cmd="$(detect_compose)"
+
+  if ! docker inspect "$PGBOUNCER_CONTAINER" >/dev/null 2>&1; then
+    log "PgBouncer container ${PGBOUNCER_CONTAINER} not found — creating from ${PGBOUNCER_COMPOSE_FILE}..."
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$PGBOUNCER_CONTAINER"; then
+    log "Starting stopped PgBouncer container ${PGBOUNCER_CONTAINER}..."
+    docker start "$PGBOUNCER_CONTAINER"
+  else
+    log "PgBouncer ${PGBOUNCER_CONTAINER} already running — applying config refresh"
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$PGBOUNCER_CONTAINER" 2>/dev/null \
+    || log "Note: ${PGBOUNCER_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+}
+
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
 # Prevents git pull/stash from restoring the dead 103.27.234.248 / wrong keys.
 ensure_minio_env_files() {
@@ -472,12 +503,21 @@ main() {
     die "Set only one of BACKEND_ONLY=1 or FRONTEND_ONLY=1"
   fi
 
+  if [[ "$FRONTEND_ONLY" != "1" && "$BACKEND_ONLY" != "1" ]]; then
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-1}"
+  elif [[ "$BACKEND_ONLY" == "1" && "$BACKEND_CONTAINER_NAME" == "alm-main-backend" ]]; then
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-1}"
+  else
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-0}"
+  fi
+
   if [[ "$FRONTEND_ONLY" != "1" ]]; then
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
     git_pull_with_stash "$BACKEND_DIR" "backend"
     ensure_minio_env_files "$BACKEND_DIR"
     ensure_alm_shared_network
     ensure_redis
+    ensure_pgbouncer
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
     remove_named_container_if_exists "$BACKEND_CONTAINER_NAME"
     compose_up "$BACKEND_DIR" "backend" "alm-backend"
