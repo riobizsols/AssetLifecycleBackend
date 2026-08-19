@@ -11,6 +11,7 @@ const {
   getInhouseVendorId,
   resolveVendorIdForMaintRecord,
 } = require('../utils/inhouseVendorUtils');
+const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -136,6 +137,92 @@ async function getUserRoleIds(userId) {
     [userId]
   );
   return [...new Set(result.rows.map((r) => r.job_role_id).filter(Boolean))];
+}
+
+async function getSystemAdminRoleName() {
+  const result = await getDb().query(
+    `SELECT text FROM "tblJobRoles" WHERE job_role_id = $1 LIMIT 1`,
+    [SYSTEM_ADMIN_JOB_ROLE_ID]
+  );
+  return result.rows[0]?.text || 'System Administrator';
+}
+
+async function getActorRoleIdsByUserId(userIds = []) {
+  const uniqueIds = [...new Set((userIds || []).filter(Boolean).map(String))];
+  if (uniqueIds.length === 0) return {};
+
+  const result = await getDb().query(
+    `
+      SELECT user_id, array_agg(DISTINCT job_role_id) FILTER (WHERE job_role_id IS NOT NULL AND btrim(job_role_id) <> '') AS role_ids
+      FROM (
+        SELECT ujr.user_id, ujr.job_role_id
+        FROM "tblUserJobRoles" ujr
+        WHERE ujr.user_id = ANY($1::varchar[])
+           OR LEFT(ujr.user_id, 20) = ANY($1::varchar[])
+        UNION
+        SELECT u.user_id, u.job_role_id
+        FROM "tblUsers" u
+        WHERE u.user_id = ANY($1::varchar[])
+           OR LEFT(u.user_id, 20) = ANY($1::varchar[])
+      ) roles
+      GROUP BY user_id
+    `,
+    [uniqueIds]
+  );
+
+  const map = {};
+  for (const row of result.rows) {
+    const roles = row.role_ids || [];
+    map[row.user_id] = roles;
+    map[String(row.user_id).substring(0, 20)] = roles;
+  }
+  return map;
+}
+
+function getStepActorDisplayName(detail, actorRoleMap, adminRoleName) {
+  const defaultName = detail.job_role_name || 'Unassigned Role';
+  if (!detail.changed_by) return defaultName;
+  const actorRoles = actorRoleMap[detail.changed_by] || [];
+  const isAdminBypass =
+    roleIdsIncludeSystemAdmin(actorRoles) &&
+    detail.job_role_id !== SYSTEM_ADMIN_JOB_ROLE_ID &&
+    !actorRoles.includes(detail.job_role_id);
+  return isAdminBypass ? adminRoleName : defaultName;
+}
+
+async function fetchCurrentApStep({ isWfamshId, assetOrWfamshId, orgId, userRoleIds }) {
+  const isAdmin = roleIdsIncludeSystemAdmin(userRoleIds);
+  const roleFilter = isAdmin ? '' : 'AND wfd.job_role_id = ANY($3::varchar[])';
+  const params = isAdmin
+    ? [assetOrWfamshId, orgId]
+    : [assetOrWfamshId, orgId, userRoleIds];
+
+  if (isWfamshId) {
+    return getDb().query(
+      `
+        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+        FROM "tblWFAssetMaintSch_D" wfd
+        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
+          AND wfd.status = 'AP'
+          ${roleFilter}
+        ORDER BY wfd.sequence ASC
+      `,
+      params
+    );
+  }
+
+  return getDb().query(
+    `
+      SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
+      FROM "tblWFAssetMaintSch_D" wfd
+      INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
+      WHERE wfh.asset_id = $1 AND wfd.org_id = $2
+        AND wfd.status = 'AP'
+        ${roleFilter}
+      ORDER BY wfd.sequence ASC
+    `,
+    params
+  );
 }
 
 const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
@@ -264,6 +351,10 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         
         // Create workflow steps
       const workflowSteps = [];
+      const [adminRoleName, actorRoleMap] = await Promise.all([
+        getSystemAdminRoleName(),
+        getActorRoleIdsByUserId(approvalDetails.map((d) => d.changed_by)),
+      ]);
       
       // Step 1: System (always first)
       workflowSteps.push({
@@ -301,12 +392,12 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
           case 'UA':
             status = 'approved'; // Blue for approved
             title = 'Approved';
-            description = `Approved by ${detail.job_role_name}`;
+            description = `Approved by ${getStepActorDisplayName(detail, actorRoleMap, adminRoleName)}`;
             break;
           case 'UR':
             status = 'rejected'; // Red for rejected
             title = 'Rejected';
-            description = `Rejected by ${detail.job_role_name}`;
+            description = `Rejected by ${getStepActorDisplayName(detail, actorRoleMap, adminRoleName)}`;
             break;
           case 'IN':
             status = 'pending'; // Gray for initial
@@ -449,30 +540,13 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       throw new Error('User has no assigned roles');
     }
 
-    // ROLE-BASED: Only users with the required role for the current AP step can approve (no System Admin bypass)
-    let currentResult;
-    if (isWfamshId) {
-      const byHeaderQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.status = 'AP'
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
-    } else {
-      const currentQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-          AND wfd.status = 'AP'
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
-    }
+    // ROLE-BASED: Matching role can approve the AP step. System Admin (JR001) can approve any AP step.
+    const currentResult = await fetchCurrentApStep({
+      isWfamshId,
+      assetOrWfamshId,
+      orgId,
+      userRoleIds,
+    });
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
@@ -708,30 +782,13 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
     const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
 
-    // ROLE-BASED: Only users with the required role for the current AP step can reject (no System Admin bypass)
-    let currentResult;
-    if (isWfamshId) {
-      const byHeaderQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        WHERE wfd.wfamsh_id = $1 AND wfd.org_id = $2
-          AND wfd.status = 'AP'
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(byHeaderQuery, [assetOrWfamshId, orgId, userRoleIds]);
-    } else {
-      const currentQuery = `
-        SELECT wfd.wfamsd_id, wfd.sequence, wfd.status, wfd.user_id, wfd.wfamsh_id, wfd.job_role_id, wfd.dept_id, wfd.notes
-        FROM "tblWFAssetMaintSch_D" wfd
-        INNER JOIN "tblWFAssetMaintSch_H" wfh ON wfd.wfamsh_id = wfh.wfamsh_id
-        WHERE wfh.asset_id = $1 AND wfd.org_id = $2
-          AND wfd.status = 'AP'
-          AND wfd.job_role_id = ANY($3::varchar[])
-        ORDER BY wfd.sequence ASC
-      `;
-      currentResult = await getDb().query(currentQuery, [assetOrWfamshId, orgId, userRoleIds]);
-    }
+    // ROLE-BASED: Matching role can reject the AP step. System Admin (JR001) can reject any AP step.
+    const currentResult = await fetchCurrentApStep({
+      isWfamshId,
+      assetOrWfamshId,
+      orgId,
+      userRoleIds,
+    });
     const workflowDetails = currentResult.rows;
     
     if (workflowDetails.length === 0) {
@@ -1397,6 +1454,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       console.log('User has no assigned roles');
       return [];
     }
+
+    if (roleIdsIncludeSystemAdmin(userRoleIds)) {
+      hasSuperAccess = true;
+    }
     
     console.log('User roles:', userRoleIds);
     
@@ -1441,13 +1502,18 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       params.push(userBranchCode);
       paramIndex++;
     }
+
+    if (!hasSuperAccess) {
+      query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])`;
+      params.push(userRoleIds);
+      paramIndex++;
+    }
     
-    query += ` AND wfd.job_role_id = ANY($${paramIndex}::varchar[])
+    query += `
         AND wfh.status IN ('IN', 'IP', 'CO', 'CA')
         AND wfd.status IN ('IN', 'IP', 'UA', 'UR', 'AP')
       ORDER BY wfh.created_on DESC
     `;
-    params.push(userRoleIds);
 
     const result = await getDb().query(query, params);
     console.log('Query executed successfully, found rows:', result.rows.length);
@@ -1489,24 +1555,30 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       const supervisorRoleId = orgSettingsResult.rows[0].value;
       console.log('Found supervisor role ID:', supervisorRoleId);
       
-      // Step 2: Get asset name for notification context
+      // Step 2: Get asset name and branch for notification context
       const assetQuery = `
-        SELECT text as asset_name 
+        SELECT text as asset_name, branch_id
         FROM "tblAssets" 
         WHERE asset_id = $1 AND org_id = $2
       `;
       const assetResult = await getDb().query(assetQuery, [assetId, orgId]);
       const assetName = assetResult.rows.length > 0 ? assetResult.rows[0].asset_name : 'Asset';
+      const assetBranchId = assetResult.rows.length > 0 ? assetResult.rows[0].branch_id : null;
       
-      // Step 3: Find all users with the supervisor job role
+      // Step 3: Find users with the supervisor job role in the same branch as the asset
       const usersQuery = `
         SELECT DISTINCT u.user_id, u.full_name, u.email, u.emp_int_id
         FROM "tblUserJobRoles" ujr
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+        LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id
         WHERE ujr.job_role_id = $1
         AND u.int_status = 1
+        ${assetBranchId ? `AND COALESCE(NULLIF(BTRIM(u.branch_id), ''), NULLIF(BTRIM(e.branch_id), '')) = $2` : ''}
       `;
-      const usersResult = await getDb().query(usersQuery, [supervisorRoleId]);
+      const usersResult = await getDb().query(
+        usersQuery,
+        assetBranchId ? [supervisorRoleId, assetBranchId] : [supervisorRoleId]
+      );
       
       console.log(`Query for supervisor role ${supervisorRoleId} returned ${usersResult.rows.length} users`);
       if (usersResult.rows.length > 0) {
@@ -2913,6 +2985,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           ), null)
         : null;
 
+      const [adminRoleName, actorRoleMap] = await Promise.all([
+        getSystemAdminRoleName(),
+        getActorRoleIdsByUserId(approvalDetails.map((d) => d.changed_by)),
+      ]);
+
       // Step 2+: Users in sequence order
       approvalDetails.forEach((detail, index) => {
         const stepNumber = index + 2; // Start from step 2
@@ -2932,11 +3009,11 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         if (detail.detail_status === 'UA') {
           stepStatus = 'approved';
           stepTitle = 'Approved';
-          stepDescription = `Approved by ${detail.job_role_name}`;
+          stepDescription = `Approved by ${getStepActorDisplayName(detail, actorRoleMap, adminRoleName)}`;
         } else if (detail.detail_status === 'UR') {
           stepStatus = 'rejected';
           stepTitle = 'Rejected';
-          stepDescription = `Rejected by ${detail.job_role_name}`;
+          stepDescription = `Rejected by ${getStepActorDisplayName(detail, actorRoleMap, adminRoleName)}`;
         } else if (detail.detail_status === 'AP') {
           stepStatus = 'current';
           stepTitle = 'In Progress';

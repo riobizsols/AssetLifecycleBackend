@@ -108,6 +108,7 @@ const updateBranch = async (req, res) => {
         const city = String(req.body?.city || '').trim();
         const branch_code = String(req.body?.branch_code || '').trim();
         const { user_id, org_id } = req.user;
+        const currentId = String(branch_id || '').trim();
 
         // Validate required fields
         if (!text || !city || !branch_code) {
@@ -118,7 +119,7 @@ const updateBranch = async (req, res) => {
         }
 
         // Check if branch exists (any org)
-        const branchExists = await branchModel.getBranchById(branch_id);
+        const branchExists = await branchModel.getBranchById(currentId);
         
         if (!branchExists) {
             return res.status(404).json({ 
@@ -127,21 +128,45 @@ const updateBranch = async (req, res) => {
             });
         }
 
-        // Check if branch code is unique within the same org (excluding current branch)
         const branches = await branchModel.getAllBranches(branchExists.org_id);
-        const duplicateBranchCode = branches.find(b => 
-            b.branch_code === branch_code && b.branch_id !== branch_id
-        );
+        const currentCode = String(branchExists.branch_code || '').trim().toLowerCase();
+        const newCode = branch_code.toLowerCase();
+        const currentName = String(branchExists.text || '').trim().toLowerCase();
+        const newName = text.toLowerCase();
 
-        if (duplicateBranchCode) {
-            return res.status(400).json({ 
-                error: "Duplicate branch code",
-                message: "This branch code is already in use" 
-            });
+        // Only validate uniqueness when the value actually changes
+        if (newCode !== currentCode) {
+            const duplicateBranchCode = branches.find(
+                (b) =>
+                    String(b.branch_code || '').trim().toLowerCase() === newCode &&
+                    String(b.branch_id || '').trim() !== currentId
+            );
+
+            if (duplicateBranchCode) {
+                return res.status(400).json({ 
+                    error: "Duplicate branch code",
+                    message: "This branch code is already in use" 
+                });
+            }
+        }
+
+        if (newName !== currentName) {
+            const duplicateBranchName = branches.find(
+                (b) =>
+                    String(b.text || '').trim().toLowerCase() === newName &&
+                    String(b.branch_id || '').trim() !== currentId
+            );
+
+            if (duplicateBranchName) {
+                return res.status(400).json({
+                    error: "Duplicate branch name",
+                    message: "A branch with this name already exists"
+                });
+            }
         }
 
         const updatedBranch = await branchModel.updateBranch(
-            branch_id,
+            currentId,
             { text, city, branch_code },
             user_id
         );
