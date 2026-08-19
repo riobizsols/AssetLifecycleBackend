@@ -1,5 +1,3 @@
-version: "3.9"
-
 # Pressana org stack — separate from alm-main (5002/3002) and alm-tenant (5001/3001).
 # Host ports: backend 5003, frontend 3003 → https://pressanaorg.rioassetmanagement.net
 #

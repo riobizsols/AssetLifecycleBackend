@@ -55,6 +55,13 @@ if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   fi
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
+REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
+PRESSANA_DB_NAME="${PRESSANA_DB_NAME:-demopressana_db}"
+PRESSANA_PUBLIC_URL="${PRESSANA_PUBLIC_URL:-https://pressanaorg.rioassetmanagement.net}"
+PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
+PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
+PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
+FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -270,19 +277,83 @@ verify_container_health() {
   fi
 }
 
+is_pressana_stack() {
+  [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] \
+    || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]] \
+    || [[ "${COMPOSE_PROJECT_NAME:-}" == "pressana-alm" ]]
+}
+
 ensure_alm_shared_network() {
   if [[ "$ENSURE_ALM_SHARED" != "1" ]]; then
     log "ENSURE_ALM_SHARED=0 — skipping shared Docker network setup"
     return
   fi
-  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER}..."
+  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER} / ${REDIS_CONTAINER}..."
   docker network create "$ALM_SHARED_NETWORK" 2>/dev/null || true
-  if docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
-    docker network connect "$ALM_SHARED_NETWORK" "$POSTGRES_CONTAINER" 2>/dev/null \
-      || log "Note: ${POSTGRES_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+  local c
+  for c in "$POSTGRES_CONTAINER" "$REDIS_CONTAINER"; do
+    if docker inspect "$c" >/dev/null 2>&1; then
+      docker network connect "$ALM_SHARED_NETWORK" "$c" 2>/dev/null \
+        || log "Note: ${c} likely already on ${ALM_SHARED_NETWORK} (OK)."
+    else
+      log "WARN: container ${c} not found — start it or set POSTGRES_CONTAINER / REDIS_CONTAINER."
+    fi
+  done
+}
+
+upsert_env_kv() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  [[ -f "$file" ]] || touch "$file"
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file" && rm -f "${file}.bak"
   else
-    log "WARN: container ${POSTGRES_CONTAINER} not found — fix POSTGRES_CONTAINER or start Postgres first."
+    printf '\n%s=%s\n' "$key" "$value" >> "$file"
   fi
+}
+
+# Keep user/password/host; only rewrite the database name (hospitality → demopressana_db).
+rewrite_database_url_dbname() {
+  local file="$1"
+  local dbname="$2"
+  [[ -f "$file" ]] || return 0
+  grep -qE '^DATABASE_URL=' "$file" 2>/dev/null || return 0
+  sed -i.bak -E "s|^(DATABASE_URL=postgresql://[^[:space:]/]+/)[^/?#]+|\1${dbname}|" "$file" && rm -f "${file}.bak"
+}
+
+# Pressana stack must never inherit main-ALM hospitality / port 5000 / web.rioassetmanagement.net.
+ensure_pressana_backend_env() {
+  local dir="${1:-$BACKEND_DIR}"
+  is_pressana_stack || return 0
+
+  local f
+  for f in "${dir}/.env.production" "${dir}/.env"; do
+    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
+    log "Ensuring Pressana backend env in $(basename "$f") (db=${PRESSANA_DB_NAME}, port=${PRESSANA_APP_PORT})"
+    upsert_env_kv "$f" "PORT" "$PRESSANA_APP_PORT"
+    upsert_env_kv "$f" "FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "BACKEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
+    upsert_env_kv "$f" "REDIS_URL" "$PRESSANA_REDIS_URL"
+    upsert_env_kv "$f" "CACHE_ENABLED" "true"
+    rewrite_database_url_dbname "$f" "$PRESSANA_DB_NAME"
+  done
+}
+
+ensure_pressana_frontend_env() {
+  local dir="${1:-$FRONTEND_DIR}"
+  is_pressana_stack || return 0
+
+  local f
+  for f in "${dir}/.env.production" "${dir}/.env"; do
+    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
+    log "Ensuring Pressana frontend env in $(basename "$f")"
+    upsert_env_kv "$f" "VITE_API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "VITE_FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "VITE_RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
+  done
 }
 
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
@@ -425,8 +496,13 @@ compose_up() {
       export COMPOSE_PROJECT_NAME="tenant-alm"
     fi
   fi
-  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build"
-  ( cd "$dir" && $cmd up -d --build )
+  export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
+  local extra=()
+  if [[ "$FORCE_COMPOSE_RECREATE" == "1" ]]; then
+    extra+=(--force-recreate)
+  fi
+  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build ${extra[*]}"
+  ( cd "$dir" && $cmd up -d --build "${extra[@]}" )
   ( cd "$dir" && $cmd ps -a )
 }
 
@@ -446,8 +522,12 @@ main() {
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
     git_pull_with_stash "$BACKEND_DIR" "backend"
     ensure_minio_env_files "$BACKEND_DIR"
+    ensure_pressana_backend_env "$BACKEND_DIR"
     ensure_alm_shared_network
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
+    if is_pressana_stack; then
+      docker rm -f "$BACKEND_CONTAINER_NAME" 2>/dev/null || true
+    fi
     compose_up "$BACKEND_DIR" "backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
     ensure_minio_network "$BACKEND_CONTAINER_NAME"
@@ -457,6 +537,7 @@ main() {
   if [[ "$BACKEND_ONLY" != "1" ]]; then
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
+    ensure_pressana_frontend_env "$FRONTEND_DIR"
     compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
     compose_up "$FRONTEND_DIR" "frontend"
     verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"

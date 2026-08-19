@@ -34,6 +34,13 @@ export FRONTEND_CONTAINER_NAME="${FRONTEND_CONTAINER_NAME:-alm-pressana-frontend
 export BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-5003}"
 export FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3003}"
 export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-pressana}"
+export PRESSANA_DB_NAME="${PRESSANA_DB_NAME:-demopressana_db}"
+export PRESSANA_PUBLIC_URL="${PRESSANA_PUBLIC_URL:-https://pressanaorg.rioassetmanagement.net}"
+export PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
+export PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
+export PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
+export FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
+export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
 # Prevent clobbering ~/alm-main compose project (same folder name AssetLifecycleBackend)
 export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pressana-alm}"
 exec "$DEPLOY"
