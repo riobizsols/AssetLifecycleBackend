@@ -42,12 +42,6 @@ const createCategory = async (req, res) => {
     if (!uom || !String(uom).trim()) {
       return res.status(400).json({ success: false, error: 'UOM is required' });
     }
-    if (minimum_stock === undefined || minimum_stock === null || minimum_stock === '') {
-      return res.status(400).json({ success: false, error: 'Minimum stock is required' });
-    }
-    if (reorder === undefined || reorder === null || reorder === '') {
-      return res.status(400).json({ success: false, error: 'Reorder level is required' });
-    }
 
     const row = await model.createCategory({
       org_id,
@@ -148,6 +142,19 @@ const createCategoryMapping = async (req, res) => {
       success: false,
       error: error.message || 'Failed to save asset type mapping',
     });
+  }
+};
+
+const getLots = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const rows = await model.getSparePartLots(org_id, branch_id, hasSuperAccess);
+    return res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching spare part lots:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch spare part lots' });
   }
 };
 
@@ -252,12 +259,232 @@ const getLotIndividuals = async (req, res) => {
   }
 };
 
+const createVendorSpareMappings = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const created_by = req.user.user_id;
+    const branch_id = req.user.branch_id || null;
+    const { vendor_id, items } = req.body;
+
+    if (!vendor_id) {
+      return res.status(400).json({ success: false, error: 'Vendor is required' });
+    }
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one spare supply item is required',
+      });
+    }
+
+    const created = await model.createVendorSpareMappings({
+      org_id,
+      branch_id,
+      vendor_id,
+      items,
+      created_by,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Spare supply mappings saved successfully',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Error creating vendor spare mappings:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to save spare supply mappings',
+    });
+  }
+};
+
+const getMaintenanceList = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+
+    const rows = await model.getSparePartMaintenanceList(org_id, branch_id, hasSuperAccess);
+    return res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching spare part maintenance list:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch spare part list' });
+  }
+};
+
+const getMaintenanceDetail = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { ams_id } = req.params;
+
+    const row = await model.getSparePartMaintenanceDetail(
+      ams_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'Maintenance record not found' });
+    }
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Error fetching spare part maintenance detail:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch maintenance detail' });
+  }
+};
+
+const getCategoriesByAssetType = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { asset_type_id } = req.params;
+
+    if (!asset_type_id) {
+      return res.status(400).json({ success: false, error: 'Asset type is required' });
+    }
+
+    const rows = await model.getCategoryMappingsByAssetType(
+      org_id,
+      asset_type_id,
+      branch_id,
+      hasSuperAccess
+    );
+    return res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching categories by asset type:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch categories' });
+  }
+};
+
+const createIssueRequests = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const created_by = req.user.user_id;
+    const { assetmaintsch_id, ams_id, items } = req.body;
+
+    const created = await model.createSpareIssueRequests({
+      org_id,
+      branch_id,
+      assetmaintsch_id: assetmaintsch_id || ams_id,
+      items,
+      created_by,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Spare part request submitted for approval',
+      data: created,
+    });
+  } catch (error) {
+    console.error('Error creating spare issue requests:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to submit spare part request',
+    });
+  }
+};
+
+const getIssueApprovals = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+
+    const rows = await model.getSpareIssueApprovals(org_id, branch_id, hasSuperAccess);
+    return res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching spare issue approvals:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch spare part approvals' });
+  }
+};
+
+const getIssueApprovalDetail = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { si_id } = req.params;
+
+    const row = await model.getSpareIssueApprovalDetail(
+      si_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'Spare part request not found' });
+    }
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Error fetching spare issue approval detail:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch approval detail' });
+  }
+};
+
+const approveIssue = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const approved_by = req.user.user_id;
+    const { si_id } = req.params;
+
+    const row = await model.approveSpareIssue({
+      si_id,
+      org_id,
+      branch_id,
+      approved_by,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Spare part request approved and issued',
+      data: row,
+    });
+  } catch (error) {
+    console.error('Error approving spare issue:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to approve spare part request',
+      code: error.code || undefined,
+    });
+  }
+};
+
+const getAvailableQty = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const { spc_id } = req.params;
+    const qty = await model.getAvailableQuantity(spc_id, org_id);
+    return res.status(200).json({ success: true, data: { spc_id, available_qty: qty } });
+  } catch (error) {
+    console.error('Error fetching available quantity:', error);
+    return res.status(500).json({ success: false, error: 'Failed to fetch available quantity' });
+  }
+};
+
 module.exports = {
   getCategories,
   createCategory,
   getCategoryMappings,
   createCategoryMapping,
   getIspModels,
+  getLots,
   createSparePartLot,
   getLotIndividuals,
+  createVendorSpareMappings,
+  getMaintenanceList,
+  getMaintenanceDetail,
+  getCategoriesByAssetType,
+  createIssueRequests,
+  getIssueApprovals,
+  getIssueApprovalDetail,
+  approveIssue,
+  getAvailableQty,
 };
