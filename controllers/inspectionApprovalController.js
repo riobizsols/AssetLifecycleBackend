@@ -2,6 +2,12 @@ const inspectionApprovalModel = require('../models/inspectionApprovalModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const operationalCache = require('../utils/operationalCache');
 const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/systemAdmin');
+const {
+  getInspectionAssetBranchId,
+  getApprovalBranchAccessForUser,
+  attachBranchAccess,
+  crossBranchForbiddenBody,
+} = require('../utils/approvalBranchAccess');
 
 /**
  * CHUNK 2.1 & 2.2: INSPECTION APPROVALS (CONTROLLER)
@@ -40,7 +46,14 @@ async function getPendingApprovals(req, res) {
       req,
       'inspection-approval',
       operationalCache.hashQuery(jobRoles),
-      () => inspectionApprovalModel.getPendingInspectionApprovals(orgId, jobRoles),
+      () => inspectionApprovalModel.getPendingInspectionApprovals(
+        orgId,
+        jobRoles,
+        {
+          userBranchId: req.user?.branch_id || null,
+          isSystemAdmin: userHasSystemAdminRole(req.user),
+        }
+      ),
     );
     
     return res.json({ success: true, count: approvals.length, data: approvals });
@@ -68,8 +81,13 @@ async function getInspectionDetail(req, res) {
       return res.status(404).json({ success: false, message: 'Inspection not found.' });
     }
     
+    const branchAccess = await getApprovalBranchAccessForUser(
+      req.user,
+      detail.header?.asset_branch_id || detail.header?.branch_id || await getInspectionAssetBranchId(wfaiish_id)
+    );
+
     console.log('Successfully retrieved detail for ID:', wfaiish_id);
-    return res.json({ success: true, data: detail });
+    return res.json({ success: true, data: attachBranchAccess(detail, branchAccess) });
   } catch (error) {
     console.error('Error getting inspection detail for ID:', req.params?.wfaiish_id);
     console.error('Error details:', error.message);
@@ -162,6 +180,14 @@ async function processApprovalAction(req, res) {
         success: false,
         message: 'You do not have the required role to act on this approval step.',
       });
+    }
+
+    const inspBranchAccess = await getApprovalBranchAccessForUser(
+      req.user,
+      await getInspectionAssetBranchId(step.wfaiish_id)
+    );
+    if (!inspBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
     }
     
     const normalizedAction = action.toUpperCase();

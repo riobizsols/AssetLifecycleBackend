@@ -1,6 +1,13 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const operationalCache = require('../utils/operationalCache');
 const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch');
+const { userHasSystemAdminRole } = require('../utils/systemAdmin');
+const {
+    getMaintenanceAssetBranchId,
+    getApprovalBranchAccessForUser,
+    attachBranchAccess,
+    crossBranchForbiddenBody,
+} = require('../utils/approvalBranchAccess');
 const {
     // Generic helpers
     logApiCall,
@@ -176,10 +183,13 @@ const getApprovalDetail = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
+    const maintBranchId = await getMaintenanceAssetBranchId(assetId);
+    const branchAccess = await getApprovalBranchAccessForUser(req.user, maintBranchId);
+
     res.json({
       success: true,
       message: 'Approval detail retrieved successfully',
-      data: formattedDetail,
+      data: attachBranchAccess(formattedDetail, branchAccess),
       timestamp: new Date().toISOString()
     });
 
@@ -299,6 +309,14 @@ const approveMaintenanceAction = async (req, res) => {
         empIntId,
         userId
       }).catch(err => console.error('Logging error:', err));
+    }
+
+    const approveBranchAccess = await getApprovalBranchAccessForUser(
+      req.user,
+      await getMaintenanceAssetBranchId(assetId)
+    );
+    if (!approveBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
     }
 
     // Step 5: Execute approval
@@ -534,6 +552,14 @@ const rejectMaintenanceAction = async (req, res) => {
         reason: reason.trim(),
         userId
       }).catch(err => console.error('Logging error:', err));
+    }
+
+    const rejectBranchAccess = await getApprovalBranchAccessForUser(
+      req.user,
+      await getMaintenanceAssetBranchId(assetId)
+    );
+    if (!rejectBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
     }
 
     // Step 5: Execute rejection
@@ -774,8 +800,9 @@ const getMaintenanceApprovalsController = async (req, res) => {
           empIntId,
           orgId,
           userBranchCode,
-          req.user?.hasSuperAccess || false,
-          req.user?.job_role_id || null
+          userHasSystemAdminRole(req.user),
+          req.user?.job_role_id || null,
+          userBranchId
         );
 
         return maintenanceApprovals.map(record => ({
@@ -881,7 +908,7 @@ const getVendorRenewalApprovalsController = async (req, res) => {
       });
     }
 
-    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, userHasSystemAdminRole(req.user));
 
     // Format the data for frontend
     const formattedData = vendorRenewalApprovals.map(record => ({
@@ -1246,9 +1273,12 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       userId
     });
 
+    const wfamshBranchId = await getMaintenanceAssetBranchId(wfamshId);
+    const wfamshBranchAccess = await getApprovalBranchAccessForUser(req.user, wfamshBranchId);
+
     res.json({
       success: true,
-      data: formattedDetail,
+      data: attachBranchAccess(formattedDetail, wfamshBranchAccess),
       message: 'Approval detail fetched successfully'
     });
 
@@ -1287,6 +1317,15 @@ const updateWorkflowHeaderAction = async (req, res) => {
     if (vendorId === undefined && maintenanceDate === undefined && technicianId === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field (vendorId, maintenanceDate or technicianId) must be provided' });
     }
+
+    const headerBranchAccess = await getApprovalBranchAccessForUser(
+      req.user,
+      await getMaintenanceAssetBranchId(wfamshId)
+    );
+    if (!headerBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
+
     const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, technicianId, userId, orgId);
     
     if (result.success) {

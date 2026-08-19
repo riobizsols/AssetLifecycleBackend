@@ -62,6 +62,8 @@ PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
 PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
 PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
 FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
+SKIP_FRONTEND_IF_UNCHANGED="${SKIP_FRONTEND_IF_UNCHANGED:-1}"
+LAST_GIT_PULL_CHANGED=0
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -183,11 +185,16 @@ git_pull_with_stash() {
   local dir="$1"
   local label="${2:-$(basename "$dir")}"
   [[ -d "$dir/.git" ]] || die "Not a git repo: $dir"
+  LAST_GIT_PULL_CHANGED=0
 
   if [[ "$SKIP_GIT_PULL" == "1" ]]; then
     log "SKIP_GIT_PULL=1 — skipping git pull in $label ($dir)"
+    LAST_GIT_PULL_CHANGED=1
     return
   fi
+
+  local before_rev after_rev
+  before_rev="$(git -C "$dir" rev-parse HEAD)"
 
   (
     cd "$dir" || exit 1
@@ -203,7 +210,9 @@ git_pull_with_stash() {
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
       # Never stash .env* — they are server secrets and cause recurring merge conflicts
-      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production'; then
+      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . \
+        ':(exclude).env' ':(exclude).env.production' \
+        ':(exclude).env-pull-backup.*' ':(exclude).env.production.bak.*'; then
         log "[$label] WARN: pathspec stash failed — trying full stash after resetting env files"
         clear_env_merge_conflicts "$label"
         git checkout HEAD -- .env .env.production 2>/dev/null || true
@@ -233,6 +242,40 @@ git_pull_with_stash() {
       fi
     fi
   )
+
+  after_rev="$(git -C "$dir" rev-parse HEAD)"
+  if [[ "$before_rev" != "$after_rev" ]]; then
+    LAST_GIT_PULL_CHANGED=1
+    log "[$label] Git updated ${before_rev:0:7} → ${after_rev:0:7}"
+  else
+    LAST_GIT_PULL_CHANGED=0
+    log "[$label] Git already up to date (${after_rev:0:7})"
+  fi
+}
+
+frontend_http_ok() {
+  curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${FRONTEND_HOST_PORT}/" 2>/dev/null | grep -qE '^[23]'
+}
+
+should_skip_frontend_compose() {
+  if [[ "$SKIP_FRONTEND_IF_UNCHANGED" != "1" ]]; then
+    return 1
+  fi
+  if [[ "$LAST_GIT_PULL_CHANGED" == "1" ]]; then
+    log "[frontend] Code changed (or --rebuild) — Docker build required"
+    return 1
+  fi
+  if ! container_is_running "$FRONTEND_CONTAINER_NAME"; then
+    log "[frontend] Container not running — Docker build required"
+    return 1
+  fi
+  if ! frontend_http_ok; then
+    log "[frontend] HTTP not healthy — Docker build required"
+    return 1
+  fi
+  log "[frontend] Skipping Vite/Docker rebuild (git unchanged, ${FRONTEND_CONTAINER_NAME} already healthy on :${FRONTEND_HOST_PORT})"
+  log "[frontend] To force a rebuild: ./deploy-docker.sh --rebuild"
+  return 0
 }
 
 container_is_running() {
@@ -538,9 +581,16 @@ main() {
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
     ensure_pressana_frontend_env "$FRONTEND_DIR"
-    compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-    compose_up "$FRONTEND_DIR" "frontend"
-    verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    if should_skip_frontend_compose; then
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    else
+      compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
+      local saved_force="$FORCE_COMPOSE_RECREATE"
+      FORCE_COMPOSE_RECREATE="${FRONTEND_FORCE_RECREATE:-0}"
+      compose_up "$FRONTEND_DIR" "frontend"
+      FORCE_COMPOSE_RECREATE="$saved_force"
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    fi
   fi
 
   log "Deploy complete. Public URL: ensure nginx proxies /api → 127.0.0.1:${BACKEND_HOST_PORT}"

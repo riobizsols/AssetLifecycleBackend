@@ -1291,7 +1291,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 
 // Supports super access users who can view all branches
 // tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null) => {
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null, userBranchId = null) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
@@ -1383,6 +1383,14 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
        paramIndex++;
+     }
+
+     if (!hasSuperAccess && userBranchId) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${paramIndex})`;
+       params.push(userBranchId);
+       paramIndex++;
+     } else if (!hasSuperAccess && !userBranchId) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
      }
      
      // Only apply role filter if user doesn't have super access

@@ -46,7 +46,7 @@ const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
  * @param {string|string[]} jobRoles - Job role ID or array of IDs (e.g., 'JR001' or ['JR001', 'JR002'])
  * @returns {Array} List of pending approvals
  */
-async function getPendingInspectionApprovals(orgId, jobRoles) {
+async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false } = {}) {
   // Ensure jobRoles is an array
   const roles = Array.isArray(jobRoles) ? jobRoles : [jobRoles];
   
@@ -54,6 +54,19 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
 
   const includeAllRoles = roleIdsIncludeSystemAdmin(roles);
   const roleFilter = includeAllRoles ? '' : 'AND d.job_role_id = ANY($2::text[])';
+  const seeAllBranches = isSystemAdmin || includeAllRoles;
+  let branchFilter = '';
+  const values = seeAllBranches && includeAllRoles ? [orgId] : includeAllRoles ? [orgId] : [orgId, roles];
+
+  if (!seeAllBranches) {
+    const branchParam = values.length + 1;
+    if (userBranchId) {
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${branchParam})`;
+      values.push(userBranchId);
+    } else {
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
+    }
+  }
 
   const query = `
     SELECT 
@@ -90,14 +103,13 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
     
     WHERE d.org_id = $1
       ${roleFilter}
+      ${branchFilter}
       AND UPPER(d.status) = 'AP'
       AND h.org_id = $1
     
     ORDER BY h.pl_sch_date ASC, d.sequence ASC;
   `;
-  
-  const values = includeAllRoles ? [orgId] : [orgId, roles];
-  
+
   try {
     const result = await getDb().query(query, values);
     return result.rows;
@@ -134,6 +146,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       a.purchased_on,
       a.purchase_vendor_id,
       a.service_vendor_id,
+      a.branch_id as asset_branch_id,
       h.vendor_id,
       
       ast.text as asset_type_name,
