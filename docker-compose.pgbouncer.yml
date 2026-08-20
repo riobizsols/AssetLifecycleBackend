@@ -11,10 +11,11 @@
 
 services:
   alm-pgbouncer:
-    image: pgbouncer/pgbouncer:1.23.1
+    # Hub pgbouncer/pgbouncer has no 1.23.1 tag (stale repo, latest is 1.15.0).
+    image: edoburu/pgbouncer:v1.23.1-p3
     container_name: alm_pgbouncer
     restart: unless-stopped
-    command: ["pgbouncer", "/etc/pgbouncer/pgbouncer.ini"]
+    command: ["/usr/bin/pgbouncer", "/etc/pgbouncer/pgbouncer.ini"]
     volumes:
       - ./config/pgbouncer/generated/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
       - ./config/pgbouncer/generated/userlist.txt:/etc/pgbouncer/userlist.txt:ro
