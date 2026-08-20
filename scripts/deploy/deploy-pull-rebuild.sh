@@ -121,7 +121,7 @@ repo_has_local_changes() {
 # stash/pull can proceed; ensure_minio_env_files re-applies MinIO values later.
 clear_env_merge_conflicts() {
   local label="${1:-repo}"
-  local unmerged
+  local unmerged leftover
   unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
   if [[ -z "$unmerged" ]]; then
     return 0
@@ -150,6 +150,26 @@ clear_env_merge_conflicts() {
   fi
 
   log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
+
+  # Stash pop can also conflict on code (e.g. docker-compose.pgbouncer.yml).
+  # Take the just-pulled HEAD for those paths so deploy is not stuck mid-merge.
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    log "[$label] Taking HEAD for remaining unmerged files (local/stash copies discarded for those paths):"
+    printf '%s\n' "$leftover"
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      git checkout HEAD -- "$f" 2>/dev/null || true
+      git add -- "$f" 2>/dev/null || true
+    done <<< "$leftover"
+  fi
+
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    die "[$label] Still unmerged. On the server run:
+  git checkout HEAD -- $leftover
+  git add $leftover"
+  fi
 }
 
 # Backup server .env files, reset tracked copies so git pull can proceed,
@@ -232,10 +252,17 @@ git_pull_with_stash() {
     if [[ "$stashed" == "1" ]]; then
       log "[$label] git stash pop — restoring local changes..."
       if ! git stash pop; then
-        log "[$label] WARN: stash pop had conflicts — auto-resolving .env / .env.production"
+        log "[$label] WARN: stash pop had conflicts — auto-resolving .env and remaining unmerged files"
         clear_env_merge_conflicts "$label"
-        log "[$label] Env conflict auto-resolved (MinIO settings will be re-applied next)"
-        log "[$label] Remaining stash (if any): git stash list"
+        log "[$label] Env/code conflict auto-resolved (MinIO settings will be re-applied next)"
+        # git stash pop keeps the stash on conflict; drop auto-stash so the next
+        # deploy is not blocked by the same compose/.env conflict.
+        if git stash list | head -1 | grep -q "$STASH_MESSAGE_PREFIX"; then
+          log "[$label] Dropping leftover auto-stash after conflict resolve"
+          git stash drop || true
+        else
+          log "[$label] Remaining stash (if any): git stash list"
+        fi
       else
         log "[$label] Local changes restored after pull"
       fi
