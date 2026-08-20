@@ -320,6 +320,19 @@ ensure_redis() {
     || log "Note: ${REDIS_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
 }
 
+run_node() {
+  if command -v node >/dev/null 2>&1; then
+    ( cd "$BACKEND_DIR" && node "$@" )
+    return
+  fi
+  log "Host has no node — running via docker node:20-bookworm-slim"
+  docker run --rm \
+    -v "$BACKEND_DIR":/app \
+    -w /app \
+    node:20-bookworm-slim \
+    node "$@"
+}
+
 ensure_pgbouncer() {
   if [[ "$ENSURE_PGBOUNCER" != "1" ]]; then
     log "ENSURE_PGBOUNCER=0 — skipping PgBouncer setup"
@@ -328,7 +341,7 @@ ensure_pgbouncer() {
 
   ensure_alm_shared_network
   log "Rendering PgBouncer config from .env.production..."
-  ( cd "$BACKEND_DIR" && node scripts/db/render-pgbouncer-config.js )
+  run_node scripts/db/render-pgbouncer-config.js
 
   local cmd
   cmd="$(detect_compose)"

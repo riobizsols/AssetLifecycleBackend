@@ -3,18 +3,68 @@
  * Render PgBouncer config from .env.production (or env).
  * Output: config/pgbouncer/generated/pgbouncer.ini + userlist.txt
  *
+ * No npm deps — safe to run with `docker run node:20-bookworm-slim` on rio-server.
+ *
  * Usage (from AssetLifecycleBackend):
  *   node scripts/db/render-pgbouncer-config.js
  */
 const fs = require('fs');
 const path = require('path');
 
-require('dotenv').config({ path: path.join(__dirname, '../../.env.production') });
-require('dotenv').config({ path: path.join(__dirname, '../../.env') });
+const ROOT = path.join(__dirname, '../..');
+const OUT_DIR = path.join(ROOT, 'config/pgbouncer/generated');
 
-const { parseDatabaseUrl } = require('../../utils/pgSslOption');
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+  const text = fs.readFileSync(filePath, 'utf8');
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 1) continue;
+    const key = line.slice(0, eq).trim();
+    let value = line.slice(eq + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+    if (process.env[key] == null || process.env[key] === '') {
+      process.env[key] = value;
+    }
+  }
+}
 
-const OUT_DIR = path.join(__dirname, '../../config/pgbouncer/generated');
+function parseDatabaseUrl(databaseUrl) {
+  if (!databaseUrl) {
+    throw new Error('Database URL is required');
+  }
+  const cleaned = databaseUrl.trim();
+  try {
+    const url = new URL(cleaned);
+    return {
+      user: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      host: url.hostname,
+      port: parseInt(url.port || '5432', 10),
+    };
+  } catch (err) {
+    const match = cleaned.match(/^postgresql:\/\/([^:]+):([^@]+)@([^:/]+):(\d+)\/([^?]+)/);
+    if (!match) {
+      throw new Error(`Invalid database URL format: ${err.message}`);
+    }
+    return {
+      user: decodeURIComponent(match[1]),
+      password: decodeURIComponent(match[2]),
+      host: match[3],
+      port: parseInt(match[4], 10),
+    };
+  }
+}
+
+loadEnvFile(path.join(ROOT, '.env.production'));
+loadEnvFile(path.join(ROOT, '.env'));
 
 function resolveCredentials() {
   const directUrl =
@@ -82,13 +132,13 @@ log_connections = 0
 log_disconnections = 0
 `;
 
-  const userlist = `"${user}" "${password.replace(/"/g, '\\"')}"\n`;
+  const userlist = `"${user}" "${String(password || '').replace(/"/g, '\\"')}"\n`;
 
   fs.writeFileSync(path.join(OUT_DIR, 'pgbouncer.ini'), ini, 'utf8');
   fs.writeFileSync(path.join(OUT_DIR, 'userlist.txt'), userlist, 'utf8');
   fs.chmodSync(path.join(OUT_DIR, 'userlist.txt'), 0o600);
 
-  console.log(`✅ PgBouncer config written to ${OUT_DIR}`);
+  console.log(`PgBouncer config written to ${OUT_DIR}`);
   console.log(`   Postgres backend: ${postgresHost}:${postgresPort}`);
   console.log(`   Pool mode: ${poolMode}, default_pool_size: ${defaultPoolSize}`);
 }
