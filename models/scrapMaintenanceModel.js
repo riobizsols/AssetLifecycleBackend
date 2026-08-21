@@ -8,6 +8,8 @@ const {
   statusInSql,
 } = require('../utils/workflowStatusCodes');
 const crypto = require('crypto');
+const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -691,7 +693,7 @@ async function getScrapApprovalDetailByHeaderId(wfscrap_h_id, orgId) {
   return {
     header: headerResult.rows[0],
     assets: assetsResult.rows,
-    workflowSteps: detailsResult.rows,
+    workflowSteps: await enrichWorkflowActors(detailsResult.rows),
   };
 }
 
@@ -751,19 +753,31 @@ async function approveScrapWorkflow({ wfscrap_h_id, empIntId, note, orgId }) {
       );
     }
 
-    // Find an AP row for one of the user's roles
+    const isAdmin = roleIdsIncludeSystemAdmin(roleIds);
+
+    // Matching role can approve the AP step. System Admin (JR001) can approve any AP step.
     const currentRes = await client.query(
-      `
-        SELECT id, seq, status, job_role_id
-        FROM "tblWFScrap_D"
-        WHERE wfscrap_h_id = $1
-          AND status = $3
-          AND job_role_id = ANY($2::varchar[])
-        ORDER BY seq ASC, created_on ASC
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [wfscrap_h_id, roleIds, statusIds.AP]
+      isAdmin
+        ? `
+            SELECT id, seq, status, job_role_id
+            FROM "tblWFScrap_D"
+            WHERE wfscrap_h_id = $1
+              AND status = $2
+            ORDER BY seq ASC, created_on ASC
+            LIMIT 1
+            FOR UPDATE
+          `
+        : `
+            SELECT id, seq, status, job_role_id
+            FROM "tblWFScrap_D"
+            WHERE wfscrap_h_id = $1
+              AND status = $3
+              AND job_role_id = ANY($2::varchar[])
+            ORDER BY seq ASC, created_on ASC
+            LIMIT 1
+            FOR UPDATE
+          `,
+      isAdmin ? [wfscrap_h_id, statusIds.AP] : [wfscrap_h_id, roleIds, statusIds.AP]
     );
 
     if (!currentRes.rows.length) {
@@ -1149,18 +1163,30 @@ async function rejectScrapWorkflow({ wfscrap_h_id, empIntId, reason, orgId }) {
 
     const statusIds = await getStatusIds(['IN', 'AP', 'UA', 'UR', 'IP'], client);
 
+    const isAdmin = roleIdsIncludeSystemAdmin(roleIds);
+
     const currentRes = await client.query(
-      `
-        SELECT id, seq, status, job_role_id
-        FROM "tblWFScrap_D"
-        WHERE wfscrap_h_id = $1
-          AND status = $3
-          AND job_role_id = ANY($2::varchar[])
-        ORDER BY seq ASC, created_on ASC
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [wfscrap_h_id, roleIds, statusIds.AP]
+      isAdmin
+        ? `
+            SELECT id, seq, status, job_role_id
+            FROM "tblWFScrap_D"
+            WHERE wfscrap_h_id = $1
+              AND status = $2
+            ORDER BY seq ASC, created_on ASC
+            LIMIT 1
+            FOR UPDATE
+          `
+        : `
+            SELECT id, seq, status, job_role_id
+            FROM "tblWFScrap_D"
+            WHERE wfscrap_h_id = $1
+              AND status = $3
+              AND job_role_id = ANY($2::varchar[])
+            ORDER BY seq ASC, created_on ASC
+            LIMIT 1
+            FOR UPDATE
+          `,
+      isAdmin ? [wfscrap_h_id, statusIds.AP] : [wfscrap_h_id, roleIds, statusIds.AP]
     );
 
     if (!currentRes.rows.length) {
