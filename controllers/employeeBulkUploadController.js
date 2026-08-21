@@ -73,6 +73,8 @@ const trialUploadEmployees = async (req, res) => {
     // Check which employees already exist
     const employeeIds = csvData.map(row => row.employee_id).filter(id => id);
     const existingIds = await model.checkExistingEmployeeIds(employeeIds);
+    const org_id = req.user?.org_id;
+    const seenEmails = new Set();
     
     let newRecords = 0;
     let updatedRecords = 0;
@@ -98,6 +100,29 @@ const trialUploadEmployees = async (req, res) => {
           validationErrors.push(`Employee ${row.employee_id}: Missing email_id`);
           errors++;
           continue;
+        }
+
+        const emailKey = String(row.email_id).trim().toLowerCase();
+        if (seenEmails.has(emailKey)) {
+          validationErrors.push(
+            `Employee ${row.employee_id}: Duplicate email "${row.email_id}" in upload file`,
+          );
+          errors++;
+          continue;
+        }
+        seenEmails.add(emailKey);
+
+        if (org_id) {
+          const emailOwner = await model.findEmployeeByEmail(row.email_id, org_id, {
+            excludeEmployeeId: row.employee_id || undefined,
+          });
+          if (emailOwner && emailOwner.employee_id !== row.employee_id) {
+            validationErrors.push(
+              `Employee ${row.employee_id}: Email "${row.email_id}" is already used by ${emailOwner.employee_id}`,
+            );
+            errors++;
+            continue;
+          }
         }
         
         if (!row.dept_id) {

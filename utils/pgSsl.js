@@ -45,7 +45,7 @@ function pgSslOptions(connectionString) {
   }
 
   if (process.env.NODE_ENV === 'production') {
-    if (/@(localhost|127\.0\.0\.1|alm_db|host\.docker\.internal)(:|\/|$)/.test(lower)) {
+    if (/@(localhost|127\.0\.0\.1|alm_db|alm_pgbouncer|host\.docker\.internal)(:|\/|$)/.test(lower)) {
       return false;
     }
     return { rejectUnauthorized: false };

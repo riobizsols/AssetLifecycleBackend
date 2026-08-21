@@ -20,6 +20,9 @@ export FRONTEND_CONTAINER_NAME=alm-tenant-web
 export BACKEND_HOST_PORT=5001
 export FRONTEND_HOST_PORT=3001
 export MINIO_BUCKET_VALUE=alm-tenant
+# Tenant reuses shared alm_redis / alm_db from the main stack — do not create
+# main's docker-compose.redis.yml / docker-compose.pgbouncer.yml from this repo.
+export ENSURE_PGBOUNCER=0
 # Must match docker-compose ports "5001:5001" — never allow PORT=5000 from git .env
 export ENSURE_BACKEND_PORT=5001
 export ENSURE_REDIS_URL=redis://alm_redis:6379/0

@@ -41,6 +41,17 @@ const defaultPrefixes = {
     // Existing scrap details table (legacy, used by reports/UI)
     'asset_scrap_det': 'ASD',
     'etc': 'ETC',
+    // Spare parts
+    'sp_category': 'SPC',
+    'sp_lot_det': 'SPLD',
+    'sp_ind_det': 'SPID',
+    'sp_cat_at_map': 'SPCATM',
+    'vsp_map': 'VSPM',
+    'spare_history': 'SPH',
+    'spare_issue': 'SI',
+    'sp_issue': 'SPI',
+    'spare_store': 'SS',
+    'sp_store': 'SS',
 };
 
 /**
@@ -248,7 +259,18 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'scrap_asset_hist': 'tblScrapAssetHist',
         // Existing scrap details table (legacy)
         'asset_scrap_det': 'tblAssetScrapDet',
-        'etc': 'tblEmpTechCert'
+        'etc': 'tblEmpTechCert',
+        // Spare parts
+        'sp_category': 'tblSPCategory',
+        'sp_lot_det': 'tblSPLotDet',
+        'sp_ind_det': 'tblSPIndDet',
+        'sp_cat_at_map': 'tblSPCatATMap',
+        'vsp_map': 'tblVSPMap',
+        'spare_history': 'tblSpareHistory',
+        'spare_issue': 'tblSpareIssue',
+        'sp_issue': 'tblSpareIssue',
+        'spare_store': 'tblSpareStore',
+        'sp_store': 'tblSpareStore',
     };
 
     const targetTable = tableMap[tableKey];
@@ -300,7 +322,18 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
             'scrap_asset_hist': 'scraphis_id',
             // Existing scrap details table (legacy)
               'asset_scrap_det': 'asd_id',
-              'etc': 'etc_id'
+              'etc': 'etc_id',
+              // Spare parts
+              'sp_category': 'spc_id',
+              'sp_lot_det': 'spld_id',
+              'sp_ind_det': 'spid_id',
+              'sp_cat_at_map': 'spcatm_id',
+              'vsp_map': 'vspm_id',
+              'spare_history': 'sph_id',
+              'spare_issue': 'si_id',
+              'sp_issue': 'si_id',
+              'spare_store': 'ss_id',
+              'sp_store': 'ss_id',
         };
 
         const columnName = columnMap[tableKey];
