@@ -77,6 +77,10 @@ const defaultPrefixes = {
     'sp_cat_at_map': 'SPCATM',
     'vsp_map': 'VSPM',
     'spare_history': 'SPH',
+    'sp_issue': 'SPI',
+    'sp_store': 'SS',
+    'sp_brand': 'SPBR',
+    'sp_model': 'SPMD',
 };
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
@@ -218,11 +222,15 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'etc': 'tblEmpTechCert',
         // Spare parts
         'sp_category': 'tblSPCategory',
+        'sp_brand': 'tblSPBrand',
+        'sp_model': 'tblSPModel',
         'sp_lot_det': 'tblSPLotDet',
         'sp_ind_det': 'tblSPIndDet',
         'sp_cat_at_map': 'tblSPCatATMap',
         'vsp_map': 'tblVSPMap',
         'spare_history': 'tblSpareHistory',
+        'sp_issue': 'tblSpareIssue',
+        'sp_store': 'tblSpareStore',
     };
 
     const targetTable = tableMap[tableKey];
@@ -277,11 +285,15 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
               'etc': 'etc_id',
               // Spare parts
               'sp_category': 'spc_id',
+              'sp_brand': 'spb_id',
+              'sp_model': 'spm_id',
               'sp_lot_det': 'spld_id',
               'sp_ind_det': 'spid_id',
               'sp_cat_at_map': 'spcatm_id',
               'vsp_map': 'vspm_id',
               'spare_history': 'sph_id',
+              'sp_issue': 'si_id',
+              'sp_store': 'ss_id',
         };
 
         const columnName = columnMap[tableKey];

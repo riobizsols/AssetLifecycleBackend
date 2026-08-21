@@ -32,9 +32,9 @@ const p = new Pool({
     await client.query(
       `
         INSERT INTO "tblApps" (app_id, text, int_status, org_id)
-        VALUES ('SPAREPARTSCONFIG', 'Spare Parts Configuration', true, $1)
+        VALUES ('SPAREPARTSCONFIG', 'Spare Part Category', true, $1)
         ON CONFLICT (app_id) DO UPDATE
-        SET text = 'Spare Parts Configuration', int_status = true
+        SET text = 'Spare Part Category', int_status = true
       `,
       [orgId]
     );
@@ -122,7 +122,7 @@ const p = new Pool({
             app_id, label, sub_menu, sequence, access_level, is_group, mob_desk
           ) VALUES (
             $1, $2, 1, $3, $4,
-            'SPAREPARTSCONFIG', 'Spare Parts Configuration', NULL, $5, $6, false, $7
+            'SPAREPARTSCONFIG', 'Spare Part Category', NULL, $5, $6, false, $7
           )
         `,
         [
