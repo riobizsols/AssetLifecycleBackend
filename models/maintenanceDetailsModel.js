@@ -286,32 +286,52 @@ const checkJobRoleExists = async (wf_steps_id, job_role_id, org_id, exclude_wf_j
     return result.rows.length > 0;
 };
 
-// Create workflow job role
+// Create workflow job role (dept_id removed from tblWFJobRole; kept nullable only on legacy DBs)
 const createWorkflowJobRole = async (wf_steps_id, job_role_id, emp_int_id, org_id, dept_id = null) => {
     await ensureWfJobRoleDeptNullable();
     const wf_job_role_id = await generateCustomId('wfjr', 3);
-    
-    const query = `
+    const dbPool = getDb();
+
+    const deptCol = await dbPool.query(`
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'tblWFJobRole'
+          AND column_name = 'dept_id'
+        LIMIT 1
+    `);
+    const hasDeptId = deptCol.rows.length > 0;
+
+    if (hasDeptId) {
+        return await dbPool.query(
+            `
+            INSERT INTO "tblWFJobRole" (
+                wf_job_role_id,
+                wf_steps_id,
+                job_role_id,
+                emp_int_id,
+                dept_id,
+                org_id
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING *
+            `,
+            [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, dept_id, org_id]
+        );
+    }
+
+    return await dbPool.query(
+        `
         INSERT INTO "tblWFJobRole" (
             wf_job_role_id,
             wf_steps_id,
             job_role_id,
             emp_int_id,
-            dept_id,
             org_id
-        ) VALUES ($1, $2, $3, $4, $5, $6)
+        ) VALUES ($1, $2, $3, $4, $5)
         RETURNING *
-    `;
-    
-    const dbPool = getDb();
-    return await dbPool.query(query, [
-        wf_job_role_id,
-        wf_steps_id,
-        job_role_id,
-        emp_int_id,
-        dept_id,
-        org_id,
-    ]);
+        `,
+        [wf_job_role_id, wf_steps_id, job_role_id, emp_int_id, org_id]
+    );
 };
 
 // Update workflow job role

@@ -280,26 +280,32 @@ const getUserNotifications = async (req, res) => {
     });
 
     const formattedSpareIssuedNotifications = (spareIssuedNotifications || []).map(
-      (notification) => ({
+      (notification) => {
+        const isConfirmed = notification.status === "IE";
+        return {
         id: notification.si_id,
         wfamshId: null,
         workflowId: notification.si_id,
-        workflowType: "SPARE_ISSUED",
+        workflowType: isConfirmed ? "SPARE_CONFIRMED" : "SPARE_ISSUED",
         route: notification.assetmaintsch_id
-          ? `/spare-part-list-detail/${notification.assetmaintsch_id}`
-          : "/spare-part-list",
+          ? isConfirmed
+            ? "/spare-part-issue"
+            : `/spare-part-list-detail/${notification.assetmaintsch_id}`
+          : isConfirmed
+            ? "/spare-part-issue"
+            : "/spare-part-list",
         userId: userId,
         userName: notification.action_by_name || "Unassigned",
         userEmail: null,
-        status: "IS",
-        statusLabel: "Issued",
+        status: isConfirmed ? "IE" : "IS",
+        statusLabel: isConfirmed ? "Issued" : "Reserved",
         dueDate: notification.due_date || notification.changed_on || notification.created_on,
         cutoffDate: notification.changed_on || notification.created_on,
         daysUntilDue: 0,
         daysUntilCutoff: 999,
         isUrgent: false,
         isOverdue: false,
-        maintenanceType: "Spare Part Issued",
+        maintenanceType: isConfirmed ? "Spare Part Issued" : "Spare Part Reserved",
         assetId: null,
         assetTypeName: notification.asset_type_name || "Asset",
         categoryName: notification.category_name || notification.spc_id || "-",
@@ -310,13 +316,14 @@ const getUserNotifications = async (req, res) => {
         groupId: null,
         groupName: null,
         groupAssetCount: null,
-        title: "Spare Part Issued",
+        title: isConfirmed ? "Spare Part Issued" : "Spare Part Reserved",
         body: `Maintenance ${notification.assetmaintsch_id || "-"}: ${
           notification.asset_type_name || "Asset"
         } / ${
           notification.category_name || notification.spc_id || ""
-        } — spare part issued`,
-      })
+        } — spare part ${isConfirmed ? "issued" : "reserved"}`,
+      };
+      }
     );
 
     console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);

@@ -23,12 +23,23 @@ const MANUAL_EN_BY_TMD_ID = {
   TMD_FAILED_TO_DELETE_ASSET_295BFB6A: "Failed to delete asset",
   TMD_FAILED_TO_SUBMIT_QSN_PRINT_REQUEST_39D8A39B: "Failed to submit QSN print request",
   TMD_FAILED_TO_UPDATE_ASSET_8578544F: "Failed to update asset",
+  TMD_FAILED_TO_ASSIGN_JOB_ROLE_0B4AAC08: "Failed to assign job role",
+  TMD_FAILED_TO_REMOVE_JOB_ROLE_62A4EC13: "Failed to remove job role",
+  TMD_THIS_JOB_ROLE_IS_ALREADY_ASSIGNED_TO_THIS_WORKFLOW_S_1FB6E637:
+    "This job role is already assigned to this workflow step",
   TMD_I18N_ASSETS_NOPERMISSIONTOADDASSETS_254881D6: "No permission to add assets",
   TMD_I18N_COMMON_EXPORTSUCCESS_0C579D38: "Export successful",
   TMD_I18N_VENDORS_FAILEDTOFETCHVENDORS_00D2C278: "Failed to fetch vendors",
   TMD_I18N_VENDORS_FAILEDTOUPLOADANYFILES_1540D0C3: "Failed to upload any files",
   TMD_I18N_VENDORS_PLEASESAVEVENDORFIRST_4D3BFE9E: "Please save vendor first",
   TMD_I18N_VENDORS_SAVEFAILED_08205C99: "Save failed",
+  TMD_PROPERTY_NAME_ALREADY_EXISTS_CE58E9C6: "A property with this name already exists",
+  TMD_PROPERTY_CREATED_WITH_LIST_VALUES_COUNT_7A8D7937:
+    "Property created successfully with {{count}} list value(s)",
+  TMD_FAILED_TO_CREATE_PROPERTY_AA95D244: "Failed to create property",
+  TMD_FAILED_TO_UPDATE_PROPERTY_FF2A7E3B: "Failed to update property",
+  TMD_STATUS_UPDATED_TO_VALUE_777D8607: "Status updated to {{status}}",
+  TMD_FAILED_TO_UPDATE_STATUS_3AD66FA7: "Failed to update status",
 };
 
 const DEFAULT_FRONTEND_SRC = path.join(

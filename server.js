@@ -209,6 +209,8 @@ app.use("/api", techCertRoutes);
 app.use("/api", employeeTechCertRoutes);
 
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
+// Asset docs must be registered before /api/assets so /assets/:id/docs is not swallowed.
+app.use("/api", assetDocsRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/asset-assignments", assetAssignmentRoutes);
 app.use("/api/asset-usage", assetUsageRoutes);
@@ -239,7 +241,6 @@ app.use("/api/cron-jobs", cronJobRoutes);
 app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
 app.use("/api/work-orders", workOrderRoutes);
-app.use("/api", assetDocsRoutes);
 app.use("/api/asset-register", assetRegisterRoutes);
 app.use("/api/asset-lifecycle", assetLifecycleRoutes);
 app.use("/api/asset-valuation", assetValuationRoutes);

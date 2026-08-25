@@ -12,6 +12,7 @@ const {
   resolveVendorIdForMaintRecord,
 } = require('../utils/inhouseVendorUtils');
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -1789,6 +1790,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
     if (workflowData.emp_int_id && isInhouseMaintainedBy(workflowData.maintained_by)) {
       empIntToSave = workflowData.emp_int_id;
     }
+    const technicianDetails = await resolveTechnicianFromEmp(empIntToSave, getDb());
      
      // Check if maintenance record already exists with status 'AP' (manual creation)
      // This should be checked BEFORE group maintenance and BF01/BF03 logic
@@ -1861,6 +1863,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            at_main_freq_id = $4,
           maintained_by = $5,
           emp_int_id = $10,
+          technician_name = COALESCE($11, technician_name),
+          technician_email = COALESCE($12, technician_email),
+          technician_phno = COALESCE($13, technician_phno),
           status = 'IN',
            act_maint_st_date = $6,
            notes = CASE 
@@ -1886,7 +1891,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          existingAmsId,
          orgId,
          amsNotes,
-         empIntToSave
+         empIntToSave,
+         technicianDetails.technician_name,
+         technicianDetails.technician_email,
+         technicianDetails.technician_phno,
        ];
        
        await getDb().query(updateQuery, updateParams);
@@ -2007,6 +2015,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            at_main_freq_id,
            maintained_by,
            emp_int_id,
+           technician_name,
+           technician_email,
+           technician_phno,
            notes,
            status,
            act_maint_st_date,
@@ -2014,7 +2025,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
            created_on,
            org_id,
            branch_code
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP, $13, $14, $15)
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, CURRENT_TIMESTAMP, $17, $18)
        `;
 
        const insertParams = [
@@ -2027,6 +2038,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          workflowData.at_main_freq_id,
         workflowData.maintained_by, // Use maintained_by from representative asset
         empIntToSave,
+        technicianDetails.technician_name,
+        technicianDetails.technician_email,
+        technicianDetails.technician_phno,
         groupNotes, // Notes field is null for group maintenance
          'IN', // Initial status
          workflowData.act_maint_st_date,
@@ -2277,18 +2291,28 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          SET wo_id = $1,
           branch_code = COALESCE($2, branch_code),
           emp_int_id = $5,
+          technician_name = COALESCE($6, technician_name),
+          technician_email = COALESCE($7, technician_email),
+          technician_phno = COALESCE($8, technician_phno),
              changed_by = 'system',
              changed_on = CURRENT_TIMESTAMP
          WHERE ams_id = $3 AND org_id = $4
          RETURNING ams_id, wo_id
        `;
        
+       const bf03Tech = await resolveTechnicianFromEmp(
+         isInhouseMaintainedBy(workflowData.maintained_by) ? workflowData.emp_int_id : null,
+         getDb()
+       );
        const updateParams = [
          workOrderId,
          workflowData.branch_code,
          existingAmsId,
-         orgId
-        , workflowData.emp_int_id
+         orgId,
+         bf03Tech.emp_int_id,
+         bf03Tech.technician_name,
+         bf03Tech.technician_email,
+         bf03Tech.technician_phno,
        ];
        
        console.log('BF03 update query params:', updateParams);
@@ -2330,8 +2354,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
              vendor_id = $3,
              at_main_freq_id = $4,
              maintained_by = $5,
-            maintained_by = $5,
             emp_int_id = $11,
+            technician_name = COALESCE($12, technician_name),
+            technician_email = COALESCE($13, technician_email),
+            technician_phno = COALESCE($14, technician_phno),
             branch_code = COALESCE($6, branch_code),
              notes = CASE 
                WHEN notes IS NULL OR notes = '' THEN $9
@@ -2346,6 +2372,10 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        `;
        
        const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
+       const bf01Tech = await resolveTechnicianFromEmp(
+         isInhouseMaintainedBy(workflowData.maintained_by) ? workflowData.emp_int_id : null,
+         getDb()
+       );
        
        const updateParams = [
          workflowData.wfamsh_id,
@@ -2357,8 +2387,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
          existingAmsId,
          orgId,
          amsNotes,
-         isSoftwareAsset ? null : workOrderId
-        , workflowData.emp_int_id
+         isSoftwareAsset ? null : workOrderId,
+         bf01Tech.emp_int_id,
+         bf01Tech.technician_name,
+         bf01Tech.technician_email,
+         bf01Tech.technician_phno,
        ];
        
        console.log('BF01 update query params:', updateParams);
@@ -2427,6 +2460,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
           at_main_freq_id,
           maintained_by,
           emp_int_id,
+          technician_name,
+          technician_email,
+          technician_phno,
           notes,
           status,
           act_maint_st_date,
@@ -2434,7 +2470,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
           created_on,
           org_id,
           branch_code
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, $14, $15)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, CURRENT_TIMESTAMP, $17, $18)
       `;
       
       const amsNotes = breakdownId ? `Breakdown Maintenance - ${breakdownId}` : null;
@@ -2449,6 +2485,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         workflowData.at_main_freq_id,
         workflowData.maintained_by, // Set based on service_vendor_id
         empIntToSave,
+        technicianDetails.technician_name,
+        technicianDetails.technician_email,
+        technicianDetails.technician_phno,
         amsNotes, // notes - ensures the breakdown link is preserved for syncing
         'IN', // Initial status
         workflowData.act_maint_st_date,

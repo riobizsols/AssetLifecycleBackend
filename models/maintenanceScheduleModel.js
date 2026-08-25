@@ -785,6 +785,37 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   // Automatically set end date to current date when updating
   const currentDate = new Date().toISOString().split("T")[0];
+  const dbPool = getDb();
+
+  // If technician fields are empty but emp_int_id exists, fill name/email/phone from employee
+  let resolvedName = technician_name;
+  let resolvedEmail = technician_email;
+  let resolvedPhone = technician_phno;
+  const needsResolve =
+    (!resolvedName || String(resolvedName).trim() === "") ||
+    (!resolvedEmail || String(resolvedEmail).trim() === "") ||
+    (!resolvedPhone || String(resolvedPhone).trim() === "");
+  if (needsResolve) {
+    const existing = await dbPool.query(
+      `SELECT emp_int_id, technician_name, technician_email, technician_phno
+       FROM "tblAssetMaintSch" WHERE ams_id = $1 AND org_id = $2 LIMIT 1`,
+      [amsId, orgId]
+    );
+    const row = existing.rows[0];
+    if (row?.emp_int_id) {
+      const { resolveTechnicianFromEmp } = require("../utils/technicianResolveUtils");
+      const tech = await resolveTechnicianFromEmp(row.emp_int_id, dbPool);
+      if (!resolvedName || String(resolvedName).trim() === "") {
+        resolvedName = tech.technician_name || row.technician_name || null;
+      }
+      if (!resolvedEmail || String(resolvedEmail).trim() === "") {
+        resolvedEmail = tech.technician_email || row.technician_email || null;
+      }
+      if (!resolvedPhone || String(resolvedPhone).trim() === "") {
+        resolvedPhone = tech.technician_phno || row.technician_phno || null;
+      }
+    }
+  }
 
   const query = `
         UPDATE "tblAssetMaintSch"
@@ -813,9 +844,9 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     currentDate, // Automatically set to current date
     po_number,
     invoice,
-    technician_name,
-    technician_email,
-    technician_phno,
+    resolvedName,
+    resolvedEmail,
+    resolvedPhone,
     cost,
     hours_spent,
     maint_notes,
@@ -823,7 +854,6 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     changed_on,
     orgId,
   ];
-  const dbPool = getDb();
 
   const result = await dbPool.query(query, values);
 
