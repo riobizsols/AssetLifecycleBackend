@@ -10,14 +10,14 @@ const p = new Pool({
   try {
     const apps = await p.query(`
       UPDATE "tblApps"
-      SET text = 'Spare Part Category'
-      WHERE app_id = 'SPAREPARTSCONFIG'
+      SET text = 'Spare Part'
+      WHERE app_id = 'SPAREPARTMASTER'
       RETURNING app_id, text, org_id
     `);
     const nav = await p.query(`
       UPDATE "tblJobRoleNav"
-      SET label = 'Spare Part Category'
-      WHERE app_id = 'SPAREPARTSCONFIG'
+      SET label = 'Spare Part'
+      WHERE app_id = 'SPAREPARTMASTER'
       RETURNING job_role_nav_id, label
     `);
     console.log('apps updated:', apps.rows);

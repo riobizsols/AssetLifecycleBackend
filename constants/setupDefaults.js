@@ -428,7 +428,8 @@ const DEFAULT_APPS = [
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
   { id: "SPAREPARTS", label: "Spare Part Lot" },
-  { id: "SPAREPARTSCONFIG", label: "Spare Parts Configuration" },
+  { id: "SPAREPARTSCONFIG", label: "Spare Part Category" },
+  { id: "SPAREPARTMASTER", label: "Spare Part" },
   { id: "USERS", label: "Users" },
   { id: "AUDITLOGS", label: "Audit Logs" },
   { id: "AUDITLOGCONFIG", label: "Audit Log Config" },
@@ -437,6 +438,7 @@ const DEFAULT_APPS = [
   { id: "MAINTENANCEAPPROVAL", label: "Maintenance Approval" },
   { id: "SUPERVISORAPPROVAL", label: "Supervisor Approval" },
   { id: "SPAREPARTLIST", label: "Spare Part List" },
+  { id: "SPAREPARTISSUE", label: "Spare Part Issue" },
   { id: "SPAREPARTAPPROVAL", label: "Spare Part Approval" }
 ];
 
@@ -530,6 +532,8 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "org", prefix: "ORG", lastNumber: 0 },
   { tableKey: "aplv", prefix: "APLV", lastNumber: 0 },
   { tableKey: "sp_category", prefix: "SPC", lastNumber: 0 },
+  { tableKey: "sp_brand", prefix: "SPBR", lastNumber: 0 },
+  { tableKey: "sp_model", prefix: "SPMD", lastNumber: 0 },
   { tableKey: "sp_lot_det", prefix: "SPLD", lastNumber: 0 },
   { tableKey: "sp_ind_det", prefix: "SPID", lastNumber: 0 },
   { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 },
@@ -732,12 +736,32 @@ const DEFAULT_JOB_ROLE_NAV = [
     isGroup: false
   },
   {
+    id: "JRN014F",
+    jobRoleId: "JR001",
+    parentId: "JRN014A",
+    appId: "SPAREPARTISSUE",
+    label: "Spare Part Issue",
+    sequence: 4,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
     id: "JRN014C",
     jobRoleId: "JR001",
     parentId: "JRN007",
     appId: "SPAREPARTSCONFIG",
-    label: "Spare Parts Configuration",
+    label: "Spare Part Category",
     sequence: 8,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
+    id: "JRN014G",
+    jobRoleId: "JR001",
+    parentId: "JRN007",
+    appId: "SPAREPARTMASTER",
+    label: "Spare Part",
+    sequence: 9,
     accessLevel: "A",
     isGroup: false
   },
@@ -747,7 +771,7 @@ const DEFAULT_JOB_ROLE_NAV = [
     parentId: "JRN007",
     appId: "USERS",
     label: "Users",
-    sequence: 9,
+    sequence: 10,
     accessLevel: "A",
     isGroup: false
   },

@@ -18,14 +18,47 @@ async function addProdserv(data) {
     description
   } = data;
 
+  const brandName = String(brand || '').trim();
+  const modelName = String(model || '').trim();
+  if (!brandName) {
+    const err = new Error('Brand is required');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!modelName) {
+    const err = new Error('Model is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const dbPool = getDb();
+  const dup = await dbPool.query(
+    `
+      SELECT prod_serv_id
+      FROM "tblProdServs"
+      WHERE org_id = $1
+        AND asset_type_id = $2
+        AND LOWER(BTRIM(brand)) = LOWER($3)
+        AND LOWER(BTRIM(model)) = LOWER($4)
+        AND COALESCE(ps_type, '') = COALESCE($5, '')
+        AND CAST(status AS TEXT) IN ('1', 'true')
+      LIMIT 1
+    `,
+    [org_id, asset_type_id, brandName, modelName, ps_type || null]
+  );
+  if (dup.rows.length) {
+    const err = new Error('This brand and model already exist for the selected asset type');
+    err.statusCode = 400;
+    throw err;
+  }
+
   const query = `
     INSERT INTO "tblProdServs"
     (prod_serv_id, org_id, asset_type_id, brand, model, status, ps_type, description)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
     RETURNING *;
   `;
-  const values = [prod_serv_id, org_id, asset_type_id, brand, model, status, ps_type, description];
-  const dbPool = getDb();
+  const values = [prod_serv_id, org_id, asset_type_id, brandName, modelName, status, ps_type, description];
 
   const result = await dbPool.query(query, values);
   return result.rows[0];
