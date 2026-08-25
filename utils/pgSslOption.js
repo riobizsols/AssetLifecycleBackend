@@ -88,6 +88,7 @@ function pgClientOptsFromDatabaseUrl(databaseUrl) {
     ssl = false;
   } else if (
     host === 'alm_db' ||
+    host === 'alm_pgbouncer' ||
     host === 'localhost' ||
     host === '127.0.0.1' ||
     host === 'host.docker.internal'

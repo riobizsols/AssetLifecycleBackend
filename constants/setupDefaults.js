@@ -539,7 +539,9 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 },
   { tableKey: "vsp_map", prefix: "VSPM", lastNumber: 0 },
   { tableKey: "spare_history", prefix: "SPH", lastNumber: 0 },
+  { tableKey: "spare_issue", prefix: "SI", lastNumber: 0 },
   { tableKey: "sp_issue", prefix: "SPI", lastNumber: 0 },
+  { tableKey: "spare_store", prefix: "SS", lastNumber: 0 },
   { tableKey: "sp_store", prefix: "SS", lastNumber: 0 }
 ];
 

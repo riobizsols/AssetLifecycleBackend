@@ -53,6 +53,11 @@ if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   fi
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
+REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
+REDIS_COMPOSE_FILE="${REDIS_COMPOSE_FILE:-docker-compose.redis.yml}"
+PGBOUNCER_CONTAINER="${PGBOUNCER_CONTAINER:-alm_pgbouncer}"
+PGBOUNCER_COMPOSE_FILE="${PGBOUNCER_COMPOSE_FILE:-docker-compose.pgbouncer.yml}"
+ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -95,6 +100,18 @@ compose_v1_remove_container_if_exists() {
   done < <(docker ps -aq --filter "name=${cname}" 2>/dev/null)
 }
 
+# Compose v2 does not hit the 1.29 recreate bug, but fixed container_name values
+# (alm-main-backend / alm-main-frontend) still conflict with containers left
+# from an older compose project (e.g. assetlifecyclebackend). Always remove
+# by exact name before force-recreate.
+remove_named_container_if_exists() {
+  local cname="$1"
+  if docker inspect "$cname" >/dev/null 2>&1; then
+    log "Removing existing container ${cname} before recreate..."
+    docker rm -f "$cname" || true
+  fi
+}
+
 repo_has_local_changes() {
   local dir="$1"
   [[ -n "$(cd "$dir" && git status --porcelain 2>/dev/null)" ]]
@@ -104,7 +121,7 @@ repo_has_local_changes() {
 # stash/pull can proceed; ensure_minio_env_files re-applies MinIO values later.
 clear_env_merge_conflicts() {
   local label="${1:-repo}"
-  local unmerged
+  local unmerged leftover
   unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
   if [[ -z "$unmerged" ]]; then
     return 0
@@ -133,6 +150,26 @@ clear_env_merge_conflicts() {
   fi
 
   log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
+
+  # Stash pop can also conflict on code (e.g. docker-compose.pgbouncer.yml).
+  # Take the just-pulled HEAD for those paths so deploy is not stuck mid-merge.
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    log "[$label] Taking HEAD for remaining unmerged files (local/stash copies discarded for those paths):"
+    printf '%s\n' "$leftover"
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      git checkout HEAD -- "$f" 2>/dev/null || true
+      git add -- "$f" 2>/dev/null || true
+    done <<< "$leftover"
+  fi
+
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    die "[$label] Still unmerged. On the server run:
+  git checkout HEAD -- $leftover
+  git add $leftover"
+  fi
 }
 
 # Backup server .env files, reset tracked copies so git pull can proceed,
@@ -215,10 +252,17 @@ git_pull_with_stash() {
     if [[ "$stashed" == "1" ]]; then
       log "[$label] git stash pop — restoring local changes..."
       if ! git stash pop; then
-        log "[$label] WARN: stash pop had conflicts — auto-resolving .env / .env.production"
+        log "[$label] WARN: stash pop had conflicts — auto-resolving .env and remaining unmerged files"
         clear_env_merge_conflicts "$label"
-        log "[$label] Env conflict auto-resolved (MinIO settings will be re-applied next)"
-        log "[$label] Remaining stash (if any): git stash list"
+        log "[$label] Env/code conflict auto-resolved (MinIO settings will be re-applied next)"
+        # git stash pop keeps the stash on conflict; drop auto-stash so the next
+        # deploy is not blocked by the same compose/.env conflict.
+        if git stash list | head -1 | grep -q "$STASH_MESSAGE_PREFIX"; then
+          log "[$label] Dropping leftover auto-stash after conflict resolve"
+          git stash drop || true
+        else
+          log "[$label] Remaining stash (if any): git stash list"
+        fi
       else
         log "[$label] Local changes restored after pull"
       fi
@@ -281,6 +325,67 @@ ensure_alm_shared_network() {
   else
     log "WARN: container ${POSTGRES_CONTAINER} not found — fix POSTGRES_CONTAINER or start Postgres first."
   fi
+}
+
+# Shared Redis (alm_redis) is managed separately from backend deploy to avoid
+# container name conflicts when an older compose project already created it.
+ensure_redis() {
+  if ! docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+    log "Redis container ${REDIS_CONTAINER} not found — creating from ${REDIS_COMPOSE_FILE}..."
+    ensure_alm_shared_network
+    local cmd
+    cmd="$(detect_compose)"
+    ( cd "$BACKEND_DIR" && $cmd -f "$REDIS_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$REDIS_CONTAINER"; then
+    log "Starting stopped Redis container ${REDIS_CONTAINER}..."
+    docker start "$REDIS_CONTAINER"
+  else
+    log "Redis ${REDIS_CONTAINER} already running — reusing existing container"
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$REDIS_CONTAINER" 2>/dev/null \
+    || log "Note: ${REDIS_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+}
+
+run_node() {
+  if command -v node >/dev/null 2>&1; then
+    ( cd "$BACKEND_DIR" && node "$@" )
+    return
+  fi
+  log "Host has no node — running via docker node:20-bookworm-slim"
+  docker run --rm \
+    -v "$BACKEND_DIR":/app \
+    -w /app \
+    node:20-bookworm-slim \
+    node "$@"
+}
+
+ensure_pgbouncer() {
+  if [[ "$ENSURE_PGBOUNCER" != "1" ]]; then
+    log "ENSURE_PGBOUNCER=0 — skipping PgBouncer setup"
+    return
+  fi
+
+  ensure_alm_shared_network
+  log "Rendering PgBouncer config from .env.production..."
+  run_node scripts/db/render-pgbouncer-config.js
+
+  local cmd
+  cmd="$(detect_compose)"
+
+  if ! docker inspect "$PGBOUNCER_CONTAINER" >/dev/null 2>&1; then
+    log "PgBouncer container ${PGBOUNCER_CONTAINER} not found — creating from ${PGBOUNCER_COMPOSE_FILE}..."
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$PGBOUNCER_CONTAINER"; then
+    log "Starting stopped PgBouncer container ${PGBOUNCER_CONTAINER}..."
+    docker start "$PGBOUNCER_CONTAINER"
+  else
+    log "PgBouncer ${PGBOUNCER_CONTAINER} already running — applying config refresh"
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$PGBOUNCER_CONTAINER" 2>/dev/null \
+    || log "Note: ${PGBOUNCER_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
 }
 
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
@@ -413,10 +518,16 @@ ensure_minio_bucket() {
 compose_up() {
   local dir="$1"
   local label="$2"
+  local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
-  log "Compose ($label): cd $dir && $cmd up -d --build"
-  ( cd "$dir" && $cmd up -d --build )
+  if [[ -n "$service" ]]; then
+    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
+    ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
+  else
+    log "Compose ($label): cd $dir && $cmd up -d --build"
+    ( cd "$dir" && $cmd up -d --build )
+  fi
   ( cd "$dir" && $cmd ps -a )
 }
 
@@ -432,13 +543,24 @@ main() {
     die "Set only one of BACKEND_ONLY=1 or FRONTEND_ONLY=1"
   fi
 
+  if [[ "$FRONTEND_ONLY" != "1" && "$BACKEND_ONLY" != "1" ]]; then
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-1}"
+  elif [[ "$BACKEND_ONLY" == "1" && "$BACKEND_CONTAINER_NAME" == "alm-main-backend" ]]; then
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-1}"
+  else
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-0}"
+  fi
+
   if [[ "$FRONTEND_ONLY" != "1" ]]; then
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
     git_pull_with_stash "$BACKEND_DIR" "backend"
     ensure_minio_env_files "$BACKEND_DIR"
     ensure_alm_shared_network
+    ensure_redis
+    ensure_pgbouncer
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
-    compose_up "$BACKEND_DIR" "backend"
+    remove_named_container_if_exists "$BACKEND_CONTAINER_NAME"
+    compose_up "$BACKEND_DIR" "backend" "alm-backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
     ensure_minio_network "$BACKEND_CONTAINER_NAME"
     ensure_minio_bucket "$BACKEND_CONTAINER_NAME"
@@ -448,7 +570,8 @@ main() {
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
     compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-    compose_up "$FRONTEND_DIR" "frontend"
+    remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
+    compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
     verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
   fi
 

@@ -1,6 +1,7 @@
 const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 const scrapApprovalCache = require('../utils/scrapApprovalCache');
 const assetsDashboardCache = require('../utils/assetsDashboardCache');
+const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 
 function bustScrapCaches(req, orgId) {
   const oid = orgId || req.user?.org_id;
@@ -93,9 +94,9 @@ const getScrapMaintenanceApprovals = async (req, res) => {
     const userId = req.user?.user_id;
     const orgId = req.user?.org_id;
     let userBranchCode = req.user?.branch_code || req.user?.branchCode || null;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
     const branchId = req.user?.branch_id;
     const roleIds = collectUserRoleIds(req.user);
+    const hasSuperAccess = (req.user?.hasSuperAccess || false) || roleIdsIncludeSystemAdmin(roleIds);
 
     if (!userId || !orgId) {
       return res.status(400).json({ success: false, message: 'user_id/org_id missing in user context' });

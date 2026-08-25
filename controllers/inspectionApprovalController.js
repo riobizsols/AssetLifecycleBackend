@@ -1,6 +1,7 @@
 const inspectionApprovalModel = require('../models/inspectionApprovalModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const operationalCache = require('../utils/operationalCache');
+const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/systemAdmin');
 
 /**
  * CHUNK 2.1 & 2.2: INSPECTION APPROVALS (CONTROLLER)
@@ -149,6 +150,17 @@ async function processApprovalAction(req, res) {
       return res.status(400).json({ 
         success: false, 
         message: `Cannot process action. Current status is '${step.status}', expected 'AP'.` 
+      });
+    }
+
+    const userRoleIds = collectUserJobRoleIds(req.user);
+    const canAct =
+      userHasSystemAdminRole(req.user) ||
+      (step.job_role_id && userRoleIds.includes(step.job_role_id));
+    if (!canAct) {
+      return res.status(403).json({
+        success: false,
+        message: 'You do not have the required role to act on this approval step.',
       });
     }
     

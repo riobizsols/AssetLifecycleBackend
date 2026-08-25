@@ -14,6 +14,7 @@ const {
   getProdServAssetTypes,
   getProdServBrands,
   getProdServModels,
+  getIspModels,
   getLots,
   createSparePartLot,
   getLotIndividuals,
@@ -47,6 +48,7 @@ router.post('/models', createSpModel);
 
 router.get('/category-mappings', getCategoryMappings);
 router.post('/category-mappings', createCategoryMapping);
+router.get('/isp-models', getIspModels);
 router.get('/category-mappings/by-asset-type/:asset_type_id', getCategoriesByAssetType);
 router.get('/mapping-options/categories', getModCatCategories);
 router.get('/mapping-options/asset-types', getProdServAssetTypes);

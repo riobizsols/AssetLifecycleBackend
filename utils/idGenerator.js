@@ -77,7 +77,9 @@ const defaultPrefixes = {
     'sp_cat_at_map': 'SPCATM',
     'vsp_map': 'VSPM',
     'spare_history': 'SPH',
+    'spare_issue': 'SI',
     'sp_issue': 'SPI',
+    'spare_store': 'SS',
     'sp_store': 'SS',
     'sp_brand': 'SPBR',
     'sp_model': 'SPMD',
@@ -229,7 +231,9 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'sp_cat_at_map': 'tblSPCatATMap',
         'vsp_map': 'tblVSPMap',
         'spare_history': 'tblSpareHistory',
+        'spare_issue': 'tblSpareIssue',
         'sp_issue': 'tblSpareIssue',
+        'spare_store': 'tblSpareStore',
         'sp_store': 'tblSpareStore',
     };
 
@@ -292,7 +296,9 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
               'sp_cat_at_map': 'spcatm_id',
               'vsp_map': 'vspm_id',
               'spare_history': 'sph_id',
+              'spare_issue': 'si_id',
               'sp_issue': 'si_id',
+              'spare_store': 'ss_id',
               'sp_store': 'ss_id',
         };
 

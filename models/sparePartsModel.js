@@ -3403,7 +3403,194 @@ const getPropertyListValues = async (org_id, prop_id) => {
   return result.rows;
 };
 
+const getIspModels = async (org_id) => {
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `
+      SELECT
+        m."spbmId" AS spbm_id,
+        m."modelName" AS model_name,
+        b."brandName" AS brand_name
+      FROM "tblISPModel" m
+      LEFT JOIN "tblISPBrand" b ON b."spbId" = m."spbId"
+      WHERE m.org_id = $1
+        AND COALESCE(m.int_status, 1) = 1
+      ORDER BY b."brandName" ASC, m."modelName" ASC
+    `,
+    [org_id]
+  );
+  return result.rows;
+};
+
+/**
+ * Create lot header (tblSPLotDet) + individual unit rows (tblSPIndDet) in one transaction.
+ */
+
+const markIndividualIssuedToAsset = async (client, { spid_id, asset_id, org_id, changed_by }) => {
+  const db = client || getDb();
+  const result = await db.query(
+    `
+      UPDATE "tblSPIndDet"
+      SET
+        asset_id = $1,
+        is_used = 1,
+        changed_by = $2,
+        changed_on = CURRENT_TIMESTAMP
+      WHERE spid_id = $3
+        AND org_id = $4
+      RETURNING *
+    `,
+    [asset_id, changed_by || null, spid_id, org_id]
+  );
+  return result.rows[0] || null;
+};
+
+/**
+ * Create spare issue on maintenance approval.
+ * Saves both assetmaintsch_id (ams_id) and asset_id, and marks the unit used.
+ */
+const createSpareIssueOnApproval = async ({
+  org_id,
+  branch_id,
+  ss_id,
+  assetmaintsch_id,
+  asset_id,
+  spid_id,
+  quantity_issued = 1,
+  issued_to,
+  issued_by,
+  remarks,
+  status = 'ISSUED',
+  created_by,
+}) => {
+  if (!org_id) throw new Error('org_id is required');
+  if (!ss_id) throw new Error('ss_id is required');
+  if (!assetmaintsch_id) throw new Error('assetmaintsch_id is required');
+  if (!asset_id) throw new Error('asset_id is required');
+
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Prefer explicit asset_id; otherwise resolve from maintenance schedule
+    let resolvedAssetId = asset_id;
+    const amsResult = await client.query(
+      `
+        SELECT ams_id, asset_id
+        FROM "tblAssetMaintSch"
+        WHERE ams_id = $1
+          AND org_id = $2
+      `,
+      [assetmaintsch_id, org_id]
+    );
+    if (!amsResult.rows.length) {
+      throw new Error(`Maintenance schedule ${assetmaintsch_id} not found`);
+    }
+    if (!resolvedAssetId) {
+      resolvedAssetId = amsResult.rows[0].asset_id;
+    }
+    if (!resolvedAssetId) {
+      throw new Error(`No asset_id found for maintenance schedule ${assetmaintsch_id}`);
+    }
+
+    const si_id = await generateCustomIdForClient(client, 'spare_issue', 3);
+
+    const issueResult = await client.query(
+      `
+        INSERT INTO "tblSpareIssue" (
+          si_id,
+          org_id,
+          branch_id,
+          ss_id,
+          assetmaintsch_id,
+          asset_id,
+          spid_id,
+          quantity_issued,
+          issued_to,
+          issued_by,
+          remarks,
+          status,
+          created_by,
+          created_on,
+          changed_by,
+          changed_on
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
+          CURRENT_TIMESTAMP, $13, CURRENT_TIMESTAMP
+        )
+        RETURNING *
+      `,
+      [
+        si_id,
+        org_id,
+        branch_id || null,
+        ss_id,
+        assetmaintsch_id,
+        resolvedAssetId,
+        spid_id || null,
+        quantity_issued,
+        issued_to || null,
+        issued_by || created_by || null,
+        remarks || null,
+        status,
+        created_by || null,
+      ]
+    );
+
+    let individual = null;
+    if (spid_id) {
+      individual = await markIndividualIssuedToAsset(client, {
+        spid_id,
+        asset_id: resolvedAssetId,
+        org_id,
+        changed_by: created_by,
+      });
+    }
+
+    const sph_id = await generateCustomIdForClient(client, 'spare_history', 3);
+    await client.query(
+      `
+        INSERT INTO "tblSpareHistory" (
+          sph_id, si_id, status, remarks, org_id, branch_id, created_by, created_on
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
+        )
+      `,
+      [
+        sph_id,
+        si_id,
+        status,
+        remarks || null,
+        org_id,
+        branch_id || null,
+        created_by || null,
+      ]
+    );
+
+    await client.query('COMMIT');
+    return {
+      issue: issueResult.rows[0],
+      individual,
+    };
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {
+      /* ignore */
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
+  getIspModels,
+  markIndividualIssuedToAsset,
+  createSpareIssueOnApproval,
+
   getCategories,
   createCategory,
   getSpBrands,

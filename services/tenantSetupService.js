@@ -23,6 +23,10 @@ const {
   parseDatabaseUrl,
   pgClientOptsFromDatabaseUrl,
 } = require('../utils/pgSslOption');
+const {
+  getPostgresDirectClientOpts,
+  getAppDatabaseEndpoint,
+} = require('../utils/postgresConnection');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
 require('dotenv').config();
 
@@ -77,13 +81,7 @@ async function generateUniqueDatabaseName(orgId, subdomain) {
   }
   
   const tenantDbConfig = parseDatabaseUrl(tenantDbUrl);
-  const adminClient = new Client(pgClientOpts({
-    host: tenantDbConfig.host,
-    port: tenantDbConfig.port,
-    user: tenantDbConfig.user,
-    password: tenantDbConfig.password,
-    database: 'postgres',
-  }));
+  const adminClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDbUrl, 'postgres')));
   
   try {
     await adminClient.connect();
@@ -1170,15 +1168,10 @@ async function createTenant(tenantData) {
   }
 
   const dbConfig = parseDatabaseUrl(tenantDatabaseUrl);
+  const appEndpoint = getAppDatabaseEndpoint();
   
-  // Connect to postgres database to create new database
-  const adminClient = new Client(pgClientOpts({
-    host: dbConfig.host,
-    port: dbConfig.port,
-    user: dbConfig.user,
-    password: dbConfig.password,
-    database: 'postgres', // Connect to postgres database to create new DB
-  }));
+  // DDL and schema provisioning must bypass PgBouncer (direct Postgres)
+  const adminClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, 'postgres')));
 
   try {
     await adminClient.connect();
@@ -1200,22 +1193,15 @@ async function createTenant(tenantData) {
     // Register tenant in tenant table using DATABASE_URL credentials
     // Note: registerTenant will be updated to accept subdomain
     await registerTenant(orgIdUpper, {
-      host: dbConfig.host,
-      port: dbConfig.port,
+      host: appEndpoint.host,
+      port: appEndpoint.port,
       database: dbName,
       user: dbConfig.user,
       password: dbConfig.password,
       subdomain: subdomain, // Add subdomain to tenant registration
     });
 
-    // Create all tables in the new database using DATABASE_URL credentials
-    const tenantClient = new Client(pgClientOpts({
-      host: dbConfig.host,
-      port: dbConfig.port,
-      user: dbConfig.user,
-      password: dbConfig.password,
-      database: dbName,
-    }));
+    const tenantClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, dbName)));
 
     try {
       await tenantClient.connect();
@@ -1643,8 +1629,8 @@ async function createTenant(tenantData) {
         subdomain,
         subdomainUrl: finalSubdomainUrl, // Add subdomain URL to response
         database: dbName,
-        host: dbConfig.host,
-        port: dbConfig.port,
+        host: appEndpoint.host,
+        port: appEndpoint.port,
         user: dbConfig.user,
         adminCredentials,
         message: 'Tenant created successfully with all tables and admin user',

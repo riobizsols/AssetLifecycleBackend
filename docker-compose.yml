@@ -1,12 +1,18 @@
-version: "3.9"
-
-# DATABASE_URL like postgres://...@alm_db:5432/db only works if this container
-# shares a user-defined Docker network with the Postgres container named alm_db.
-# One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db
-# Then deploy/restart this compose stack so alm-main-backend joins alm-shared.
+# Backend only — Redis is shared via docker-compose.redis.yml (container alm_redis).
+# PgBouncer is shared via docker-compose.pgbouncer.yml (container alm_pgbouncer).
+# One-time on server:
+#   docker network create alm-shared
+#   docker network connect alm-shared alm_db
+#   docker compose -f docker-compose.redis.yml up -d
+#   ./scripts/db/enable-pgbouncer-main.sh
+#   docker compose -f docker-compose.pgbouncer.yml up -d
 #
+# Deploy backend:
+#   ./deploy-docker.sh
+#
+# App traffic: DATABASE_URL → alm_pgbouncer:6432 (when PGBOUNCER_ENABLED=true)
+# Admin/DDL:   POSTGRES_DIRECT_URL → alm_db:5432
 # MinIO (mansoor-minio) lives on external network mansoor-s-app-backend_mansoor-net.
-# Compose joins that network so MINIO_END_POINT=mansoor-minio works after every recreate.
 
 services:
   alm-backend:
@@ -19,25 +25,10 @@ services:
     ports:
       - "5002:5000"
     restart: unless-stopped
-    depends_on:
-      - alm-redis
     networks:
       - default
       - alm-shared
       - mansoor-net
-
-  alm-redis:
-    image: redis:7-alpine
-    container_name: alm_redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-    volumes:
-      - redis-data:/data
-    networks:
-      - alm-shared
-
-volumes:
-  redis-data:
 
 networks:
   alm-shared:

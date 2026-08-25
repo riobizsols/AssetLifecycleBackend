@@ -1,4 +1,6 @@
 const { getDbFromContext } = require('../utils/dbContext');
+const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
 
 const getDb = () => getDbFromContext();
 
@@ -50,6 +52,9 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
   
   if (roles.length === 0) return [];
 
+  const includeAllRoles = roleIdsIncludeSystemAdmin(roles);
+  const roleFilter = includeAllRoles ? '' : 'AND d.job_role_id = ANY($2::text[])';
+
   const query = `
     SELECT 
       d.wfaiisd_id,
@@ -84,14 +89,14 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
     LEFT JOIN "tblBranches" b ON h.branch_code = b.branch_code
     
     WHERE d.org_id = $1
-      AND d.job_role_id = ANY($2::text[])
+      ${roleFilter}
       AND UPPER(d.status) = 'AP'
       AND h.org_id = $1
     
     ORDER BY h.pl_sch_date ASC, d.sequence ASC;
   `;
   
-  const values = [orgId, roles];
+  const values = includeAllRoles ? [orgId] : [orgId, roles];
   
   try {
     const result = await getDb().query(query, values);
@@ -228,7 +233,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
     
     return {
       header: headerResult.rows[0],
-      approvalLevels: detailResult.rows,
+      approvalLevels: await enrichWorkflowActors(detailResult.rows),
       workflowConfiguration: [] // Empty for now to avoid table issues
     };
   } catch (error) {

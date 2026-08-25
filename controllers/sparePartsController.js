@@ -192,6 +192,23 @@ const getCategoryMappings = async (req, res) => {
   }
 };
 
+const getIspModels = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const models = await model.getIspModels(org_id);
+    return res.status(200).json({
+      success: true,
+      data: models,
+    });
+  } catch (error) {
+    console.error('Error fetching ISP brand models:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch brand / model list',
+    });
+  }
+};
+
 const createCategoryMapping = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -862,6 +879,7 @@ module.exports = {
   getProdServAssetTypes,
   getProdServBrands,
   getProdServModels,
+  getIspModels,
   getLots,
   createSparePartLot,
   getLotIndividuals,
