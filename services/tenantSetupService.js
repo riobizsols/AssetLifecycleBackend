@@ -2286,6 +2286,7 @@ module.exports = {
   checkSubdomainExists,
   checkDomainAndDatabaseAvailability,
   getProposedDatabaseName,
+  buildSubdomainUrl,
   copyJobRoleNavigationForRole,
   seedDefaultJobRoleNavigationIfMissing,
   ensureJobRoleNavigation,
