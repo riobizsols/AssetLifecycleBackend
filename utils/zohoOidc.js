@@ -2,32 +2,49 @@
  * Zoho Directory OIDC helpers (India DC).
  * Enabled only when ZOHO_OIDC_ENABLED=true and credentials are set.
  * Does not affect password login or tenant registration.
+ *
+ * Env aliases (either name works):
+ *   ZOHO_AUTHORIZATION_ENDPOINT | ZOHO_AUTHORIZE_URL
+ *   ZOHO_TOKEN_ENDPOINT          | ZOHO_TOKEN_URL
+ *   ZOHO_USERINFO_ENDPOINT       | ZOHO_USERINFO_URL
  */
 
 const crypto = require('crypto');
 
-const isZohoOidcEnabled = () => {
-  const flag = String(process.env.ZOHO_OIDC_ENABLED || '').toLowerCase();
-  if (flag !== 'true' && flag !== '1' && flag !== 'yes') return false;
-  return Boolean(
-    process.env.ZOHO_CLIENT_ID &&
-      process.env.ZOHO_CLIENT_SECRET &&
-      process.env.ZOHO_REDIRECT_URI &&
-      process.env.ZOHO_AUTHORIZATION_ENDPOINT &&
-      process.env.ZOHO_TOKEN_ENDPOINT &&
-      process.env.ZOHO_USERINFO_ENDPOINT
-  );
+const DEFAULT_AUTHORIZE =
+  'https://directory.zoho.in/p/60084560311/app/514401000000006001/sso/authorize';
+const DEFAULT_TOKEN =
+  'https://directory.zoho.in/p/60084560311/app/514401000000006001/sso/token';
+const DEFAULT_USERINFO =
+  'https://directory.zoho.in/p/60084560311/app/514401000000006001/sso/userinfo';
+const DEFAULT_REDIRECT = 'https://rioassetmanagement.net/api/auth/zoho/callback';
+
+const envFirst = (...keys) => {
+  for (const key of keys) {
+    const v = String(process.env[key] || '').trim();
+    if (v) return v;
+  }
+  return '';
 };
 
 const getZohoConfig = () => ({
-  clientId: process.env.ZOHO_CLIENT_ID,
-  clientSecret: process.env.ZOHO_CLIENT_SECRET,
-  redirectUri: process.env.ZOHO_REDIRECT_URI,
-  authorizationEndpoint: process.env.ZOHO_AUTHORIZATION_ENDPOINT,
-  tokenEndpoint: process.env.ZOHO_TOKEN_ENDPOINT,
-  userinfoEndpoint: process.env.ZOHO_USERINFO_ENDPOINT,
-  scopes: process.env.ZOHO_SCOPES || 'openid email profile',
+  clientId: envFirst('ZOHO_CLIENT_ID'),
+  clientSecret: envFirst('ZOHO_CLIENT_SECRET'),
+  redirectUri: envFirst('ZOHO_REDIRECT_URI') || DEFAULT_REDIRECT,
+  authorizationEndpoint:
+    envFirst('ZOHO_AUTHORIZATION_ENDPOINT', 'ZOHO_AUTHORIZE_URL') || DEFAULT_AUTHORIZE,
+  tokenEndpoint: envFirst('ZOHO_TOKEN_ENDPOINT', 'ZOHO_TOKEN_URL') || DEFAULT_TOKEN,
+  userinfoEndpoint:
+    envFirst('ZOHO_USERINFO_ENDPOINT', 'ZOHO_USERINFO_URL') || DEFAULT_USERINFO,
+  scopes: envFirst('ZOHO_SCOPES') || 'openid email profile',
 });
+
+const isZohoOidcEnabled = () => {
+  const flag = String(process.env.ZOHO_OIDC_ENABLED || '').toLowerCase().trim();
+  if (flag !== 'true' && flag !== '1' && flag !== 'yes') return false;
+  const cfg = getZohoConfig();
+  return Boolean(cfg.clientId && cfg.clientSecret && cfg.redirectUri);
+};
 
 /** HMAC-signed state so we don't need cookie-parser / shared session store. */
 const createOidcState = () => {
