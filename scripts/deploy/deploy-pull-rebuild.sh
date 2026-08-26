@@ -134,19 +134,26 @@ clear_env_merge_conflicts() {
   [[ -f .env ]] && cp -a .env ".env.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
   [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
 
-  # Prefer committed/HEAD versions; fall back to deleting index conflict entries
-  git checkout HEAD -- .env .env.production 2>/dev/null || true
-  git add -- .env .env.production 2>/dev/null || true
+  # Prefer keeping on-disk server env; only use HEAD if file missing
+  if [[ ! -f .env.production ]]; then
+    git checkout HEAD -- .env.production 2>/dev/null || true
+  fi
+  if [[ ! -f .env ]]; then
+    git checkout HEAD -- .env 2>/dev/null || true
+  fi
+  # Clear conflict state in index without overwriting restored files if present
+  git add -u -- .env .env.production 2>/dev/null || true
+  git reset HEAD -- .env .env.production 2>/dev/null || true
 
   # If still unmerged (file only existed on one side), reset the index entry
   if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
     git reset HEAD -- .env .env.production 2>/dev/null || true
-    git checkout -- .env .env.production 2>/dev/null || true
+    git checkout --ours -- .env .env.production 2>/dev/null || true
     git add -- .env .env.production 2>/dev/null || true
   fi
 
   if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
-    die "[$label] Could not clear .env merge conflicts. Run: git checkout HEAD -- .env .env.production && git add .env .env.production"
+    die "[$label] Could not clear .env merge conflicts. Restore from .env.production.bak.* then: git reset HEAD -- .env .env.production"
   fi
 
   log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
@@ -266,11 +273,12 @@ git_pull_with_stash() {
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
       # Never stash .env* — they are server secrets and cause recurring merge conflicts
-      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production'; then
+      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production' ':(exclude).env.*'; then
         log "[$label] WARN: pathspec stash failed — trying full stash after resetting env files"
         clear_env_merge_conflicts "$label"
-        git checkout HEAD -- .env .env.production 2>/dev/null || true
-        git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        # Do NOT checkout HEAD for env here — preserve_env already backed them up;
+        # restore after this failed-path stash as well.
+        git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production'
       fi
       stashed=1
     elif repo_has_local_changes "$dir"; then
@@ -287,11 +295,17 @@ git_pull_with_stash() {
     if [[ "$stashed" == "1" ]]; then
       log "[$label] git stash pop — restoring local changes..."
       if ! git stash pop; then
-        log "[$label] WARN: stash pop had conflicts — auto-resolving .env and remaining unmerged files"
+        log "[$label] WARN: stash pop had conflicts — auto-resolving without wiping restored .env*"
+        # Backup current (restored) env again before conflict cleaner touches them
+        local conflict_bak=".env-conflict-bak.$(date -u +%Y%m%d%H%M%S)"
+        mkdir -p "$conflict_bak"
+        [[ -f .env ]] && cp -a .env "$conflict_bak/.env"
+        [[ -f .env.production ]] && cp -a .env.production "$conflict_bak/.env.production"
         clear_env_merge_conflicts "$label"
-        log "[$label] Env/code conflict auto-resolved (MinIO settings will be re-applied next)"
-        # git stash pop keeps the stash on conflict; drop auto-stash so the next
-        # deploy is not blocked by the same compose/.env conflict.
+        [[ -f "$conflict_bak/.env" ]] && cp -a "$conflict_bak/.env" .env
+        [[ -f "$conflict_bak/.env.production" ]] && cp -a "$conflict_bak/.env.production" .env.production
+        rm -rf "$conflict_bak"
+        log "[$label] Env restored after conflict resolve (MinIO settings will be re-applied next)"
         if git stash list | head -1 | grep -q "$STASH_MESSAGE_PREFIX"; then
           log "[$label] Dropping leftover auto-stash after conflict resolve"
           git stash drop || true
