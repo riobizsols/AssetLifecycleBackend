@@ -14,6 +14,7 @@ class EventLogger {
         this.logDirectory = path.join(__dirname, '../logs/events');
         this.currentDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
         this.fileRetentionDays = 10;
+        this.logDirectoryWritable = false;
         
         // Ensure log directory exists
         this.ensureLogDirectory();
@@ -26,11 +27,19 @@ class EventLogger {
     }
 
     /**
-     * Ensure log directory exists
+     * Ensure log directory exists (best-effort; never crash the process).
      */
     ensureLogDirectory() {
-        if (!fs.existsSync(this.logDirectory)) {
-            fs.mkdirSync(this.logDirectory, { recursive: true });
+        try {
+            if (!fs.existsSync(this.logDirectory)) {
+                fs.mkdirSync(this.logDirectory, { recursive: true });
+            }
+            this.logDirectoryWritable = true;
+        } catch (error) {
+            this.logDirectoryWritable = false;
+            console.warn(
+                `[EventLogger] Cannot create log directory ${this.logDirectory}: ${error.message}. Event CSV logging disabled.`
+            );
         }
     }
 
@@ -38,16 +47,26 @@ class EventLogger {
      * Get log file path for specific app_id
      * Creates file with headers if it doesn't exist
      * @param {string} appId - Application/module ID
-     * @returns {string} Full path to log file
+     * @returns {string|null} Full path to log file, or null if logging is unavailable
      */
     getLogFileForApp(appId) {
+        if (!this.logDirectoryWritable) {
+            return null;
+        }
+
         const fileName = `events_${appId}_${this.currentDate}.csv`;
         const filePath = path.join(this.logDirectory, fileName);
         
         // Create file with headers if it doesn't exist
-        if (!fs.existsSync(filePath)) {
-            const headers = 'Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID\n';
-            fs.writeFileSync(filePath, headers, 'utf8');
+        try {
+            if (!fs.existsSync(filePath)) {
+                const headers = 'Timestamp,Log Level,Event Type,Module,Message,Request Data,Response Data,Duration (ms),User ID\n';
+                fs.writeFileSync(filePath, headers, 'utf8');
+            }
+        } catch (error) {
+            this.logDirectoryWritable = false;
+            console.warn(`[EventLogger] Cannot write log file ${filePath}: ${error.message}`);
+            return null;
         }
         
         return filePath;
@@ -69,7 +88,8 @@ class EventLogger {
             const requiredLevel = TechnicalLogConfigModel.getLogLevelCode(eventLevel);
             return await TechnicalLogConfigModel.shouldLog(appId, requiredLevel);
         } catch (error) {
-            if (error?.code !== 'TENANT_DB_CONTEXT_REQUIRED' && process.env.NODE_ENV !== 'production') {
+            // Only log errors in non-production environments
+            if (process.env.NODE_ENV !== 'production') {
                 console.error('Error checking if should log:', error);
             }
             return false;
@@ -126,6 +146,7 @@ class EventLogger {
 
             // Get app-specific log file and append
             const logFile = this.getLogFileForApp(appId);
+            if (!logFile) return;
             fs.appendFileSync(logFile, csvRow, 'utf8');
 
         } catch (error) {
@@ -297,6 +318,7 @@ class EventLogger {
      * Clean up log files older than retention period
      */
     cleanupOldFiles() {
+        if (!this.logDirectoryWritable) return;
         try {
             const files = fs.readdirSync(this.logDirectory);
             const cutoffDate = new Date();
