@@ -714,7 +714,11 @@ compose_up() {
 
 main() {
   local compose_cmd
+  local script_self script_hash_start script_hash_now
   compose_cmd="$(detect_compose)"
+  script_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  script_hash_start="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+
   log "Using: $(compose_version_line "$compose_cmd")"
   log "ALM_ROOT=$ALM_ROOT"
   log "BACKEND_DIR=$BACKEND_DIR"
@@ -738,7 +742,25 @@ main() {
 
   if [[ "$FRONTEND_ONLY" != "1" ]]; then
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
-    git_pull_with_stash "$BACKEND_DIR" "backend"
+    if [[ "${SKIP_BACKEND_GIT_PULL:-0}" == "1" ]]; then
+      log "[backend] SKIP_BACKEND_GIT_PULL=1 — already pulled before deploy-script re-exec"
+    else
+      git_pull_with_stash "$BACKEND_DIR" "backend"
+    fi
+
+    # git pull may update THIS script while the old version is still running in memory.
+    # Re-exec once so ensure_compose_env_complete / new helpers always run.
+    script_hash_now="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+    if [[ "${DEPLOY_REEXEC_DONE:-0}" != "1" \
+      && -n "$script_hash_start" \
+      && -n "$script_hash_now" \
+      && "$script_hash_now" != "$script_hash_start" ]]; then
+      log "[deploy] deploy-pull-rebuild.sh updated by git pull — re-executing latest script"
+      export DEPLOY_REEXEC_DONE=1
+      export SKIP_BACKEND_GIT_PULL=1
+      exec bash "$script_self" "$@"
+    fi
+
     ensure_compose_env_complete "$BACKEND_DIR"
     ensure_minio_env_files "$BACKEND_DIR"
     ensure_alm_shared_network

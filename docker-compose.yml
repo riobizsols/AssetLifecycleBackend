@@ -1,5 +1,3 @@
-version: "3.9"
-
 # DATABASE_URL like postgres://...@alm_db:5432/db only works if this container
 # shares a user-defined Docker network with the Postgres container named alm_db.
 # One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db
