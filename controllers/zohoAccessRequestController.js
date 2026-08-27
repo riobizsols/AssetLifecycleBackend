@@ -17,6 +17,7 @@ const {
   getAccessRequestById,
   markAccessRequestApproved,
   markAccessRequestRejected,
+  checkAccessRequestSubdomainAvailability,
 } = require('../models/zohoAccessRequestModel');
 const { createTenant, buildSubdomainUrl } = require('../services/tenantSetupService');
 const { validateSubdomain } = require('../utils/subdomainUtils');
@@ -79,6 +80,22 @@ const getClaimPreview = async (req, res) => {
     });
   } catch (err) {
     return res.status(err.status || 401).json({ message: err.message });
+  }
+};
+
+const checkSubdomain = async (req, res) => {
+  try {
+    const subdomain = req.body?.subdomain || req.query?.subdomain;
+    if (!subdomain) {
+      return res.status(400).json({ available: false, message: 'Subdomain is required' });
+    }
+    const result = await checkAccessRequestSubdomainAvailability(subdomain);
+    return res.json(result);
+  } catch (err) {
+    return res.status(400).json({
+      available: false,
+      message: err.message || 'Invalid subdomain',
+    });
   }
 };
 
@@ -198,6 +215,12 @@ const approveRequest = async (req, res) => {
       return res.status(400).json({ message: e.message || 'Invalid subdomain' });
     }
 
+    // Allow this request's own reserved subdomain; block tenants + other pending rows
+    const availability = await checkAccessRequestSubdomainAvailability(subdomain, id);
+    if (!availability.available) {
+      return res.status(409).json({ message: availability.message });
+    }
+
     const tenantResult = await createTenant({
       orgId: orgIdInput,
       orgName: companyName,
@@ -280,6 +303,7 @@ const rejectRequest = async (req, res) => {
 module.exports = {
   opsLogin,
   getClaimPreview,
+  checkSubdomain,
   submitAccessRequest,
   listRequests,
   approveRequest,

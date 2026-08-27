@@ -3,14 +3,16 @@ const router = express.Router();
 const {
   opsLogin,
   getClaimPreview,
+  checkSubdomain,
   submitAccessRequest,
   listRequests,
   approveRequest,
   rejectRequest,
 } = require('../controllers/zohoAccessRequestController');
 
-// Public — Zoho-verified claim required
+// Public — Zoho-verified claim required for submit
 router.get('/claim-preview', getClaimPreview);
+router.post('/check-subdomain', checkSubdomain);
 router.post('/request', submitAccessRequest);
 
 // Company ops only (ACCESS_REQUEST_OPS_PASSWORD) — not tenant users

@@ -125,17 +125,19 @@ async function isDatabaseNameTaken(dbName) {
  */
 async function checkDomainAndDatabaseAvailability(subdomainInput) {
   const { validateSubdomain } = require('../utils/subdomainUtils');
+  const { isSubdomainHeldByPendingRequest } = require('../models/zohoAccessRequestModel');
   const normalizedSubdomain = validateSubdomain(subdomainInput);
   const databaseName = getProposedDatabaseName(normalizedSubdomain);
   const subdomainTaken = await checkSubdomainExists(normalizedSubdomain);
+  const pendingRequestTaken = await isSubdomainHeldByPendingRequest(normalizedSubdomain);
   const databaseTaken = await isDatabaseNameTaken(databaseName);
-  const available = !subdomainTaken && !databaseTaken;
+  const available = !subdomainTaken && !pendingRequestTaken && !databaseTaken;
 
   let message;
-  if (subdomainTaken && databaseTaken) {
-    message = `Login domain "${normalizedSubdomain}" and database "${databaseName}" are already taken.`;
-  } else if (subdomainTaken) {
-    message = `Login domain "${normalizedSubdomain}" is already taken.`;
+  if (subdomainTaken) {
+    message = `Login domain "${normalizedSubdomain}" is already taken by an organization.`;
+  } else if (pendingRequestTaken) {
+    message = `Login domain "${normalizedSubdomain}" is already reserved by a pending access request.`;
   } else if (databaseTaken) {
     message = `Database name "${databaseName}" is already taken.`;
   } else {
@@ -146,8 +148,9 @@ async function checkDomainAndDatabaseAvailability(subdomainInput) {
     available,
     subdomain: normalizedSubdomain,
     databaseName,
-    subdomainTaken,
+    subdomainTaken: subdomainTaken || pendingRequestTaken,
     databaseTaken,
+    pendingRequestTaken,
     message,
   };
 }

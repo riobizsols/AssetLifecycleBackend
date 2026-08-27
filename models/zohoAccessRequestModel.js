@@ -37,6 +37,11 @@ async function ensureAccessRequestsTable(pool = null) {
     WHERE status = 'pending'
   `);
   await registry.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_zoho_access_requests_pending_subdomain
+    ON zoho_access_requests (lower(trim(subdomain)))
+    WHERE status = 'pending'
+  `);
+  await registry.query(`
     CREATE INDEX IF NOT EXISTS idx_zoho_access_requests_status_created
     ON zoho_access_requests (status, created_at DESC)
   `);
@@ -48,6 +53,76 @@ function normalizeEmail(email) {
   return String(email || '')
     .trim()
     .toLowerCase();
+}
+
+/**
+ * True if subdomain is held by a pending Zoho access request.
+ * @param {string} subdomain
+ * @param {number|null} excludeRequestId - skip this request (approve/self)
+ */
+async function isSubdomainHeldByPendingRequest(subdomain, excludeRequestId = null) {
+  const pool = initTenantRegistryPool();
+  await ensureAccessRequestsTable(pool);
+  const normalized = String(subdomain || '')
+    .trim()
+    .toLowerCase();
+  if (!normalized) return false;
+
+  if (excludeRequestId) {
+    const result = await pool.query(
+      `SELECT id FROM zoho_access_requests
+       WHERE status = 'pending'
+         AND lower(trim(subdomain)) = $1
+         AND id <> $2
+       LIMIT 1`,
+      [normalized, excludeRequestId]
+    );
+    return result.rows.length > 0;
+  }
+
+  const result = await pool.query(
+    `SELECT id FROM zoho_access_requests
+     WHERE status = 'pending'
+       AND lower(trim(subdomain)) = $1
+     LIMIT 1`,
+    [normalized]
+  );
+  return result.rows.length > 0;
+}
+
+/**
+ * Check tenants.subdomain + pending zoho_access_requests.subdomain.
+ */
+async function checkAccessRequestSubdomainAvailability(subdomainInput, excludeRequestId = null) {
+  const { validateSubdomain, isSubdomainAvailable } = require('../utils/subdomainUtils');
+  const subdomain = validateSubdomain(subdomainInput);
+
+  const tenantAvailable = await isSubdomainAvailable(subdomain);
+  if (!tenantAvailable) {
+    return {
+      available: false,
+      subdomain,
+      reason: 'tenant',
+      message: `Subdomain "${subdomain}" is already used by an existing organization.`,
+    };
+  }
+
+  const pendingHeld = await isSubdomainHeldByPendingRequest(subdomain, excludeRequestId);
+  if (pendingHeld) {
+    return {
+      available: false,
+      subdomain,
+      reason: 'pending_request',
+      message: `Subdomain "${subdomain}" is already reserved by another pending access request.`,
+    };
+  }
+
+  return {
+    available: true,
+    subdomain,
+    reason: null,
+    message: `Subdomain "${subdomain}" is available.`,
+  };
 }
 
 async function createAccessRequest(data) {
@@ -78,24 +153,43 @@ async function createAccessRequest(data) {
     throw err;
   }
 
-  const result = await pool.query(
-    `INSERT INTO zoho_access_requests (
-       email_normalized, full_name, company_name, subdomain, org_id,
-       org_city, phone, notes, status
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
-     RETURNING *`,
-    [
-      email,
-      data.fullName ? String(data.fullName).trim() : null,
-      companyName,
-      subdomain,
-      data.orgId ? String(data.orgId).trim().toUpperCase().slice(0, 10) : null,
-      data.orgCity ? String(data.orgCity).trim() : null,
-      data.phone ? String(data.phone).trim() : null,
-      data.notes ? String(data.notes).trim() : null,
-    ]
-  );
-  return result.rows[0];
+  const availability = await checkAccessRequestSubdomainAvailability(subdomain);
+  if (!availability.available) {
+    const err = new Error(availability.message);
+    err.status = 409;
+    err.reason = availability.reason;
+    throw err;
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO zoho_access_requests (
+         email_normalized, full_name, company_name, subdomain, org_id,
+         org_city, phone, notes, status
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending')
+       RETURNING *`,
+      [
+        email,
+        data.fullName ? String(data.fullName).trim() : null,
+        companyName,
+        subdomain,
+        data.orgId ? String(data.orgId).trim().toUpperCase().slice(0, 10) : null,
+        data.orgCity ? String(data.orgCity).trim() : null,
+        data.phone ? String(data.phone).trim() : null,
+        data.notes ? String(data.notes).trim() : null,
+      ]
+    );
+    return result.rows[0];
+  } catch (dbErr) {
+    if (dbErr?.code === '23505') {
+      const err = new Error(
+        `Subdomain "${subdomain}" was just reserved by another request. Choose a different one.`
+      );
+      err.status = 409;
+      throw err;
+    }
+    throw dbErr;
+  }
 }
 
 async function listAccessRequests({ status = null, limit = 100 } = {}) {
@@ -175,4 +269,6 @@ module.exports = {
   getAccessRequestById,
   markAccessRequestApproved,
   markAccessRequestRejected,
+  isSubdomainHeldByPendingRequest,
+  checkAccessRequestSubdomainAvailability,
 };
