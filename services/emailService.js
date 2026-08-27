@@ -484,9 +484,113 @@ FRONTEND_URL=${frontendUrl || process.env.FRONTEND_URL || 'http://localhost:3000
   }
 };
 
+/** Notify RIO ops that a Zoho user requested an ALM org. */
+const sendAccessRequestNotifyEmail = async ({ to, request, approveUrl }) => {
+  try {
+    const recipients = Array.isArray(to) ? to.filter(Boolean) : [to].filter(Boolean);
+    if (!recipients.length) return { success: false, error: 'No recipients' };
+
+    const mailOptions = {
+      from: `"RIO EAM" <${process.env.EMAIL_USER}>`,
+      to: recipients.join(', '),
+      subject: `New Zoho access request: ${request.company_name || 'Organization'}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background-color: #0E2F4B; color: white; padding: 16px;">
+            <h2 style="margin:0;">New Zoho access request</h2>
+          </div>
+          <div style="padding: 20px; background: #f8f9fa;">
+            <p>A Zoho user requested an ALM organization.</p>
+            <ul>
+              <li><strong>Email:</strong> ${request.email_normalized}</li>
+              <li><strong>Name:</strong> ${request.full_name || '—'}</li>
+              <li><strong>Company:</strong> ${request.company_name}</li>
+              <li><strong>Desired subdomain:</strong> ${request.subdomain}</li>
+              <li><strong>City:</strong> ${request.org_city || '—'}</li>
+              <li><strong>Phone:</strong> ${request.phone || '—'}</li>
+              <li><strong>Notes:</strong> ${request.notes || '—'}</li>
+            </ul>
+            <p>
+              ${
+                approveUrl
+                  ? `<a href="${approveUrl}" style="display:inline-block;padding:10px 18px;background:#0E2F4B;color:#fff;text-decoration:none;border-radius:4px;">Review in ALM</a>`
+                  : ""
+              }
+            </p>
+            <p style="font-size:12px;color:#666;">
+              Open the company ops screen (password-protected):
+              <strong>/ops/access-requests</strong>, then Approve to auto-create the organization.
+            </p>
+          </div>
+        </div>
+      `,
+    };
+    const result = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: result.messageId };
+  } catch (error) {
+    console.error('[AccessRequest] notify email error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/** Email Zoho requester after org is auto-created on approve. */
+const sendOrgProvisionedForZohoEmail = async ({
+  to,
+  fullName,
+  companyName,
+  subdomain,
+  subdomainUrl,
+  zohoLoginUrl,
+  passwordHint,
+}) => {
+  try {
+    const mailOptions = {
+      from: `"RIO EAM" <${process.env.EMAIL_USER}>`,
+      to,
+      subject: `Your RIO EAM organization is ready — ${companyName}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background-color: #0E2F4B; color: white; padding: 16px;">
+            <h2 style="margin:0;">Welcome to RIO EAM</h2>
+          </div>
+          <div style="padding: 20px; background: #f8f9fa;">
+            <p>Hello ${fullName || 'there'},</p>
+            <p>Your organization <strong>${companyName}</strong> has been created.</p>
+            <div style="background:#fff;padding:14px;border-left:4px solid #0E2F4B;margin:16px 0;">
+              <p style="margin:0 0 8px 0;"><strong>Organization URL:</strong><br/>
+                <a href="${subdomainUrl}">${subdomainUrl}</a>
+              </p>
+              <p style="margin:0;"><strong>Subdomain:</strong> ${subdomain}</p>
+            </div>
+            <p><strong>Recommended:</strong> Open RIO EAM from Zoho (or use the button below) to sign in with Zoho SSO.</p>
+            <p style="text-align:center;margin:24px 0;">
+              <a href="${zohoLoginUrl}" style="display:inline-block;padding:12px 22px;background:#0E2F4B;color:#fff;text-decoration:none;border-radius:4px;font-weight:bold;">
+                Sign in with Zoho
+              </a>
+            </p>
+            <p style="font-size:13px;color:#444;">
+              Backup (email/password): use <strong>${to}</strong>
+              ${passwordHint ? ` with initial password <strong>${passwordHint}</strong> (change after first login).` : '.'}
+            </p>
+            <p>After you sign in, add your team under Employees / Users — they can then use Zoho SSO too.</p>
+            <p>Best regards,<br/>RIO EAM Team</p>
+          </div>
+        </div>
+      `,
+    };
+    const result = await transporter.sendMail(mailOptions);
+    return { success: true, messageId: result.messageId };
+  } catch (error) {
+    console.error('[AccessRequest] provision email error:', error);
+    return { success: false, error: error.message };
+  }
+};
+
 module.exports = {
     sendWelcomeEmail,
     sendRoleAssignmentEmail,
     sendWorkflowNotificationToRole,
-    sendSetupCompletionEmail
+    sendSetupCompletionEmail,
+    sendAccessRequestNotifyEmail,
+    sendOrgProvisionedForZohoEmail,
 };

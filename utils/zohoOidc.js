@@ -79,12 +79,14 @@ const verifyOidcState = (state, maxAgeMs = 10 * 60 * 1000) => {
 const buildAuthorizeUrl = (state) => {
   const cfg = getZohoConfig();
   const url = new URL(cfg.authorizationEndpoint);
+  // Directory OIDC authorize only — do not use accounts.zoho.*/oauth/v2/auth.
+  // Omit access_type=offline; that is for Zoho API OAuth clients and can force
+  // Accounts into a generic client lookup that rejects Directory client IDs.
   url.searchParams.set('client_id', cfg.clientId);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('redirect_uri', cfg.redirectUri);
   url.searchParams.set('scope', cfg.scopes);
   url.searchParams.set('state', state);
-  url.searchParams.set('access_type', 'offline');
   return url.toString();
 };
 

@@ -17,6 +17,7 @@ const { resolveTenantDatabase } = require('../utils/tenantAuthResolver');
 const { findUserByEmail, getUserWithBranch } = require('../models/userModel');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { buildSubdomainUrl } = require('../services/tenantSetupService');
+const { createZohoAccessClaim } = require('../utils/zohoAccessClaim');
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 
@@ -112,10 +113,28 @@ const zohoLoginCallback = async (req, res) => {
 
     const tenantCtx = await resolveTenantDatabase({ hostname: null, email });
     if (!tenantCtx?.dbPool || !tenantCtx.registryOrgId) {
-      return redirectWithError(
-        res,
-        'No ALM organization found for this email. Register a tenant or ask your admin to add your email.'
-      );
+      // Zoho-first onboarding: send verified user to request-access (not public tenant-setup).
+      const fullName =
+        profile?.name ||
+        profile?.Name ||
+        [profile?.given_name || profile?.first_name, profile?.family_name || profile?.last_name]
+          .filter(Boolean)
+          .join(' ') ||
+        idPayload?.name ||
+        null;
+      try {
+        const claim = createZohoAccessClaim({ email, fullName });
+        const url = new URL(`${platformFrontendBase()}/request-access`);
+        url.searchParams.set('claim', claim);
+        logger.log(`[ZohoSSO] No org for ${email} → request-access`);
+        return res.redirect(302, url.toString());
+      } catch (claimErr) {
+        logger.warn('[ZohoSSO] access claim failed:', claimErr.message);
+        return redirectWithError(
+          res,
+          'No ALM organization found for this email. Contact support to request access.'
+        );
+      }
     }
 
     const dbPool = tenantCtx.dbPool;

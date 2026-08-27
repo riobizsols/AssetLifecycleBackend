@@ -69,6 +69,7 @@ const CronService = require("./services/cronService");
 const { connectRedis, quitRedis } = require("./config/redis");
 const setupWizardRoutes = require("./routes/setupWizardRoutes");
 const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
+const zohoAccessRequestRoutes = require("./routes/zohoAccessRequestRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
@@ -189,6 +190,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/account-deletion", accountDeletionRoutes);
 app.use("/api/setup", setupWizardRoutes);
 app.use("/api/tenant-setup", tenantSetupRoutes);
+app.use("/api/access-requests", zohoAccessRequestRoutes);
 app.use("/api/text-messages", textMessagesRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
