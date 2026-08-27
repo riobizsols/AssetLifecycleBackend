@@ -20,7 +20,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    # Compose loads both; deploy syncs missing keys into .env.production first.
+    # Later file wins on duplicate keys — keep secrets in .env.production.
     env_file:
+      - .env
       - .env.production
     ports:
       - "5002:5000"
