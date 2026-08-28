@@ -143,7 +143,7 @@ async function buildColumnAlignPlan(referenceClient, tenantClient, tableFilter =
   `);
   const plan = [];
 
-  for (const { table_name: table } of refTables.rows) {
+  for (const { table_name: table } of refTables) {
     if (tableFilter && !tableFilter.has(table)) continue;
     const refCols = await getColumnsDetailed(referenceClient, table);
     const tenCols = await getColumnsDetailed(tenantClient, table);

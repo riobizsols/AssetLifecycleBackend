@@ -45,7 +45,7 @@ const insertAssetType = async (
     return await dbPool.query(query, values);
 };
 
-const getAllAssetTypes = async (org_id = null) => {
+const getAllAssetTypes = async (org_id = null, scope = {}) => {
     const dbPool = getDb();
     let query = `
         SELECT 
@@ -57,9 +57,75 @@ const getAllAssetTypes = async (org_id = null) => {
     `;
     
     const params = [];
+    const conditions = [];
     if (org_id) {
-        query += ` WHERE org_id = $1`;
         params.push(org_id);
+        conditions.push(`org_id = $${params.length}`);
+    }
+
+    // Asset types are organization master data, but department/branch mappings
+    // define which types are relevant in the active ACM working context.
+    const deptId = scope.deptId || null;
+    const branchId = scope.branchId || null;
+    const deptIds = Array.isArray(scope.deptIds)
+        ? scope.deptIds.map(String).filter(Boolean)
+        : [];
+    const branchIds = Array.isArray(scope.branchIds)
+        ? scope.branchIds.map(String).filter(Boolean)
+        : [];
+
+    if (deptId || branchId || deptIds.length || branchIds.length) {
+        const mappingConditions = [
+            'dat.asset_type_id = "tblAssetTypes".asset_type_id',
+            'dat.org_id = "tblAssetTypes".org_id',
+            'dat.int_status = 1',
+        ];
+
+        if (deptId) {
+            params.push(deptId);
+            mappingConditions.push(`dat.dept_id = $${params.length}`);
+        } else if (deptIds.length) {
+            params.push(deptIds);
+            mappingConditions.push(`dat.dept_id = ANY($${params.length}::text[])`);
+        }
+
+        if (branchId) {
+            params.push(branchId);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = "tblAssetTypes".org_id
+                      AND bd.branch_id = $${params.length}
+                      AND bd.int_status = 1
+                )
+            `);
+        } else if (branchIds.length) {
+            params.push(branchIds);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = "tblAssetTypes".org_id
+                      AND bd.branch_id = ANY($${params.length}::text[])
+                      AND bd.int_status = 1
+                )
+            `);
+        }
+
+        conditions.push(`
+            EXISTS (
+                SELECT 1
+                FROM "tblDeptAssetTypes" dat
+                WHERE ${mappingConditions.join(' AND ')}
+            )
+        `);
+    }
+
+    if (conditions.length) {
+        query += ` WHERE ${conditions.join(' AND ')}`;
     }
     
     query += ` ORDER BY created_on DESC`;

@@ -178,14 +178,15 @@ const addAssetType = async (req, res) => {
 const getAllAssetTypes = async (req, res) => {
     try {
         const { getEffectiveListContext } = require('../utils/acmAccess');
-        const { orgId } = getEffectiveListContext(req);
+        const context = getEffectiveListContext(req);
+        const { orgId } = context;
         const org_id = orgId || req.user?.org_id;
         const { data: rows } = await operationalCache.cachedList(
             req,
             'asset-types',
             'list',
             async () => {
-                const result = await model.getAllAssetTypes(org_id);
+                const result = await model.getAllAssetTypes(org_id, context);
                 return result.rows;
             },
         );
