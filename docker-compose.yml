@@ -6,9 +6,8 @@
 # Do NOT define alm-redis here — name conflicts with ~/alm-main on the same server.
 # Set REDIS_URL=redis://alm_redis:6379/0 in .env.production
 #
-# DATABASE_URL @alm_db requires network alm-shared with Postgres container alm_db.
-# Redis: use shared alm_redis (do NOT define alm-redis here — conflicts with main ALM).
-# MinIO: join mansoor-net so MINIO_END_POINT=mansoor-minio resolves.
+# MinIO (mansoor-minio) lives on external network mansoor-s-app-backend_mansoor-net.
+# Compose joins that network so MINIO_END_POINT=mansoor-minio works after every recreate.
 
 services:
   alm-backend:
