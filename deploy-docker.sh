@@ -14,7 +14,7 @@ DEPLOY="${SCRIPT_DIR}/scripts/deploy/deploy-pull-rebuild.sh"
 
 export ALM_ROOT
 export BACKEND_DIR="${SCRIPT_DIR}"
-export FRONTEND_DIR="${ALM_ROOT}/frontend"
+export FRONTEND_DIR="${ALM_ROOT}/Frontend"
 
 for arg in "$@"; do
   case "$arg" in

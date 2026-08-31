@@ -17,7 +17,7 @@ The deployment scripts expect this layout:
 ```text
 ~/bannari/
 ├── backend/
-└── frontend/
+└── Frontend/
 ```
 
 Clone the `bannari` branch into those folders, then configure the backend:
