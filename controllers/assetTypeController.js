@@ -730,6 +730,7 @@ const commitBulkUpload = async (req, res) => {
         let inserted = 0;
         let updated = 0;
         let errors = 0;
+        const errorDetails = [];
         let totalProcessed = 0;
         
         // Process each record
@@ -828,6 +829,11 @@ const commitBulkUpload = async (req, res) => {
             } catch (recordError) {
                 console.error(`❌ Error processing record ${i + 1}:`, recordError);
                 errors++;
+                errorDetails.push({
+                    row: i + 1,
+                    asset_type_id: record.asset_type_id || null,
+                    error: recordError.message,
+                });
             }
         }
         
@@ -835,7 +841,8 @@ const commitBulkUpload = async (req, res) => {
             inserted,
             updated,
             errors,
-            totalProcessed
+            totalProcessed,
+            errorDetails,
         };
         
         console.log('🔍 Commit results:', results);

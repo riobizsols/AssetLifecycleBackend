@@ -251,7 +251,8 @@ const commitBulkUploadAssets = async (req, res) => {
                 totalProcessed: results.totalProcessed,
                 inserted: results.inserted,
                 updated: results.updated,
-                errors: results.errors
+                errors: results.errors,
+                errorDetails: results.errorDetails || [],
             }
         });
     } catch (error) {
