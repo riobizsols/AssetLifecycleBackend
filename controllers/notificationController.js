@@ -281,31 +281,46 @@ const getUserNotifications = async (req, res) => {
 
     const formattedSpareIssuedNotifications = (spareIssuedNotifications || []).map(
       (notification) => {
-        const isConfirmed = notification.status === "IE";
+        const statusCode = String(notification.status || "").trim().toUpperCase();
+        const isConfirmed = statusCode === "IE";
+        const isApproval = statusCode === "RQ";
+        const workflowType = isConfirmed
+          ? "SPARE_CONFIRMED"
+          : isApproval
+            ? "SPARE_APPROVAL"
+            : "SPARE_ISSUED";
+        const statusLabel = isConfirmed
+          ? "Issued"
+          : isApproval
+            ? "Approval"
+            : "Requested";
+        const maintenanceType = isConfirmed
+          ? "Spare Part Issued"
+          : isApproval
+            ? "Spare Part Approval"
+            : "Spare Part Requested";
         return {
         id: notification.si_id,
         wfamshId: null,
         workflowId: notification.si_id,
-        workflowType: isConfirmed ? "SPARE_CONFIRMED" : "SPARE_ISSUED",
-        route: notification.assetmaintsch_id
-          ? isConfirmed
-            ? "/spare-part-issue"
-            : `/spare-part-list-detail/${notification.assetmaintsch_id}`
-          : isConfirmed
-            ? "/spare-part-issue"
-            : "/spare-part-list",
+        workflowType,
+        route: isConfirmed
+          ? "/spare-part-issue"
+          : notification.si_id
+            ? `/spare-part-approval-detail/${notification.si_id}`
+            : "/spare-part-approval",
         userId: userId,
         userName: notification.action_by_name || "Unassigned",
         userEmail: null,
-        status: isConfirmed ? "IE" : "IS",
-        statusLabel: isConfirmed ? "Issued" : "Reserved",
+        status: isConfirmed ? "IE" : isApproval ? "RQ" : "IS",
+        statusLabel,
         dueDate: notification.due_date || notification.changed_on || notification.created_on,
         cutoffDate: notification.changed_on || notification.created_on,
         daysUntilDue: 0,
         daysUntilCutoff: 999,
         isUrgent: false,
         isOverdue: false,
-        maintenanceType: isConfirmed ? "Spare Part Issued" : "Spare Part Reserved",
+        maintenanceType,
         assetId: null,
         assetTypeName: notification.asset_type_name || "Asset",
         categoryName: notification.category_name || notification.spc_id || "-",
@@ -316,12 +331,12 @@ const getUserNotifications = async (req, res) => {
         groupId: null,
         groupName: null,
         groupAssetCount: null,
-        title: isConfirmed ? "Spare Part Issued" : "Spare Part Reserved",
+        title: maintenanceType,
         body: `Maintenance ${notification.assetmaintsch_id || "-"}: ${
           notification.asset_type_name || "Asset"
         } / ${
           notification.category_name || notification.spc_id || ""
-        } — spare part ${isConfirmed ? "issued" : "reserved"}`,
+        } — spare part ${isConfirmed ? "issued" : isApproval ? "pending approval" : "requested"}`,
       };
       }
     );
