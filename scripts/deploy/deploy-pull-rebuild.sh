@@ -541,12 +541,16 @@ compose_up() {
   fi
   export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
   local extra=()
+  local env_file_args=()
+  if [[ -f "$dir/.env.production" ]]; then
+    env_file_args+=(--env-file .env.production)
+  fi
   if [[ "$FORCE_COMPOSE_RECREATE" == "1" ]]; then
     extra+=(--force-recreate)
   fi
-  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build ${extra[*]}"
-  ( cd "$dir" && $cmd up -d --build "${extra[@]}" )
-  ( cd "$dir" && $cmd ps -a )
+  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd ${env_file_args[*]} up -d --build ${extra[*]}"
+  ( cd "$dir" && $cmd "${env_file_args[@]}" up -d --build "${extra[@]}" )
+  ( cd "$dir" && $cmd "${env_file_args[@]}" ps -a )
 }
 
 main() {
