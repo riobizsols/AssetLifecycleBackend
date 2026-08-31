@@ -50,21 +50,24 @@ class WorkflowNotificationService {
                     wfamsh_id: wfamsh_id || '',
                     asset_id: workflowInfo.asset_id || '',
                     asset_name: workflowInfo.asset_name || '',
+                    branch_id: workflowInfo.branch_id || '',
                     planned_date: workflowInfo.pl_sch_date ? new Date(workflowInfo.pl_sch_date).toISOString() : '',
                     job_role: jobRoleInfo?.text || '',
                     sequence: sequence ? sequence.toString() : '',
                     notification_type: 'workflow_approval'
                 },
-                notificationType: 'workflow_approval'
+                notificationType: 'workflow_approval',
+                branchId: workflowInfo.branch_id || null
             };
 
-            // Send notification to all users with this job role
+            // Send notification to users with this job role in the asset's branch
             const result = await fcmService.sendNotificationToRole(notificationData);
 
             console.log(`Workflow notification sent for wfamsd_id ${wfamsd_id}:`, {
                 jobRoleId: job_role_id,
                 jobRoleName: jobRoleInfo.text,
                 assetName: workflowInfo.asset_name,
+                branchId: workflowInfo.branch_id || null,
                 totalUsers: result.totalUsers,
                 successCount: result.successCount,
                 failureCount: result.failureCount
@@ -117,13 +120,15 @@ class WorkflowNotificationService {
                     planned_date: workflowInfo.pl_sch_date ? new Date(workflowInfo.pl_sch_date).toISOString() : '',
                     job_role_name: jobRoleInfo.text || '',
                     sequence: sequence ? sequence.toString() : '',
+                    branch_id: workflowInfo.branch_id || '',
                     notification_type: 'inspection_approval'
                 },
                 jobRoleId: job_role_id,
-                notificationType: 'inspection_approval'
+                notificationType: 'inspection_approval',
+                branchId: workflowInfo.branch_id || null
             };
 
-            // Send to all users with this role
+            // Send to users with this role in the asset's branch
             const result = await fcmService.sendNotificationToRole(notificationData);
             console.log(`Inspection notification sent for ${wfaiisd_id}:`, {
                 jobRoleId: job_role_id,
@@ -150,6 +155,7 @@ class WorkflowNotificationService {
                     h.asset_id,
                     h.pl_sch_date,
                     h.status,
+                    a.branch_id,
                     ast.text as asset_name
                 FROM "tblWFAATInspSch_H" h
                 INNER JOIN "tblAssets" a ON h.asset_id = a.asset_id
@@ -183,10 +189,12 @@ class WorkflowNotificationService {
                 data: {
                     wfaiisd_id: wfaiisd_id || '',
                     wfaiish_id: wfaiish_id || '',
-                    notification_type: 'inspection_rejection'
+                    notification_type: 'inspection_rejection',
+                    branch_id: workflowInfo.branch_id || ''
                 },
                 jobRoleId: job_role_id, // Send to this role
-                notificationType: 'inspection_approval'
+                notificationType: 'inspection_approval',
+                branchId: workflowInfo.branch_id || null
              };
              
              const result = await fcmService.sendNotificationToRole(notificationData);
@@ -214,6 +222,7 @@ class WorkflowNotificationService {
                     wfh.status,
                     a.text as asset_name,
                     a.asset_type_id,
+                    a.branch_id,
                     at.text as asset_type_name
                 FROM "tblWFAssetMaintSch_H" wfh
                 INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
@@ -290,16 +299,18 @@ class WorkflowNotificationService {
                     wfamsh_id: wfamsh_id || '',
                     asset_id: workflowInfo.asset_id || '',
                     asset_name: workflowInfo.asset_name || '',
+                    branch_id: workflowInfo.branch_id || '',
                     planned_date: workflowInfo.pl_sch_date ? new Date(workflowInfo.pl_sch_date).toISOString() : '',
                     job_role: jobRoleInfo?.text || '',
                     sequence: sequence ? sequence.toString() : '',
                     breakdown_info: breakdownInfo || '',
                     notification_type: 'breakdown_approval'
                 },
-                notificationType: 'breakdown_approval'
+                notificationType: 'breakdown_approval',
+                branchId: workflowInfo.branch_id || null
             };
 
-            // Send notification to all users with this job role
+            // Send notification to users with this job role in the asset's branch
             const result = await fcmService.sendNotificationToRole(notificationData);
 
             console.log(`Breakdown workflow notification sent for wfamsd_id ${wfamsd_id}:`, {
@@ -355,6 +366,9 @@ class WorkflowNotificationService {
                 return { success: true, reason: 'Status not AP' };
             }
 
+            const workflowInfo = await this.getWorkflowInfo(wfamsh_id, org_id);
+            const assetBranchId = workflowInfo?.branch_id || null;
+
             // Get job role information
             const jobRoleInfo = await this.getJobRoleInfo(job_role_id);
             if (!jobRoleInfo) {
@@ -372,6 +386,7 @@ class WorkflowNotificationService {
                     wfamsh_id: wfamsh_id || '',
                     asset_id: asset_id || '',
                     asset_name: asset_name || '',
+                    branch_id: assetBranchId || '',
                     job_role: jobRoleInfo?.text || '',
                     sequence: sequence ? sequence.toString() : '',
                     rejection_reason: rejection_reason || '',
@@ -379,10 +394,11 @@ class WorkflowNotificationService {
                     is_reversion: 'true',
                     notification_type: 'workflow_rejection_reverted'
                 },
-                notificationType: 'workflow_rejection_reverted'
+                notificationType: 'workflow_rejection_reverted',
+                branchId: assetBranchId
             };
 
-            // Send notification to all users with this job role
+            // Send notification to users with this job role in the asset's branch
             const result = await fcmService.sendNotificationToRole(notificationData);
 
             console.log(`Rejection reversion notification sent for wfamsd_id ${wfamsd_id}:`, {

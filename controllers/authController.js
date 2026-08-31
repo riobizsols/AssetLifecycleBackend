@@ -197,7 +197,7 @@ const login = async (req, res) => {
                             b.branch_code, jr.text as job_role_name
                      FROM "tblRioAdmin" ra
                      LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
-                     LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                     LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id
                      LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
                      WHERE ra.user_id = $1`,
                     [loginUser.user_id]
@@ -964,7 +964,7 @@ const tenantLogin = async (req, res) => {
                     jr.text as job_role_name
                 FROM "tblRioAdmin" ra
                 LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
-                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id
                 LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
                 WHERE ra.user_id = $1
             `;

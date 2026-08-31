@@ -93,9 +93,10 @@ const getAllAssetGroups = async (req, res) => {
     const userId = req.user?.user_id;
     
     try {
-        const org_id = req.user.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId, hasSuperAccess } = getEffectiveListContext(req);
+        const org_id = orgId || req.user.org_id;
         const userBranchCode = branchCodeFromReq(req);
-        const hasSuperAccess = req.user?.hasSuperAccess || false;
 
         const { data: rows } = await operationalCache.cachedList(
             req,

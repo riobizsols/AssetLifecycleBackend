@@ -1,6 +1,5 @@
 const vendorsModel = require("../models/vendorsModel");
 const operationalCache = require('../utils/operationalCache');
-const { branchCodeFromReq } = require('../utils/reqUserBranch');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
@@ -15,10 +14,9 @@ function invalidateVendorCaches(req, orgId) {
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
-    const org_id = req.user.org_id;
-    
-    const userBranchCode = branchCodeFromReq(req);
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId } = getEffectiveListContext(req);
+    const org_id = orgId || req.user.org_id;
     
     // Optional: filter by supply type (product-based or service-based) via tblVendorProdService + tblProdServs.ps_type
     const type = req.query.type ? String(req.query.type).toLowerCase() : '';
@@ -29,9 +27,9 @@ exports.getAllVendors = async (req, res) => {
       operationalCache.hashQuery({ type, serviceOnly }),
       () => {
         if (type === 'product' || type === 'service') {
-          return vendorsModel.getVendorsBySupplyType(org_id, type, userBranchCode, hasSuperAccess);
+          return vendorsModel.getVendorsBySupplyType(org_id, type, null, true);
         }
-        return vendorsModel.getAllVendors(org_id, userBranchCode, hasSuperAccess, serviceOnly);
+        return vendorsModel.getAllVendors(org_id, null, true, serviceOnly);
       },
     );
     res.json(vendors);
@@ -114,33 +112,16 @@ exports.createVendor = async (req, res) => {
       changed_by,
     } = req.body;
 
-    // Use internal org_id from req.user (already set by authMiddleware from tblOrgs)
-    const org_id = req.user.org_id; // This is now the internal org_id from tblOrgs
-    
-    // Get user's branch information
-    const userModel = require("../models/userModel");
-    const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-    const userBranchId = userWithBranch?.branch_id;
+    // Active ACM context is the source of truth (overlayed onto req.user)
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId } = getEffectiveListContext(req);
+    const org_id = orgId || req.user.org_id;
+    // Vendors are org-level master data — do not stamp a branch
+    const branch_code = null;
     
     console.log('=== Vendor Creation Debug ===');
-    console.log('Internal org_id (from req.user):', org_id);
-    console.log('Tenant org_id (for reference):', req.user.tenant_org_id);
-    console.log('User branch_id:', userBranchId);
-    
-    // Get branch_code from tblBranches
-    let branch_code = null;
-    if (userBranchId) {
-      const branchQuery = `SELECT branch_code FROM "tblBranches" WHERE branch_id = $1`;
-      const dbPool = req.db || require("../config/db");
-
-      const branchResult = await dbPool.query(branchQuery, [userBranchId]);
-      if (branchResult.rows.length > 0) {
-        branch_code = branchResult.rows[0].branch_code;
-        console.log('Branch code found:', branch_code);
-      } else {
-        console.log('Branch not found for branch_id:', userBranchId);
-      }
-    }
+    console.log('ACM org_id:', org_id);
+    console.log('branch_code (org-level):', branch_code);
     
     const changed_on = new Date();
     const created_on = new Date();
@@ -148,7 +129,7 @@ exports.createVendor = async (req, res) => {
 
     const vendorData = sanitizeVendorPayload({
       vendor_id, // use generated
-      org_id: org_id, // Use internal org_id from req.user (already set by authMiddleware)
+      org_id: org_id,
       branch_code,
       vendor_name,
       int_status,

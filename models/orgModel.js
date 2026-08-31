@@ -5,10 +5,21 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 
-const getAllOrganizations = async () => {
+const getAllOrganizations = async (acm = null) => {
   const dbPool = getDb();
+  const { applyAcmSqlFilters } = require('../utils/acmAccess');
 
-  const result = await dbPool.query(`SELECT * FROM "tblOrgs" ORDER BY org_id DESC`);
+  let query = `SELECT * FROM "tblOrgs" WHERE 1=1`;
+  const params = [];
+
+  if (acm) {
+    const filter = applyAcmSqlFilters(acm, { org: 'org_id' }, 1);
+    query += filter.sql;
+    params.push(...filter.params);
+  }
+
+  query += ` ORDER BY org_id DESC`;
+  const result = await dbPool.query(query, params);
   return result.rows;
 };
 
@@ -20,19 +31,16 @@ const getOrganizationById = async (orgId) => {
 };
 
 const addOrganization = async (org) => {
-  const { org_id, org_code, text, org_city, subdomain, int_status = 1, valid_from, valid_to } = org;
+  const { org_id, org_code, text, org_city, int_status = 1, valid_from, valid_to } = org;
 
   const dbPool = getDb();
 
-  // Check if subdomain column exists, if not, add it without subdomain
   const result = await dbPool.query(
     `INSERT INTO "tblOrgs" (
-        org_id, org_code, text, org_city, ${subdomain ? 'subdomain, ' : ''}int_status, valid_from, valid_to
-     ) VALUES ($1, $2, $3, $4, ${subdomain ? '$5, $6, $7, $8' : '$5, $6, $7'})
+        org_id, org_code, text, org_city, int_status, valid_from, valid_to
+     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING *`,
-    subdomain 
-      ? [org_id, org_code, text, org_city, subdomain, int_status, valid_from, valid_to]
-      : [org_id, org_code, text, org_city, int_status, valid_from, valid_to]
+    [org_id, org_code, text, org_city, int_status, valid_from, valid_to]
   );
 
   return result.rows[0];

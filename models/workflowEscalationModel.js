@@ -47,6 +47,7 @@ const getOverdueWorkflows = async (orgId = 'ORG001') => {
         wfd.created_on as step_created_on,
         wfd.changed_on as step_changed_on,
         wfh.asset_id,
+        a.branch_id,
         wfh.pl_sch_date as due_date,
         wfh.status as header_status,
         a.asset_type_id,
@@ -310,7 +311,8 @@ const processWorkflowEscalations = async (orgId = 'ORG001') => {
               await notificationIntegrationService.notifyWorkflowEscalated(
                 {
                   workflowId: workflow.wfamsh_id,
-                  assetTypeName: workflow.asset_type_name
+                  assetTypeName: workflow.asset_type_name,
+                  branchId: workflow.branch_id || null
                 },
                 nextApprover.job_role_id
               );

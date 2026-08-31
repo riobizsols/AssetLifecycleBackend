@@ -337,21 +337,36 @@ class FCMService {
      */
     async sendNotificationToRole(notificationData) {
         try {
-            const { jobRoleId, title, body, data = {}, notificationType } = notificationData;
+            const { jobRoleId, title, body, data = {}, notificationType, branchId } = notificationData;
+            const assetBranchId = branchId || data.branch_id || data.branchId || null;
 
-            // Get all users with this role
-            const usersQuery = `
-                SELECT DISTINCT u.user_id 
+            // Get users with this role. When the asset has a branch, only notify
+            // users assigned to that same branch (not other branches).
+            const params = [jobRoleId];
+            let usersQuery = `
+                SELECT DISTINCT u.user_id
                 FROM "tblUserJobRoles" ujr
                 INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+                LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id
                 WHERE ujr.job_role_id = $1 AND u.int_status = 1
             `;
+            if (assetBranchId) {
+                params.push(assetBranchId);
+                usersQuery += `
+                  AND COALESCE(NULLIF(BTRIM(u.branch_id), ''), NULLIF(BTRIM(e.branch_id), '')) = $2
+                `;
+            }
             const dbPool = getDb();
-            const usersResult = await dbPool.query(usersQuery, [jobRoleId]);
+            const usersResult = await dbPool.query(usersQuery, params);
             const userIds = usersResult.rows.map(row => row.user_id);
 
             if (userIds.length === 0) {
-                return { success: false, reason: 'No users found with specified role' };
+                return {
+                    success: false,
+                    reason: assetBranchId
+                        ? `No users found with role ${jobRoleId} in branch ${assetBranchId}`
+                        : 'No users found with specified role'
+                };
             }
 
             // Send notifications to each user

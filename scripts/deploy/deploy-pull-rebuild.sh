@@ -44,10 +44,12 @@ MINIO_PORT_VALUE="${MINIO_PORT_VALUE:-9000}"
 MINIO_USE_SSL_VALUE="${MINIO_USE_SSL_VALUE:-false}"
 MINIO_ACCESS_KEY_VALUE="${MINIO_ACCESS_KEY_VALUE:-minioadmin}"
 MINIO_SECRET_KEY_VALUE="${MINIO_SECRET_KEY_VALUE:-minioadmin123}"
-# Separate buckets: main vs tenant (override with MINIO_BUCKET_VALUE)
+# Separate buckets: main vs tenant vs pressana (override with MINIO_BUCKET_VALUE)
 if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   if [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]]; then
     MINIO_BUCKET_VALUE="alm-tenant"
+  elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]]; then
+    MINIO_BUCKET_VALUE="alm-pressana"
   else
     MINIO_BUCKET_VALUE="alm-main"
   fi
@@ -58,6 +60,14 @@ REDIS_COMPOSE_FILE="${REDIS_COMPOSE_FILE:-docker-compose.redis.yml}"
 PGBOUNCER_CONTAINER="${PGBOUNCER_CONTAINER:-alm_pgbouncer}"
 PGBOUNCER_COMPOSE_FILE="${PGBOUNCER_COMPOSE_FILE:-docker-compose.pgbouncer.yml}"
 ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-}"
+PRESSANA_DB_NAME="${PRESSANA_DB_NAME:-demopressana_db}"
+PRESSANA_PUBLIC_URL="${PRESSANA_PUBLIC_URL:-https://pressanaorg.rioassetmanagement.net}"
+PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
+PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
+PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
+FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
+SKIP_FRONTEND_IF_UNCHANGED="${SKIP_FRONTEND_IF_UNCHANGED:-1}"
+LAST_GIT_PULL_CHANGED=0
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -249,15 +259,55 @@ restore_env_after_pull() {
   ENV_PULL_BACKUP_DIR=""
 }
 
+# Backup server .env files, reset tracked copies so git pull can proceed,
+# then restore the backup after pull (server secrets win over remote template).
+preserve_env_across_pull() {
+  local label="${1:-repo}"
+  local ts
+  ts="$(date -u +%Y%m%d%H%M%S)"
+  ENV_PULL_BACKUP_DIR=""
+
+  if [[ ! -f .env && ! -f .env.production ]]; then
+    return 0
+  fi
+
+  ENV_PULL_BACKUP_DIR=".env-pull-backup.${ts}"
+  mkdir -p "$ENV_PULL_BACKUP_DIR"
+  [[ -f .env ]] && cp -a .env "$ENV_PULL_BACKUP_DIR/.env"
+  [[ -f .env.production ]] && cp -a .env.production "$ENV_PULL_BACKUP_DIR/.env.production"
+  log "[$label] Backed up env files → ${ENV_PULL_BACKUP_DIR}/"
+
+  # Drop local modifications so pull is not blocked (excludes from stash leave these dirty)
+  git checkout HEAD -- .env .env.production 2>/dev/null || true
+}
+
+restore_env_after_pull() {
+  local label="${1:-repo}"
+  [[ -n "${ENV_PULL_BACKUP_DIR:-}" && -d "$ENV_PULL_BACKUP_DIR" ]] || return 0
+
+  log "[$label] Restoring server env files from ${ENV_PULL_BACKUP_DIR}/"
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env" .env
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env.production" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env.production" .env.production
+  # Keep one dated bak alongside; remove temp dir to avoid clutter growth
+  [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.${ENV_PULL_BACKUP_DIR##*.}" 2>/dev/null || true
+  rm -rf "$ENV_PULL_BACKUP_DIR"
+  ENV_PULL_BACKUP_DIR=""
+}
+
 git_pull_with_stash() {
   local dir="$1"
   local label="${2:-$(basename "$dir")}"
   [[ -d "$dir/.git" ]] || die "Not a git repo: $dir"
+  LAST_GIT_PULL_CHANGED=0
 
   if [[ "$SKIP_GIT_PULL" == "1" ]]; then
     log "SKIP_GIT_PULL=1 — skipping git pull in $label ($dir)"
+    LAST_GIT_PULL_CHANGED=1
     return
   fi
+
+  local before_rev after_rev
+  before_rev="$(git -C "$dir" rev-parse HEAD)"
 
   (
     cd "$dir" || exit 1
@@ -273,7 +323,9 @@ git_pull_with_stash() {
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
       # Never stash .env* — they are server secrets and cause recurring merge conflicts
-      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production' ':(exclude).env.*'; then
+      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . \
+        ':(exclude).env' ':(exclude).env.production' ':(exclude).env.*' \
+        ':(exclude).env-pull-backup.*' ':(exclude).env.production.bak.*'; then
         log "[$label] WARN: pathspec stash failed — trying full stash after resetting env files"
         clear_env_merge_conflicts "$label"
         # Do NOT checkout HEAD for env here — preserve_env already backed them up;
@@ -317,6 +369,40 @@ git_pull_with_stash() {
       fi
     fi
   )
+
+  after_rev="$(git -C "$dir" rev-parse HEAD)"
+  if [[ "$before_rev" != "$after_rev" ]]; then
+    LAST_GIT_PULL_CHANGED=1
+    log "[$label] Git updated ${before_rev:0:7} → ${after_rev:0:7}"
+  else
+    LAST_GIT_PULL_CHANGED=0
+    log "[$label] Git already up to date (${after_rev:0:7})"
+  fi
+}
+
+frontend_http_ok() {
+  curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${FRONTEND_HOST_PORT}/" 2>/dev/null | grep -qE '^[23]'
+}
+
+should_skip_frontend_compose() {
+  if [[ "$SKIP_FRONTEND_IF_UNCHANGED" != "1" ]]; then
+    return 1
+  fi
+  if [[ "$LAST_GIT_PULL_CHANGED" == "1" ]]; then
+    log "[frontend] Code changed (or --rebuild) — Docker build required"
+    return 1
+  fi
+  if ! container_is_running "$FRONTEND_CONTAINER_NAME"; then
+    log "[frontend] Container not running — Docker build required"
+    return 1
+  fi
+  if ! frontend_http_ok; then
+    log "[frontend] HTTP not healthy — Docker build required"
+    return 1
+  fi
+  log "[frontend] Skipping Vite/Docker rebuild (git unchanged, ${FRONTEND_CONTAINER_NAME} already healthy on :${FRONTEND_HOST_PORT})"
+  log "[frontend] To force a rebuild: ./deploy-docker.sh --rebuild"
+  return 0
 }
 
 container_is_running() {
@@ -361,18 +447,39 @@ verify_container_health() {
   fi
 }
 
+is_pressana_stack() {
+  [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] \
+    || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]] \
+    || [[ "${COMPOSE_PROJECT_NAME:-}" == "pressana-alm" ]]
+}
+
 ensure_alm_shared_network() {
   if [[ "$ENSURE_ALM_SHARED" != "1" ]]; then
     log "ENSURE_ALM_SHARED=0 — skipping shared Docker network setup"
     return
   fi
-  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER}..."
+  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER} / ${REDIS_CONTAINER}..."
   docker network create "$ALM_SHARED_NETWORK" 2>/dev/null || true
-  if docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
-    docker network connect "$ALM_SHARED_NETWORK" "$POSTGRES_CONTAINER" 2>/dev/null \
-      || log "Note: ${POSTGRES_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+  local c
+  for c in "$POSTGRES_CONTAINER" "$REDIS_CONTAINER"; do
+    if docker inspect "$c" >/dev/null 2>&1; then
+      docker network connect "$ALM_SHARED_NETWORK" "$c" 2>/dev/null \
+        || log "Note: ${c} likely already on ${ALM_SHARED_NETWORK} (OK)."
+    else
+      log "WARN: container ${c} not found — start it or set POSTGRES_CONTAINER / REDIS_CONTAINER."
+    fi
+  done
+}
+
+upsert_env_kv() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  [[ -f "$file" ]] || touch "$file"
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file" && rm -f "${file}.bak"
   else
-    log "WARN: container ${POSTGRES_CONTAINER} not found — fix POSTGRES_CONTAINER or start Postgres first."
+    printf '\n%s=%s\n' "$key" "$value" >> "$file"
   fi
 }
 
@@ -553,6 +660,49 @@ ensure_compose_env_complete() {
   done
 }
 
+# Keep user/password/host; only rewrite the database name (hospitality → demopressana_db).
+rewrite_database_url_dbname() {
+  local file="$1"
+  local dbname="$2"
+  [[ -f "$file" ]] || return 0
+  grep -qE '^DATABASE_URL=' "$file" 2>/dev/null || return 0
+  sed -i.bak -E "s|^(DATABASE_URL=postgresql://[^[:space:]/]+/)[^/?#]+|\1${dbname}|" "$file" && rm -f "${file}.bak"
+}
+
+# Pressana stack must never inherit main-ALM hospitality / port 5000 / web.rioassetmanagement.net.
+ensure_pressana_backend_env() {
+  local dir="${1:-$BACKEND_DIR}"
+  is_pressana_stack || return 0
+
+  local f
+  for f in "${dir}/.env.production" "${dir}/.env"; do
+    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
+    log "Ensuring Pressana backend env in $(basename "$f") (db=${PRESSANA_DB_NAME}, port=${PRESSANA_APP_PORT})"
+    upsert_env_kv "$f" "PORT" "$PRESSANA_APP_PORT"
+    upsert_env_kv "$f" "FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "BACKEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
+    upsert_env_kv "$f" "REDIS_URL" "$PRESSANA_REDIS_URL"
+    upsert_env_kv "$f" "CACHE_ENABLED" "true"
+    rewrite_database_url_dbname "$f" "$PRESSANA_DB_NAME"
+  done
+}
+
+ensure_pressana_frontend_env() {
+  local dir="${1:-$FRONTEND_DIR}"
+  is_pressana_stack || return 0
+
+  local f
+  for f in "${dir}/.env.production" "${dir}/.env"; do
+    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
+    log "Ensuring Pressana frontend env in $(basename "$f")"
+    upsert_env_kv "$f" "VITE_API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "VITE_FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
+    upsert_env_kv "$f" "VITE_RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
+  done
+}
+
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
 # Prevents git pull/stash from restoring the dead 103.27.234.248 / wrong keys.
 ensure_minio_env_files() {
@@ -702,12 +852,24 @@ compose_up() {
   local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
+  if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]]; then
+      export COMPOSE_PROJECT_NAME="pressana-alm"
+    elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-tenant-web" ]]; then
+      export COMPOSE_PROJECT_NAME="tenant-alm"
+    fi
+  fi
+  export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
+  local extra=()
+  if [[ "$FORCE_COMPOSE_RECREATE" == "1" ]]; then
+    extra+=(--force-recreate)
+  fi
   if [[ -n "$service" ]]; then
-    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
-    ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build ${extra[*]} $service"
+    ( cd "$dir" && $cmd up -d --build "${extra[@]}" "$service" )
   else
-    log "Compose ($label): cd $dir && $cmd up -d --build"
-    ( cd "$dir" && $cmd up -d --build )
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build ${extra[*]}"
+    ( cd "$dir" && $cmd up -d --build "${extra[@]}" )
   fi
   ( cd "$dir" && $cmd ps -a )
 }
@@ -763,11 +925,15 @@ main() {
 
     ensure_compose_env_complete "$BACKEND_DIR"
     ensure_minio_env_files "$BACKEND_DIR"
+    ensure_pressana_backend_env "$BACKEND_DIR"
     ensure_alm_shared_network
     ensure_redis
     ensure_pgbouncer
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
     remove_named_container_if_exists "$BACKEND_CONTAINER_NAME"
+    if is_pressana_stack; then
+      docker rm -f "$BACKEND_CONTAINER_NAME" 2>/dev/null || true
+    fi
     compose_up "$BACKEND_DIR" "backend" "alm-backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
     ensure_minio_network "$BACKEND_CONTAINER_NAME"
@@ -777,10 +943,18 @@ main() {
   if [[ "$BACKEND_ONLY" != "1" ]]; then
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
-    compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-    remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
-    compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
-    verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    ensure_pressana_frontend_env "$FRONTEND_DIR"
+    if should_skip_frontend_compose; then
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    else
+      compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
+      remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
+      local saved_force="$FORCE_COMPOSE_RECREATE"
+      FORCE_COMPOSE_RECREATE="${FRONTEND_FORCE_RECREATE:-0}"
+      compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
+      FORCE_COMPOSE_RECREATE="$saved_force"
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    fi
   fi
 
   log "Deploy complete. Public URL: ensure nginx proxies /api → 127.0.0.1:${BACKEND_HOST_PORT}"

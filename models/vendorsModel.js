@@ -77,38 +77,23 @@ const attachVendorSupplyFlags = async (vendors) => {
   return Array.isArray(vendors) ? mapped : mapped[0];
 };
 
-// Get all vendors - supports super access users who can view all branches
+// Get all vendors for an organization (org-level master data — visible in every branch)
 const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, serviceOnly = false) => {
   console.log('=== Vendor Model Listing Debug ===');
   console.log('org_id:', org_id);
-  console.log('userBranchCode:', userBranchCode);
-  console.log('hasSuperAccess:', hasSuperAccess);
   console.log('serviceOnly:', serviceOnly);
+  // userBranchCode / hasSuperAccess retained for call-site compatibility; vendors are not branch-scoped
   
   let query = `
     SELECT * FROM "tblVendors" 
     WHERE org_id = $1
   `;
   const params = [org_id];
-  
-  // Apply branch filter only if user doesn't have super access
-  if (!hasSuperAccess && userBranchCode) {
-    query += ` AND branch_code = $2`;
-    params.push(userBranchCode);
-  }
 
   // Filter to service vendors if requested. The vendors table contains a boolean
   // column `service_supply` which indicates whether the vendor provides services.
-  // If the column doesn't exist in a particular tenant DB, this clause will be
-  // ignored by the frontend fallback (frontend already handles absence), but
-  // here we add the filter only when explicitly requested.
   if (serviceOnly) {
-    // If branch filter was added, parameter index is 2, otherwise 2 will be used below
-    if (!hasSuperAccess && userBranchCode) {
-      query += ` AND service_supply = true`;
-    } else {
-      query += ` AND service_supply = true`;
-    }
+    query += ` AND service_supply = true`;
   }
   
   query += ` ORDER BY created_on DESC`;
@@ -153,6 +138,7 @@ const getVendorById = async (vendorId) => {
  * - product: vendors that have at least one linked prod_serv with ps_type = 'product'
  * - service: vendors that have at least one linked prod_serv with ps_type = 'service'
  * Vendors with both appear in both lists.
+ * Scoped by organization only (same as getAllVendors).
  */
 const getVendorsBySupplyType = async (org_id, supplyType, userBranchCode, hasSuperAccess = false) => {
   if (!supplyType || !['product', 'service'].includes(String(supplyType).toLowerCase())) {
@@ -160,20 +146,15 @@ const getVendorsBySupplyType = async (org_id, supplyType, userBranchCode, hasSup
   }
   const psType = String(supplyType).toLowerCase();
   const dbPool = getDb();
-  let query = `
+  const query = `
     SELECT DISTINCT v.vendor_id, v.vendor_name, v.company_name, v.int_status, v.org_id, v.branch_code, v.created_on
     FROM "tblVendors" v
     INNER JOIN "tblVendorProdService" vps ON v.vendor_id = vps.vendor_id AND vps.org_id = v.org_id
     INNER JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id AND LOWER(TRIM(ps.ps_type)) = $2
     WHERE v.org_id = $1 AND (v.int_status = 1 OR v.int_status IS NULL)
+    ORDER BY v.vendor_name ASC
   `;
-  const params = [org_id, psType];
-  if (!hasSuperAccess && userBranchCode) {
-    query += ` AND (v.branch_code = $3 OR v.branch_code IS NULL)`;
-    params.push(userBranchCode);
-  }
-  query += ` ORDER BY v.vendor_name ASC`;
-  const result = await dbPool.query(query, params);
+  const result = await dbPool.query(query, [org_id, psType]);
   return result.rows;
 };
 

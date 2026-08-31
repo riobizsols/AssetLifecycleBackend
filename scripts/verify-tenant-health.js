@@ -57,7 +57,7 @@ async function compareColumns(ref, ten, table) {
 async function checkFkViolations(c) {
   // Critical relationships only (fast; full schema FK scan is too slow on 98 tables)
   const fkChecks = [
-    ['dept→branch', `SELECT d.dept_id AS id FROM "tblDepartments" d LEFT JOIN "tblBranches" b ON d.branch_id=b.branch_id WHERE d.branch_id IS NOT NULL AND b.branch_id IS NULL`],
+    ['dept→branch', `SELECT d.dept_id AS id FROM "tblDepartments" d LEFT JOIN "tblBR_DEPT" bd ON bd.dept_id=d.dept_id LEFT JOIN "tblBranches" b ON bd.branch_id=b.branch_id WHERE bd.branch_id IS NOT NULL AND b.branch_id IS NULL`],
     ['user→employee', `SELECT u.user_id AS id FROM "tblUsers" u LEFT JOIN "tblEmployees" e ON u.emp_int_id::text=e.emp_int_id::text WHERE u.emp_int_id IS NOT NULL AND e.emp_int_id IS NULL`],
     ['user→jobrole', `SELECT u.user_id AS id FROM "tblUsers" u LEFT JOIN "tblJobRoles" j ON u.job_role_id=j.job_role_id WHERE u.job_role_id IS NOT NULL AND j.job_role_id IS NULL`],
     ['ujr→user', `SELECT ujr.user_job_role_id AS id FROM "tblUserJobRoles" ujr LEFT JOIN "tblUsers" u ON ujr.user_id=u.user_id WHERE u.user_id IS NULL`],
@@ -87,7 +87,7 @@ async function checkRequiredMaster(ten) {
     { name: 'Admin job role', sql: `SELECT job_role_id, text FROM "tblJobRoles" WHERE job_role_id='JR001'` },
     { name: 'User job role link', sql: `SELECT * FROM "tblUserJobRoles" WHERE user_id='USR001'` },
     { name: 'Branch', sql: 'SELECT branch_id, branch_code, text FROM "tblBranches"' },
-    { name: 'Department', sql: 'SELECT dept_id, branch_id FROM "tblDepartments"' },
+    { name: 'Department', sql: 'SELECT bd.dept_id, bd.branch_id FROM "tblBR_DEPT" bd' },
     { name: 'Employee', sql: `SELECT employee_id, emp_int_id, email_id, dept_id FROM "tblEmployees" WHERE employee_id='EMP001'` },
     { name: 'Cron jobs', sql: 'SELECT job_id, job_name, status FROM "tblJobs" ORDER BY job_id' },
     { name: 'Apps count', sql: 'SELECT COUNT(*)::int c FROM "tblApps"' },
@@ -248,9 +248,9 @@ async function main() {
 
   // 10. Dept-branch link
   const deptBranch = await ten.query(`
-    SELECT d.dept_id, d.branch_id, b.branch_id AS branch_exists
-    FROM "tblDepartments" d
-    LEFT JOIN "tblBranches" b ON d.branch_id = b.branch_id
+    SELECT bd.dept_id, bd.branch_id, b.branch_id AS branch_exists
+    FROM "tblBR_DEPT" bd
+    LEFT JOIN "tblBranches" b ON bd.branch_id = b.branch_id
   `);
   const brokenDept = deptBranch.rows.filter((r) => r.branch_id && !r.branch_exists);
   if (brokenDept.length) report.issues.push({ check: 'dept_branch_link', items: brokenDept });

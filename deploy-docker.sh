@@ -39,6 +39,8 @@ for arg in "$@"; do
       ;;
     --rebuild)
       export SKIP_GIT_PULL=1
+      export SKIP_FRONTEND_IF_UNCHANGED=0
+      export FRONTEND_FORCE_RECREATE=1
       ;;
     --help|-h)
       echo "Usage: ./deploy-docker.sh [--all] [--rebuild]"

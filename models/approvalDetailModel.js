@@ -1292,7 +1292,7 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 
 // Supports super access users who can view all branches
 // tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null) => {
+const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null, userBranchId = null) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
@@ -1384,6 +1384,14 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
        paramIndex++;
+     }
+
+     if (!hasSuperAccess && userBranchId) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${paramIndex})`;
+       params.push(userBranchId);
+       paramIndex++;
+     } else if (!hasSuperAccess && !userBranchId) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
      }
      
      // Only apply role filter if user doesn't have super access
@@ -1556,24 +1564,30 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       const supervisorRoleId = orgSettingsResult.rows[0].value;
       console.log('Found supervisor role ID:', supervisorRoleId);
       
-      // Step 2: Get asset name for notification context
+      // Step 2: Get asset name and branch for notification context
       const assetQuery = `
-        SELECT text as asset_name 
+        SELECT text as asset_name, branch_id
         FROM "tblAssets" 
         WHERE asset_id = $1 AND org_id = $2
       `;
       const assetResult = await getDb().query(assetQuery, [assetId, orgId]);
       const assetName = assetResult.rows.length > 0 ? assetResult.rows[0].asset_name : 'Asset';
+      const assetBranchId = assetResult.rows.length > 0 ? assetResult.rows[0].branch_id : null;
       
-      // Step 3: Find all users with the supervisor job role
+      // Step 3: Find users with the supervisor job role in the same branch as the asset
       const usersQuery = `
         SELECT DISTINCT u.user_id, u.full_name, u.email, u.emp_int_id
         FROM "tblUserJobRoles" ujr
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+        LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id
         WHERE ujr.job_role_id = $1
         AND u.int_status = 1
+        ${assetBranchId ? `AND COALESCE(NULLIF(BTRIM(u.branch_id), ''), NULLIF(BTRIM(e.branch_id), '')) = $2` : ''}
       `;
-      const usersResult = await getDb().query(usersQuery, [supervisorRoleId]);
+      const usersResult = await getDb().query(
+        usersQuery,
+        assetBranchId ? [supervisorRoleId, assetBranchId] : [supervisorRoleId]
+      );
       
       console.log(`Query for supervisor role ${supervisorRoleId} returned ${usersResult.rows.length} users`);
       if (usersResult.rows.length > 0) {

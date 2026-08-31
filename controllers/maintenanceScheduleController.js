@@ -14,13 +14,17 @@ function bustMaintenanceSupervisorCaches(req, orgId) {
 
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
 
-/** First workflow sequence (lowest seqs_no) is approval-pending (AP); others start IN. */
-const getInitialWorkflowDetailStatus = (sequences, seqNo) => {
-    const nums = (sequences || [])
-        .map((s) => parseInt(s.seqs_no, 10))
+/**
+ * First sequence that actually creates detail rows (has job roles) is AP; others IN.
+ * Pass only seq numbers that will be created — not raw tblWFATSeqs rows that may
+ * include empty-role sequences (those are skipped and would incorrectly steal minSeq).
+ */
+const getInitialWorkflowDetailStatus = (activeSeqNumbers, seqNo) => {
+    const nums = (activeSeqNumbers || [])
+        .map((s) => parseInt(s, 10))
         .filter((n) => !Number.isNaN(n));
-    const minSeq = nums.length ? Math.min(...nums) : 10;
-    return seqNo === minSeq ? 'AP' : 'IN';
+    const minSeq = nums.length ? Math.min(...nums) : Number(seqNo);
+    return Number(seqNo) === minSeq ? 'AP' : 'IN';
 };
 
 const USAGE_BASED_UOMS = new Set([
@@ -213,6 +217,17 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
         let totalDetailsCreated = 0;
         const sequenceRows = workflowSequences.rows;
         
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
+        
         for (const sequence of sequenceRows) {
             const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
             
@@ -224,7 +239,7 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
                 const wfamsdId = await model.getNextWFAMSDId();
                 
                 const seqNo = parseInt(sequence.seqs_no, 10);
-                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                 
                 const scheduleDetailData = {
                     wfamsd_id: wfamsdId,
@@ -577,6 +592,17 @@ const generateMaintenanceSchedules = async (req, res) => {
                     // Step 3j: Create workflow maintenance schedule details
                     let totalDetailsCreated = 0;
                     const sequenceRows = workflowSequences.rows;
+        
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
                     
                     for (const sequence of sequenceRows) {
                         console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
@@ -593,7 +619,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                             const wfamsdId = await model.getNextWFAMSDId();
                             
                             const seqNo = parseInt(sequence.seqs_no, 10);
-                            const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                            const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                             
                             console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                             
@@ -882,6 +908,17 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                         
                         let totalDetailsCreated = 0;
                         const sequenceRows = workflowSequences.rows;
+        
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
                         
                         for (const sequence of sequenceRows) {
                             console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
@@ -898,7 +935,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 const wfamsdId = await model.getNextWFAMSDId();
                                 
                                 const seqNo = parseInt(sequence.seqs_no, 10);
-                                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                                const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                                 
                                 console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                                 

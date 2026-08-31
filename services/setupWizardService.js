@@ -854,8 +854,20 @@ const CORE_TABLE_DDL = [
       created_on date,
       changed_on date,
       changed_by character varying(10),
-      created_by character varying(10),
-      branch_id character varying(50)
+      created_by character varying(10)
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblBR_DEPT" (
+      branch_id character varying(20) NOT NULL,
+      dept_id character varying(20) NOT NULL,
+      org_id character varying(20),
+      int_status integer DEFAULT 1,
+      created_by character varying(20),
+      created_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      changed_by character varying(20),
+      changed_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (branch_id, dept_id)
     );
   `,
   `
@@ -1578,15 +1590,24 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId 
       await client.query(
         `
           INSERT INTO "tblDepartments"
-            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by, branch_id)
+            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by)
           VALUES
-            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4, $5)
+            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4)
           ON CONFLICT (dept_id) DO UPDATE
           SET text = EXCLUDED.text,
-              branch_id = EXCLUDED.branch_id,
               org_id = EXCLUDED.org_id
         `,
-        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId, branchId]
+        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId]
+      );
+
+      await client.query(
+        `
+          INSERT INTO "tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_by, created_on)
+          VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
+          ON CONFLICT (branch_id, dept_id) DO UPDATE
+          SET int_status = 1, org_id = EXCLUDED.org_id
+        `,
+        [branchId, deptId, orgId, adminUserId]
       );
 
       deptMappings.push({

@@ -41,9 +41,25 @@ function memoryInvalidateOrg(orgId) {
 }
 
 function branchScope(req) {
-  const hasSuperAccess = req.user?.hasSuperAccess || false;
-  const branchId = req.user?.branch_id || null;
-  return hasSuperAccess ? 'all' : (branchId || 'none');
+  if (req.user?.hasSuperAccess || req.user?.acmAllBranches) return 'all';
+  const acmBranchIds = Array.isArray(req.user?.acmBranchIds)
+    ? req.user.acmBranchIds.map(String).filter(Boolean).sort()
+    : [];
+  if (acmBranchIds.length) return acmBranchIds.join(',');
+  const sel = req.user?.acmSelection || {};
+  if (sel.branchId) return String(sel.branchId);
+  return req.user?.branch_id || 'none';
+}
+
+function acmScope(req) {
+  const sel = req.user?.acmSelection || {};
+  const acmDeptIds = Array.isArray(req.user?.acmDeptIds)
+    ? req.user.acmDeptIds.map(String).filter(Boolean).sort()
+    : [];
+  const deptPart = acmDeptIds.length
+    ? acmDeptIds.join(',')
+    : (sel.deptId || req.user?.dept_id || '*');
+  return `acm:${sel.orgId || '*'}:${branchScope(req)}:${deptPart}`;
 }
 
 function tenantScope(req) {
@@ -55,8 +71,9 @@ function tenantScope(req) {
 }
 
 function scopeKey(req, ...parts) {
-  const orgId = req.user?.org_id || 'unknown';
-  return cacheService.buildKey('api', tenantScope(req), orgId, branchScope(req), ...parts);
+  const selOrg = req.user?.acmSelection?.orgId;
+  const orgId = selOrg || req.user?.org_id || 'unknown';
+  return cacheService.buildKey('api', tenantScope(req), orgId, branchScope(req), acmScope(req), ...parts);
 }
 
 function hashQuery(value) {

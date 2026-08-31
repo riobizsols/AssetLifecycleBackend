@@ -351,31 +351,65 @@ const deleteMultipleAssetAssignments = async (asset_assign_ids) => {
   return await dbPool.query(query, [asset_assign_ids]);
 };
 
-// Supports super access users who can view all branches
 const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, hasSuperAccess = false) => {
-  // Get department details and employee count with org_id and branch_id filter
-  let deptQuery = `
-        SELECT 
-            d.dept_id, d.text as department_name, d.org_id, d.branch_id,
-            COUNT(DISTINCT e.employee_id) as employee_count
-        FROM "tblDepartments" d
-        LEFT JOIN "tblEmployees" e ON d.dept_id = e.dept_id
-        WHERE d.dept_id = $1 AND d.org_id = $2
-    `;
-  const deptParams = [dept_id, org_id];
-  
-  // Apply branch filter only if user doesn't have super access
-  if (!hasSuperAccess && branch_id) {
-    deptQuery += ` AND d.branch_id = $3`;
-    deptParams.push(branch_id);
-  }
-  
-  deptQuery += ` GROUP BY d.dept_id, d.text, d.org_id, d.branch_id`;
-
   const dbPool = getDb();
-  const deptResult = await dbPool.query(deptQuery, deptParams);
 
-  // Get assigned assets for department with org_id and branch_id filters
+  // Resolve department first (do not force request org — dept may be looked up across contexts)
+  const deptLookup = await dbPool.query(
+    `SELECT d.dept_id, d.text as department_name, d.org_id
+     FROM "tblDepartments" d
+     WHERE d.dept_id = $1 AND d.int_status = 1
+     LIMIT 1`,
+    [dept_id]
+  );
+
+  if (!deptLookup.rows[0]) {
+    return { department: null, assignedAssets: [], employees: [] };
+  }
+
+  const department = deptLookup.rows[0];
+  // Prefer the department's own org; fall back to request org
+  const effectiveOrgId = department.org_id || org_id;
+
+  // When ACM/request org is set and conflicts with dept org, treat as not in scope
+  // (empty list) rather than a hard failure — avoids toast spam on bad BR_DEPT mappings.
+  if (org_id && department.org_id && String(org_id) !== String(department.org_id)) {
+    return {
+      department: {
+        ...department,
+        branch_id: branch_id || null,
+        employee_count: 0,
+      },
+      assignedAssets: [],
+      employees: [],
+      orgMismatch: true,
+    };
+  }
+
+  let branchIdForDept = null;
+  if (branch_id) {
+    const br = await dbPool.query(
+      `SELECT branch_id FROM "tblBR_DEPT"
+       WHERE dept_id = $1 AND branch_id = $2 AND int_status = 1
+       LIMIT 1`,
+      [dept_id, branch_id]
+    );
+    branchIdForDept = br.rows[0]?.branch_id || null;
+  }
+  if (!branchIdForDept) {
+    const brAny = await dbPool.query(
+      `SELECT bd.branch_id
+       FROM "tblBR_DEPT" bd
+       INNER JOIN "tblBranches" b ON b.branch_id = bd.branch_id
+       WHERE bd.dept_id = $1 AND bd.int_status = 1 AND b.org_id = $2
+       ORDER BY bd.branch_id
+       LIMIT 1`,
+      [dept_id, effectiveOrgId]
+    );
+    branchIdForDept = brAny.rows[0]?.branch_id || null;
+  }
+
+  // Get assigned assets for department
   let assignedAssetsQuery = `
         SELECT DISTINCT
             a.asset_id, a.text as asset_name, a.serial_number, a.description,
@@ -387,20 +421,19 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
         INNER JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
         WHERE aa.dept_id = $1 
         AND a.org_id = $2
+          AND aa.action = 'A' AND aa.latest_assignment_flag = true
     `;
-  const assignedAssetsParams = [dept_id, org_id];
-  
-  // Apply branch filter only if user doesn't have super access
+  const assignedAssetsParams = [dept_id, effectiveOrgId];
+
   if (!hasSuperAccess && branch_id) {
     assignedAssetsQuery += ` AND a.branch_id = $3`;
     assignedAssetsParams.push(branch_id);
   }
-  
-  assignedAssetsQuery += ` AND aa.action = 'A' AND aa.latest_assignment_flag = true ORDER BY a.text`;
+
+  assignedAssetsQuery += ` ORDER BY a.text`;
 
   const assignedAssetsResult = await dbPool.query(assignedAssetsQuery, assignedAssetsParams);
 
-  // Get employees for the department (filtered by org_id)
   const employeesQuery = `
         SELECT 
             e.employee_id, e.emp_int_id, e.name as employee_name, 
@@ -410,12 +443,16 @@ const getDepartmentWiseAssetAssignments = async (dept_id, org_id, branch_id, has
         ORDER BY e.name
     `;
 
-  const employeesResult = await dbPool.query(employeesQuery, [dept_id, org_id]);
+  const employeesResult = await dbPool.query(employeesQuery, [dept_id, effectiveOrgId]);
 
   return {
-    department: deptResult.rows[0] || null,
+    department: {
+      ...department,
+      branch_id: branchIdForDept || branch_id || null,
+      employee_count: employeesResult.rows.length,
+    },
     assignedAssets: assignedAssetsResult.rows,
-    employees: employeesResult.rows
+    employees: employeesResult.rows,
   };
 };
 

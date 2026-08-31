@@ -138,19 +138,29 @@ const sendWorkflowNotificationToRole = async (workflowData, jobRoleId, orgId = '
         
         console.log('Sending workflow notification to role:', jobRoleId);
         
-        // Get all users with this job role
-        const usersQuery = `
+        // Get users with this job role. When the asset has a branch, only email
+        // users assigned to that same branch.
+        const branchId = workflowData.branchId || workflowData.branch_id || null;
+        const params = [jobRoleId];
+        let usersQuery = `
             SELECT u.user_id, u.emp_int_id, u.full_name, u.email, jr.text as job_role_name
             FROM "tblUserJobRoles" ujr
             INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
             INNER JOIN "tblJobRoles" jr ON ujr.job_role_id = jr.job_role_id
+            LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id
             WHERE ujr.job_role_id = $1 AND u.int_status = 1 AND u.email IS NOT NULL
         `;
+        if (branchId) {
+            params.push(branchId);
+            usersQuery += `
+              AND COALESCE(NULLIF(BTRIM(u.branch_id), ''), NULLIF(BTRIM(e.branch_id), '')) = $2
+            `;
+        }
         
         // Use tenant database from context if available
         const { getDbFromContext } = require('../utils/dbContext');
         const dbPool = getDbFromContext();
-        const usersResult = await dbPool.query(usersQuery, [jobRoleId]);
+        const usersResult = await dbPool.query(usersQuery, params);
         const users = usersResult.rows;
         
         if (users.length === 0) {

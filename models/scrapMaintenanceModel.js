@@ -385,6 +385,7 @@ async function getScrapMaintenanceApprovals({
   userId,
   roleIds = [],
   userBranchCode = null,
+  userBranchId = null,
   hasSuperAccess = false,
 } = {}) {
   if (!orgId || !userId) return [];
@@ -393,10 +394,25 @@ async function getScrapMaintenanceApprovals({
   let idx = 2;
 
   let branchFilter = '';
-  if (!hasSuperAccess && userBranchCode) {
-    branchFilter = ` AND ((wh.assetgroup_id LIKE 'SCRAP_INDIVIDUAL_%' OR wh.assetgroup_id LIKE 'SCRAP_SALES_%') OR agh.branch_code = $${idx})`;
-    params.push(userBranchCode);
-    idx += 1;
+  if (!hasSuperAccess && (userBranchCode || userBranchId)) {
+    const parts = [];
+    if (userBranchCode) {
+      parts.push(`agh.branch_code = $${idx}`);
+      params.push(userBranchCode);
+      idx += 1;
+    }
+    if (userBranchId) {
+      parts.push(`EXISTS (
+        SELECT 1
+        FROM "tblAssetScrap" s
+        INNER JOIN "tblAssets" a ON a.asset_id = s.asset_id
+        WHERE s.asset_group_id = wh.assetgroup_id
+          AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${idx})
+      )`);
+      params.push(userBranchId);
+      idx += 1;
+    }
+    branchFilter = parts.length ? ` AND (${parts.join(' OR ')})` : '';
   }
 
   let existsRoleFilter = '';
