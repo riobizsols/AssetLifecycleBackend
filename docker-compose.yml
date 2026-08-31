@@ -6,15 +6,15 @@
 # MinIO: join mansoor-net so MINIO_END_POINT=mansoor-minio resolves.
 
 services:
-  alm-backend:
-    container_name: alm-pressana-backend
+  bannari-backend:
+    container_name: bannari-backend
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
       - .env.production
     ports:
-      - "5003:5001"
+      - "5004:5002"
     restart: unless-stopped
     networks:
       - alm-shared
