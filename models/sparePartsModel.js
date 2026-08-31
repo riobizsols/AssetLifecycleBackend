@@ -1131,8 +1131,8 @@ const ensureSpBrandModelSchema = async (client) => {
     )
   `);
   await client.query(`
-    CREATE TABLE IF NOT EXISTS "tblSPModel" (
-      spm_id character varying(20) PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS "tblSPBMod" (
+      spbm_id character varying(20) PRIMARY KEY,
       spb_id character varying(20) NOT NULL,
       text character varying(100) NOT NULL,
       int_status integer NOT NULL DEFAULT 1,
@@ -1205,8 +1205,8 @@ const ensureSpBrandModelSchema = async (client) => {
 
   try {
     await client.query(`
-      INSERT INTO "tblSPModel" (
-        spm_id, spb_id, text, int_status, org_id, branch_id,
+      INSERT INTO "tblSPBMod" (
+        spbm_id, spb_id, text, int_status, org_id, branch_id,
         created_by, created_on, changed_by, changed_on
       )
       SELECT
@@ -1228,10 +1228,10 @@ const ensureSpBrandModelSchema = async (client) => {
           SELECT 1 FROM "tblSPBrand" b WHERE b.spb_id = i."spbId"
         )
         AND NOT EXISTS (
-          SELECT 1 FROM "tblSPModel" m WHERE m.spm_id = i."spbmId"
+          SELECT 1 FROM "tblSPBMod" m WHERE m.spbm_id = i."spbmId"
         )
         AND NOT EXISTS (
-          SELECT 1 FROM "tblSPModel" m
+          SELECT 1 FROM "tblSPBMod" m
           WHERE m.spb_id = i."spbId"
             AND m.org_id = i.org_id
             AND LOWER(BTRIM(m.text)) = LOWER(BTRIM(i."modelName"))
@@ -1273,7 +1273,7 @@ const getCategories = async (
       m.text AS model_name
     FROM "tblSPCategory" c
     LEFT JOIN "tblSPBrand" b ON b.spb_id = c.spb_id
-    LEFT JOIN "tblSPModel" m ON m.spm_id = c.spm_id
+    LEFT JOIN "tblSPBMod" m ON m.spbm_id = c.spm_id
     WHERE c.org_id = $1
   `;
 
@@ -1346,8 +1346,8 @@ const createCategory = async ({
 
     const model = await client.query(
       `
-        SELECT spm_id FROM "tblSPModel"
-        WHERE spm_id = $1 AND spb_id = $2 AND org_id = $3 AND int_status = 1
+        SELECT spbm_id AS spm_id FROM "tblSPBMod"
+        WHERE spbm_id = $1 AND spb_id = $2 AND org_id = $3 AND int_status = 1
       `,
       [spm_id, spb_id, org_id]
     );
@@ -1564,8 +1564,8 @@ const getSpModels = async (org_id, spb_id) => {
   await ensureSpBrandModelSchema(dbPool);
   const params = [org_id];
   let query = `
-    SELECT spm_id, spb_id, text, int_status, org_id
-    FROM "tblSPModel"
+    SELECT spbm_id AS spm_id, spbm_id, spb_id, text, int_status, org_id
+    FROM "tblSPBMod"
     WHERE org_id = $1
       AND int_status = 1
   `;
@@ -1613,7 +1613,7 @@ const createSpModel = async ({ org_id, branch_id, spb_id, text, created_by }) =>
 
     const dupSp = await client.query(
       `
-        SELECT spm_id FROM "tblSPModel"
+        SELECT spbm_id AS spm_id FROM "tblSPBMod"
         WHERE org_id = $1
           AND spb_id = $2
           AND LOWER(BTRIM(text)) = LOWER($3)
@@ -1650,14 +1650,14 @@ const createSpModel = async ({ org_id, branch_id, spb_id, text, created_by }) =>
     const spm_id = await generateCustomIdForClient(client, 'sp_model', 3);
     const result = await client.query(
       `
-        INSERT INTO "tblSPModel" (
-          spm_id, spb_id, text, int_status,
+        INSERT INTO "tblSPBMod" (
+          spbm_id, spb_id, text, int_status,
           org_id, branch_id, created_by, created_on, changed_by, changed_on
         ) VALUES (
           $1, $2, $3, 1,
           $4, $5, $6, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP
         )
-        RETURNING *
+        RETURNING spbm_id AS spm_id, spbm_id, spb_id, text, int_status, org_id, branch_id
       `,
       [spm_id, spb_id, name, org_id, branch_id || null, created_by || null]
     );
@@ -1700,7 +1700,7 @@ const getCategoryMappings = async (org_id, branch_id = null, hasSuperAccess = fa
     FROM "tblSPCatATMap" m
     LEFT JOIN "tblSPCategory" c ON c.spc_id = m.spc_id
     LEFT JOIN "tblSPBrand" sb ON sb.spb_id = c.spb_id
-    LEFT JOIN "tblSPModel" sm ON sm.spm_id = c.spm_id
+    LEFT JOIN "tblSPBMod" sm ON sm.spbm_id = c.spm_id
     LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = m.asset_type_id
     LEFT JOIN "tblISPModel" im ON im."spbmId" = m.spbm_id
     LEFT JOIN "tblISPBrand" ib ON ib."spbId" = im."spbId"
@@ -1799,7 +1799,7 @@ const createCategoryMapping = async ({
 
     let spbm_id = modcat.rows[0]?.spbm_id || null;
     if (!spbm_id) {
-      // Category created via Spare Part Category (tblSPBrand/tblSPModel) — ensure ISP link
+      // Category created via Spare Part Category (tblSPBrand/tblSPBMod) — ensure ISP link
       await ensureSpBrandModelSchema(client);
       const catDetail = await client.query(
         `
@@ -1811,7 +1811,7 @@ const createCategoryMapping = async ({
             m.text AS model_name
           FROM "tblSPCategory" c
           LEFT JOIN "tblSPBrand" b ON b.spb_id = c.spb_id AND b.org_id = c.org_id
-          LEFT JOIN "tblSPModel" m ON m.spm_id = c.spm_id AND m.org_id = c.org_id
+          LEFT JOIN "tblSPBMod" m ON m.spbm_id = c.spm_id AND m.org_id = c.org_id
           WHERE c.spc_id = $1 AND c.org_id = $2 AND c.int_status = 1
         `,
         [spc_id, org_id]
@@ -1843,10 +1843,10 @@ const createCategoryMapping = async ({
       );
       const spModel = await client.query(
         `
-          SELECT spm_id, spb_id, text
-          FROM "tblSPModel"
+          SELECT spbm_id AS spm_id, spb_id, text
+          FROM "tblSPBMod"
           WHERE org_id = $1 AND int_status = 1
-            AND (spm_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
+            AND (spbm_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
             AND (
               spb_id = $3
               OR spb_id = $4
@@ -2291,11 +2291,11 @@ const getLotModelsByCategoryAndBrand = async (
   const fallback = await dbPool.query(
     `
       SELECT DISTINCT
-        COALESCE(im."spbmId", m.spm_id) AS model_id,
+        COALESCE(im."spbmId", m.spbm_id) AS model_id,
         COALESCE(im."modelName", m.text) AS model_name
       FROM "tblSPCategory" c
-      INNER JOIN "tblSPModel" m
-        ON m.spm_id = c.spm_id
+      INNER JOIN "tblSPBMod" m
+        ON m.spbm_id = c.spm_id
        AND m.org_id = c.org_id
       INNER JOIN "tblSPBrand" b
         ON b.spb_id = c.spb_id
@@ -2349,11 +2349,11 @@ const getLotPartNumber = async ({
   const result = await dbPool.query(
     `
       SELECT
-        COALESCE(vpn."vendorPartNumber", pn."sppartExtId") AS part_number,
-        pn."sppnsId" AS part_spec_id
+        COALESCE(vpn."vendorPartNumber", pn.sppart_ext_id) AS part_number,
+        pn.sppns_id AS part_spec_id
       FROM "tblISPPartNumberSpec" pn
       INNER JOIN "tblISPPropDet" pd
-        ON pd."sppdId" = pn."sppdId"
+        ON pd."sppdId" = pn.sppd_id
        AND pd.org_id = pn.org_id
       INNER JOIN "tblISPModel" m
         ON m."spbmId" = pd."spbmId"
@@ -2363,7 +2363,7 @@ const getLotPartNumber = async ({
        AND mc."spcId" = $3
        AND mc.org_id = m.org_id
       LEFT JOIN "tblISPPNVPNMap" vpn
-        ON vpn."sppnsId" = pn."sppnsId"
+        ON vpn.sppns_id = pn.sppns_id
        AND vpn.org_id = pn.org_id
        AND vpn."vendorId" = $2
        AND vpn.int_status = 1
@@ -2374,10 +2374,10 @@ const getLotPartNumber = async ({
         AND mc.int_status = 1
         AND m."spbmId" = $4
         AND m."spbId" = $5
-        AND BTRIM(COALESCE(vpn."vendorPartNumber", pn."sppartExtId", '')) <> ''
+        AND BTRIM(COALESCE(vpn."vendorPartNumber", pn.sppart_ext_id, '')) <> ''
       ORDER BY
         CASE WHEN vpn."spvpnId" IS NOT NULL THEN 0 ELSE 1 END,
-        pn."sppnsId" ASC
+        pn.sppns_id ASC
     `,
     [org_id, vendor_id, spc_id, model_id, brand_id]
   );
@@ -2789,12 +2789,14 @@ const createVendorSpareMappings = async ({
 const nextQuotedIspId = async (client, table, column, prefix, pad = 3) => {
   const pattern = `^${prefix}[0-9]+$`;
   const startPos = prefix.length + 1;
+  // Quote camelCase columns; leave snake_case unquoted
+  const colSql = /[A-Z]/.test(column) ? `"${column}"` : column;
   const result = await client.query(
     `
       SELECT COALESCE(MAX(
         CASE
-          WHEN "${column}" ~ $1
-          THEN CAST(SUBSTRING("${column}" FROM ${startPos}) AS INTEGER)
+          WHEN ${colSql} ~ $1
+          THEN CAST(SUBSTRING(${colSql} FROM ${startPos}) AS INTEGER)
           ELSE 0
         END
       ), 0)::int AS max_num
@@ -2925,13 +2927,13 @@ const findOrCreateIspModel = async (
     if (existing.rows.length) {
       return existing.rows[0];
     }
-    // Model id may be from tblSPModel — resolve by name below
+    // Model id may be from tblSPBMod — resolve by name below
     if (!model_name) {
       const spModel = await client.query(
         `
           SELECT text AS model_name
-          FROM "tblSPModel"
-          WHERE spm_id = $1 AND org_id = $2 AND int_status = 1
+          FROM "tblSPBMod"
+          WHERE spbm_id = $1 AND org_id = $2 AND int_status = 1
         `,
         [model_id, org_id]
       );
@@ -2976,7 +2978,7 @@ const findOrCreateIspModel = async (
     try {
       const dupSp = await client.query(
         `
-          SELECT spm_id FROM "tblSPModel"
+          SELECT spbm_id AS spm_id FROM "tblSPBMod"
           WHERE org_id = $1
             AND spb_id = $2
             AND LOWER(BTRIM(text)) = LOWER($3)
@@ -3093,8 +3095,8 @@ const getSparePartMasters = async (org_id, branch_id = null, hasSuperAccess = fa
   const params = [org_id];
   let query = `
     SELECT
-      pn."sppartExtId" AS part_number,
-      MIN(pn."sppnsId") AS sppns_id,
+      pn.sppart_ext_id AS part_number,
+      MIN(pn.sppns_id) AS sppns_id,
       MAX(c.spc_id) AS spc_id,
       MAX(c.text) AS category_name,
       MAX(b."spbId") AS brand_id,
@@ -3105,7 +3107,7 @@ const getSparePartMasters = async (org_id, branch_id = null, hasSuperAccess = fa
       MAX(pn.created_on) AS created_on
     FROM "tblISPPartNumberSpec" pn
     INNER JOIN "tblISPPropDet" pd
-      ON pd."sppdId" = pn."sppdId"
+      ON pd."sppdId" = pn.sppd_id
      AND pd.org_id = pn.org_id
     INNER JOIN "tblISPModel" m
       ON m."spbmId" = pd."spbmId"
@@ -3130,8 +3132,8 @@ const getSparePartMasters = async (org_id, branch_id = null, hasSuperAccess = fa
   }
 
   query += `
-    GROUP BY pn."sppartExtId"
-    ORDER BY MAX(pn.created_on) DESC NULLS LAST, pn."sppartExtId" ASC
+    GROUP BY pn.sppart_ext_id
+    ORDER BY MAX(pn.created_on) DESC NULLS LAST, pn.sppart_ext_id ASC
   `;
 
   const result = await dbPool.query(query, params);
@@ -3189,11 +3191,11 @@ const createSparePartMaster = async ({
 
     const duplicatePart = await client.query(
       `
-        SELECT "sppnsId"
+        SELECT sppns_id
         FROM "tblISPPartNumberSpec"
         WHERE org_id = $1
           AND int_status = 1
-          AND LOWER(BTRIM("sppartExtId")) = LOWER($2)
+          AND LOWER(BTRIM(sppart_ext_id)) = LOWER($2)
         LIMIT 1
       `,
       [org_id, partNo]
@@ -3320,14 +3322,14 @@ const createSparePartMaster = async ({
         const sppnsId = await nextQuotedIspId(
           client,
           'tblISPPartNumberSpec',
-          'sppnsId',
+          'sppns_id',
           'SPPNS',
           3
         );
         const specResult = await client.query(
           `
             INSERT INTO "tblISPPartNumberSpec" (
-              "sppnsId", "sppartExtId", "sppdId", "aplvId", int_status,
+              sppns_id, sppart_ext_id, sppd_id, aplv_id, int_status,
               org_id, branch_id, created_by, created_on, changed_by, changed_on
             ) VALUES (
               $1, $2, $3, $4, 1,

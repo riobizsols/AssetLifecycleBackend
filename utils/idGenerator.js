@@ -81,8 +81,8 @@ const defaultPrefixes = {
     'sp_issue': 'SPI',
     'spare_store': 'SS',
     'sp_store': 'SS',
-    'sp_brand': 'SPBR',
-    'sp_model': 'SPMD',
+    'sp_brand': 'SPB',
+    'sp_model': 'SPBM',
 };
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
@@ -225,7 +225,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         // Spare parts
         'sp_category': 'tblSPCategory',
         'sp_brand': 'tblSPBrand',
-        'sp_model': 'tblSPModel',
+        'sp_model': 'tblSPBMod',
         'sp_lot_det': 'tblSPLotDet',
         'sp_ind_det': 'tblSPIndDet',
         'sp_cat_at_map': 'tblSPCatATMap',
@@ -290,7 +290,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
               // Spare parts
               'sp_category': 'spc_id',
               'sp_brand': 'spb_id',
-              'sp_model': 'spm_id',
+              'sp_model': 'spbm_id',
               'sp_lot_det': 'spld_id',
               'sp_ind_det': 'spid_id',
               'sp_cat_at_map': 'spcatm_id',
