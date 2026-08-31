@@ -5,7 +5,7 @@
 #
 #   ./deploy-docker.sh           # backend only
 #   ./deploy-docker.sh --all     # backend + frontend
-#   ./deploy-docker.sh --rebuild # rebuild only (no git pull)
+#   ./deploy-docker.sh --rebuild # rebuild backend + frontend (no git pull)
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,6 +30,8 @@ for arg in "$@"; do
       ;;
     --rebuild)
       export SKIP_GIT_PULL=1
+      export BACKEND_ONLY=0
+      export FRONTEND_ONLY=0
       export SKIP_FRONTEND_IF_UNCHANGED=0
       export FRONTEND_FORCE_RECREATE=1
       ;;
