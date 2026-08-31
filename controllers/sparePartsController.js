@@ -82,7 +82,8 @@ const createCategory = async (req, res) => {
 
 const getSpBrands = async (req, res) => {
   try {
-    const brands = await model.getSpBrands(req.user.org_id);
+    const spc_id = req.query.spc_id || req.query.category_id || null;
+    const brands = await model.getSpBrands(req.user.org_id, spc_id);
     return res.status(200).json({ success: true, data: brands });
   } catch (error) {
     console.error('Error fetching spare part brands:', error);
@@ -126,7 +127,8 @@ const createSpBrand = async (req, res) => {
 const getSpModels = async (req, res) => {
   try {
     const spb_id = req.query.spb_id || req.query.brand_id || null;
-    const models = await model.getSpModels(req.user.org_id, spb_id);
+    const spc_id = req.query.spc_id || req.query.category_id || null;
+    const models = await model.getSpModels(req.user.org_id, spb_id, spc_id);
     return res.status(200).json({ success: true, data: models });
   } catch (error) {
     console.error('Error fetching spare part models:', error);
@@ -327,6 +329,40 @@ const getLots = async (req, res) => {
   }
 };
 
+const getLotById = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { spld_id } = req.params;
+
+    if (!spld_id) {
+      return res.status(400).json({ success: false, error: 'Lot id is required' });
+    }
+
+    const lot = await model.getSparePartLotById(
+      spld_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+    if (!lot) {
+      return res.status(404).json({
+        success: false,
+        error: 'Spare part lot not found',
+      });
+    }
+
+    return res.status(200).json({ success: true, data: lot });
+  } catch (error) {
+    console.error('Error fetching spare part lot:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare part lot',
+    });
+  }
+};
+
 const createSparePartLot = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -413,6 +449,98 @@ const createSparePartLot = async (req, res) => {
   }
 };
 
+const updateSparePartLot = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const changed_by = req.user.user_id;
+    const branch_id = req.user.branch_id || null;
+    const { spld_id } = req.params;
+
+    if (!spld_id) {
+      return res.status(400).json({ success: false, error: 'Lot id is required' });
+    }
+
+    const {
+      spc_id,
+      vendor_id,
+      brand_id,
+      model_id,
+      part_number,
+      quantity,
+      unit_price,
+      invoice_no,
+      invoice_number,
+      lot_purchase_date,
+      purchase_date,
+      invoice_item_no,
+      invoice_item_number,
+      has_serial_number,
+      serial_numbers,
+      remarks,
+    } = req.body;
+
+    if (!spc_id) {
+      return res.status(400).json({ success: false, error: 'Category is required' });
+    }
+    if (quantity === undefined || quantity === null || quantity === '') {
+      return res.status(400).json({ success: false, error: 'Quantity is required' });
+    }
+    if (unit_price === undefined || unit_price === null || unit_price === '') {
+      return res.status(400).json({ success: false, error: 'Unit price is required' });
+    }
+    if (Number(unit_price) < 0 || Number.isNaN(Number(unit_price))) {
+      return res.status(400).json({ success: false, error: 'Unit price must be a valid number' });
+    }
+
+    const invoiceNo = invoice_no ?? invoice_number;
+    const purchaseDate = lot_purchase_date ?? purchase_date;
+    const invoiceItemNo = invoice_item_no ?? invoice_item_number;
+
+    if (!invoiceNo || !String(invoiceNo).trim()) {
+      return res.status(400).json({ success: false, error: 'Invoice number is required' });
+    }
+    if (!purchaseDate) {
+      return res.status(400).json({ success: false, error: 'Purchase date is required' });
+    }
+    if (!invoiceItemNo || !String(invoiceItemNo).trim()) {
+      return res.status(400).json({ success: false, error: 'Invoice item number is required' });
+    }
+
+    const result = await model.updateSparePartLot({
+      spld_id,
+      org_id,
+      branch_id,
+      changed_by,
+      spc_id,
+      vendor_id: vendor_id || null,
+      brand_id: brand_id || null,
+      model_id: model_id || null,
+      part_number: part_number ? String(part_number).trim() : null,
+      unit_price: Number(unit_price),
+      lot_purchase_date: purchaseDate,
+      invoice_no: String(invoiceNo).trim(),
+      invoice_item_no: String(invoiceItemNo).trim(),
+      quantity: Number(quantity),
+      remarks: remarks || null,
+      has_serial_number: Boolean(has_serial_number),
+      serial_numbers: Array.isArray(serial_numbers) ? serial_numbers : [],
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Spare part lot updated successfully',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error updating spare part lot:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to update spare part lot',
+    });
+  }
+};
+
 const getLotIndividuals = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -432,6 +560,24 @@ const getLotIndividuals = async (req, res) => {
     return res.status(500).json({
       success: false,
       error: 'Failed to fetch spare part serial records',
+    });
+  }
+};
+
+const getVendorSpareMappings = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const vendor_id = req.query.vendor_id || req.params.vendor_id;
+    if (!vendor_id) {
+      return res.status(400).json({ success: false, error: 'Vendor is required' });
+    }
+    const rows = await model.getVendorSpareMappings(vendor_id, org_id);
+    return res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching vendor spare mappings:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare supply mappings',
     });
   }
 };
@@ -675,6 +821,23 @@ const getAvailableQty = async (req, res) => {
   }
 };
 
+const getLotVendors = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+
+    const vendors = await model.getLotVendors(org_id, branch_id, hasSuperAccess);
+    return res.status(200).json({ success: true, data: vendors });
+  } catch (error) {
+    console.error('Error fetching spare part lot vendors:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare part vendors',
+    });
+  }
+};
+
 const getLotCategoriesByVendor = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -881,8 +1044,11 @@ module.exports = {
   getProdServModels,
   getIspModels,
   getLots,
+  getLotById,
   createSparePartLot,
+  updateSparePartLot,
   getLotIndividuals,
+  getVendorSpareMappings,
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
@@ -893,6 +1059,7 @@ module.exports = {
   approveIssue,
   confirmIssue,
   getAvailableQty,
+  getLotVendors,
   getLotCategoriesByVendor,
   getLotBrandsByCategory,
   getLotModelsByCategoryAndBrand,

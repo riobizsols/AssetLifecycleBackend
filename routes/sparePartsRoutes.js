@@ -16,8 +16,11 @@ const {
   getProdServModels,
   getIspModels,
   getLots,
+  getLotById,
   createSparePartLot,
+  updateSparePartLot,
   getLotIndividuals,
+  getVendorSpareMappings,
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
@@ -28,6 +31,7 @@ const {
   approveIssue,
   confirmIssue,
   getAvailableQty,
+  getLotVendors,
   getLotCategoriesByVendor,
   getLotBrandsByCategory,
   getLotModelsByCategoryAndBrand,
@@ -55,12 +59,16 @@ router.get('/mapping-options/asset-types', getProdServAssetTypes);
 router.get('/mapping-options/asset-brands', getProdServBrands);
 router.get('/mapping-options/asset-models', getProdServModels);
 
+router.get('/vendor-mappings', getVendorSpareMappings);
 router.post('/vendor-mappings', createVendorSpareMappings);
 
 router.get('/lots', getLots);
 router.post('/lots', createSparePartLot);
 router.get('/lots/:spld_id/individuals', getLotIndividuals);
+router.get('/lots/:spld_id', getLotById);
+router.put('/lots/:spld_id', updateSparePartLot);
 
+router.get('/lot-options/vendors', getLotVendors);
 router.get('/lot-options/categories', getLotCategoriesByVendor);
 router.get('/lot-options/brands', getLotBrandsByCategory);
 router.get('/lot-options/models', getLotModelsByCategoryAndBrand);
