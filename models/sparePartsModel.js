@@ -1,8 +1,42 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomIdForClient } = require('../utils/idGenerator');
 const fcmService = require('../services/fcmService');
+const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
 
 const getDb = () => getDbFromContext();
+
+const maintenanceProviderExpression = (
+  maintenanceAlias = 'ams',
+  frequencyAlias = 'mf',
+  assetAlias = 'a',
+) => `
+  COALESCE(
+    NULLIF(BTRIM(${maintenanceAlias}.maintained_by), ''),
+    NULLIF(BTRIM(${frequencyAlias}.maintained_by), ''),
+    CASE
+      WHEN NULLIF(BTRIM(${assetAlias}.service_vendor_id), '') IS NOT NULL
+        THEN 'Vendor'
+      ELSE NULL
+    END
+  )
+`;
+
+const inhouseMaintenancePredicate = (
+  maintenanceAlias = 'ams',
+  frequencyAlias = 'mf',
+  assetAlias = 'a',
+) => {
+  const provider = maintenanceProviderExpression(
+    maintenanceAlias,
+    frequencyAlias,
+    assetAlias,
+  );
+  return `
+    NULLIF(BTRIM(${provider}), '') IS NOT NULL
+    AND LOWER(REGEXP_REPLACE(BTRIM(${provider}), '[[:space:]-]', '', 'g'))
+      NOT LIKE '%vendor%'
+  `;
+};
 
 const SPARE_ISSUE_STATUS = {
   REQUESTED: 'RQ',
@@ -110,12 +144,15 @@ const getSparePartMaintenanceList = async (
 ) => {
   const dbPool = getDb();
   const params = [org_id];
+  const provider = maintenanceProviderExpression();
+  const inhouseOnly = inhouseMaintenancePredicate();
   let query = `
     SELECT
       ams.ams_id,
       ams.asset_id,
       ams.maint_type_id,
       ams.vendor_id,
+      ${provider} AS maintenance_provider,
       ams.status AS maintenance_status,
       a.asset_type_id,
       a.serial_number,
@@ -137,9 +174,13 @@ const getSparePartMaintenanceList = async (
     INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
     LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
     WHERE ams.org_id = $1
       AND a.org_id = $1
+      AND ${inhouseOnly}
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -158,9 +199,12 @@ const getSparePartMaintenanceDetail = async (
 ) => {
   const dbPool = getDb();
   const params = [ams_id, org_id];
+  const provider = maintenanceProviderExpression();
+  const inhouseOnly = inhouseMaintenancePredicate();
   let query = `
     SELECT
       ams.*,
+      ${provider} AS maintenance_provider,
       a.asset_type_id,
       a.serial_number,
       a.description AS asset_description,
@@ -181,10 +225,14 @@ const getSparePartMaintenanceDetail = async (
     INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
     LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
     WHERE ams.ams_id = $1
       AND ams.org_id = $2
       AND a.org_id = $2
+      AND ${inhouseOnly}
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -192,6 +240,39 @@ const getSparePartMaintenanceDetail = async (
   }
   const result = await dbPool.query(query, params);
   return result.rows[0] || null;
+};
+
+const assertInhouseMaintenance = async (client, amsId, orgId) => {
+  const result = await client.query(
+    `
+      SELECT ${maintenanceProviderExpression()} AS maintenance_provider
+      FROM "tblAssetMaintSch" ams
+      INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+      LEFT JOIN "tblATMaintFreq" mf
+        ON mf.at_main_freq_id = ams.at_main_freq_id
+       AND mf.org_id = ams.org_id
+      WHERE ams.ams_id = $1
+        AND ams.org_id = $2
+      LIMIT 1
+    `,
+    [amsId, orgId],
+  );
+
+  if (!result.rows.length) {
+    const err = new Error('Maintenance schedule not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (!isInhouseMaintainedBy(result.rows[0].maintenance_provider)) {
+    const err = new Error(
+      'Spare part requests are available only for in-house maintenance',
+    );
+    err.statusCode = 400;
+    throw err;
+  }
+
+  return result.rows[0];
 };
 
 const createSpareIssueRequests = async ({
@@ -220,9 +301,18 @@ const createSpareIssueRequests = async ({
 
     const maint = await client.query(
       `
-        SELECT ams.ams_id, ams.org_id, ams.vendor_id, a.asset_type_id, a.branch_id
+        SELECT
+          ams.ams_id,
+          ams.org_id,
+          ams.vendor_id,
+          a.asset_type_id,
+          a.branch_id,
+          ${maintenanceProviderExpression()} AS maintenance_provider
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+        LEFT JOIN "tblATMaintFreq" mf
+          ON mf.at_main_freq_id = ams.at_main_freq_id
+         AND mf.org_id = ams.org_id
         WHERE ams.ams_id = $1
           AND ams.org_id = $2
       `,
@@ -231,6 +321,13 @@ const createSpareIssueRequests = async ({
     if (!maint.rows.length) {
       const err = new Error('Maintenance schedule not found');
       err.statusCode = 404;
+      throw err;
+    }
+    if (!isInhouseMaintainedBy(maint.rows[0].maintenance_provider)) {
+      const err = new Error(
+        'Spare part requests are available only for in-house maintenance'
+      );
+      err.statusCode = 400;
       throw err;
     }
 
@@ -349,6 +446,8 @@ const getSpareIssueApprovals = async (
 ) => {
   const dbPool = getDb();
   const params = [org_id];
+  const provider = maintenanceProviderExpression();
+  const inhouseOnly = inhouseMaintenancePredicate();
   let query = `
     SELECT
       si.si_id,
@@ -360,6 +459,7 @@ const getSpareIssueApprovals = async (
       si.assetmaintsch_id,
       si.spid_id,
       ams.maint_type_id,
+      ${provider} AS maintenance_provider,
       a.asset_type_id,
       a.serial_number,
       at.text AS asset_type_name,
@@ -371,10 +471,14 @@ const getSpareIssueApprovals = async (
     INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
     LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
     LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
     WHERE si.org_id = $1
       AND si.status IN ('RQ', 'IS', 'IE')
+      AND ${inhouseOnly}
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -423,11 +527,14 @@ const getSpareIssueApprovalDetail = async (
 ) => {
   const dbPool = getDb();
   const params = [si_id, org_id];
+  const provider = maintenanceProviderExpression();
+  const inhouseOnly = inhouseMaintenancePredicate();
   let query = `
     SELECT
       si.*,
       ams.maint_type_id,
       ams.vendor_id,
+      ${provider} AS maintenance_provider,
       a.asset_type_id,
       a.serial_number,
       at.text AS asset_type_name,
@@ -439,10 +546,14 @@ const getSpareIssueApprovalDetail = async (
     INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
     LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
     LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
     LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
     WHERE si.si_id = $1
       AND si.org_id = $2
+      AND ${inhouseOnly}
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -862,6 +973,7 @@ const approveSpareIssue = async ({
     }
 
     const issue = locked.rows[0];
+    await assertInhouseMaintenance(client, issue.assetmaintsch_id, org_id);
     if (
       issue.status === SPARE_ISSUE_STATUS.RESERVED ||
       issue.status === SPARE_ISSUE_STATUS.ISSUED
@@ -999,6 +1111,8 @@ const confirmSparePartIssue = async ({
 
   try {
     await client.query('BEGIN');
+
+    await assertInhouseMaintenance(client, ams_id, org_id);
 
     const locked = await client.query(
       `
