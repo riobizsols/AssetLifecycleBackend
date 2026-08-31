@@ -2,6 +2,28 @@ const branchModel = require('../models/branchModel');
 const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 
+/** Branch name / city must include at least one letter (not digits-only). */
+const isDigitsOnlyName = (value) => {
+    const cleaned = String(value || '').trim().replace(/\s+/g, '');
+    return cleaned.length > 0 && /^\d+$/.test(cleaned);
+};
+
+const validateBranchNameFields = (text, city) => {
+    if (isDigitsOnlyName(text)) {
+        return {
+            error: "Invalid branch name",
+            message: "Branch name cannot be only numbers"
+        };
+    }
+    if (isDigitsOnlyName(city)) {
+        return {
+            error: "Invalid city",
+            message: "City name cannot be only numbers"
+        };
+    }
+    return null;
+};
+
 const getBranches = async (req, res) => {
     try {
         const org_id = req.user.org_id;
@@ -30,6 +52,11 @@ const createBranch = async (req, res) => {
                 error: "Missing required fields",
                 message: "Branch name, city and branch code are required"
             });
+        }
+
+        const nameValidationError = validateBranchNameFields(text, city);
+        if (nameValidationError) {
+            return res.status(400).json(nameValidationError);
         }
 
         const branches = await branchModel.getAllBranches(org_id);
@@ -108,6 +135,11 @@ const updateBranch = async (req, res) => {
                 error: "Missing required fields",
                 message: "Branch name, city and branch code are required" 
             });
+        }
+
+        const nameValidationError = validateBranchNameFields(text, city);
+        if (nameValidationError) {
+            return res.status(400).json(nameValidationError);
         }
 
         // Check if branch exists

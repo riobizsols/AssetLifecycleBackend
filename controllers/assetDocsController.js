@@ -25,7 +25,8 @@ const uploadAssetDoc = [
     try {
       const body = req.body || {};
       const asset_id = body.asset_id || req.params.asset_id;
-      const { dto_id, doc_type_name, org_id } = body;
+      const { dto_id, doc_type_name } = body;
+      const org_id = body.org_id || req.user?.org_id || req.user?.tenant_org_id;
       
       // Step 1: Log upload API called
       if (req.file) {
@@ -39,7 +40,8 @@ const uploadAssetDoc = [
       }
       
       if (!req.file) return res.status(400).json({ message: 'file is required' });
-      if (!asset_id || !org_id) return res.status(400).json({ message: 'asset_id and org_id are required' });
+      if (!asset_id) return res.status(400).json({ message: 'asset_id is required' });
+      if (!org_id) return res.status(400).json({ message: 'org_id is required' });
 
       await ensureBucketExists(MINIO_BUCKET);
 

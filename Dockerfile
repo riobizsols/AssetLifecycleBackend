@@ -8,7 +8,8 @@ RUN npm ci --omit=dev
 
 COPY . .
 
-# RUN chown -R node:node /app
+RUN mkdir -p /app/logs/events \
+  && chown -R node:node /app
 
 ENV NODE_ENV=production
 EXPOSE 5001

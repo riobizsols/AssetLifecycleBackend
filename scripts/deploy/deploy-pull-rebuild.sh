@@ -388,6 +388,112 @@ ensure_pgbouncer() {
     || log "Note: ${PGBOUNCER_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
 }
 
+# Return 0 if key is missing or has an empty value in file (after stripping quotes).
+env_key_is_empty() {
+  local file="$1"
+  local key="$2"
+  local line val
+  line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -1 || true)"
+  if [[ -z "$line" ]]; then
+    return 0
+  fi
+  val="${line#*=}"
+  if [[ "$val" == \"*\" ]]; then
+    val="${val:1:${#val}-2}"
+  elif [[ "$val" == \'*\' ]]; then
+    val="${val:1:${#val}-2}"
+  fi
+  [[ -z "$val" ]]
+}
+
+# Permanent fix: fill missing/empty .env.production keys from .env before compose.
+ensure_compose_env_complete() {
+  local dir="${1:-$BACKEND_DIR}"
+  local src="${dir}/.env"
+  local dst="${dir}/.env.production"
+  local example="${dir}/.env.production.example"
+  local filled=0
+  local line key
+  local -a missing=()
+
+  if [[ ! -f "$src" ]]; then
+    touch "$src"
+    log "[env] Created empty .env (compose env_file requires the path)"
+  fi
+
+  if [[ ! -f "$dst" ]]; then
+    if [[ -f "$src" ]] && grep -qE '^[A-Za-z_][A-Za-z0-9_]*=' "$src" 2>/dev/null; then
+      cp -a "$src" "$dst"
+      log "[env] Created .env.production from .env"
+    elif [[ -f "$example" ]]; then
+      cp -a "$example" "$dst"
+      log "[env] Created .env.production from .env.production.example — fill real secrets"
+    else
+      die "[env] Missing .env.production (and no .env / example to copy)"
+    fi
+  fi
+
+  if [[ -f "$src" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+      [[ "$line" != *=* ]] && continue
+      key="${line%%=*}"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      if env_key_is_empty "$dst" "$key"; then
+        if grep -qE "^${key}=" "$dst" 2>/dev/null; then
+          sed -i.bak "/^${key}=/d" "$dst" && rm -f "${dst}.bak"
+        fi
+        printf '%s\n' "$line" >> "$dst"
+        filled=$((filled + 1))
+        log "[env] Filled ${key} into .env.production from .env"
+      fi
+    done < "$src"
+    if [[ "$filled" -gt 0 ]]; then
+      log "[env] Synced ${filled} missing/empty key(s) .env → .env.production"
+    else
+      log "[env] .env.production already has all keys present in .env"
+    fi
+  fi
+
+  local empty_stripped=0
+  local ek
+  for ek in \
+    DATABASE_URL TENANT_DATABASE_URL GENERIC_URL JWT_SECRET \
+    FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY_ID FIREBASE_PRIVATE_KEY \
+    FIREBASE_CLIENT_EMAIL FIREBASE_CLIENT_ID \
+    ZOHO_CLIENT_ID ZOHO_CLIENT_SECRET EMAIL_USER EMAIL_PASS \
+    ACCESS_REQUEST_OPS_PASSWORD
+  do
+    if grep -qE "^${ek}=" "$dst" 2>/dev/null && env_key_is_empty "$dst" "$ek"; then
+      sed -i.bak "/^${ek}=/d" "$dst" && rm -f "${dst}.bak"
+      empty_stripped=$((empty_stripped + 1))
+      log "[env] Removed empty ${ek}= from .env.production (so .env can supply it)"
+    fi
+  done
+  [[ "$empty_stripped" -gt 0 ]] && log "[env] Stripped ${empty_stripped} empty override(s) from .env.production"
+
+  for key in DATABASE_URL JWT_SECRET; do
+    if env_key_is_empty "$dst" "$key" && env_key_is_empty "$src" "$key"; then
+      missing+=("$key")
+    fi
+  done
+  if [[ "${BACKEND_CONTAINER_NAME:-}" == "alm-tenant-backend" ]]; then
+    if env_key_is_empty "$dst" "TENANT_DATABASE_URL" && env_key_is_empty "$src" "TENANT_DATABASE_URL"; then
+      missing+=("TENANT_DATABASE_URL")
+    fi
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "[env] Required keys missing in both .env and .env.production: ${missing[*]}"
+  fi
+
+  for key in FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY FIREBASE_CLIENT_EMAIL; do
+    if env_key_is_empty "$dst" "$key" && env_key_is_empty "$src" "$key"; then
+      log "WARN: [env] ${key} unset — FCM push notifications will be disabled"
+    fi
+  done
+}
+
 # Force correct MinIO settings into .env.production (and .env) before compose recreate.
 # Prevents git pull/stash from restoring the dead 103.27.234.248 / wrong keys.
 ensure_minio_env_files() {
@@ -533,7 +639,11 @@ compose_up() {
 
 main() {
   local compose_cmd
+  local script_self script_hash_start script_hash_now
   compose_cmd="$(detect_compose)"
+  script_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  script_hash_start="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+
   log "Using: $(compose_version_line "$compose_cmd")"
   log "ALM_ROOT=$ALM_ROOT"
   log "BACKEND_DIR=$BACKEND_DIR"
@@ -553,7 +663,24 @@ main() {
 
   if [[ "$FRONTEND_ONLY" != "1" ]]; then
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
-    git_pull_with_stash "$BACKEND_DIR" "backend"
+    if [[ "${SKIP_BACKEND_GIT_PULL:-0}" == "1" ]]; then
+      log "[backend] SKIP_BACKEND_GIT_PULL=1 — already pulled before deploy-script re-exec"
+    else
+      git_pull_with_stash "$BACKEND_DIR" "backend"
+    fi
+
+    script_hash_now="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+    if [[ "${DEPLOY_REEXEC_DONE:-0}" != "1" \
+      && -n "$script_hash_start" \
+      && -n "$script_hash_now" \
+      && "$script_hash_now" != "$script_hash_start" ]]; then
+      log "[deploy] deploy-pull-rebuild.sh updated by git pull — re-executing latest script"
+      export DEPLOY_REEXEC_DONE=1
+      export SKIP_BACKEND_GIT_PULL=1
+      exec bash "$script_self" "$@"
+    fi
+
+    ensure_compose_env_complete "$BACKEND_DIR"
     ensure_minio_env_files "$BACKEND_DIR"
     ensure_alm_shared_network
     ensure_redis
