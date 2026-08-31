@@ -44,23 +44,23 @@ MINIO_PORT_VALUE="${MINIO_PORT_VALUE:-9000}"
 MINIO_USE_SSL_VALUE="${MINIO_USE_SSL_VALUE:-false}"
 MINIO_ACCESS_KEY_VALUE="${MINIO_ACCESS_KEY_VALUE:-minioadmin}"
 MINIO_SECRET_KEY_VALUE="${MINIO_SECRET_KEY_VALUE:-minioadmin123}"
-# Separate buckets: main vs tenant vs pressana (override with MINIO_BUCKET_VALUE)
+# Separate buckets: main vs tenant vs Bannari (override with MINIO_BUCKET_VALUE)
 if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   if [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]]; then
     MINIO_BUCKET_VALUE="alm-tenant"
-  elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]]; then
-    MINIO_BUCKET_VALUE="alm-pressana"
+  elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]]; then
+    MINIO_BUCKET_VALUE="alm-bannari"
   else
     MINIO_BUCKET_VALUE="alm-main"
   fi
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
 REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
-PRESSANA_DB_NAME="${PRESSANA_DB_NAME:-demopressana_db}"
-PRESSANA_PUBLIC_URL="${PRESSANA_PUBLIC_URL:-https://pressanaorg.rioassetmanagement.net}"
-PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
-PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
-PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
+BANNARI_DB_NAME="${BANNARI_DB_NAME:-bannari_db}"
+BANNARI_PUBLIC_URL="${BANNARI_PUBLIC_URL:-https://bannari.rioassetmanagement.net}"
+BANNARI_APP_PORT="${BANNARI_APP_PORT:-5001}"
+BANNARI_REDIS_URL="${BANNARI_REDIS_URL:-redis://alm_redis:6379/0}"
+BANNARI_RESERVED_SUBDOMAINS="${BANNARI_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg,bannari}"
 FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
 SKIP_FRONTEND_IF_UNCHANGED="${SKIP_FRONTEND_IF_UNCHANGED:-1}"
 LAST_GIT_PULL_CHANGED=0
@@ -320,10 +320,10 @@ verify_container_health() {
   fi
 }
 
-is_pressana_stack() {
-  [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] \
-    || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]] \
-    || [[ "${COMPOSE_PROJECT_NAME:-}" == "pressana-alm" ]]
+is_bannari_stack() {
+  [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]] \
+    || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-bannari-frontend" ]] \
+    || [[ "${COMPOSE_PROJECT_NAME:-}" == "bannari-alm" ]]
 }
 
 ensure_alm_shared_network() {
@@ -356,7 +356,7 @@ upsert_env_kv() {
   fi
 }
 
-# Keep user/password/host; only rewrite the database name (hospitality → demopressana_db).
+# Keep user/password/host; only rewrite the database name to Bannari's database.
 rewrite_database_url_dbname() {
   local file="$1"
   local dbname="$2"
@@ -365,37 +365,37 @@ rewrite_database_url_dbname() {
   sed -i.bak -E "s|^(DATABASE_URL=postgresql://[^[:space:]/]+/)[^/?#]+|\1${dbname}|" "$file" && rm -f "${file}.bak"
 }
 
-# Pressana stack must never inherit main-ALM hospitality / port 5000 / web.rioassetmanagement.net.
-ensure_pressana_backend_env() {
+# Bannari stack must never inherit another ALM stack's database, port, or domain.
+ensure_bannari_backend_env() {
   local dir="${1:-$BACKEND_DIR}"
-  is_pressana_stack || return 0
+  is_bannari_stack || return 0
 
   local f
   for f in "${dir}/.env.production" "${dir}/.env"; do
     [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
-    log "Ensuring Pressana backend env in $(basename "$f") (db=${PRESSANA_DB_NAME}, port=${PRESSANA_APP_PORT})"
-    upsert_env_kv "$f" "PORT" "$PRESSANA_APP_PORT"
-    upsert_env_kv "$f" "FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
-    upsert_env_kv "$f" "BACKEND_URL" "$PRESSANA_PUBLIC_URL"
-    upsert_env_kv "$f" "API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
-    upsert_env_kv "$f" "RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
-    upsert_env_kv "$f" "REDIS_URL" "$PRESSANA_REDIS_URL"
+    log "Ensuring Bannari backend env in $(basename "$f") (db=${BANNARI_DB_NAME}, port=${BANNARI_APP_PORT})"
+    upsert_env_kv "$f" "PORT" "$BANNARI_APP_PORT"
+    upsert_env_kv "$f" "FRONTEND_URL" "$BANNARI_PUBLIC_URL"
+    upsert_env_kv "$f" "BACKEND_URL" "$BANNARI_PUBLIC_URL"
+    upsert_env_kv "$f" "API_BASE_URL" "${BANNARI_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "RESERVED_SUBDOMAINS" "$BANNARI_RESERVED_SUBDOMAINS"
+    upsert_env_kv "$f" "REDIS_URL" "$BANNARI_REDIS_URL"
     upsert_env_kv "$f" "CACHE_ENABLED" "true"
-    rewrite_database_url_dbname "$f" "$PRESSANA_DB_NAME"
+    rewrite_database_url_dbname "$f" "$BANNARI_DB_NAME"
   done
 }
 
-ensure_pressana_frontend_env() {
+ensure_bannari_frontend_env() {
   local dir="${1:-$FRONTEND_DIR}"
-  is_pressana_stack || return 0
+  is_bannari_stack || return 0
 
   local f
   for f in "${dir}/.env.production" "${dir}/.env"; do
     [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
-    log "Ensuring Pressana frontend env in $(basename "$f")"
-    upsert_env_kv "$f" "VITE_API_BASE_URL" "${PRESSANA_PUBLIC_URL}/api"
-    upsert_env_kv "$f" "VITE_FRONTEND_URL" "$PRESSANA_PUBLIC_URL"
-    upsert_env_kv "$f" "VITE_RESERVED_SUBDOMAINS" "$PRESSANA_RESERVED_SUBDOMAINS"
+    log "Ensuring Bannari frontend env in $(basename "$f")"
+    upsert_env_kv "$f" "VITE_API_BASE_URL" "${BANNARI_PUBLIC_URL}/api"
+    upsert_env_kv "$f" "VITE_FRONTEND_URL" "$BANNARI_PUBLIC_URL"
+    upsert_env_kv "$f" "VITE_RESERVED_SUBDOMAINS" "$BANNARI_RESERVED_SUBDOMAINS"
   done
 }
 
@@ -533,8 +533,8 @@ compose_up() {
   cmd="$(detect_compose)"
   # Isolate stacks that share the same directory basename (AssetLifecycleBackend)
   if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
-    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-pressana-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-pressana-frontend" ]]; then
-      export COMPOSE_PROJECT_NAME="pressana-alm"
+    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-bannari-frontend" ]]; then
+      export COMPOSE_PROJECT_NAME="bannari-alm"
     elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-tenant-web" ]]; then
       export COMPOSE_PROJECT_NAME="tenant-alm"
     fi
@@ -565,10 +565,10 @@ main() {
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
     git_pull_with_stash "$BACKEND_DIR" "backend"
     ensure_minio_env_files "$BACKEND_DIR"
-    ensure_pressana_backend_env "$BACKEND_DIR"
+    ensure_bannari_backend_env "$BACKEND_DIR"
     ensure_alm_shared_network
     compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
-    if is_pressana_stack; then
+    if is_bannari_stack; then
       docker rm -f "$BACKEND_CONTAINER_NAME" 2>/dev/null || true
     fi
     compose_up "$BACKEND_DIR" "backend"
@@ -580,7 +580,7 @@ main() {
   if [[ "$BACKEND_ONLY" != "1" ]]; then
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
-    ensure_pressana_frontend_env "$FRONTEND_DIR"
+    ensure_bannari_frontend_env "$FRONTEND_DIR"
     if should_skip_frontend_compose; then
       verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
     else

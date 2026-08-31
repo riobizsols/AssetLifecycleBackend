@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Docker deploy — Pressana BACKEND (alm-pressana-backend :5003).
-# Run on server from ~/pressana-ALM/AssetLifecycleBackend (or this repo path).
+# Docker deploy — Bannari BACKEND (alm-bannari-backend :5004).
+# Run on the server from the Bannari backend directory.
 #
 #   ./deploy-docker.sh           # backend only
 #   ./deploy-docker.sh --all     # backend + frontend
@@ -31,19 +31,19 @@ done
 
 export BACKEND_ONLY="${BACKEND_ONLY:-1}"
 export FRONTEND_ONLY="${FRONTEND_ONLY:-0}"
-export BACKEND_CONTAINER_NAME="${BACKEND_CONTAINER_NAME:-alm-pressana-backend}"
-export FRONTEND_CONTAINER_NAME="${FRONTEND_CONTAINER_NAME:-alm-pressana-frontend}"
-export BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-5003}"
-export FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3003}"
-export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-pressana}"
-export PRESSANA_DB_NAME="${PRESSANA_DB_NAME:-demopressana_db}"
-export PRESSANA_PUBLIC_URL="${PRESSANA_PUBLIC_URL:-https://pressanaorg.rioassetmanagement.net}"
-export PRESSANA_APP_PORT="${PRESSANA_APP_PORT:-5001}"
-export PRESSANA_REDIS_URL="${PRESSANA_REDIS_URL:-redis://alm_redis:6379/0}"
-export PRESSANA_RESERVED_SUBDOMAINS="${PRESSANA_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg}"
+export BACKEND_CONTAINER_NAME="${BACKEND_CONTAINER_NAME:-alm-bannari-backend}"
+export FRONTEND_CONTAINER_NAME="${FRONTEND_CONTAINER_NAME:-alm-bannari-frontend}"
+export BACKEND_HOST_PORT="${BACKEND_HOST_PORT:-5004}"
+export FRONTEND_HOST_PORT="${FRONTEND_HOST_PORT:-3004}"
+export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-bannari}"
+export BANNARI_DB_NAME="${BANNARI_DB_NAME:-bannari_db}"
+export BANNARI_PUBLIC_URL="${BANNARI_PUBLIC_URL:-https://bannari.rioassetmanagement.net}"
+export BANNARI_APP_PORT="${BANNARI_APP_PORT:-5001}"
+export BANNARI_REDIS_URL="${BANNARI_REDIS_URL:-redis://alm_redis:6379/0}"
+export BANNARI_RESERVED_SUBDOMAINS="${BANNARI_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg,bannari}"
 export FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
 export SKIP_FRONTEND_IF_UNCHANGED="${SKIP_FRONTEND_IF_UNCHANGED:-1}"
 export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
-# Prevent clobbering ~/alm-main compose project (same folder name AssetLifecycleBackend)
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-pressana-alm}"
+# Prevent clobbering other ALM compose projects (same folder name AssetLifecycleBackend)
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-bannari-alm}"
 exec "$DEPLOY"

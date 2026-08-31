@@ -1,20 +1,20 @@
-# Pressana org stack — separate from alm-main (5002/3002) and alm-tenant (5001/3001).
-# Host ports: backend 5003, frontend 3003 → https://pressanaorg.rioassetmanagement.net
+# Bannari stack — separate from the existing ALM application stacks.
+# Host ports: backend 5004, frontend 3004 → https://bannari.rioassetmanagement.net
 #
 # DATABASE_URL @alm_db requires network alm-shared with Postgres container alm_db.
 # Redis: use shared alm_redis (do NOT define alm-redis here — conflicts with main ALM).
 # MinIO: join mansoor-net so MINIO_END_POINT=mansoor-minio resolves.
 
 services:
-  bannari-backend:
-    container_name: bannari-backend
+  alm-backend:
+    container_name: alm-bannari-backend
     build:
       context: .
       dockerfile: Dockerfile
     env_file:
       - .env.production
     ports:
-      - "5004:5002"
+      - "5004:5001"
     restart: unless-stopped
     networks:
       - alm-shared
