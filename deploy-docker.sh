@@ -9,7 +9,12 @@
 #
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ALM_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 DEPLOY="${SCRIPT_DIR}/scripts/deploy/deploy-pull-rebuild.sh"
+
+export ALM_ROOT
+export BACKEND_DIR="${SCRIPT_DIR}"
+export FRONTEND_DIR="${ALM_ROOT}/frontend"
 
 for arg in "$@"; do
   case "$arg" in
