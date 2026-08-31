@@ -324,6 +324,11 @@ const createSpareIssueRequests = async ({
     }
 
     await client.query('COMMIT');
+
+    for (const issueRow of created) {
+      await notifySparePartIssued({ issueRow, org_id, kind: 'approval' });
+    }
+
     return created;
   } catch (error) {
     try {
@@ -496,6 +501,50 @@ const ensureSpareIssuedPreference = async (dbPool, userId) => {
   }
 };
 
+const getSpareApprovalUserIds = async (dbPool, orgId = null) => {
+  const params = [];
+  let orgFilter = '';
+  if (orgId) {
+    params.push(orgId);
+    orgFilter = ` AND (u.org_id = $${params.length} OR u.org_id IS NULL)`;
+  }
+  const result = await dbPool.query(
+    `
+      SELECT DISTINCT u.user_id
+      FROM "tblUsers" u
+      INNER JOIN "tblUserJobRoles" ujr ON ujr.user_id = u.user_id
+      INNER JOIN "tblJobRoleNav" n
+        ON n.job_role_id = ujr.job_role_id
+       AND n.app_id = 'SPAREPARTAPPROVAL'
+       AND COALESCE(n.int_status, 1) = 1
+      WHERE u.int_status = 1
+        ${orgFilter}
+    `,
+    params,
+  );
+  return result.rows.map((r) => r.user_id).filter(Boolean);
+};
+
+const isSpareApproverByEmpIntId = async (dbPool, empIntId) => {
+  if (!empIntId) return false;
+  const result = await dbPool.query(
+    `
+      SELECT 1
+      FROM "tblUsers" u
+      INNER JOIN "tblUserJobRoles" ujr ON ujr.user_id = u.user_id
+      INNER JOIN "tblJobRoleNav" n
+        ON n.job_role_id = ujr.job_role_id
+       AND n.app_id = 'SPAREPARTAPPROVAL'
+       AND COALESCE(n.int_status, 1) = 1
+      WHERE u.int_status = 1
+        AND u.emp_int_id = $1
+      LIMIT 1
+    `,
+    [empIntId],
+  );
+  return result.rows.length > 0;
+};
+
 const getSystemAdminUserIds = async (dbPool, orgId = null) => {
   const params = [];
   let orgFilter = '';
@@ -606,31 +655,44 @@ const notifySparePartIssued = async ({ issueRow, org_id, kind = 'reserved' }) =>
     }
 
     const isConfirmed = kind === 'issued';
-    const title = isConfirmed ? 'Spare Part Issued' : 'Spare Part Reserved';
-    const verb = isConfirmed ? 'issued' : 'reserved';
+    const isApproval = kind === 'requested' || kind === 'approval';
+    const title = isConfirmed
+      ? 'Spare Part Issued'
+      : isApproval
+        ? 'Spare Part Approval'
+        : 'Spare Part Requested';
+    const verb = isConfirmed ? 'issued' : isApproval ? 'pending approval' : 'requested';
     const body = `Maintenance ${maintenanceId || '-'}: ${assetTypeName} / ${categoryName} — spare part ${verb}${
       quantityIssued !== '' && quantityIssued != null
         ? ` (qty ${quantityIssued})`
         : ''
     }`;
     const payload = {
-      type: isConfirmed ? 'spare_part_confirmed' : 'spare_part_issued',
+      type: isConfirmed
+        ? 'spare_part_confirmed'
+        : isApproval
+          ? 'spare_part_approval'
+          : 'spare_part_requested',
       si_id: issueRow.si_id,
       assetmaintsch_id: maintenanceId || '',
       maintenance_id: maintenanceId || '',
       asset_type_name: assetTypeName,
       category_name: categoryName,
       quantity_issued: String(quantityIssued ?? ''),
-      status: isConfirmed ? 'Issued' : 'Reserved',
+      status: isConfirmed ? 'Issued' : isApproval ? 'Approval' : 'Requested',
       spc_id,
       route: isConfirmed
         ? `/spare-part-issue`
-        : `/spare-part-list-detail/${maintenanceId || ''}`,
+        : `/spare-part-approval-detail/${issueRow.si_id || ''}`,
     };
 
     const adminUserIds = await getSystemAdminUserIds(dbPool, org_id);
     const targetUserIds = new Set(adminUserIds);
     if (issueRow.created_by) targetUserIds.add(issueRow.created_by);
+    if (isApproval) {
+      const approverIds = await getSpareApprovalUserIds(dbPool, org_id);
+      for (const userId of approverIds) targetUserIds.add(userId);
+    }
 
     for (const userId of targetUserIds) {
       await ensureSpareIssuedPreference(dbPool, userId);
@@ -658,7 +720,7 @@ const notifySparePartIssued = async ({ issueRow, org_id, kind = 'reserved' }) =>
 };
 
 /**
- * In-app notifications for reserved (IS) and issued (IE) spare parts.
+ * In-app notifications for requested (RQ), reserved (IS), and issued (IE) spare parts.
  * Requesters see their own; System Administrators see all org rows.
  */
 const getSpareIssuedNotificationsByUser = async ({
@@ -670,6 +732,7 @@ const getSpareIssuedNotificationsByUser = async ({
   const dbPool = getDb();
   const isAdmin =
     hasSuperAccess || (await isSystemAdminByEmpIntId(dbPool, empIntId));
+  const isApprover = isAdmin || (await isSpareApproverByEmpIntId(dbPool, empIntId));
 
   const params = [orgId];
   let branchFilter = '';
@@ -679,7 +742,7 @@ const getSpareIssuedNotificationsByUser = async ({
   }
 
   let requesterJoin = '';
-  if (!isAdmin) {
+  if (!isApprover) {
     params.push(empIntId);
     requesterJoin = `
       INNER JOIN "tblUsers" u
@@ -726,12 +789,17 @@ const getSpareIssuedNotificationsByUser = async ({
              NULL
            )
       WHERE si.org_id = $1
-        AND si.status IN ($${params.length + 1}, $${params.length + 2})
+        AND si.status IN ($${params.length + 1}, $${params.length + 2}, $${params.length + 3})
         ${branchFilter}
       ORDER BY COALESCE(si.changed_on, si.created_on) DESC
       LIMIT 100
     `,
-    [...params, SPARE_ISSUE_STATUS.RESERVED, SPARE_ISSUE_STATUS.ISSUED],
+    [
+      ...params,
+      SPARE_ISSUE_STATUS.REQUESTED,
+      SPARE_ISSUE_STATUS.RESERVED,
+      SPARE_ISSUE_STATUS.ISSUED,
+    ],
   );
 
   const rows = [];
@@ -755,7 +823,12 @@ const getSpareIssuedNotificationsByUser = async ({
       ...row,
       spc_id,
       category_name: category_name || spc_id,
-      status_label: row.status === SPARE_ISSUE_STATUS.ISSUED ? 'Issued' : 'Reserved',
+      status_label:
+        row.status === SPARE_ISSUE_STATUS.ISSUED
+          ? 'Issued'
+          : row.status === SPARE_ISSUE_STATUS.REQUESTED
+            ? 'Approval'
+            : 'Requested',
     });
   }
   return rows;
@@ -1740,16 +1813,6 @@ const createCategoryMapping = async ({
       err.statusCode = 400;
       throw err;
     }
-    if (!category_brand_id) {
-      const err = new Error('Category brand is required');
-      err.statusCode = 400;
-      throw err;
-    }
-    if (!category_model_id) {
-      const err = new Error('Category model is required');
-      err.statusCode = 400;
-      throw err;
-    }
     if (!asset_type_id) {
       const err = new Error('Asset type is required');
       err.statusCode = 400;
@@ -1757,16 +1820,10 @@ const createCategoryMapping = async ({
     }
     const assetBrandVal = asset_brand != null ? String(asset_brand).trim() : '';
     const assetModelVal = asset_model != null ? String(asset_model).trim() : '';
-    if (!assetBrandVal) {
-      const err = new Error('Asset type brand is required');
-      err.statusCode = 400;
-      throw err;
-    }
-    if (!assetModelVal) {
-      const err = new Error('Asset type model is required');
-      err.statusCode = 400;
-      throw err;
-    }
+    const categoryBrandIdVal =
+      category_brand_id != null ? String(category_brand_id).trim() : '';
+    const categoryModelIdVal =
+      category_model_id != null ? String(category_model_id).trim() : '';
 
     const cat = await client.query(
       `
@@ -1781,122 +1838,74 @@ const createCategoryMapping = async ({
       throw err;
     }
 
-    const modcat = await client.query(
-      `
-        SELECT mc."spbmId" AS spbm_id
-        FROM "tblISPModCat" mc
-        INNER JOIN "tblISPModel" m ON m."spbmId" = mc."spbmId"
-        WHERE mc."spcId" = $1
-          AND mc."spbmId" = $2
-          AND m."spbId" = $3
-          AND COALESCE(mc.int_status, 1) = 1
-          AND COALESCE(m.int_status, 1) = 1
-          AND (mc.org_id = $4 OR mc.org_id IS NULL)
-        LIMIT 1
-      `,
-      [spc_id, category_model_id, category_brand_id, org_id]
-    );
+    let spbm_id = null;
 
-    let spbm_id = modcat.rows[0]?.spbm_id || null;
+    // If caller provided brand/model ids, try to resolve from existing ISP mod-category.
+    if (categoryBrandIdVal && categoryModelIdVal) {
+      const modcat = await client.query(
+        `
+          SELECT mc."spbmId" AS spbm_id
+          FROM "tblISPModCat" mc
+          INNER JOIN "tblISPModel" m ON m."spbmId" = mc."spbmId"
+          WHERE mc."spcId" = $1
+            AND mc."spbmId" = $2
+            AND m."spbId" = $3
+            AND COALESCE(mc.int_status, 1) = 1
+            AND COALESCE(m.int_status, 1) = 1
+            AND (mc.org_id = $4 OR mc.org_id IS NULL)
+          LIMIT 1
+        `,
+        [spc_id, categoryModelIdVal, categoryBrandIdVal, org_id]
+      );
+      spbm_id = modcat.rows[0]?.spbm_id || null;
+    }
+
+    // Otherwise (or if not found), fall back to the brand/model saved on tblSPCategory.
     if (!spbm_id) {
-      // Category created via Spare Part Category (tblSPBrand/tblSPModel) — ensure ISP link
       await ensureSpBrandModelSchema(client);
       const catDetail = await client.query(
         `
           SELECT
             c.spc_id,
-            c.spb_id,
-            c.spm_id,
             b.text AS brand_name,
             m.text AS model_name
           FROM "tblSPCategory" c
           LEFT JOIN "tblSPBrand" b ON b.spb_id = c.spb_id AND b.org_id = c.org_id
           LEFT JOIN "tblSPModel" m ON m.spm_id = c.spm_id AND m.org_id = c.org_id
           WHERE c.spc_id = $1 AND c.org_id = $2 AND c.int_status = 1
+          LIMIT 1
         `,
         [spc_id, org_id]
       );
+
       const detail = catDetail.rows[0];
-      if (!detail?.brand_name || !detail?.model_name) {
-        const err = new Error('Selected category / brand / model combination was not found');
-        err.statusCode = 400;
-        throw err;
-      }
-
-      const brandMatches =
-        detail.spb_id === category_brand_id ||
-        String(detail.brand_name).toLowerCase() === String(category_brand_id).toLowerCase();
-      const modelMatches =
-        detail.spm_id === category_model_id ||
-        String(detail.model_name).toLowerCase() === String(category_model_id).toLowerCase();
-
-      // Also accept explicit SP brand/model ids even if category columns differ (legacy)
-      const spBrand = await client.query(
-        `
-          SELECT spb_id, text
-          FROM "tblSPBrand"
-          WHERE org_id = $1 AND int_status = 1
-            AND (spb_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
-          LIMIT 1
-        `,
-        [org_id, category_brand_id]
-      );
-      const spModel = await client.query(
-        `
-          SELECT spm_id, spb_id, text
-          FROM "tblSPModel"
-          WHERE org_id = $1 AND int_status = 1
-            AND (spm_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
-            AND (
-              spb_id = $3
-              OR spb_id = $4
-              OR $3 IS NULL
-            )
-          LIMIT 1
-        `,
-        [
+      if (detail?.brand_name && detail?.model_name) {
+        const brand = await findOrCreateIspBrand(client, {
           org_id,
-          category_model_id,
-          category_brand_id,
-          spBrand.rows[0]?.spb_id || detail.spb_id,
-        ]
-      );
-
-      if (!spBrand.rows.length || !spModel.rows.length) {
-        if (!(brandMatches && modelMatches)) {
-          const err = new Error('Selected category / brand / model combination was not found');
-          err.statusCode = 400;
-          throw err;
-        }
+          branch_id,
+          created_by,
+          brand_id: null,
+          brand_name: detail.brand_name,
+          strictCreate: false,
+        });
+        const model = await findOrCreateIspModel(client, {
+          org_id,
+          branch_id,
+          created_by,
+          spbId: brand.spbId,
+          model_id: null,
+          model_name: detail.model_name,
+          strictCreate: false,
+        });
+        await ensureIspModCat(client, {
+          org_id,
+          branch_id,
+          created_by,
+          spc_id,
+          spbmId: model.spbmId,
+        });
+        spbm_id = model.spbmId;
       }
-
-      const brandName = spBrand.rows[0]?.text || detail.brand_name;
-      const modelName = spModel.rows[0]?.text || detail.model_name;
-      const brand = await findOrCreateIspBrand(client, {
-        org_id,
-        branch_id,
-        created_by,
-        brand_id: null,
-        brand_name: brandName,
-        strictCreate: false,
-      });
-      const model = await findOrCreateIspModel(client, {
-        org_id,
-        branch_id,
-        created_by,
-        spbId: brand.spbId,
-        model_id: null,
-        model_name: modelName,
-        strictCreate: false,
-      });
-      await ensureIspModCat(client, {
-        org_id,
-        branch_id,
-        created_by,
-        spc_id,
-        spbmId: model.spbmId,
-      });
-      spbm_id = model.spbmId;
     }
 
     const at = await client.query(
@@ -1912,24 +1921,27 @@ const createCategoryMapping = async ({
       throw err;
     }
 
-    const prodServ = await client.query(
-      `
-        SELECT prod_serv_id
-        FROM "tblProdServs"
-        WHERE asset_type_id = $1
-          AND LOWER(BTRIM(brand)) = LOWER($2)
-          AND LOWER(BTRIM(model)) = LOWER($3)
-          AND (org_id = $4 OR org_id IS NULL)
-        LIMIT 1
-      `,
-      [asset_type_id, assetBrandVal, assetModelVal, org_id]
-    );
-    if (!prodServ.rows.length) {
-      const err = new Error('Selected asset type / brand / model combination was not found');
-      err.statusCode = 400;
-      throw err;
+    let prod_serv_id = null;
+    if (assetBrandVal && assetModelVal) {
+      const prodServ = await client.query(
+        `
+          SELECT prod_serv_id
+          FROM "tblProdServs"
+          WHERE asset_type_id = $1
+            AND LOWER(BTRIM(brand)) = LOWER($2)
+            AND LOWER(BTRIM(model)) = LOWER($3)
+            AND (org_id = $4 OR org_id IS NULL)
+          LIMIT 1
+        `,
+        [asset_type_id, assetBrandVal, assetModelVal, org_id]
+      );
+      if (!prodServ.rows.length) {
+        const err = new Error('Selected asset type / brand / model combination was not found');
+        err.statusCode = 400;
+        throw err;
+      }
+      prod_serv_id = prodServ.rows[0].prod_serv_id;
     }
-    const prod_serv_id = prodServ.rows[0].prod_serv_id;
 
     const mapCols = await client.query(
       `
@@ -1949,12 +1961,20 @@ const createCategoryMapping = async ({
         AND int_status = 1
     `;
     if (colSet.has('spbm_id')) {
-      dupParams.push(spbm_id);
-      dupSql += ` AND spbm_id = $${dupParams.length}`;
+      if (spbm_id == null) {
+        dupSql += ` AND spbm_id IS NULL`;
+      } else {
+        dupParams.push(spbm_id);
+        dupSql += ` AND spbm_id = $${dupParams.length}`;
+      }
     }
     if (colSet.has('prod_serv_id')) {
-      dupParams.push(prod_serv_id);
-      dupSql += ` AND prod_serv_id = $${dupParams.length}`;
+      if (prod_serv_id == null) {
+        dupSql += ` AND prod_serv_id IS NULL`;
+      } else {
+        dupParams.push(prod_serv_id);
+        dupSql += ` AND prod_serv_id = $${dupParams.length}`;
+      }
     }
     dupSql += ` LIMIT 1`;
     const dup = await client.query(dupSql, dupParams);
