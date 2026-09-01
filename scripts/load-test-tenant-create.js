@@ -43,7 +43,6 @@ function tenantPayload(index) {
       fullName: `Load Test Admin ${n}`,
       email: `loadtest.${RUN_ID}.${n}@alm-loadtest.local`,
       password: 'LoadTest1!',
-      username: 'USR001',
       phone: '9876543210',
     },
   };

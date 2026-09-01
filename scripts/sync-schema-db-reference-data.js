@@ -20,6 +20,13 @@ function hospitalityUrl() {
   return base.replace(/\/([^/?]+)(\?.*)?$/i, '/hospitality$2');
 }
 
+/** Prefer hospitality for master data that assetLifecycle may lack or have fewer rows. */
+const HOSPITALITY_SOURCED_TABLES = new Set([
+  'tblApps',
+  'tblProps',
+  'tblAssetPropListValues',
+]);
+
 /** Same tables tenant provisioning reads from schema_db. */
 const PROVISIONING_TABLES = [
   { table: 'tblIDSequences', pk: ['table_key'] },
@@ -35,6 +42,7 @@ const PROVISIONING_TABLES = [
   { table: 'tblTextMessagesOtherLangs', pk: ['tmol_id'] },
   { table: 'tblStatusCodes', pk: ['id'] },
   { table: 'tblProps', pk: ['prop_id'] },
+  { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
 ];
 
@@ -84,24 +92,26 @@ async function main() {
       continue;
     }
 
-    const appsSourceUrl = spec.table === 'tblApps' ? hospitalityUrl() || sourceUrl : sourceUrl;
-    let appsSourceClient = sourceClient;
-    let extraAppsClient = null;
-    if (appsSourceUrl !== sourceUrl) {
-      extraAppsClient = new Client({ connectionString: appsSourceUrl, ssl: false });
-      await extraAppsClient.connect();
-      await extraAppsClient.query('SET search_path TO public');
-      appsSourceClient = extraAppsClient;
-      const hospDb = (await extraAppsClient.query('SELECT current_database() AS db')).rows[0].db;
-      console.log(`  ${spec.table}: using ${hospDb} as app source (spare-parts screens)`);
+    const tableSourceUrl = HOSPITALITY_SOURCED_TABLES.has(spec.table)
+      ? hospitalityUrl() || sourceUrl
+      : sourceUrl;
+    let tableSourceClient = sourceClient;
+    let extraSourceClient = null;
+    if (tableSourceUrl !== sourceUrl) {
+      extraSourceClient = new Client({ connectionString: tableSourceUrl, ssl: false });
+      await extraSourceClient.connect();
+      await extraSourceClient.query('SET search_path TO public');
+      tableSourceClient = extraSourceClient;
+      const srcDb = (await extraSourceClient.query('SELECT current_database() AS db')).rows[0].db;
+      console.log(`  ${spec.table}: using ${srcDb} as source`);
     }
 
-    const result = await copyReferenceTableRows(appsSourceClient, targetClient, spec.table, {
+    const result = await copyReferenceTableRows(tableSourceClient, targetClient, spec.table, {
       pk: spec.pk,
       missingOnly: true,
     });
 
-    if (extraAppsClient) await extraAppsClient.end();
+    if (extraSourceClient) await extraSourceClient.end();
 
     summary.push(result);
 

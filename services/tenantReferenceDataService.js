@@ -12,6 +12,7 @@ const REQUIRED_MASTER_TABLES = [
   { table: 'tblTextMessagesOtherLangs', pk: ['tmol_id'] },
   { table: 'tblStatusCodes', pk: ['id'] },
   { table: 'tblProps', pk: ['prop_id'] },
+  { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
   { table: 'tblApps', pk: ['app_id'], orgIdColumn: 'org_id', missingOnly: true },
 ];

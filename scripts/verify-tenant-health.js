@@ -94,6 +94,7 @@ async function checkRequiredMaster(ten) {
     { name: 'Text messages', sql: 'SELECT COUNT(*)::int c FROM "tblTextMessagesDefault"' },
     { name: 'Status codes', sql: 'SELECT COUNT(*)::int c FROM "tblStatusCodes"' },
     { name: 'Props', sql: 'SELECT COUNT(*)::int c FROM "tblProps"' },
+    { name: 'Property list values', sql: 'SELECT COUNT(*)::int c FROM "tblAssetPropListValues"' },
     { name: 'Maint status', sql: 'SELECT COUNT(*)::int c FROM "tblMaintStatus"' },
     { name: 'Events', sql: 'SELECT COUNT(*)::int c FROM "tblEvents"' },
     { name: 'ID sequences', sql: 'SELECT COUNT(*)::int c FROM "tblIDSequences"' },
@@ -115,7 +116,7 @@ async function checkRequiredMaster(ten) {
 async function compareMasterCounts(ref, ten) {
   const tables = [
     'tblApps', 'tblTextMessagesDefault', 'tblTextMessagesOtherLangs',
-    'tblStatusCodes', 'tblProps', 'tblUom', 'tblEvents', 'tblMaintStatus', 'tblMaintTypes',
+    'tblStatusCodes', 'tblProps', 'tblAssetPropListValues', 'tblUom', 'tblEvents', 'tblMaintStatus', 'tblMaintTypes',
     'tblJobs', 'tblAuditLogConfig', 'tblTechnicalLogConfig', 'tblTableFilterColumns',
     'tblOrgSettings', 'tblIDSequences',
   ];

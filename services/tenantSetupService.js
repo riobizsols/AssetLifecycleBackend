@@ -502,7 +502,6 @@ async function createAdminUser(client, orgId, adminData, registryMeta = null) {
   const {
     fullName = 'System Administrator',
     email,
-    username = 'USR001',
     phone = '',
   } = adminData;
 
@@ -514,10 +513,17 @@ async function createAdminUser(client, orgId, adminData, registryMeta = null) {
     throw new Error('Organization ID is required');
   }
 
-  // Use a fixed initial password for newly created tenant admin
+  // Use pre-allocated ID from createTenant, or generate next USR### from tblIDSequences
+  const userId = registryMeta.userId
+    ? String(registryMeta.userId).toUpperCase()
+    : await generateCustomIdForClient(client, 'user', 3);
+
+  if (!/^USR\d{3}$/.test(userId)) {
+    throw new Error(`Generated user_id "${userId}" does not match expected format USR###`);
+  }
+
   const plainPassword = 'Initial1';
   const passwordHash = await bcrypt.hash(plainPassword, 10);
-  const userId = username.toUpperCase();
 
   await client.query('SET search_path TO public');
 
@@ -1055,18 +1061,12 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       } else {
         const idSequences = await referenceClient.query('SELECT * FROM "tblIDSequences"');
         for (const seq of idSequences.rows) {
-          // For employee and user sequences, set last_number to 1 since we've already created EMP001 and USR001
-          let lastNumber = seq.last_number;
-          if (seq.table_key === 'employee' || seq.table_key === 'user') {
-            lastNumber = 1; // We've used 001, so next will be 002
-          }
-          
           await tenantClient.query(`
             INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
             VALUES ($1, $2, $3)
             ON CONFLICT (table_key) DO UPDATE
             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
-          `, [seq.table_key, seq.prefix, lastNumber]);
+          `, [seq.table_key, seq.prefix, seq.last_number]);
         }
         console.log(`[TenantSetup] ✅ Copied ${idSequences.rows.length} ID sequences`);
       }
@@ -2075,16 +2075,23 @@ async function createTenant(tenantData) {
         `[TenantSetup] Organization record created in tblOrgs: ${internalOrgId} (code: ${orgCodeUpper}) with subdomain: ${subdomain}`,
       );
 
-      // Step 3: Ensure branch and department exist (tagged with internal org_id)
+      // Step 3: Allocate admin user_id (USR001 on fresh tenant) and ensure branch/department
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
-      const plannedAdminUserId = (adminUser.username || 'USR001').toUpperCase();
-      await ensureBranchAndDepartment(tenantClient, internalOrgId, plannedAdminUserId, orgCity);
+      const adminUserId = await generateCustomIdForClient(tenantClient, 'user', 3);
+      if (!/^USR\d{3}$/.test(adminUserId)) {
+        throw new Error(
+          `Generated admin user_id "${adminUserId}" does not match expected format USR###`,
+        );
+      }
+      console.log(`[TenantSetup] Allocated admin user_id: ${adminUserId}`);
+      await ensureBranchAndDepartment(tenantClient, internalOrgId, adminUserId, orgCity);
       
       // Step 4: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
       const adminCredentials = await createAdminUser(tenantClient, internalOrgId, adminUser, {
         registryOrgId,
         subdomain,
+        userId: adminUserId,
       });
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
