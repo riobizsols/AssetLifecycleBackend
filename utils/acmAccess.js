@@ -624,6 +624,63 @@ function buildAssetListScopeSql(ctx, { branchCol = 'a.branch_id', assetAlias = '
   };
 }
 
+/**
+ * EXISTS clause: asset group has at least one asset within ACM list scope.
+ */
+function buildAssetGroupScopeExistsSql(ctx, { groupHeaderAlias = 'h', startIndex = 1 } = {}) {
+  const assetAlias = 'a_acm';
+  const scope = buildAssetListScopeSql(ctx, {
+    assetAlias,
+    branchCol: `${assetAlias}.branch_id`,
+    startIndex,
+  });
+  if (!scope.sql) {
+    return { sql: '', params: [], nextIndex: startIndex };
+  }
+
+  return {
+    sql: ` AND EXISTS (
+      SELECT 1
+      FROM "tblAssetGroup_D" gd_acm
+      INNER JOIN "tblAssets" ${assetAlias} ON ${assetAlias}.asset_id = gd_acm.asset_id
+      WHERE gd_acm.assetgroup_h_id = ${groupHeaderAlias}.assetgroup_h_id
+        AND ${assetAlias}.org_id = ${groupHeaderAlias}.org_id
+        ${scope.sql}
+    )`,
+    params: scope.params,
+    nextIndex: scope.nextIndex,
+  };
+}
+
+/**
+ * Org + branch/dept ACM scope for report queries on tblAssets (alias a).
+ */
+function buildReportAssetScopeClause(acmCtx = {}) {
+  const orgId = acmCtx.orgId;
+  if (!orgId) {
+    return { clause: '', params: [], paramCount: 0 };
+  }
+
+  const params = [orgId];
+  const scope = buildAssetListScopeSql(acmCtx, { startIndex: 2 });
+  params.push(...scope.params);
+  return {
+    clause: `WHERE a.org_id = $1${scope.sql}`,
+    params,
+    paramCount: scope.nextIndex - 1,
+  };
+}
+
+/** Split report asset scope into WHERE fragments for query builders that use condition arrays. */
+function buildReportAssetScopeConditions(acmCtx = {}) {
+  const acmScope = buildReportAssetScopeClause(acmCtx);
+  return {
+    conditions: acmScope.clause ? [acmScope.clause.replace(/^WHERE /, '')] : [],
+    params: acmScope.params,
+    paramCount: acmScope.paramCount,
+  };
+}
+
 module.exports = {
   WILDCARD,
   isWild,
@@ -639,6 +696,9 @@ module.exports = {
   getEffectiveListContext,
   applyAcmSqlFilters,
   buildAssetListScopeSql,
+  buildAssetGroupScopeExistsSql,
+  buildReportAssetScopeClause,
+  buildReportAssetScopeConditions,
   isResourceInAcmScope,
   requireAcmWrite,
   filterRowsByAcm,

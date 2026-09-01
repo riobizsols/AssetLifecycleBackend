@@ -94,16 +94,15 @@ const getAllAssetGroups = async (req, res) => {
     
     try {
         const { getEffectiveListContext } = require('../utils/acmAccess');
-        const { orgId, hasSuperAccess } = getEffectiveListContext(req);
-        const org_id = orgId || req.user.org_id;
-        const userBranchCode = branchCodeFromReq(req);
+        const acmCtx = getEffectiveListContext(req);
+        const org_id = acmCtx.orgId || req.user.org_id;
 
         const { data: rows } = await operationalCache.cachedList(
             req,
             'asset-groups',
-            'list-v2',
+            'list-v3',
             async () => {
-                const result = await model.getAllAssetGroups(org_id, userBranchCode, hasSuperAccess);
+                const result = await model.getAllAssetGroups(org_id, acmCtx);
                 return result.rows;
             },
         );
@@ -136,29 +135,23 @@ const getAllAssetGroups = async (req, res) => {
 const getAssetGroupsByAssetType = async (req, res) => {
     try {
         const { asset_type_id } = req.params;
-        const org_id = req.user?.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const org_id = acmCtx.orgId || req.user?.org_id;
 
         if (!asset_type_id) {
             return res.status(400).json({ success: false, message: "asset_type_id is required" });
         }
 
-        const userBranchCode = branchCodeFromReq(req);
-        const hasSuperAccess = req.user?.hasSuperAccess || false;
-
-        if (!userBranchCode && !hasSuperAccess) {
-            return res.status(400).json({ success: false, message: "branch_code not found for current user" });
-        }
-
         const { data: groups } = await operationalCache.cachedList(
             req,
             'asset-groups',
-            operationalCache.hashQuery({ asset_type_id, branch: userBranchCode || 'all' }),
+            operationalCache.hashQuery({ asset_type_id, scope: 'v3' }),
             async () => {
                 const result = await model.getAssetGroupsByAssetType(
                     org_id,
-                    userBranchCode,
                     asset_type_id,
-                    hasSuperAccess
+                    acmCtx
                 );
                 return result.rows;
             },
@@ -191,6 +184,20 @@ const getAssetGroupById = async (req, res) => {
             assetGroupId: id,
             userId
         }).catch(err => console.error('Logging error:', err));
+
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const org_id = acmCtx.orgId || req.user?.org_id;
+
+        const inScope = await model.isAssetGroupInScope(id, org_id, acmCtx);
+        if (!inScope) {
+            assetGroupLogger.logAssetGroupNotFound({
+                assetGroupId: id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+
+            return res.status(404).json({ error: "Asset group not found" });
+        }
         
         const result = await model.getAssetGroupById(id);
         
@@ -272,7 +279,21 @@ const updateAssetGroup = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // Check if asset group exists
+        // Check if asset group exists and is in ACM scope
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const org_id = acmCtx.orgId || req.user?.org_id;
+
+        const inScope = await model.isAssetGroupInScope(id, org_id, acmCtx);
+        if (!inScope) {
+            assetGroupLogger.logAssetGroupNotFound({
+                assetGroupId: id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+            
+            return res.status(404).json({ error: "Asset group not found" });
+        }
+
         const existingGroup = await model.getAssetGroupById(id);
         if (!existingGroup.header) {
             assetGroupLogger.logAssetGroupNotFound({
@@ -342,7 +363,21 @@ const deleteAssetGroup = async (req, res) => {
             userId
         }).catch(err => console.error('Logging error:', err));
 
-        // Check if asset group exists
+        // Check if asset group exists and is in ACM scope
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const org_id = acmCtx.orgId || req.user?.org_id;
+
+        const inScope = await model.isAssetGroupInScope(id, org_id, acmCtx);
+        if (!inScope) {
+            assetGroupLogger.logAssetGroupNotFound({
+                assetGroupId: id,
+                userId
+            }).catch(err => console.error('Logging error:', err));
+            
+            return res.status(404).json({ error: "Asset group not found" });
+        }
+
         const existingGroup = await model.getAssetGroupById(id);
         if (!existingGroup.header) {
             assetGroupLogger.logAssetGroupNotFound({

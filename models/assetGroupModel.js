@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const { buildAssetGroupScopeExistsSql } = require('../utils/acmAccess');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -127,13 +128,8 @@ const createAssetGroup = async (org_id, branch_code, text, asset_ids, created_by
     }
 };
 
-// Get all asset groups - supports super access users who can view all branches
-const getAllAssetGroups = async (org_id, userBranchCode, hasSuperAccess = false) => {
-    console.log('=== Asset Group Model Listing Debug ===');
-    console.log('org_id:', org_id);
-    console.log('userBranchCode:', userBranchCode);
-    console.log('hasSuperAccess:', hasSuperAccess);
-
+// Get all asset groups scoped by ACM (branch + department via asset assignments)
+const getAllAssetGroups = async (org_id, acmCtx = {}) => {
     let query = `
         SELECT 
             h.assetgroup_h_id,
@@ -151,12 +147,10 @@ const getAllAssetGroups = async (org_id, userBranchCode, hasSuperAccess = false)
     `;
     const params = [org_id];
 
-    // Apply branch filter only if user doesn't have super access
-    // Include NULL branch_code for legacy groups created without a branch
-    // Super-access: no branch filter (all branches for the org)
-    if (!hasSuperAccess && userBranchCode) {
-        query += ` AND (h.branch_code = $2 OR h.branch_code IS NULL)`;
-        params.push(userBranchCode);
+    const scope = buildAssetGroupScopeExistsSql(acmCtx, { startIndex: 2 });
+    if (scope.sql) {
+        query += scope.sql;
+        params.push(...scope.params);
     }
 
     query += `
@@ -165,16 +159,14 @@ const getAllAssetGroups = async (org_id, userBranchCode, hasSuperAccess = false)
     `;
 
     const dbPool = getDb();
-    const result = await dbPool.query(query, params);
-    console.log('Query executed successfully, found asset groups:', result.rows.length);
-    return result;
+    return await dbPool.query(query, params);
 };
 
 /**
  * Get asset groups where ALL assets are of the given asset_type_id.
  * Used by Scrap flow to show "Grouped assets" option.
  */
-const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id, hasSuperAccess = false) => {
+const getAssetGroupsByAssetType = async (org_id, asset_type_id, acmCtx = {}) => {
     let query = `
         SELECT
             h.assetgroup_h_id,
@@ -193,9 +185,10 @@ const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id, 
     `;
     const params = [org_id];
 
-    if (!hasSuperAccess && userBranchCode) {
-        query += ` AND (h.branch_code = $${params.length + 1} OR h.branch_code IS NULL)`;
-        params.push(userBranchCode);
+    const scope = buildAssetGroupScopeExistsSql(acmCtx, { startIndex: 2 });
+    if (scope.sql) {
+        query += scope.sql;
+        params.push(...scope.params);
     }
 
     params.push(asset_type_id);
@@ -210,6 +203,27 @@ const getAssetGroupsByAssetType = async (org_id, userBranchCode, asset_type_id, 
 
     const dbPool = getDb();
     return await dbPool.query(query, params);
+};
+
+// Check whether an asset group is visible under ACM list scope
+const isAssetGroupInScope = async (assetgroup_h_id, org_id, acmCtx = {}) => {
+    let query = `
+        SELECT 1
+        FROM "tblAssetGroup_H" h
+        WHERE h.assetgroup_h_id = $1
+          AND h.org_id = $2
+    `;
+    const params = [assetgroup_h_id, org_id];
+
+    const scope = buildAssetGroupScopeExistsSql(acmCtx, { startIndex: 3 });
+    if (scope.sql) {
+        query += scope.sql;
+        params.push(...scope.params);
+    }
+
+    const dbPool = getDb();
+    const result = await dbPool.query(query, params);
+    return result.rows.length > 0;
 };
 
 // Get asset group by ID with details
@@ -399,6 +413,7 @@ module.exports = {
     createAssetGroup,
     getAllAssetGroups,
     getAssetGroupsByAssetType,
+    isAssetGroupInScope,
     getAssetGroupById,
     updateAssetGroup,
     deleteAssetGroup,

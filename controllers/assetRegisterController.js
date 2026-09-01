@@ -86,16 +86,12 @@ const getAssetRegister = async (req, res) => {
       });
     }
 
-    // Add user's branch_id as default filter only if user doesn't have super access
-    const userBranchId = req.user?.branch_id;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
-    filters.hasSuperAccess = hasSuperAccess; // Pass to model
-    if (!hasSuperAccess && userBranchId) {
-      filters.branch_id = userBranchId;
-      console.log('🔍 [AssetRegisterController] Added user branch_id filter:', userBranchId);
-    } else if (hasSuperAccess) {
-      console.log('🔍 [AssetRegisterController] User has super access - no branch filter applied');
-    }
+    // Add orgId to filters for property filtering
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    filters.acmCtx = getEffectiveListContext(req);
+    filters.acmCtx.orgId = filters.acmCtx.orgId || req.user?.org_id;
+    filters.orgId = filters.acmCtx.orgId;
+    filters.org_id = filters.acmCtx.orgId;
 
     // Step 3: Log data retrieval started
     await logReportDataRetrieval({
@@ -104,10 +100,6 @@ const getAssetRegister = async (req, res) => {
       filters,
       userId
     });
-
-    // Add orgId to filters for property filtering
-    filters.orgId = req.user?.org_id;
-    filters.org_id = req.user?.org_id;
 
     const { data: cachedPayload } = await reportsCache.cachedList(
       req,
@@ -250,10 +242,14 @@ const getAssetRegister = async (req, res) => {
 // Get filter options for asset register
 const getAssetRegisterFilterOptions = async (req, res) => {
   try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    acmCtx.orgId = acmCtx.orgId || req.user?.org_id;
+
     const { data: options } = await reportsCache.cachedFilterOptions(
       req,
       'asset-register',
-      () => assetRegisterModel.getAssetRegisterFilterOptions(),
+      () => assetRegisterModel.getAssetRegisterFilterOptions(acmCtx),
     );
     
     res.status(200).json({
@@ -274,9 +270,9 @@ const getAssetRegisterFilterOptions = async (req, res) => {
 // Get asset register summary statistics
 const getAssetRegisterSummary = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
-    const branchId = req.user?.branch_id;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext, buildAssetListScopeSql } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const orgId = acmCtx.orgId || req.user?.org_id;
     
     let summaryQuery = `
       SELECT 
@@ -298,11 +294,10 @@ const getAssetRegisterSummary = async (req, res) => {
     `;
     
     const params = [orgId];
-    
-    // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && branchId) {
-      summaryQuery += ` AND a.branch_id = $2`;
-      params.push(branchId);
+    const scope = buildAssetListScopeSql(acmCtx, { startIndex: 2 });
+    if (scope.sql) {
+      summaryQuery += scope.sql;
+      params.push(...scope.params);
     }
 
     // Use tenant database from request context (set by middleware)

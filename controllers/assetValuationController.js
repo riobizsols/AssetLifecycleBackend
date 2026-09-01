@@ -14,6 +14,68 @@ const {
     logDatabaseConnectionFailure
 } = require('../eventLoggers/reportsEventLogger');
 
+function getValuationAcmContext(req) {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    acmCtx.orgId = acmCtx.orgId || req.user?.org_id;
+    return acmCtx;
+}
+
+function buildValuationFilters(req, query = {}) {
+    const acmCtx = getValuationAcmContext(req);
+    const {
+        assetStatus,
+        includeScrapAssets,
+        currentValueMin,
+        currentValueMax,
+        category,
+        location,
+        department,
+        acquisitionDateFrom,
+        acquisitionDateTo,
+        page,
+        limit,
+        sortBy,
+        sortOrder,
+        advancedConditions,
+    } = query;
+
+    let parsedAdvancedConditions = null;
+    if (advancedConditions) {
+        try {
+            parsedAdvancedConditions = typeof advancedConditions === 'string'
+                ? JSON.parse(advancedConditions)
+                : advancedConditions;
+        } catch (error) {
+            const parseError = new Error('Invalid advanced conditions format');
+            parseError.statusCode = 400;
+            throw parseError;
+        }
+    }
+
+    return {
+        acmCtx,
+        orgId: acmCtx.orgId,
+        filters: {
+            acmCtx,
+            assetStatus: assetStatus || null,
+            includeScrapAssets: includeScrapAssets === 'true' || includeScrapAssets === true,
+            currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
+            currentValueMax: currentValueMax ? parseFloat(currentValueMax) : null,
+            category: category ? (Array.isArray(category) ? category : [category]) : null,
+            location: location ? (Array.isArray(location) ? location : [location]) : null,
+            department: department ? (Array.isArray(department) ? department : [department]) : null,
+            acquisitionDateFrom: acquisitionDateFrom || null,
+            acquisitionDateTo: acquisitionDateTo || null,
+            page: page ? parseInt(page, 10) : 1,
+            limit: limit ? parseInt(limit, 10) : 10000,
+            sortBy: sortBy || null,
+            sortOrder: sortOrder || null,
+            advancedConditions: parsedAdvancedConditions,
+        },
+    };
+}
+
 class AssetValuationController {
     /**
      * Get asset valuation data with filtering and pagination
@@ -53,23 +115,11 @@ class AssetValuationController {
             
             const orgId = req.user.org_id;  
             
-            // Extract query parameters
+            const { filters } = buildValuationFilters(req, req.query);
             const {
-                assetStatus,
-                includeScrapAssets,
-                currentValueMin,
-                currentValueMax,
-                category,
-                location,
-                department,
-                acquisitionDateFrom,
-                acquisitionDateTo,
                 page,
                 limit,
-                sortBy,
-                sortOrder,
-                advancedConditions
-            } = req.query;
+            } = filters;
 
             // Validate required parameters
             if (!page || !limit) {
@@ -79,55 +129,6 @@ class AssetValuationController {
                 });
             }
 
-            // Parse advanced conditions
-            
-            let parsedAdvancedConditions = null;
-            if (advancedConditions) {
-                try {
-                    parsedAdvancedConditions = typeof advancedConditions === 'string' 
-                        ? JSON.parse(advancedConditions) 
-                        : advancedConditions;
-                } catch (error) {
-                    console.error('Error parsing advanced conditions:', error);
-                    console.error('Raw advancedConditions that failed to parse:', advancedConditions);
-                    return res.status(400).json({
-                        success: false,
-                        message: 'Invalid advanced conditions format'
-                    });
-                }
-            }
-
-            // Add user's branch_id as default filter
-            const userBranchId = req.user?.branch_id;
-            const hasSuperAccess = req.user?.hasSuperAccess || false;
-            if (!hasSuperAccess && userBranchId) {
-                console.log('🔍 [AssetValuationController] Added user branch_id filter:', userBranchId);
-            } else if (hasSuperAccess) {
-                console.log('🔍 [AssetValuationController] User has super access - no branch filter applied');
-            }
-
-            // Parse array parameters
-            const filters = {
-                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
-                hasSuperAccess: hasSuperAccess, // Pass to model
-                assetStatus: assetStatus || null,
-                includeScrapAssets: includeScrapAssets === 'true' || includeScrapAssets === true,
-                currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
-                currentValueMax: currentValueMax ? parseFloat(currentValueMax) : null,
-                category: category ? (Array.isArray(category) ? category : [category]) : null,
-                location: location ? (Array.isArray(location) ? location : [location]) : null,
-                department: department ? (Array.isArray(department) ? department : [department]) : null,
-                acquisitionDateFrom: acquisitionDateFrom || null,
-                acquisitionDateTo: acquisitionDateTo || null,
-                page: parseInt(page),
-                limit: parseInt(limit),
-                sortBy: sortBy || null,
-                sortOrder: sortOrder || null,
-                advancedConditions: parsedAdvancedConditions
-            };
-
-            // Debug logs removed for cleaner console
-            
             // Log filters applied
             const appliedFilters = Object.keys(filters).filter(key => 
                 filters[key] !== null && !['page', 'limit', 'sortBy', 'sortOrder'].includes(key)
@@ -200,6 +201,13 @@ class AssetValuationController {
 
         } catch (error) {
             console.error('Error in getAssetValuationData:', error);
+
+            if (error.statusCode === 400) {
+                return res.status(400).json({
+                    success: false,
+                    message: error.message,
+                });
+            }
             
             // Determine error level
             const isDbError = error.code && (error.code.startsWith('23') || error.code.startsWith('42') || error.code === 'ECONNREFUSED');
@@ -256,11 +264,12 @@ class AssetValuationController {
             }
             
             const orgId = req.user.org_id;
+            const acmCtx = getValuationAcmContext(req);
 
             const { data: summary } = await reportsCache.cachedSummary(
                 req,
                 'asset-valuation',
-                () => AssetValuationModel.getAssetValuationSummary(orgId),
+                () => AssetValuationModel.getAssetValuationSummary(orgId, acmCtx),
             );
 
             res.status(200).json({
@@ -295,11 +304,12 @@ class AssetValuationController {
             }
             
             const orgId = req.user.org_id;
+            const acmCtx = getValuationAcmContext(req);
 
             const { data: filterOptions } = await reportsCache.cachedFilterOptions(
                 req,
                 'asset-valuation',
-                () => AssetValuationModel.getFilterOptions(orgId),
+                () => AssetValuationModel.getFilterOptions(orgId, acmCtx),
             );
 
             res.status(200).json({
@@ -325,47 +335,19 @@ class AssetValuationController {
      */
     static async exportToExcel(req, res) {
         try {
-            const orgId = req.user?.org_id || 'ORG001';
-            
-            // Extract query parameters (same as getAssetValuationData)
-            const {
-                assetStatus,
-                includeScrapAssets,
-                currentValueMin,
-                currentValueMax,
-                category,
-                location,
-                department,
-                acquisitionDateFrom,
-                acquisitionDateTo,
-                sortBy = 'asset_id',
-                sortOrder = 'ASC'
-            } = req.query;
-
-            const userBranchId = req.user?.branch_id;
-            const hasSuperAccess = req.user?.hasSuperAccess || false;
-            const filters = {
-                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
-                hasSuperAccess: hasSuperAccess, // Pass to model
-                assetStatus: assetStatus || 'In-Use',
-                includeScrapAssets: includeScrapAssets === 'true',
-                currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
-                currentValueMax: currentValueMax ? parseFloat(currentValueMax) : null,
-                category: category ? (Array.isArray(category) ? category : [category]) : null,
-                location: location ? (Array.isArray(location) ? location : [location]) : null,
-                department: department ? (Array.isArray(department) ? department : [department]) : null,
-                acquisitionDateFrom: acquisitionDateFrom || null,
-                acquisitionDateTo: acquisitionDateTo || null,
+            const { filters, orgId } = buildValuationFilters(req, {
+                assetStatus: 'In-Use',
                 page: 1,
-                limit: 10000, // Large limit for export
-                sortBy,
-                sortOrder
-            };
+                limit: 10000,
+                sortBy: 'asset_id',
+                sortOrder: 'ASC',
+                ...req.query,
+            });
 
             const result = await AssetValuationModel.getAssetValuationData(filters, orgId);
                     
             // Get summary data for comprehensive report
-            const summary = await AssetValuationModel.getAssetValuationSummary(orgId);
+            const summary = await AssetValuationModel.getAssetValuationSummary(orgId, filters.acmCtx);
 
             // Prepare comprehensive data for Excel export
             const excelData = result.assets.map(asset => ({
@@ -571,47 +553,19 @@ class AssetValuationController {
      */
     static async exportToCSV(req, res) {
         try {
-            const orgId = req.user?.org_id || 'ORG001';
-            
-            // Extract query parameters (same as getAssetValuationData)
-            const {
-                assetStatus,
-                includeScrapAssets,
-                currentValueMin,
-                currentValueMax,
-                category,
-                location,
-                department,
-                acquisitionDateFrom,
-                acquisitionDateTo,
-                sortBy = 'asset_id',
-                sortOrder = 'ASC'
-            } = req.query;
-
-            const userBranchId = req.user?.branch_id;
-            const hasSuperAccess = req.user?.hasSuperAccess || false;
-            const filters = {
-                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
-                hasSuperAccess: hasSuperAccess, // Pass to model
-                assetStatus: assetStatus || 'In-Use',
-                includeScrapAssets: includeScrapAssets === 'true',
-                currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
-                currentValueMax: currentValueMax ? parseFloat(currentValueMax) : null,
-                category: category ? (Array.isArray(category) ? category : [category]) : null,
-                location: location ? (Array.isArray(location) ? location : [location]) : null,
-                department: department ? (Array.isArray(department) ? department : [department]) : null,
-                acquisitionDateFrom: acquisitionDateFrom || null,
-                acquisitionDateTo: acquisitionDateTo || null,
+            const { filters, orgId } = buildValuationFilters(req, {
+                assetStatus: 'In-Use',
                 page: 1,
-                limit: 10000, // Large limit for export
-                sortBy,
-                sortOrder
-            };
+                limit: 10000,
+                sortBy: 'asset_id',
+                sortOrder: 'ASC',
+                ...req.query,
+            });
 
             const result = await AssetValuationModel.getAssetValuationData(filters, orgId);
             
             // Get summary data for comprehensive report
-            const summary = await AssetValuationModel.getAssetValuationSummary(orgId);
+            const summary = await AssetValuationModel.getAssetValuationSummary(orgId, filters.acmCtx);
 
             // Calculate filtered totals from the actual result data
             const filteredInUseAssets = result.assets.filter(asset => asset['Asset Status'] === 'In-Use');
@@ -733,47 +687,19 @@ class AssetValuationController {
      */
     static async exportToJSON(req, res) {
         try {
-            const orgId = req.user?.org_id || 'ORG001';
-            
-            // Extract query parameters (same as getAssetValuationData)
-            const {
-                assetStatus,
-                includeScrapAssets,
-                currentValueMin,
-                currentValueMax,
-                category,
-                location,
-                department,
-                acquisitionDateFrom,
-                acquisitionDateTo,
-                sortBy = 'asset_id',
-                sortOrder = 'ASC'
-            } = req.query;
-
-            const userBranchId = req.user?.branch_id;
-            const hasSuperAccess = req.user?.hasSuperAccess || false;
-            const filters = {
-                branch_id: (!hasSuperAccess && userBranchId) ? userBranchId : null,
-                hasSuperAccess: hasSuperAccess, // Pass to model
-                assetStatus: assetStatus || 'In-Use',
-                includeScrapAssets: includeScrapAssets === 'true',
-                currentValueMin: currentValueMin ? parseFloat(currentValueMin) : null,
-                currentValueMax: currentValueMax ? parseFloat(currentValueMax) : null,
-                category: category ? (Array.isArray(category) ? category : [category]) : null,
-                location: location ? (Array.isArray(location) ? location : [location]) : null,
-                department: department ? (Array.isArray(department) ? department : [department]) : null,
-                acquisitionDateFrom: acquisitionDateFrom || null,
-                acquisitionDateTo: acquisitionDateTo || null,
+            const { filters, orgId } = buildValuationFilters(req, {
+                assetStatus: 'In-Use',
                 page: 1,
-                limit: 10000, // Large limit for export
-                sortBy,
-                sortOrder
-            };
+                limit: 10000,
+                sortBy: 'asset_id',
+                sortOrder: 'ASC',
+                ...req.query,
+            });
 
             const result = await AssetValuationModel.getAssetValuationData(filters, orgId);
             
             // Get summary data for comprehensive report
-            const summary = await AssetValuationModel.getAssetValuationSummary(orgId);
+            const summary = await AssetValuationModel.getAssetValuationSummary(orgId, filters.acmCtx);
 
             // Calculate filtered totals from the actual result data
             const filteredInUseAssets = result.assets.filter(asset => asset['Asset Status'] === 'In-Use');

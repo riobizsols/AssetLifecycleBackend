@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
+const { buildAssetListScopeSql, buildReportAssetScopeClause } = require('../utils/acmAccess');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -23,7 +24,6 @@ class AssetValuationModel {
             }
 
             const {
-                branch_id,
                 assetStatus,
                 includeScrapAssets,
                 currentValueMin,
@@ -37,8 +37,12 @@ class AssetValuationModel {
                 limit,
                 sortBy,
                 sortOrder,
-                advancedConditions
+                advancedConditions,
+                acmCtx = {},
             } = filters;
+
+            const effectiveAcmCtx = { ...acmCtx, orgId };
+            const acmScope = buildAssetListScopeSql(effectiveAcmCtx, { startIndex: 2 });
 
             // Build the base query
             let baseQuery = `
@@ -47,7 +51,7 @@ class AssetValuationModel {
                     a.text as "Name",
                     at.text as "Category",
                     b.text as "Location",
-                    'No Department' as "Department",
+                    COALESCE(d.text, 'No Department') as "Department",
                     CASE 
                         WHEN a.current_status = 'SCRAPPED' THEN 'Scrap'
                         ELSE 'In-Use'
@@ -75,20 +79,18 @@ class AssetValuationModel {
                 FROM "tblAssets" a
                 LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
                 LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+                LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+                    AND aa.action = 'A'
+                    AND aa.latest_assignment_flag = true
+                LEFT JOIN "tblDepartments" d ON aa.dept_id = d.dept_id
                 LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
                 LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
                 WHERE a.org_id = $1
+                ${acmScope.sql}
             `;
 
-            const queryParams = [orgId];
-            let paramIndex = 2;
-
-            // Apply branch_id filter only if user doesn't have super access
-            if (branch_id && !filters.hasSuperAccess) {
-                baseQuery += ` AND a.branch_id = $${paramIndex}`;
-                queryParams.push(branch_id);
-                paramIndex++;
-            }
+            const queryParams = [orgId, ...acmScope.params];
+            let paramIndex = acmScope.nextIndex;
 
             // Apply filters
             if (assetStatus && assetStatus !== 'All' && assetStatus !== null) {
@@ -129,12 +131,11 @@ class AssetValuationModel {
                 queryParams.push(...location);
             }
 
-            // Department filter - disabled since no department data in assets table
-            // if (department && department.length > 0) {
-            //     const departmentPlaceholders = department.map(() => `$${paramIndex++}`).join(',');
-            //     baseQuery += ` AND ps.description IN (${departmentPlaceholders})`;
-            //     queryParams.push(...department);
-            // }
+            if (department && department.length > 0) {
+                const departmentPlaceholders = department.map(() => `$${paramIndex++}`).join(',');
+                baseQuery += ` AND d.text IN (${departmentPlaceholders})`;
+                queryParams.push(...department);
+            }
 
             // Acquisition date range filter
             if (acquisitionDateFrom) {
@@ -240,15 +241,25 @@ class AssetValuationModel {
             }
 
             // Add ordering
-            const validSortColumns = [
-                'asset_id', 'text', 'Category', 'Location', 'Department', 
-                'Asset Status', 'purchased_on', 'Current Value', 'Original Cost',
-                'Accumulated Depreciation', 'Net Book Value', 'Depreciation Method', 'Useful Life'
-            ];
-            const sortColumn = (sortBy && validSortColumns.includes(sortBy)) ? sortBy : 'asset_id';
+            const sortColumnMap = {
+                asset_id: 'a.asset_id',
+                text: 'a.text',
+                purchased_on: 'a.purchased_on',
+                Category: 'at.text',
+                Location: 'b.text',
+                Department: 'd.text',
+                'Asset Status': `"Asset Status"`,
+                'Current Value': `"Current Value"`,
+                'Original Cost': `"Original Cost"`,
+                'Accumulated Depreciation': `"Accumulated Depreciation"`,
+                'Net Book Value': `"Net Book Value"`,
+                'Depreciation Method': `"Depreciation Method"`,
+                'Useful Life': `"Useful Life"`,
+            };
+            const sortColumn = (sortBy && sortColumnMap[sortBy]) ? sortBy : 'asset_id';
             const orderDirection = (sortOrder && sortOrder.toUpperCase() === 'DESC') ? 'DESC' : 'ASC';
             
-            baseQuery += ` ORDER BY "${sortColumn}" ${orderDirection}`;
+            baseQuery += ` ORDER BY ${sortColumnMap[sortColumn]} ${orderDirection}`;
 
             // Add pagination
             const offset = (page - 1) * limit;
@@ -266,20 +277,18 @@ class AssetValuationModel {
                 FROM "tblAssets" a
                 LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
                 LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
+                LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+                    AND aa.action = 'A'
+                    AND aa.latest_assignment_flag = true
+                LEFT JOIN "tblDepartments" d ON aa.dept_id = d.dept_id
                 LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
                 LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
                 WHERE a.org_id = $1
+                ${acmScope.sql}
             `;
 
-            const countParams = [orgId];
-            let countParamIndex = 2;
-
-            // Apply branch_id filter only if user doesn't have super access
-            if (branch_id && !filters.hasSuperAccess) {
-                countQuery += ` AND a.branch_id = $${countParamIndex}`;
-                countParams.push(branch_id);
-                countParamIndex++;
-            }
+            const countParams = [orgId, ...acmScope.params];
+            let countParamIndex = acmScope.nextIndex;
 
             // Apply same filters for count
             if (!includeScrapAssets) {
@@ -317,7 +326,7 @@ class AssetValuationModel {
 
             if (department && department.length > 0) {
                 const departmentPlaceholders = department.map(() => `$${countParamIndex++}`).join(',');
-                countQuery += ` AND ps.description IN (${departmentPlaceholders})`;
+                countQuery += ` AND d.text IN (${departmentPlaceholders})`;
                 countParams.push(...department);
             }
 
@@ -523,12 +532,14 @@ class AssetValuationModel {
      * @param {string} orgId - Organization ID
      * @returns {Promise<Object>} Summary data
      */
-    static async getAssetValuationSummary(orgId) {
+    static async getAssetValuationSummary(orgId, acmCtx = {}) {
         try {
             // Validate required parameters
             if (!orgId) {
                 throw new Error('Organization ID is required');
             }
+            const effectiveAcmCtx = { ...acmCtx, orgId };
+            const acmScope = buildAssetListScopeSql(effectiveAcmCtx, { startIndex: 2 });
             const query = `
                 SELECT 
                     CASE 
@@ -541,6 +552,7 @@ class AssetValuationModel {
                     SUM(COALESCE(CAST(a.accumulated_depreciation AS NUMERIC), 0)) as total_accumulated_depreciation
                 FROM "tblAssets" a
                 WHERE a.org_id = $1
+                ${acmScope.sql}
                 GROUP BY 
                     CASE 
                         WHEN a.current_status = 'SCRAPPED' THEN 'Scrap'
@@ -552,7 +564,7 @@ class AssetValuationModel {
             const dbPool = getDb();
 
 
-            const result = await dbPool.query(query, [orgId]);
+            const result = await dbPool.query(query, [orgId, ...acmScope.params]);
             
             const summary = {
                 inUse: { asset_count: 0, total_current_value: 0, total_original_cost: 0, total_accumulated_depreciation: 0 },
@@ -595,40 +607,49 @@ class AssetValuationModel {
      * @param {string} orgId - Organization ID
      * @returns {Promise<Object>} Filter options
      */
-    static async getFilterOptions(orgId) {
+    static async getFilterOptions(orgId, acmCtx = {}) {
         try {
             // Validate required parameters
             if (!orgId) {
                 throw new Error('Organization ID is required');
             }
+            const effectiveAcmCtx = { ...acmCtx, orgId };
+            const acmScope = buildReportAssetScopeClause(effectiveAcmCtx);
+            const params = [...acmScope.params];
             const queries = {
                 categories: `
                     SELECT DISTINCT at.text as category
                     FROM "tblAssets" a
                     LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
-                    WHERE a.org_id = $1 AND at.text IS NOT NULL
+                    ${acmScope.clause}
+                    AND at.text IS NOT NULL
                     ORDER BY at.text
                 `,
                 locations: `
                     SELECT DISTINCT b.text as location
                     FROM "tblAssets" a
                     LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-                    WHERE a.org_id = $1 AND b.text IS NOT NULL
+                    ${acmScope.clause}
+                    AND b.text IS NOT NULL
                     ORDER BY b.text
                 `,
-                // departments: disabled since no department data in assets table
-                // departments: `
-                //     SELECT DISTINCT ps.description as department
-                //     FROM "tblAssets" a
-                //     LEFT JOIN "tblProdServs" ps ON a.prod_serv_id = ps.prod_serv_id
-                //     WHERE a.org_id = $1 AND ps.description IS NOT NULL
-                //     ORDER BY ps.description
-                // `,
+                departments: `
+                    SELECT DISTINCT d.text as department
+                    FROM "tblAssets" a
+                    LEFT JOIN "tblAssetAssignments" aa ON a.asset_id = aa.asset_id
+                        AND aa.action = 'A'
+                        AND aa.latest_assignment_flag = true
+                    LEFT JOIN "tblDepartments" d ON aa.dept_id = d.dept_id
+                    ${acmScope.clause}
+                    AND d.text IS NOT NULL
+                    ORDER BY d.text
+                `,
                 vendors: `
                     SELECT DISTINCT v.vendor_name as vendor
                     FROM "tblAssets" a
                     LEFT JOIN "tblVendors" v ON a.purchase_vendor_id = v.vendor_id
-                    WHERE a.org_id = $1 AND v.vendor_name IS NOT NULL
+                    ${acmScope.clause}
+                    AND v.vendor_name IS NOT NULL
                     ORDER BY v.vendor_name
                 `
             };
@@ -636,15 +657,15 @@ class AssetValuationModel {
             const results = {};
             const fieldMapping = {
                 categories: 'category',
-                locations: 'location', 
-                // departments: 'department', // disabled since no department data
+                locations: 'location',
+                departments: 'department',
                 vendors: 'vendor'
             };
             
             for (const [key, query] of Object.entries(queries)) {
                 const dbPool = getDb();
 
-                const result = await dbPool.query(query, [orgId]);
+                const result = await dbPool.query(query, params);
                 const fieldName = fieldMapping[key];
                 results[key] = result.rows.map(row => row[fieldName]);
             }
