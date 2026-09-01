@@ -4,11 +4,23 @@ These files are **in the backend git repo** so they deploy with `git pull`.
 
 ## Server layout
 
+**Main stack** (`alm-main-backend` :5002, `alm-main-frontend` :3002):
+
 ```
 ~/alm-main/
-  AssetLifecycleBackend/    ← git repo (scripts live here)
+  AssetLifecycleBackend/      ← git repo (scripts live here)
   AssetLifecycleWebFrontend/  ← git repo (thin wrapper)
 ```
+
+**Tenant wildcard stack** (`alm-tenant-backend` :5001, `alm-tenant-web` :3001):
+
+```
+~/tenant-ALM-Wildcard/
+  backend/   ← AssetLifecycleBackend (production branch)
+  frontend/  ← AssetLifecycleWebFrontend (production branch)
+```
+
+Use each repo’s `./deploy-docker.sh` — tenant scripts set container names, ports, MinIO bucket (`alm-tenant`), and `COMPOSE_PROJECT_NAME=tenant-alm` so they do not collide with `alm-main` on the same host.
 
 ## Commands
 
@@ -16,6 +28,14 @@ These files are **in the backend git repo** so they deploy with `git pull`.
 
 ```bash
 cd ~/alm-main/AssetLifecycleBackend
+chmod +x deploy-docker.sh scripts/deploy/*.sh
+./deploy-docker.sh
+```
+
+**Tenant backend only**:
+
+```bash
+cd ~/tenant-ALM-Wildcard/backend
 chmod +x deploy-docker.sh scripts/deploy/*.sh
 ./deploy-docker.sh
 ```
@@ -28,10 +48,25 @@ chmod +x deploy-docker.sh
 ./deploy-docker.sh
 ```
 
+**Tenant frontend only**:
+
+```bash
+cd ~/tenant-ALM-Wildcard/frontend
+chmod +x deploy-docker.sh
+./deploy-docker.sh
+```
+
 **Both containers**:
 
 ```bash
 cd ~/alm-main/AssetLifecycleBackend
+./deploy-docker.sh --all
+```
+
+**Tenant — both containers**:
+
+```bash
+cd ~/tenant-ALM-Wildcard/backend
 ./deploy-docker.sh --all
 ```
 

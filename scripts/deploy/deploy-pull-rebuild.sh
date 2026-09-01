@@ -702,11 +702,20 @@ compose_up() {
   local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
+  # Isolate stacks that share the same directory basename (AssetLifecycleBackend / WebFrontend)
+  if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-tenant-web" ]]; then
+      export COMPOSE_PROJECT_NAME="tenant-alm"
+    elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-main-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-main-frontend" ]]; then
+      export COMPOSE_PROJECT_NAME="alm-main"
+    fi
+  fi
+  export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
   if [[ -n "$service" ]]; then
-    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build --force-recreate $service"
     ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
   else
-    log "Compose ($label): cd $dir && $cmd up -d --build"
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd up -d --build"
     ( cd "$dir" && $cmd up -d --build )
   fi
   ( cd "$dir" && $cmd ps -a )

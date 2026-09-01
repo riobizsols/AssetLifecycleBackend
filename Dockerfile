@@ -1,4 +1,4 @@
-# Production image for Express API (multi-tenant backend)
+# Production image for Express API (multi-tenant wildcard backend)
 FROM node:20-bookworm-slim
 
 WORKDIR /app

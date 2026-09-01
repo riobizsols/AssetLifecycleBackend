@@ -1,3 +1,6 @@
+# Tenant wildcard stack — separate from alm-main (5002/3002) and pressana (5003/3003).
+# Host ports: backend 5001, frontend 3001 → *.rioassetmanagement.net
+#
 # DATABASE_URL like postgres://...@alm_db:5432/db only works if this container
 # shares a user-defined Docker network with the Postgres container named alm_db.
 # One-time on server: docker network create alm-shared && docker network connect alm-shared alm_db

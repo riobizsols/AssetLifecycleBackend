@@ -30,6 +30,9 @@ export ENSURE_REDIS_URL=redis://alm_redis:6379/0
 export ENSURE_DB_SSL=false
 # Tenant setup Domain/DB check uses DATABASE_SSL (legacy) — keep both off for alm_db
 export ENSURE_DATABASE_SSL=false
+# Isolate compose project from alm-main / pressana on the same server (shared folder basename)
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tenant-alm}"
+export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
 
 for arg in "$@"; do
   case "$arg" in
