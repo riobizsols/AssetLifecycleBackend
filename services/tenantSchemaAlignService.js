@@ -4,6 +4,7 @@ const {
   alignTenantColumnsFromReference,
   seedRequiredMasterData,
 } = require('./tenantReferenceDataService');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 
 const EXCLUDED_FROM_TENANTS = ['tblRioAdmin'];
 
@@ -14,14 +15,6 @@ const PROTECTED_RUNTIME_TABLES = [
   'tblJobs',
   'tblJobHistory',
 ];
-
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL
-  );
-}
 
 function tenantUrl(dbName) {
   const base = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;

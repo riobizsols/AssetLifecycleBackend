@@ -240,17 +240,15 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
-  const referenceUrl =
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL;
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
+  const referenceUrl = getReferenceUrl();
 
   if (!referenceUrl) {
-    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / DATABASE_URL for schema generation');
+    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / schema_db URL for schema generation');
     return null;
   }
 
-  // Template database for new tenants — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
+  // Template database for new tenants — schema_db (not legacy assetLifecycle / live hospitality)
   const genericPool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -1143,11 +1141,14 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  const { getReferenceUrl } = require('./tenantSchemaAlignService');
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
   const { seedRequiredMasterData } = require('./tenantReferenceDataService');
-  const referenceUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceUrl = getReferenceUrl();
+  if (!referenceUrl) {
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or schema_db must be configured');
+  }
 
-  // Sync tblApps + required master data from hospitality reference
+  // Sync tblApps + required master data from schema_db reference
   const referencePool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -1263,7 +1264,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   try {
     const { buildPoolConfig } = require('../utils/pgSsl');
     const uomPool = new Pool(
-      buildPoolConfig(getReferenceUrl() || process.env.GENERIC_URL, {
+      buildPoolConfig(getReferenceUrl(), {
         max: 2,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 10000,
@@ -1312,7 +1313,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   }
 
   await seedTextMessages(client, {
-    genericUrl: getReferenceUrl() || process.env.GENERIC_URL,
+    genericUrl: getReferenceUrl(),
     logs,
   });
 

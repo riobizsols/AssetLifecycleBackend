@@ -2,18 +2,11 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
 
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL
-  );
-}
-
-/** Tables that must be seeded from hospitality on every new tenant. */
+/** Tables that must be seeded from schema_db reference on every new tenant. */
 const REQUIRED_MASTER_TABLES = [
   { table: 'tblTextMessagesDefault', pk: ['tmd_id'] },
   { table: 'tblTextMessagesOtherLangs', pk: ['tmol_id'] },

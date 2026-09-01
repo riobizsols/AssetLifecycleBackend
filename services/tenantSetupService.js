@@ -985,24 +985,26 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     throw new Error('Organization ID is required');
   }
   
-  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceDbUrl = getReferenceUrl();
   if (!referenceDbUrl) {
-    throw new Error('TENANT_SCHEMA_REFERENCE_URL, DATABASE_URL, or GENERIC_URL must be set to copy reference data.');
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or schema_db (via TENANT_DATABASE_URL) must be set to copy reference data.');
   }
 
   const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
 
-  if (process.env.GENERIC_URL && process.env.DATABASE_URL) {
+  if (process.env.GENERIC_URL) {
     const genericDbConfig = parseDatabaseUrl(process.env.GENERIC_URL);
-    const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
-    if (referenceDbConfig.database === genericDbConfig.database &&
-        referenceDbConfig.host === genericDbConfig.host) {
-      console.warn(`[TenantSetup] ⚠️ WARNING: Reference URL points to GENERIC_URL legacy DB. Use hospitality (DATABASE_URL) instead.`);
-    }
-    if (referenceDbConfig.database !== defaultDbConfig.database) {
-      console.log(`[TenantSetup] Using hospitality reference: ${referenceDbConfig.database}`);
+    if (
+      referenceDbConfig.database === genericDbConfig.database &&
+      referenceDbConfig.host === genericDbConfig.host
+    ) {
+      console.warn(
+        `[TenantSetup] ⚠️ WARNING: Reference URL points to legacy GENERIC_URL DB (${genericDbConfig.database}). Use schema_db instead.`
+      );
     }
   }
+
+  console.log(`[TenantSetup] Using schema reference database: ${referenceDbConfig.database}`);
   
   const referenceClient = new Client(pgClientOpts({
     host: referenceDbConfig.host,
@@ -1432,7 +1434,7 @@ async function ensureJobRoleNavigation(client, orgId) {
   `);
   const tenantCount = tenantCountResult.rows[0]?.count || 0;
 
-  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceDbUrl = getReferenceUrl();
   if (referenceDbUrl) {
     const referenceClient = new Client(pgClientOptsFromDatabaseUrl(referenceDbUrl));
 
@@ -1588,7 +1590,7 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     );
     if ((textMsgCount.rows[0]?.count || 0) === 0) {
       console.log('[TenantSetup] No text messages found after reference copy; running text message seed...');
-      await seedTextMessages(client, { genericUrl: getReferenceUrl() || process.env.GENERIC_URL });
+      await seedTextMessages(client, { genericUrl: getReferenceUrl() });
     }
 
     await ensureJobRoleNavigation(client, orgId);
@@ -1932,7 +1934,7 @@ async function createTenant(tenantData) {
 
       try {
         console.log('[TenantSetup] Applying tenant schema extras (views, job monitor, AT insp certs)...');
-        const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+        const referenceDbUrl = getReferenceUrl();
         const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
         const refClient = new Client(pgClientOpts({
           host: referenceDbConfig.host,
