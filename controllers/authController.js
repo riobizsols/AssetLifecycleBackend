@@ -14,6 +14,7 @@ const { sendResetEmail } = require('../utils/mailer');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { getInitialPassword } = require('../utils/orgSettingsUtils');
 const { ensureJobRoleNavigation } = require('../services/tenantSetupService');
+const { ensureBrDeptSchema } = require('../utils/ensureBrDeptSchema');
 const { 
     logLoginApiCalled,
     logCheckingUserInDatabase,
@@ -163,6 +164,11 @@ const login = async (req, res) => {
         safeAuthLog(() => logPasswordMatched({ email, userId: loginUser.user_id }));
 
         if (isTenant && orgId) {
+            try {
+                await ensureBrDeptSchema(dbPool);
+            } catch (brDeptErr) {
+                console.warn(`[AuthController] tblBR_DEPT ensure on login failed: ${brDeptErr.message}`);
+            }
             try {
                 await ensureJobRoleNavigation(dbPool, orgId);
             } catch (navErr) {
