@@ -19,6 +19,7 @@ const {
   ensureJobRoleNavAppIdNullable,
 } = require('../utils/navigationGroupUtils');
 const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
+const { ensureDefaultScreenApps } = require('../utils/ensureDefaultScreenApps');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient, syncJobRoleNavIdSequence } = require('../utils/idGenerator');
@@ -1097,6 +1098,8 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No apps copied (table may be empty or columns don't match)`);
     }
 
+    await ensureDefaultScreenApps(tenantClient, orgId, 'TenantSetup');
+
     // 5. Copy all audit log config from tblAuditLogConfig (reference database)
     console.log(`[TenantSetup] Copying audit log config from reference database...`);
     const auditLogResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblAuditLogConfig', orgId, { orgIdColumn: 'org_id' });
@@ -1594,6 +1597,10 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     }
 
     await ensureJobRoleNavigation(client, orgId);
+
+    console.log('[TenantSetup] Ensuring default screen apps + JR001 navigation template...');
+    await ensureDefaultScreenApps(client, orgId, 'TenantSetup');
+    await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
 
     console.log('[TenantSetup] Verifying required master data from hospitality...');
     await seedRequiredMasterData(client, { orgId });

@@ -606,6 +606,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN021", jobRoleId: "JR001", parentId: "JRN008", appId: "AUDITLOGCONFIG", label: "Audit Log Config", sequence: 2, accessLevel: "A", isGroup: false },
 
   { id: "JRN009", jobRoleId: "JR001", parentId: null, appId: null, label: "Master Data", sequence: 9, accessLevel: "A", isGroup: true },
+  { id: "JRN800", jobRoleId: "JR001", parentId: "JRN009", appId: "ORGANIZATIONS", label: "Organizations", sequence: 0, accessLevel: "A", isGroup: false },
   { id: "JRN013", jobRoleId: "JR001", parentId: "JRN009", appId: "ASSETTYPES", label: "Asset Types", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN014", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTS", label: "Departments", sequence: 2, accessLevel: "A", isGroup: false },
   { id: "JRN016", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTSADMIN", label: "Departments Admin", sequence: 3, accessLevel: "A", isGroup: false },

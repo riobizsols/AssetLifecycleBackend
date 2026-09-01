@@ -27,6 +27,7 @@ const {
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
 const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
+const { ensureDefaultScreenApps } = require("../utils/ensureDefaultScreenApps");
 const { generateCustomIdForClient } = require("../utils/idGenerator");
 
 const DUMP_FILE_PATH = path.join(
@@ -1212,7 +1213,9 @@ const seedReferenceTables = async (client, orgId, logs) => {
     await referencePool.end();
   }
 
-  // Status codes, text messages, props from hospitality
+  await ensureDefaultScreenApps(client, orgId, 'SetupWizard');
+
+  // Status codes, text messages, props from reference DB
   try {
     await seedRequiredMasterData(client, { orgId, referenceUrl });
     logs.push({ message: 'Required master data seeded from hospitality', scope: 'reference' });

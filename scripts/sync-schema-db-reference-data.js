@@ -9,6 +9,16 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 
 const { Client } = require('pg');
 const { copyReferenceTableRows } = require('../services/tenantReferenceDataService');
+const { ensureDefaultScreenApps } = require('../utils/ensureDefaultScreenApps');
+const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
+const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
+
+function hospitalityUrl() {
+  if (process.env.HOSPITALITY_DATABASE_URL) return process.env.HOSPITALITY_DATABASE_URL;
+  const base = process.env.GENERIC_URL || process.env.DATABASE_URL;
+  if (!base) return null;
+  return base.replace(/\/([^/?]+)(\?.*)?$/i, '/hospitality$2');
+}
 
 /** Same tables tenant provisioning reads from schema_db. */
 const PROVISIONING_TABLES = [
@@ -74,10 +84,24 @@ async function main() {
       continue;
     }
 
-    const result = await copyReferenceTableRows(sourceClient, targetClient, spec.table, {
+    const appsSourceUrl = spec.table === 'tblApps' ? hospitalityUrl() || sourceUrl : sourceUrl;
+    let appsSourceClient = sourceClient;
+    let extraAppsClient = null;
+    if (appsSourceUrl !== sourceUrl) {
+      extraAppsClient = new Client({ connectionString: appsSourceUrl, ssl: false });
+      await extraAppsClient.connect();
+      await extraAppsClient.query('SET search_path TO public');
+      appsSourceClient = extraAppsClient;
+      const hospDb = (await extraAppsClient.query('SELECT current_database() AS db')).rows[0].db;
+      console.log(`  ${spec.table}: using ${hospDb} as app source (spare-parts screens)`);
+    }
+
+    const result = await copyReferenceTableRows(appsSourceClient, targetClient, spec.table, {
       pk: spec.pk,
       missingOnly: true,
     });
+
+    if (extraAppsClient) await extraAppsClient.end();
 
     summary.push(result);
 
@@ -97,6 +121,15 @@ async function main() {
       }
     }
   }
+
+  // Ensure spare-parts + org tblApps and JR001 nav template on schema_db
+  const orgRow = await targetClient.query(
+    'SELECT org_id FROM "tblApps" WHERE org_id IS NOT NULL LIMIT 1',
+  );
+  const templateOrgId = orgRow.rows[0]?.org_id || 'ORG001';
+  await ensureDefaultScreenApps(targetClient, templateOrgId, 'SchemaDbSync');
+  await seedDefaultJobRoleNav(targetClient, templateOrgId, 'SchemaDbSync');
+  await applyNavigationGroupModel(targetClient, 'SchemaDbSync');
 
   await sourceClient.end();
   await targetClient.end();
