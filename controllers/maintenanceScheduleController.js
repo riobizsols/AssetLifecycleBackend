@@ -1,15 +1,24 @@
 const model = require("../models/maintenanceScheduleModel");
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
 
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
 
 function bustMaintenanceSupervisorCaches(req, orgId) {
-  const oid = orgId || req.user?.org_id;
+  const oid = orgId || getEffectiveListContext(req).orgId || req.user?.org_id;
   maintenanceSupervisorCache.invalidateOrgCaches(oid).catch(() => {});
   // Maintenance Approval list is cached under operationalCache (slug: maintenance-approval)
   operationalCache.invalidateOrgCaches(oid).catch(() => {});
+}
+
+function resolveMaintenanceScope(req) {
+  const acmCtx = getEffectiveListContext(req);
+  return {
+    acmCtx,
+    orgId: acmCtx.orgId || req.user?.org_id || 'ORG001',
+  };
 }
 
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
@@ -1082,13 +1091,12 @@ const getAllMaintenanceSchedules = async (req, res) => {
     const userId = req.user?.user_id;
     
     try {
-        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-        const branchId = req.user?.branch_id;
+        const { acmCtx, orgId } = resolveMaintenanceScope(req);
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         
         console.log('=== Maintenance Schedule Controller Debug ===');
-        console.log('org_id from req.user:', orgId);
-        console.log('branch_id from req.user:', branchId);
+        console.log('org_id from ACM context:', orgId);
+        console.log('branch_id from ACM context:', acmCtx.branchId);
         
         // Log API called (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -1105,7 +1113,7 @@ const getAllMaintenanceSchedules = async (req, res) => {
             cacheKey,
             maintenanceSupervisorCache.getTtlMs(),
             async () => {
-                const result = await model.getAllMaintenanceSchedules(orgId, branchId, req.user?.hasSuperAccess || false);
+                const result = await model.getAllMaintenanceSchedules(orgId, acmCtx);
                 return result.rows.map((record) => {
                     const baseRecord = {};
                     Object.keys(record).forEach((key) => {
@@ -1175,13 +1183,12 @@ const getMaintenanceScheduleById = async (req, res) => {
     
     try {
         const { id } = req.params;
-        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-        const branchId = req.user?.branch_id;
+        const { acmCtx, orgId } = resolveMaintenanceScope(req);
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         
         console.log('=== Maintenance Schedule Detail Controller Debug ===');
-        console.log('org_id from req.user:', orgId);
-        console.log('branch_id from req.user:', branchId);
+        console.log('org_id from ACM context:', orgId);
+        console.log('branch_id from ACM context:', acmCtx.branchId);
         console.log('ams_id:', id);
         
         // Log API called (context-aware)
@@ -1216,7 +1223,7 @@ const getMaintenanceScheduleById = async (req, res) => {
             cacheKey,
             maintenanceSupervisorCache.getTtlMs(),
             async () => {
-                const result = await model.getMaintenanceScheduleById(id, orgId, branchId, req.user?.hasSuperAccess || false);
+                const result = await model.getMaintenanceScheduleById(id, orgId, acmCtx);
                 if (!result.rows.length) return null;
                 return { ...result.rows[0] };
             },
@@ -1283,7 +1290,7 @@ const updateMaintenanceSchedule = async (req, res) => {
     
     try {
         const { id } = req.params;
-            const orgId = req.query.orgId || req.user?.org_id;
+        const { orgId, acmCtx } = resolveMaintenanceScope(req);
         const updateData = req.body;
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
@@ -1330,8 +1337,7 @@ const updateMaintenanceSchedule = async (req, res) => {
                 const existing = await model.getMaintenanceScheduleById(
                     id,
                     orgId,
-                    req.user?.branch_id,
-                    req.user?.hasSuperAccess || false
+                    acmCtx,
                 );
                 const hoursRequired = parseFloat(existing.rows[0]?.hours_required || 0);
                 if (hoursRequired > 0 && hoursSpent > hoursRequired) {
@@ -1405,7 +1411,7 @@ const updateMaintenanceSchedule = async (req, res) => {
 const createManualMaintenanceSchedule = async (req, res) => {
     try {
         const { asset_id, asset_type_id } = req.body;
-        const orgId = req.user?.org_id || req.body.org_id;
+        const { orgId } = resolveMaintenanceScope(req);
         const userId = req.user?.user_id;
 
         if (!asset_id || !asset_type_id) {

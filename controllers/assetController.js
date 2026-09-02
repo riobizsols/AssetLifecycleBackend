@@ -1130,12 +1130,13 @@ const getInactiveAssetsByAssetType = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { getEffectiveListContext, buildAssetListScopeSql } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
         const {
           orgId: userOrgId,
           branchId: acmBranchId,
           hasSuperAccess,
-        } = getEffectiveListContext(req);
+        } = acmCtx;
         
         let assignmentType = null;
         if (context === 'DEPTASSIGNMENT') {
@@ -1151,12 +1152,22 @@ const getInactiveAssetsByAssetType = async (req, res) => {
         const requestedBranch = String(req.query.branch_id || '').trim() || null;
         const branchFilter = requestedBranch || (hasSuperAccess ? null : acmBranchId);
 
+        let scopeParamIndex = 3;
+        if (assignmentType) scopeParamIndex += 1;
+        if (branchFilter) scopeParamIndex += 1;
+
+        const acmScope = isAssignmentContext
+            ? { sql: '', params: [] }
+            : buildAssetListScopeSql(acmCtx, { startIndex: scopeParamIndex });
+
         const fetchInactiveRows = async () => {
             const result = await model.getInactiveAssetsByAssetType(
                 asset_type_id,
                 userOrgId,
                 branchFilter,
                 assignmentType,
+                acmScope.sql,
+                acmScope.params,
             );
             return result.rows;
         };

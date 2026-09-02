@@ -12,6 +12,7 @@ const {
   resolveVendorIdForMaintRecord,
 } = require('../utils/inhouseVendorUtils');
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { formatDateLocal, formatTimeLocal, parseDbTimestamp } = require('../utils/dateTimeFormat');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -362,8 +363,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: new Date(firstRecord.maintenance_created_on).toLocaleDateString(),
-        time: new Date(firstRecord.maintenance_created_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(firstRecord.maintenance_created_on),
+        time: formatTimeLocal(firstRecord.maintenance_created_on),
         user: { id: 'system', name: 'System' }
       });
       
@@ -421,8 +422,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
           title: title,
           status: status,
           description: description,
-          date: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '',
-          time: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: (status === 'approved' || status === 'rejected') && detail.changed_on ? formatDateLocal(detail.changed_on) : '',
+          time: (status === 'approved' || status === 'rejected') && detail.changed_on ? formatTimeLocal(detail.changed_on) : '',
           role: { id: detail.job_role_id, name: detail.job_role_name },
           notes: detail.notes || null,
           changed_by: detail.changed_by,
@@ -1021,7 +1022,7 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       
       return {
         id: record.wfamhis_id,
-        date: record.action_on ? new Date(record.action_on).toLocaleDateString() : '-',
+        date: formatDateLocal(record.action_on) || '-',
         action: actionText,
         actionCode: record.action, // Keep original code for reference
         actionColor: actionColor,
@@ -2650,8 +2651,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: new Date(header.maintenance_created_on).toLocaleDateString(),
-        time: new Date(header.maintenance_created_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(header.maintenance_created_on),
+        time: formatTimeLocal(header.maintenance_created_on),
         user: { id: 'system', name: 'System' }
       });
       
@@ -2665,8 +2666,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
           title: `Action pending by ${detail.user_name}`,
           status: stepStatus,
           description: `Action pending by ${detail.user_name}`,
-          date: detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '-',
-          time: detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
+          date: detail.changed_on ? formatDateLocal(detail.changed_on) : '-',
+          time: detail.changed_on ? formatTimeLocal(detail.changed_on) : '-',
           user: { 
             id: detail.user_id, 
             name: detail.user_name,
@@ -2975,14 +2976,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       const workflowSteps = [];
       
       // Step 1: System (always first)
-      const createdOn = firstRecord.maintenance_created_on ? new Date(firstRecord.maintenance_created_on) : new Date();
+      const createdOn = parseDbTimestamp(firstRecord.maintenance_created_on) || new Date();
       workflowSteps.push({
         id: 'system',
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: createdOn.toLocaleDateString(),
-        time: createdOn.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(createdOn),
+        time: formatTimeLocal(createdOn),
         user: { id: 'system', name: 'System' }
       });
       
@@ -3043,14 +3044,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           stepDescription = 'Workflow stopped due to rejection at an earlier stage';
         }
         
-        const changedOn = detail.changed_on ? new Date(detail.changed_on) : null;
+        const changedOn = parseDbTimestamp(detail.changed_on);
         workflowSteps.push({
           id: `role-${detail.job_role_id}-${index + 1}`,
           title: stepTitle || `Step ${stepNumber}`,
           status: stepStatus,
           description: stepDescription,
-          date: changedOn ? changedOn.toLocaleDateString() : '',
-          time: changedOn ? changedOn.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: changedOn ? formatDateLocal(changedOn) : '',
+          time: changedOn ? formatTimeLocal(changedOn) : '',
           // ROLE-BASED: user.id contains job_role_id (not emp_int_id)
           // Frontend will check if current user has this role
           user: { 

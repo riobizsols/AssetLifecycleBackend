@@ -252,11 +252,14 @@ const getAssetTypesByGroupRequired = async (req, res) => {
 // GET /api/asset-types/maint-required - Get asset types with maintenance frequency configured
 const getAssetTypesByMaintRequired = async (req, res) => {
     try {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id;
         const { data: rows } = await operationalCache.cachedList(
             req,
             'asset-types',
             'maint-required',
-            () => model.getAssetTypesByMaintRequired().then((result) => result.rows),
+            () => model.getAssetTypesByMaintRequired(org_id, context).then((result) => result.rows),
         );
         res.status(200).json({
             success: true,
@@ -278,8 +281,10 @@ const getAssetTypesByMaintRequired = async (req, res) => {
 // GET /api/asset-types/inspection-required - Get asset types with inspection frequency configured
 const getAssetTypesByInspectionRequired = async (req, res) => {
     try {
-        const org_id = req.user?.org_id;
-        const result = await model.getAssetTypesByInspectionRequired(org_id);
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id;
+        const result = await model.getAssetTypesByInspectionRequired(org_id, context);
         res.status(200).json({
             success: true,
             message: "Asset types with inspection configured retrieved successfully",

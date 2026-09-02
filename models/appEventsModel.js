@@ -11,9 +11,25 @@ class AppEventsModel {
      * @param {string} appId - The app ID from tblApps table
      * @returns {Promise<Array>} Array of enabled events with event details
      */
-    static async getEnabledEventsForApp(appId) {
+    static async getEnabledEventsForApp(appId, orgId = null) {
         try {
-            const query = `
+            const query = orgId
+              ? `
+                SELECT 
+                    e.event_id,
+                    e.text as event_text,
+                    alc.enabled,
+                    alc.reporting_required,
+                    alc.reporting_email,
+                    alc.description as config_description
+                FROM "tblAuditLogConfig" alc
+                INNER JOIN "tblEvents" e ON alc.event_id = e.event_id
+                WHERE alc.app_id = $1 
+                AND alc.org_id = $2
+                AND alc.enabled = true
+                ORDER BY e.text ASC
+            `
+              : `
                 SELECT 
                     e.event_id,
                     e.text as event_text,
@@ -30,8 +46,8 @@ class AppEventsModel {
             
             const dbPool = getDb();
 
-            
-            const result = await dbPool.query(query, [appId]);
+            const params = orgId ? [appId, orgId] : [appId];
+            const result = await dbPool.query(query, params);
             return result.rows;
         } catch (error) {
             console.error('Error in getEnabledEventsForApp:', error);

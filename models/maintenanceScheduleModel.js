@@ -625,12 +625,9 @@ const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
 };
 
 // Get all maintenance schedules from tblAssetMaintSch
-// Supports super access users who can view all branches
-const getAllMaintenanceSchedules = async (
-  orgId = "ORG001",
-  branchId,
-  hasSuperAccess = false,
-) => {
+const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
+  const { buildAssetListScopeSql } = require('../utils/acmAccess');
+
   let query = `
         SELECT 
             ams.*,
@@ -655,12 +652,10 @@ const getAllMaintenanceSchedules = async (
         WHERE ams.org_id = $1 AND a.org_id = $1
     `;
 
-  // Apply branch filter only if user doesn't have super access
   const params = [orgId];
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $2`;
-    params.push(branchId);
-  }
+  const scope = buildAssetListScopeSql(acmCtx, { assetAlias: 'a', startIndex: 2 });
+  query += scope.sql;
+  params.push(...scope.params);
 
   query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
 
@@ -670,13 +665,13 @@ const getAllMaintenanceSchedules = async (
 };
 
 // Get maintenance schedule details by ID from tblAssetMaintSch
-// Supports super access users who can view all branches
 const getMaintenanceScheduleById = async (
   amsId,
   orgId = "ORG001",
-  branchId,
-  hasSuperAccess = false,
+  acmCtx = {},
 ) => {
+  const { buildAssetListScopeSql } = require('../utils/acmAccess');
+
   let query = `
         SELECT 
             ams.*,
@@ -698,12 +693,10 @@ const getMaintenanceScheduleById = async (
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2
     `;
 
-  // Apply branch filter only if user doesn't have super access
   const params = [amsId, orgId];
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $3`;
-    params.push(branchId);
-  }
+  const scope = buildAssetListScopeSql(acmCtx, { assetAlias: 'a', startIndex: 3 });
+  query += scope.sql;
+  params.push(...scope.params);
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);

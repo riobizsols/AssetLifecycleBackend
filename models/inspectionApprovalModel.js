@@ -648,7 +648,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
         branch_code
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        'IN', $8, NOW(), 
+        'IN', $8, NULL,
         $9, NOW(), $10, NOW(), $11, $12
       )
       RETURNING *
@@ -662,7 +662,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.aatif_id,
       finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
       empIntToSave, // emp_int_id - do not store for vendor-maintained inspections
-      header.pl_sch_date || new Date(), // act_insp_st_date
+      new Date(), // act_insp_st_date — execution starts when workflow is approved
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
       orgId,

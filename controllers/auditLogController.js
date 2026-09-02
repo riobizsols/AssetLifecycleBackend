@@ -1,4 +1,10 @@
 const AuditLogModel = require('../models/auditLogModel');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+function resolveAuditOrgId(req) {
+    const acmCtx = getEffectiveListContext(req);
+    return acmCtx.orgId || req.user?.org_id || null;
+}
 
 class AuditLogController {
     /**
@@ -10,7 +16,7 @@ class AuditLogController {
         try {
             const { app_id, event_id, text } = req.body;
             const user_id = req.user.user_id;
-            const org_id = req.user.org_id;
+            const org_id = resolveAuditOrgId(req);
 
             // Validate required fields
             if (!app_id || !event_id || !text) {
@@ -332,7 +338,15 @@ class AuditLogController {
     static async getAllAuditLogs(req, res) {
         try {
             const { app_id, event_id, user_id, start_date, end_date, page = 1, limit = 50 } = req.query;
-            const org_id = req.user.org_id;
+            const org_id = resolveAuditOrgId(req);
+
+            if (!org_id) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Organization context is required to view audit logs',
+                    data: null,
+                });
+            }
 
             // Build filter object
             const filters = {

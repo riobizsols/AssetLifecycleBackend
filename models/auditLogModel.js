@@ -45,9 +45,24 @@ class AuditLogModel {
      * @param {string} eventId - The event ID
      * @returns {Promise<Object|null>} Configuration object if enabled, null if disabled
      */
-    static async isEventEnabled(appId, eventId) {
+    static async isEventEnabled(appId, eventId, orgId = null) {
         try {
-            const query = `
+            const query = orgId
+              ? `
+                SELECT 
+                    alc_id,
+                    app_id,
+                    event_id,
+                    enabled,
+                    reporting_required,
+                    description
+                FROM "tblAuditLogConfig"
+                WHERE app_id = $1 
+                AND event_id = $2 
+                AND org_id = $3
+                AND enabled = true
+            `
+              : `
                 SELECT 
                     alc_id,
                     app_id,
@@ -63,8 +78,8 @@ class AuditLogModel {
             
             const dbPool = getDb();
 
-            
-            const result = await dbPool.query(query, [appId, eventId]);
+            const params = orgId ? [appId, eventId, orgId] : [appId, eventId];
+            const result = await dbPool.query(query, params);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error in isEventEnabled:', error);
@@ -131,7 +146,7 @@ class AuditLogModel {
             const { user_id, app_id, event_id, text, org_id } = actionData;
             
             // First, check if the event is enabled for this app
-            const eventConfig = await this.isEventEnabled(app_id, event_id);
+            const eventConfig = await this.isEventEnabled(app_id, event_id, org_id);
             
             if (!eventConfig) {
                 return {

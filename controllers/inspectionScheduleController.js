@@ -1,5 +1,11 @@
 const inspectionModel = require("../models/inspectionScheduleModel");
 const operationalCache = require("../utils/operationalCache");
+const { getEffectiveListContext } = require("../utils/acmAccess");
+
+function resolveInspectionOrgId(req, fallback = null) {
+  const acmCtx = getEffectiveListContext(req);
+  return acmCtx.orgId || req.user?.org_id || req.query?.orgId || req.body?.org_id || fallback;
+}
 
 /**
  * Inspection Schedule Controller
@@ -393,7 +399,8 @@ const createWorkflowInspection = async (
   frequency,
   workflowSequences,
   scheduledDate,
-  org_id
+  org_id,
+  created_by = 'SYSTEM'
 ) => {
   // Generate sequential header ID (e.g. WFAIISH_01, WFAIISH_02, ...)
   const wfaiish_id = await inspectionModel.getNextWFAIISHId();
@@ -407,7 +414,7 @@ const createWorkflowInspection = async (
     vendor_id: asset.vendor_id || null,
     pl_sch_date: scheduledDate,
     status: 'IN', // Initiated
-    created_by: 'SYSTEM',
+    created_by,
     org_id,
     branch_code: asset.branch_code,
     emp_int_id: frequency.emp_int_id || null
@@ -448,13 +455,15 @@ const createWorkflowInspection = async (
       dept_id: jobRole.dept_id,
       sequence: i + 1,
       status,
-      created_by: 'SYSTEM',
+      created_by,
       org_id,
       user_id: jobRole.emp_int_id || null
     });
 
     console.log(`       📝 Approver ${i + 1}: JobRole ${jobRole.job_role_id} (${status})`);
   }
+
+  return wfaiish_id;
 };
 
 /**
@@ -488,7 +497,7 @@ const createDirectInspection = async (
 const createManualInspectionSchedule = async (req, res) => {
   try {
     const { asset_id } = req.body;
-    const org_id = req.user?.org_id || req.body.org_id;
+    const org_id = resolveInspectionOrgId(req);
     const created_by = req.user?.user_id || req.user?.email || 'SYSTEM';
 
     if (!asset_id) {
@@ -512,9 +521,31 @@ const createManualInspectionSchedule = async (req, res) => {
       });
     }
     const frequency = freqResult.rows[0];
+    const scheduledDate = new Date();
+
+    const workflowResult = await inspectionModel.checkWorkflowExists(asset.asset_type_id, org_id);
+    const workflowSequences = workflowResult.rows;
+
+    if (workflowSequences.length > 0) {
+      const wfaiish_id = await createWorkflowInspection(
+        asset,
+        frequency,
+        workflowSequences,
+        scheduledDate,
+        org_id,
+        created_by,
+      );
+
+      operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
+      return res.status(201).json({
+        success: true,
+        message: 'Inspection approval workflow created successfully',
+        data: { wfaiish_id, asset_id: asset.asset_id, type: 'workflow' },
+      });
+    }
 
     const ais_id = inspectionModel.generateUniqueId('AIS');
-    const act_insp_st_date = new Date();
 
     await inspectionModel.createDirectInspectionSchedule({
       ais_id,
@@ -522,17 +553,19 @@ const createManualInspectionSchedule = async (req, res) => {
       asset_id: asset.asset_id,
       vendor_id: asset.vendor_id || null,
       emp_int_id: frequency.emp_int_id || null,
-      act_insp_st_date,
+      act_insp_st_date: scheduledDate,
       status: 'PN',
       created_by,
       org_id,
       branch_code: asset.branch_code || null
     });
 
+    operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+
     return res.status(201).json({
       success: true,
       message: 'Inspection schedule created successfully',
-      data: { ais_id, asset_id: asset.asset_id }
+      data: { ais_id, asset_id: asset.asset_id, type: 'direct' }
     });
   } catch (error) {
     console.error('Error creating manual inspection schedule:', error);
@@ -545,7 +578,7 @@ const createManualInspectionSchedule = async (req, res) => {
 
 const getInspections = async (req, res) => {
   try {
-    const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     const empIntId = req.user?.emp_int_id || null;
     const { data: rows } = await operationalCache.cachedList(
       req,
@@ -565,7 +598,7 @@ const getInspections = async (req, res) => {
 
 const getInspectionDetail = async (req, res) => {
   try {
-    const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     const id = req.params.id;
     const result = await inspectionModel.getInspectionDetailsById(id, org_id);
     
@@ -582,7 +615,7 @@ const getInspectionDetail = async (req, res) => {
 
 const updateInspection = async (req, res) => {
   try {
-    const org_id = req.user?.org_id || req.body.org_id || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     const id = req.params.id;
     const updateData = req.body;
     
@@ -630,6 +663,8 @@ const updateInspection = async (req, res) => {
     if (result.rowCount === 0) {
         return res.status(404).json({ success: false, message: 'Inspection not found or update failed' });
     }
+
+    operationalCache.invalidateOrgCaches(org_id).catch(() => {});
     
     return res.json({ success: true, message: 'Inspection updated successfully', data: result.rows[0] });
   } catch (error) {
@@ -641,7 +676,7 @@ const updateInspection = async (req, res) => {
 const getInspectionChecklist = async (req, res) => {
   try {
     const { assetTypeId } = req.params;
-    const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     
     const result = await inspectionModel.getInspectionChecklistByAssetType(assetTypeId, org_id);
     return res.json({ success: true, count: result.rows.length, data: result.rows });
@@ -654,7 +689,7 @@ const getInspectionChecklist = async (req, res) => {
 const getInspectionRecords = async (req, res) => {
   try {
     const { id } = req.params; // inspection id (ais_id)
-    const org_id = req.user?.org_id || req.query.orgId || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     
     const result = await inspectionModel.getInspectionRecords(id, org_id);
     return res.json({ success: true, count: result.rows.length, data: result.rows });
@@ -666,7 +701,7 @@ const getInspectionRecords = async (req, res) => {
 
 const saveInspectionRecord = async (req, res) => {
   try {
-    const org_id = req.user?.org_id || req.body.org_id || 'ORG001';
+    const org_id = resolveInspectionOrgId(req, 'ORG001');
     const callerUserId = req.user?.user_id || req.body.created_by || 'SYSTEM';
     const callerEmpIntId = req.user?.emp_int_id || req.body.emp_int_id || null;
 
@@ -840,6 +875,8 @@ const saveInspectionRecord = async (req, res) => {
     }
 
     console.log('saveInspectionRecord completed - savedRecords:', saved.length, 'updatedSchedulePresent:', !!updatedSchedule);
+
+    operationalCache.invalidateOrgCaches(org_id).catch(() => {});
 
     return res.json({ success: true, data: { savedRecords: saved, updatedSchedule } });
   } catch (error) {

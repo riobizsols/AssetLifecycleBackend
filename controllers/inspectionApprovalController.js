@@ -1,6 +1,7 @@
 const inspectionApprovalModel = require('../models/inspectionApprovalModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
 const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/systemAdmin');
 const {
   getInspectionAssetBranchId,
@@ -8,6 +9,11 @@ const {
   attachBranchAccess,
   crossBranchForbiddenBody,
 } = require('../utils/approvalBranchAccess');
+
+function resolveInspectionApprovalOrgId(req, fallback = 'ORG001') {
+  const acmCtx = getEffectiveListContext(req);
+  return acmCtx.orgId || req.user?.org_id || req.body?.orgId || req.query?.orgId || fallback;
+}
 
 /**
  * CHUNK 2.1 & 2.2: INSPECTION APPROVALS (CONTROLLER)
@@ -19,7 +25,7 @@ const {
  */
 async function getPendingApprovals(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     let jobRoles = [];
 
@@ -68,7 +74,7 @@ async function getPendingApprovals(req, res) {
  */
 async function getInspectionDetail(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     const { wfaiish_id } = req.params;
     
@@ -101,7 +107,7 @@ async function getInspectionDetail(req, res) {
  */
 async function getInspectionHistory(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     const { wfaiish_id } = req.params;
     
@@ -130,7 +136,7 @@ async function getInspectionHistory(req, res) {
 async function processApprovalAction(req, res) {
   try {
     // Extract user info (adapting to likely middleware structure)
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const userId = req.user?.user_id || req.user?.emp_int_id || 'UNKNOWN_USER'; 
     // In a real scenario, use middleware-provided ID. Fallback for testing/dev.
     

@@ -1,7 +1,9 @@
 // controllers/deptAssetController.js
 const model = require("../models/deptAssetsModel");
+const assetTypeModel = require("../models/assetTypeModel");
 const assignmentCache = require("../utils/assignmentCache");
 const { generateCustomId } = require("../utils/idGenerator");
+const { getEffectiveListContext } = require("../utils/acmAccess");
 
 
 const addDeptAsset = async (req, res) => {
@@ -94,7 +96,8 @@ const addDeptAsset = async (req, res) => {
 const getAllAssetTypes = async (req, res) => {
     try {
         const { assignment_type } = req.query;
-        const org_id = req.user?.org_id;
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id;
 
         if (!org_id) {
             return res.status(400).json({ error: "Organization context missing" });
@@ -112,38 +115,22 @@ const getAllAssetTypes = async (req, res) => {
             cacheKey,
             assignmentCache.getTtlMs(),
             async () => {
-                let query = `
-            SELECT DISTINCT
-                at.asset_type_id,
-                at.text,
-                at.assignment_type,
-                at.group_required,
-                COALESCE(at.is_child, false) AS is_child,
-                at.parent_asset_type_id,
-                at.maint_lead_type
-            FROM "tblAssetTypes" at
-            LEFT JOIN "tblDeptAssetTypes" dat
-                ON dat.asset_type_id = at.asset_type_id
-                AND dat.int_status = 1
-            LEFT JOIN "tblDepartments" d
-                ON d.dept_id = dat.dept_id
-                AND d.org_id = at.org_id
-            WHERE at.int_status = 1
-              AND at.org_id = $1
-        `;
-
-                const params = [org_id];
+                const result = await assetTypeModel.getAllAssetTypes(org_id, context);
+                let types = result.rows;
 
                 if (assignment_type) {
-                    params.push(assignment_type);
-                    query += ` AND at.assignment_type = $${params.length}`;
+                    types = types.filter((type) => type.assignment_type === assignment_type);
                 }
 
-                query += ` ORDER BY at.text`;
-
-                const dbPool = req.db || db;
-                const result = await dbPool.query(query, params);
-                return result.rows;
+                return types.map((type) => ({
+                    asset_type_id: type.asset_type_id,
+                    text: type.text,
+                    assignment_type: type.assignment_type,
+                    group_required: type.group_required,
+                    is_child: type.is_child ?? false,
+                    parent_asset_type_id: type.parent_asset_type_id,
+                    maint_lead_type: type.maint_lead_type,
+                }));
             },
         );
 

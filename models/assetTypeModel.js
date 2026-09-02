@@ -284,9 +284,77 @@ const getAssetTypesByGroupRequired = async () => {
     return await dbPool.query(query);
 };
 
-const getAssetTypesByMaintRequired = async (org_id = null) => {
+const getAssetTypesByMaintRequired = async (org_id = null, scope = {}) => {
     const params = [];
-    let query = `
+    const conditions = ['at.int_status = 1'];
+
+    if (org_id) {
+        params.push(org_id);
+        conditions.push(`at.org_id = $${params.length}`);
+    } else {
+        conditions.push('1=0');
+    }
+
+    const deptId = scope.deptId || null;
+    const branchId = scope.branchId || null;
+    const deptIds = Array.isArray(scope.deptIds)
+        ? scope.deptIds.map(String).filter(Boolean)
+        : [];
+    const branchIds = Array.isArray(scope.branchIds)
+        ? scope.branchIds.map(String).filter(Boolean)
+        : [];
+
+    if (deptId || branchId || deptIds.length || branchIds.length) {
+        const mappingConditions = [
+            'dat.asset_type_id = at.asset_type_id',
+            'dat.org_id = at.org_id',
+            'dat.int_status = 1',
+        ];
+
+        if (deptId) {
+            params.push(deptId);
+            mappingConditions.push(`dat.dept_id = $${params.length}`);
+        } else if (deptIds.length) {
+            params.push(deptIds);
+            mappingConditions.push(`dat.dept_id = ANY($${params.length}::text[])`);
+        }
+
+        if (branchId) {
+            params.push(branchId);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = at.org_id
+                      AND bd.branch_id = $${params.length}
+                      AND bd.int_status = 1
+                )
+            `);
+        } else if (branchIds.length) {
+            params.push(branchIds);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = at.org_id
+                      AND bd.branch_id = ANY($${params.length}::text[])
+                      AND bd.int_status = 1
+                )
+            `);
+        }
+
+        conditions.push(`
+            EXISTS (
+                SELECT 1
+                FROM "tblDeptAssetTypes" dat
+                WHERE ${mappingConditions.join(' AND ')}
+            )
+        `);
+    }
+
+    const query = `
         SELECT DISTINCT
             at.org_id, at.asset_type_id, at.int_status,
             at.assignment_type, at.inspection_required, at.group_required, at.created_by,
@@ -295,23 +363,85 @@ const getAssetTypesByMaintRequired = async (org_id = null) => {
         FROM "tblAssetTypes" at
         INNER JOIN "tblATMaintFreq" mf
           ON mf.asset_type_id = at.asset_type_id AND mf.org_id = at.org_id
-        WHERE at.int_status = 1
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY at.text
     `;
-
-    if (org_id) {
-        query += ` AND at.org_id = $1`;
-        params.push(org_id);
-    }
-
-    query += ` ORDER BY at.text`;
 
     const dbPool = getDb();
     return await dbPool.query(query, params);
 };
 
-const getAssetTypesByInspectionRequired = async (org_id = null) => {
+const getAssetTypesByInspectionRequired = async (org_id = null, scope = {}) => {
     const params = [];
-    let query = `
+    const conditions = ['at.int_status = 1'];
+
+    if (org_id) {
+        params.push(org_id);
+        conditions.push(`at.org_id = $${params.length}`);
+    } else {
+        conditions.push('1=0');
+    }
+
+    const deptId = scope.deptId || null;
+    const branchId = scope.branchId || null;
+    const deptIds = Array.isArray(scope.deptIds)
+        ? scope.deptIds.map(String).filter(Boolean)
+        : [];
+    const branchIds = Array.isArray(scope.branchIds)
+        ? scope.branchIds.map(String).filter(Boolean)
+        : [];
+
+    if (deptId || branchId || deptIds.length || branchIds.length) {
+        const mappingConditions = [
+            'dat.asset_type_id = at.asset_type_id',
+            'dat.org_id = at.org_id',
+            'dat.int_status = 1',
+        ];
+
+        if (deptId) {
+            params.push(deptId);
+            mappingConditions.push(`dat.dept_id = $${params.length}`);
+        } else if (deptIds.length) {
+            params.push(deptIds);
+            mappingConditions.push(`dat.dept_id = ANY($${params.length}::text[])`);
+        }
+
+        if (branchId) {
+            params.push(branchId);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = at.org_id
+                      AND bd.branch_id = $${params.length}
+                      AND bd.int_status = 1
+                )
+            `);
+        } else if (branchIds.length) {
+            params.push(branchIds);
+            mappingConditions.push(`
+                EXISTS (
+                    SELECT 1
+                    FROM "tblBR_DEPT" bd
+                    WHERE bd.dept_id = dat.dept_id
+                      AND bd.org_id = at.org_id
+                      AND bd.branch_id = ANY($${params.length}::text[])
+                      AND bd.int_status = 1
+                )
+            `);
+        }
+
+        conditions.push(`
+            EXISTS (
+                SELECT 1
+                FROM "tblDeptAssetTypes" dat
+                WHERE ${mappingConditions.join(' AND ')}
+            )
+        `);
+    }
+
+    const query = `
         SELECT DISTINCT
             at.org_id, at.asset_type_id, at.int_status,
             at.assignment_type, at.inspection_required, at.group_required, at.created_by,
@@ -322,15 +452,9 @@ const getAssetTypesByInspectionRequired = async (org_id = null) => {
           ON cl.at_id = at.asset_type_id AND cl.org_id = at.org_id
         INNER JOIN "tblAAT_Insp_Freq" aif
           ON aif.aatic_id = cl.aatic_id AND aif.org_id = at.org_id AND aif.int_status = 1
-        WHERE at.int_status = 1
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY at.text
     `;
-
-    if (org_id) {
-        query += ` AND at.org_id = $1`;
-        params.push(org_id);
-    }
-
-    query += ` ORDER BY at.text`;
 
     const dbPool = getDb();
     return await dbPool.query(query, params);

@@ -274,12 +274,16 @@ const getInactiveAssetsByAssetType = async (
   orgId,
   branchId,
   assignmentType = null,
+  acmScopeSql = '',
+  acmScopeParams = [],
 ) => {
   console.log("=== Inactive Assets Model Debug ===");
   console.log("asset_type_id:", asset_type_id);
   console.log("orgId:", orgId);
   console.log("branchId:", branchId);
   console.log("assignmentType:", assignmentType);
+
+  const isAssignmentContext = Boolean(assignmentType);
 
   let query = `
         SELECT 
@@ -292,15 +296,20 @@ const getInactiveAssetsByAssetType = async (
         WHERE a.asset_type_id = $1
         AND a.org_id = $2
         AND a.current_status = 'Active'
+    `;
+
+  const params = [asset_type_id, orgId];
+  let paramIndex = 3;
+
+  if (isAssignmentContext) {
+    query += `
         AND a.asset_id NOT IN (
             SELECT DISTINCT aa.asset_id 
             FROM "tblAssetAssignments" aa
             WHERE aa.action = 'A' AND aa.latest_assignment_flag = true
         )
     `;
-
-  const params = [asset_type_id, orgId];
-  let paramIndex = 3;
+  }
 
   // Filter by assignment_type if provided (for department vs employee assignments)
   if (assignmentType) {
@@ -314,6 +323,11 @@ const getInactiveAssetsByAssetType = async (
     query += ` AND a.branch_id = $${paramIndex}`;
     params.push(branchId);
     paramIndex++;
+  }
+
+  if (acmScopeSql) {
+    query += acmScopeSql;
+    params.push(...acmScopeParams);
   }
 
   query += ` ORDER BY a.created_on DESC`;
