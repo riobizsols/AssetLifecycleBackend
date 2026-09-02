@@ -2675,7 +2675,7 @@ const getDepartmentWiseAssetDistribution = async (req, res) => {
         }
 
         query += `
-      GROUP BY d.dept_id, d.text
+      GROUP BY d.text
       ORDER BY asset_count DESC, d.text ASC
     `;
 
