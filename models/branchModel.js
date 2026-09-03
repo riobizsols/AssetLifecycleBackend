@@ -10,6 +10,15 @@ const getAllBranches = async (org_id) => {
   return result.rows;
 };
 
+const getBranchById = async (branch_id) => {
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    'SELECT * FROM "tblBranches" WHERE branch_id = $1',
+    [branch_id]
+  );
+  return result.rows[0] || null;
+};
+
 const addBranch = async (branch) => {
   const { branch_id, org_id, text, city, branch_code, created_by } =
     branch;
@@ -100,6 +109,7 @@ const updateBranch = async (branch_id, data, changed_by) => {
 
 module.exports = {
   getAllBranches,
+  getBranchById,
   addBranch,
   deleteBranches,
   updateBranch,

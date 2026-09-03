@@ -170,6 +170,36 @@ async function ensureCriticalRuntimeSchema(client) {
 
   try {
     await client.query(`
+      ALTER TABLE "tblAssets"
+        ALTER COLUMN org_id DROP NOT NULL,
+        ALTER COLUMN branch_id DROP NOT NULL,
+        ALTER COLUMN purchased_by DROP NOT NULL
+    `);
+    results.push({ object: 'tblAssets.org_id/branch_id/purchased_by', status: 'nullable' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssets.optional_cols', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblAssets nullable columns:', err.message);
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS branch_id character varying(10)
+    `);
+    results.push({ object: 'tblAssetTypes.branch_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.branch_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
       ALTER TABLE "tblMaintTypes"
       ADD COLUMN IF NOT EXISTS "hours_required" DECIMAL(10,2)
     `);

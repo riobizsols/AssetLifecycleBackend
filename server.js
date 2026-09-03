@@ -1,4 +1,5 @@
 const express = require("express");
+require("./utils/pgTimestampUtc");
 const cors = require("cors");
 const { PORT, CORS_ORIGINS } = require("./config/environment");
 const authRoutes = require("./routes/authRoutes");
