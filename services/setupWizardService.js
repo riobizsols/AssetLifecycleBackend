@@ -209,15 +209,16 @@ const generateSetupReport = async (setupData) => {
 
 /**
  * Align freshly created tenant schemas with current application code.
- * Always enforce modern tblAssetTypes (no maint_required / maint_type_id).
+ * Always enforce modern tblAssetTypes (no maint_required / maint_type_id; branch_id present).
  * Maintenance config lives in tblATMaintFreq only.
  */
 const applyPostSchemaMigrations = async (client, logs = []) => {
   await client.query(`
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
+    ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10);
   `);
-  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes.maint_required / maint_type_id)";
+  const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {
     logs.push({ message, scope: "schema" });
@@ -789,6 +790,7 @@ const CORE_TABLE_DDL = [
   `
     CREATE TABLE IF NOT EXISTS "tblAssetTypes" (
       org_id character varying(10) NOT NULL,
+      branch_id character varying(10),
       asset_type_id character varying(10) PRIMARY KEY,
       int_status integer NOT NULL DEFAULT 1,
       assignment_type character varying(10) NOT NULL,
@@ -2015,12 +2017,13 @@ const runSetup = async (payload = {}) => {
       try {
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required`);
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id`);
+        await client.query(`ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10)`);
         logs.push({
-          message: "Dropped legacy maint_required/maint_type_id from tblAssetTypes",
+          message: "tblAssetTypes: ensured branch_id; dropped legacy maint columns",
           scope: "schema",
         });
       } catch (err) {
-        console.warn("[SetupWizard] Could not drop legacy tblAssetTypes columns:", err.message);
+        console.warn("[SetupWizard] Could not update tblAssetTypes columns:", err.message);
       }
 
       // tblWFJobRole.dept_id is optional in role-based maintenance workflow

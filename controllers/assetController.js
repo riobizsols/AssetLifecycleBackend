@@ -109,8 +109,7 @@ const addAsset = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        if (!text || !org_id) {
-            // WARNING: Missing required fields
+        if (!text) {
             await logMissingRequiredFields({
                 text,
                 orgId: org_id,
@@ -119,7 +118,7 @@ const addAsset = async (req, res) => {
                 duration: Date.now() - startTime
             });
             
-            return res.status(400).json({ error: "text, and org_id are required fields" });
+            return res.status(400).json({ error: "text is a required field" });
         }
 
         // Enforce service vendor when asset type maintenance is vendor-managed.
@@ -224,7 +223,9 @@ const addAsset = async (req, res) => {
 
         const trimmedDescription = String(description || "").trim();
 
-        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
+        const resolvedBranchId = branch_id
+            ? await resolveAssetBranchId(branch_id, req.user, req.db)
+            : null;
 
         // Prepare asset data (now includes prod_serv_id)
         const assetData = {
@@ -1786,8 +1787,8 @@ const createAsset = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        if (!text || !org_id) {
-            return res.status(400).json({ error: "text, and org_id are required fields" });
+        if (!text) {
+            return res.status(400).json({ error: "text is a required field" });
         }
 
         // purchase_vendor_id is NOT NULL in tblAssets.
@@ -1889,7 +1890,9 @@ const createAsset = async (req, res) => {
         }
 
         const trimmedDescription = String(description || "").trim();
-        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
+        const resolvedBranchId = branch_id
+            ? await resolveAssetBranchId(branch_id, req.user, req.db)
+            : null;
         
         // Get asset type's depreciation method to calculate correct rate
         let calculatedDepreciationRate = 0;

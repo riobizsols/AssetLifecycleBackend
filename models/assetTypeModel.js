@@ -20,25 +20,35 @@ const insertAssetType = async (
     is_child = false,
     parent_asset_type_id = null,
     maint_lead_type = null,
-    depreciation_type = 'ND'
+    depreciation_type = 'ND',
+    branch_id = null
 ) => {
     // Modern schema: maint_required / maint_type_id were removed from tblAssetTypes.
     // Maintenance is configured via tblATMaintFreq only.
     const query = `
         INSERT INTO "tblAssetTypes" (
-            org_id, asset_type_id, int_status,
+            org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP, $7, CURRENT_TIMESTAMP, $8, $9, $10, $11, 0, $12)
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, 0, $13)
         RETURNING *
     `;
 
     const values = [
-        org_id, asset_type_id, int_status,
-        assignment_type, inspection_required, group_required,
-        created_by, text,
-        is_child, parent_asset_type_id, maint_lead_type, depreciation_type
+        org_id,
+        branch_id || null,
+        asset_type_id,
+        int_status,
+        assignment_type,
+        inspection_required,
+        group_required,
+        created_by,
+        text,
+        is_child,
+        parent_asset_type_id,
+        maint_lead_type,
+        depreciation_type
     ];
 
     const dbPool = getDb();
@@ -49,7 +59,7 @@ const getAllAssetTypes = async (org_id = null) => {
     const dbPool = getDb();
     let query = `
         SELECT 
-            org_id, asset_type_id, int_status,
+            org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type
@@ -70,7 +80,7 @@ const getAllAssetTypes = async (org_id = null) => {
 const getAssetTypeById = async (asset_type_id) => {
     const query = `
         SELECT 
-            org_id, asset_type_id, int_status,
+            org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type
@@ -84,7 +94,7 @@ const getAssetTypeById = async (asset_type_id) => {
 
 const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
-        org_id, int_status, assignment_type,
+        org_id, branch_id, int_status, assignment_type,
         inspection_required, group_required, text, is_child, parent_asset_type_id,
         maint_lead_type, depreciation_type
     } = updateData;
@@ -92,20 +102,29 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const query = `
         UPDATE "tblAssetTypes"
         SET 
-            org_id = $1, int_status = $2,
-            assignment_type = $3, inspection_required = $4, group_required = $5,
-            changed_by = $6, changed_on = CURRENT_TIMESTAMP, text = $7,
-            is_child = $8, parent_asset_type_id = $9,
-            maint_lead_type = $10, depreciation_type = $11
-        WHERE asset_type_id = $12
+            org_id = $1, branch_id = $2, int_status = $3,
+            assignment_type = $4, inspection_required = $5, group_required = $6,
+            changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
+            is_child = $9, parent_asset_type_id = $10,
+            maint_lead_type = $11, depreciation_type = $12
+        WHERE asset_type_id = $13
         RETURNING *
     `;
     
     const values = [
-        org_id, int_status, assignment_type,
-        inspection_required, group_required,
-        changed_by, text,
-        is_child, parent_asset_type_id, maint_lead_type, depreciation_type, asset_type_id
+        org_id,
+        branch_id === undefined ? null : (branch_id || null),
+        int_status,
+        assignment_type,
+        inspection_required,
+        group_required,
+        changed_by,
+        text,
+        is_child,
+        parent_asset_type_id,
+        maint_lead_type,
+        depreciation_type,
+        asset_type_id
     ];
     
     const dbPool = getDb();
