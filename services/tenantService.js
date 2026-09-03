@@ -60,19 +60,59 @@ function initTenantRegistryPool() {
       }),
     );
     attachPoolErrorHandler(tenantRegistryPool, 'TENANT REGISTRY POOL');
-    // Ensure schema upgrades (e.g. tenants.email) exist
-    ensureTenantsEmailColumn(tenantRegistryPool).catch((err) => {
-      logger.warn(`[TenantService] ensureTenantsEmailColumn on init: ${err.message}`);
+    // Ensure schema upgrades (grouped_org_id, org_name, email) exist
+    ensureTenantsSchema(tenantRegistryPool).catch((err) => {
+      logger.warn(`[TenantService] ensureTenantsSchema on init: ${err.message}`);
     });
   }
   return tenantRegistryPool;
 }
 
-let tenantsEmailColumnEnsured = false;
+let tenantsSchemaEnsured = false;
 
-async function ensureTenantsEmailColumn(pool = null) {
-  if (tenantsEmailColumnEnsured) return;
+/**
+ * Ensure tenants registry schema:
+ * - rename org_id → grouped_org_id (internally generated ORG###)
+ * - add org_name (UI organization name)
+ * - add email if missing
+ */
+async function ensureTenantsSchema(pool = null) {
+  if (tenantsSchemaEnsured) return;
   const registry = pool || initTenantRegistryPool();
+
+  await registry.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tenants'
+      ) AND EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'org_id'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'grouped_org_id'
+      ) THEN
+        ALTER TABLE "tenants" RENAME COLUMN org_id TO grouped_org_id;
+      END IF;
+    END $$;
+  `);
+
+  await registry.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'tenants'
+      ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'tenants' AND column_name = 'org_name'
+      ) THEN
+        ALTER TABLE "tenants" ADD COLUMN org_name character varying(255);
+      END IF;
+    END $$;
+  `);
+
   await registry.query(`
     DO $$
     BEGIN
@@ -87,12 +127,48 @@ async function ensureTenantsEmailColumn(pool = null) {
       END IF;
     END $$;
   `);
+
+  await registry.query(`
+    CREATE INDEX IF NOT EXISTS idx_tenants_grouped_org_id ON "tenants"(grouped_org_id)
+  `).catch(() => {});
+  await registry.query(`
+    CREATE INDEX IF NOT EXISTS idx_tenants_org_name ON "tenants"(org_name)
+  `).catch(() => {});
   await registry.query(`
     CREATE INDEX IF NOT EXISTS idx_tenants_email_lower
       ON "tenants" (LOWER(email))
       WHERE email IS NOT NULL
   `).catch(() => {});
-  tenantsEmailColumnEnsured = true;
+
+  tenantsSchemaEnsured = true;
+}
+
+/** @deprecated Use ensureTenantsSchema */
+async function ensureTenantsEmailColumn(pool = null) {
+  return ensureTenantsSchema(pool);
+}
+
+/**
+ * Next registry PK: ORG001, ORG002, ... based on existing grouped_org_id values.
+ */
+async function generateNextGroupedOrgId(pool = null) {
+  const registry = pool || initTenantRegistryPool();
+  await ensureTenantsSchema(registry);
+  const result = await registry.query(`
+    SELECT COALESCE(
+      MAX(
+        CASE
+          WHEN grouped_org_id ~ '^ORG[0-9]+$'
+          THEN CAST(SUBSTRING(grouped_org_id FROM 4) AS INTEGER)
+          ELSE 0
+        END
+      ),
+      0
+    )::int AS max_num
+    FROM "tenants"
+  `);
+  const next = (result.rows[0]?.max_num || 0) + 1;
+  return `ORG${String(next).padStart(3, '0')}`;
 }
 
 /**
@@ -133,7 +209,7 @@ function decryptPassword(encryptedPassword) {
 }
 
 /**
- * Check if a tenant exists for the given org_id
+ * Check if a tenant exists for the given grouped_org_id
  */
 async function checkTenantExists(orgId) {
   const cacheService = require('./cacheService');
@@ -144,10 +220,11 @@ async function checkTenantExists(orgId) {
   }
 
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id FROM "tenants" WHERE org_id = $1 AND is_active = true`,
+      `SELECT grouped_org_id FROM "tenants" WHERE grouped_org_id = $1 AND is_active = true`,
       [orgId]
     );
     const exists = result.rows.length > 0;
@@ -162,7 +239,7 @@ async function checkTenantExists(orgId) {
 }
 
 /**
- * Get tenant database credentials by org_id
+ * Get tenant database credentials by grouped_org_id
  */
 async function getTenantCredentials(orgId) {
   const cacheService = require('./cacheService');
@@ -171,24 +248,26 @@ async function getTenantCredentials(orgId) {
   if (cached) return cached;
 
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, db_password, is_active
+      `SELECT grouped_org_id, org_name, db_host, db_port, db_name, db_user, db_password, is_active
        FROM "tenants"
-       WHERE org_id = $1 AND is_active = true`,
+       WHERE grouped_org_id = $1 AND is_active = true`,
       [orgId]
     );
 
     if (result.rows.length === 0) {
-      throw new Error(`Tenant not found for org_id: ${orgId}`);
+      throw new Error(`Tenant not found for grouped_org_id: ${orgId}`);
     }
 
     const tenant = result.rows[0];
     const decryptedPassword = decryptPassword(tenant.db_password);
 
     const credentials = {
-      orgId: tenant.org_id,
+      orgId: tenant.grouped_org_id,
+      orgName: tenant.org_name || null,
       host: tenant.db_host,
       port: tenant.db_port,
       database: tenant.db_name,
@@ -318,8 +397,10 @@ async function getTenantClient(orgId) {
 
 /**
  * Register a new tenant in the tenant table
+ * @param {string} groupedOrgId - Internally generated ORG### (registry PK)
+ * @param {object} dbConfig - host/port/database/user/password/subdomain/email/orgName
  */
-async function registerTenant(orgId, dbConfig) {
+async function registerTenant(groupedOrgId, dbConfig) {
   const pool = initTenantRegistryPool();
 
   try {
@@ -339,19 +420,21 @@ async function registerTenant(orgId, dbConfig) {
     const subdomain = dbConfig.subdomain || null;
     // Organization admin email — used for org management / account deletion
     const email = dbConfig.email ? String(dbConfig.email).trim().toLowerCase() : null;
+    const orgName = dbConfig.orgName ? String(dbConfig.orgName).trim() : null;
 
     try {
-      await ensureTenantsEmailColumn(pool);
+      await ensureTenantsSchema(pool);
     } catch (colErr) {
-      logger.warn(`[TenantService] Could not ensure tenants.email column: ${colErr.message}`);
+      logger.warn(`[TenantService] Could not ensure tenants schema: ${colErr.message}`);
     }
 
     if (hasSubdomainColumn && subdomain) {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, subdomain, email, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
-         ON CONFLICT (org_id) DO UPDATE
-         SET db_host = EXCLUDED.db_host,
+        `INSERT INTO "tenants" (grouped_org_id, org_name, db_host, db_port, db_name, db_user, db_password, subdomain, email, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+         ON CONFLICT (grouped_org_id) DO UPDATE
+         SET org_name = COALESCE(EXCLUDED.org_name, "tenants".org_name),
+             db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
              db_name = EXCLUDED.db_name,
              db_user = EXCLUDED.db_user,
@@ -361,7 +444,8 @@ async function registerTenant(orgId, dbConfig) {
              updated_at = CURRENT_TIMESTAMP,
              is_active = true`,
         [
-          orgId,
+          groupedOrgId,
+          orgName,
           dbConfig.host,
           dbConfig.port || 5432,
           dbConfig.database,
@@ -371,13 +455,14 @@ async function registerTenant(orgId, dbConfig) {
           email,
         ]
       );
-      logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
+      logger.log(`[TenantService] Registered tenant: ${groupedOrgId} (${orgName || 'n/a'}) -> ${dbConfig.database} with subdomain: ${subdomain}`);
     } else {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, email, is_active)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-         ON CONFLICT (org_id) DO UPDATE
-         SET db_host = EXCLUDED.db_host,
+        `INSERT INTO "tenants" (grouped_org_id, org_name, db_host, db_port, db_name, db_user, db_password, email, is_active)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true)
+         ON CONFLICT (grouped_org_id) DO UPDATE
+         SET org_name = COALESCE(EXCLUDED.org_name, "tenants".org_name),
+             db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
              db_name = EXCLUDED.db_name,
              db_user = EXCLUDED.db_user,
@@ -386,7 +471,8 @@ async function registerTenant(orgId, dbConfig) {
              updated_at = CURRENT_TIMESTAMP,
              is_active = true`,
         [
-          orgId,
+          groupedOrgId,
+          orgName,
           dbConfig.host,
           dbConfig.port || 5432,
           dbConfig.database,
@@ -395,13 +481,13 @@ async function registerTenant(orgId, dbConfig) {
           email,
         ]
       );
-      logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database}`);
+      logger.log(`[TenantService] Registered tenant: ${groupedOrgId} (${orgName || 'n/a'}) -> ${dbConfig.database}`);
     }
 
-    await evictTenantPool(orgId);
+    await evictTenantPool(groupedOrgId);
     const cacheService = require('./cacheService');
-    await cacheService.del(cacheService.buildKey('tenant', 'credentials', orgId));
-    await cacheService.del(cacheService.buildKey('tenant', 'exists', orgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'credentials', groupedOrgId));
+    await cacheService.del(cacheService.buildKey('tenant', 'exists', groupedOrgId));
 
     return true;
   } catch (error) {
@@ -427,7 +513,7 @@ async function updateTenant(orgId, dbConfig) {
            db_user = $4,
            db_password = $5,
            updated_at = CURRENT_TIMESTAMP
-       WHERE org_id = $6`,
+       WHERE grouped_org_id = $6`,
       [
         dbConfig.host,
         dbConfig.port || 5432,
@@ -460,7 +546,7 @@ async function deactivateTenant(orgId) {
       `UPDATE "tenants"
        SET is_active = false,
            updated_at = CURRENT_TIMESTAMP
-       WHERE org_id = $1`,
+       WHERE grouped_org_id = $1`,
       [orgId]
     );
 
@@ -535,5 +621,7 @@ module.exports = {
   initTenantRegistryPool,
   clearTenantPoolCache,
   ensureTenantsEmailColumn,
+  ensureTenantsSchema,
+  generateNextGroupedOrgId,
 };
 

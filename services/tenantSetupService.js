@@ -1,6 +1,6 @@
 const { Client } = require('pg');
 const bcrypt = require('bcrypt');
-const { registerTenant, deactivateTenant, testTenantConnection: testConnection, initTenantRegistryPool, ensureTenantsEmailColumn } = require('./tenantService');
+const { registerTenant, deactivateTenant, testTenantConnection: testConnection, initTenantRegistryPool, ensureTenantsEmailColumn, ensureTenantsSchema, generateNextGroupedOrgId } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
 const {
@@ -60,15 +60,16 @@ function pgClientOpts(base) {
  */
 async function checkOrgIdExists(orgId) {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id FROM "tenants" WHERE org_id = $1`,
-      [orgId.toUpperCase()]
+      `SELECT grouped_org_id FROM "tenants" WHERE grouped_org_id = $1`,
+      [String(orgId || '').toUpperCase()]
     );
     return result.rows.length > 0;
   } catch (error) {
-    console.error('[TenantSetup] Error checking org_id:', error);
+    console.error('[TenantSetup] Error checking grouped_org_id:', error);
     throw error;
   }
 }
@@ -89,7 +90,7 @@ function getProposedDatabaseName(subdomain) {
 async function isDatabaseNameTaken(dbName) {
   const pool = initTenantRegistryPool();
   const tenantCheck = await pool.query(
-    `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+    `SELECT grouped_org_id FROM "tenants" WHERE db_name = $1`,
     [dbName],
   );
   if (tenantCheck.rows.length > 0) {
@@ -171,6 +172,7 @@ function buildSubdomainUrl(subdomain) {
 
 async function getTenantRegistryRow(orgId) {
   const pool = initTenantRegistryPool();
+  await ensureTenantsSchema(pool);
   const subdomainColumnCheck = await pool.query(`
     SELECT EXISTS (
       SELECT 1 FROM information_schema.columns
@@ -179,12 +181,12 @@ async function getTenantRegistryRow(orgId) {
   `);
   const hasSubdomainColumn = subdomainColumnCheck.rows[0].exists;
   const columns = hasSubdomainColumn
-    ? 'org_id, db_name, subdomain, is_active'
-    : 'org_id, db_name, is_active';
+    ? 'grouped_org_id AS org_id, org_name, db_name, subdomain, is_active'
+    : 'grouped_org_id AS org_id, org_name, db_name, is_active';
 
   const result = await pool.query(
-    `SELECT ${columns} FROM "tenants" WHERE org_id = $1`,
-    [orgId.toUpperCase()],
+    `SELECT ${columns} FROM "tenants" WHERE grouped_org_id = $1`,
+    [String(orgId || '').toUpperCase()],
   );
 
   return result.rows[0] || null;
@@ -192,23 +194,24 @@ async function getTenantRegistryRow(orgId) {
 
 async function getTenantRegistryRowBySubdomain(subdomain) {
   const pool = initTenantRegistryPool();
-  await ensureTenantsEmailColumn(pool).catch(() => {});
+  await ensureTenantsSchema(pool).catch(() => {});
   const result = await pool.query(
-    `SELECT org_id, db_name, subdomain, is_active, email FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
+    `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, is_active, email FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
     [String(subdomain || '').trim().toLowerCase()],
   );
   return result.rows[0] || null;
 }
 
-function deriveRegistryOrgId(subdomain) {
+/** Derive a short org_code for tblOrgs from the subdomain (user no longer enters org ID). */
+function deriveOrgCodeFromSubdomain(subdomain) {
   const normalized = String(subdomain || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!normalized) {
-    throw new Error('Invalid domain name for tenant registry');
+    throw new Error('Invalid domain name for organization code');
   }
   return normalized.slice(0, 10);
 }
 
-async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgName, orgCity) {
+async function tryResolveExistingTenant(orgCodeUpper, subdomain, adminUser, orgName, orgCity) {
   const row = await getTenantRegistryRowBySubdomain(subdomain);
   if (!row || row.is_active === false) {
     return null;
@@ -244,28 +247,31 @@ async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgNam
 
   const effectiveSubdomain = rowSubdomain || subdomain;
   const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
+  const displayName = orgName || row.org_name || orgCodeUpper;
 
-  // Backfill tenants.email when missing on an existing registry row
-  if (adminEmail && !row.email) {
+  // Backfill tenants.email / org_name when missing on an existing registry row
+  if (adminEmail || displayName) {
     try {
       const pool = initTenantRegistryPool();
-      await ensureTenantsEmailColumn(pool);
+      await ensureTenantsSchema(pool);
       await pool.query(
         `UPDATE "tenants"
-         SET email = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE org_id = $2 AND (email IS NULL OR TRIM(email) = '')`,
-        [adminEmail, row.org_id],
+         SET email = COALESCE(NULLIF(TRIM(email), ''), $1),
+             org_name = COALESCE(NULLIF(TRIM(org_name), ''), $2),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE grouped_org_id = $3`,
+        [adminEmail, displayName, row.org_id],
       );
-      console.log(`[TenantSetup] Backfilled tenants.email for ${row.org_id}: ${adminEmail}`);
     } catch (backfillErr) {
-      console.warn(`[TenantSetup] Could not backfill tenants.email: ${backfillErr.message}`);
+      console.warn(`[TenantSetup] Could not backfill tenants row: ${backfillErr.message}`);
     }
   }
 
   return {
-    orgId: orgIdUpper,
-    orgCode: orgIdUpper,
-    orgName,
+    orgId: row.org_id,
+    generatedOrgId: row.org_id,
+    orgCode: orgCodeUpper || deriveOrgCodeFromSubdomain(effectiveSubdomain),
+    orgName: displayName,
     orgCity,
     subdomain: effectiveSubdomain,
     subdomainUrl: buildSubdomainUrl(effectiveSubdomain),
@@ -307,7 +313,7 @@ async function generateUniqueDatabaseName(orgId, subdomain) {
     let exists = true;
     while (exists) {
       const tenantCheck = await pool.query(
-        `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+        `SELECT grouped_org_id FROM "tenants" WHERE db_name = $1`,
         [dbName]
       );
       
@@ -1654,9 +1660,9 @@ async function createTenant(tenantData) {
     adminUser,
   } = tenantData;
 
-  // Validate required fields
-  if (!orgId || !orgName) {
-    throw new Error('Missing required fields: orgId, orgName');
+  // Validate required fields — org ID is generated internally; only name + subdomain required
+  if (!orgName || !String(orgName).trim()) {
+    throw new Error('Missing required field: orgName');
   }
 
   if (!subdomainInput) {
@@ -1669,13 +1675,12 @@ async function createTenant(tenantData) {
 
   const { validateSubdomain } = require('../utils/subdomainUtils');
   const subdomain = validateSubdomain(subdomainInput);
-  const registryOrgId = deriveRegistryOrgId(subdomain);
 
-  // User-facing org code (e.g. PRESSANA). Internal tblOrgs.org_id is always ORG###.
-  const orgCodeUpper = (orgCodeInput || orgId).toUpperCase().trim();
-  if (orgCodeUpper.length > 10) {
-    throw new Error('Organization ID must be 10 characters or less.');
-  }
+  // org_code for tblOrgs: optional legacy input, else derived from subdomain
+  const orgCodeUpper = (orgCodeInput || orgId || deriveOrgCodeFromSubdomain(subdomain))
+    .toUpperCase()
+    .trim()
+    .slice(0, 10);
 
   const subdomainExists = await checkSubdomainExists(subdomain);
   if (subdomainExists) {
@@ -1694,7 +1699,7 @@ async function createTenant(tenantData) {
 
   console.log(`[TenantSetup] Using user-specified subdomain: ${subdomain}`);
 
-  // Generate unique database name from org code (not internal ORG###)
+  // Generate unique database name from subdomain
   const dbName = await generateUniqueDatabaseName(orgCodeUpper, subdomain);
 
   // CRITICAL: Use TENANT_DATABASE_URL for all tenant database operations
@@ -1709,6 +1714,9 @@ async function createTenant(tenantData) {
   
   // DDL and schema provisioning must bypass PgBouncer (direct Postgres)
   const adminClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, 'postgres')));
+
+  // Internally generated registry PK (ORG###) — also used as tblOrgs.org_id
+  let groupedOrgId = null;
 
   try {
     await adminClient.connect();
@@ -1728,12 +1736,13 @@ async function createTenant(tenantData) {
     console.log(`[TenantSetup] Created database: ${dbName}`);
 
     // Register tenant in registry (includes admin email on tenants.email for org management).
-    // Keep tenant registry org id + TENANT_DATABASE_URL host/port (not main's orgIdUpper/appEndpoint).
     const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
     if (!adminEmail) {
       throw new Error('Admin user email is required');
     }
-    await registerTenant(registryOrgId, {
+
+    groupedOrgId = await generateNextGroupedOrgId();
+    await registerTenant(groupedOrgId, {
       host: dbConfig.host,
       port: dbConfig.port,
       database: dbName,
@@ -1741,8 +1750,9 @@ async function createTenant(tenantData) {
       password: dbConfig.password,
       subdomain: subdomain,
       email: adminEmail,
+      orgName: String(orgName).trim(),
     });
-    console.log(`[TenantSetup] Registered tenants.email for ${registryOrgId}: ${adminEmail}`);
+    console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
 
     const tenantClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, dbName)));
 
@@ -2034,19 +2044,19 @@ async function createTenant(tenantData) {
         // This is not critical, continue
       }
 
-      // Step 1: Seed ID sequences, then generate canonical org_id (ORG###)
+      // Step 1: Seed ID sequences, then use registry grouped_org_id as tblOrgs.org_id
       await tenantClient.query('SET search_path TO public');
       console.log(`[TenantSetup] Seeding default ID sequences...`);
       await seedDefaultIdSequences(tenantClient);
 
-      const internalOrgId = await generateCustomIdForClient(tenantClient, 'org');
-      if (!/^ORG\d{3}$/.test(internalOrgId)) {
+      const internalOrgId = groupedOrgId;
+      if (!internalOrgId || !/^ORG\d{3}$/.test(internalOrgId)) {
         throw new Error(
-          `Generated org_id "${internalOrgId}" does not match expected format ORG###`,
+          `grouped_org_id "${internalOrgId}" does not match expected format ORG###`,
         );
       }
       console.log(
-        `[TenantSetup] Using internal org_id=${internalOrgId}, org_code=${orgCodeUpper} across tenant database`,
+        `[TenantSetup] Using grouped_org_id=${internalOrgId}, org_code=${orgCodeUpper} across tenant database`,
       );
 
       // Step 2: Create organization record — org_id is ORG###, org_code is user-facing code
@@ -2099,7 +2109,7 @@ async function createTenant(tenantData) {
       // Step 4: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
       const adminCredentials = await createAdminUser(tenantClient, internalOrgId, adminUser, {
-        registryOrgId,
+        registryOrgId: groupedOrgId,
         subdomain,
         userId: adminUserId,
       });
@@ -2167,7 +2177,8 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
 
       return {
-        orgId: orgCodeUpper,
+        orgId: internalOrgId,
+        groupedOrgId: internalOrgId,
         generatedOrgId: internalOrgId,
         orgCode: orgCodeUpper,
         orgName,
@@ -2192,7 +2203,9 @@ async function createTenant(tenantData) {
 
     try {
       await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
-      await deactivateTenant(registryOrgId);
+      if (groupedOrgId) {
+        await deactivateTenant(groupedOrgId);
+      }
     } catch (dropError) {
       console.error('[TenantSetup] Error rolling back tenant:', dropError);
     }
@@ -2208,20 +2221,24 @@ async function createTenant(tenantData) {
  */
 async function getAllTenants() {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id, org_name, db_host, db_port, db_name, db_user, is_active, subdomain, created_at, updated_at
        FROM "tenants"
        ORDER BY created_at DESC`
     );
 
     return result.rows.map(tenant => ({
-      orgId: tenant.org_id,
+      orgId: tenant.grouped_org_id,
+      groupedOrgId: tenant.grouped_org_id,
+      orgName: tenant.org_name,
       host: tenant.db_host,
       port: tenant.db_port,
       database: tenant.db_name,
       user: tenant.db_user,
+      subdomain: tenant.subdomain,
       isActive: tenant.is_active,
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,
@@ -2233,16 +2250,17 @@ async function getAllTenants() {
 }
 
 /**
- * Get tenant by org_id
+ * Get tenant by grouped_org_id
  */
 async function getTenantById(orgId) {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id, org_name, db_host, db_port, db_name, db_user, is_active, subdomain, created_at, updated_at
        FROM "tenants"
-       WHERE org_id = $1`,
+       WHERE grouped_org_id = $1`,
       [orgId]
     );
 
@@ -2252,11 +2270,14 @@ async function getTenantById(orgId) {
 
     const tenant = result.rows[0];
     return {
-      orgId: tenant.org_id,
+      orgId: tenant.grouped_org_id,
+      groupedOrgId: tenant.grouped_org_id,
+      orgName: tenant.org_name,
       host: tenant.db_host,
       port: tenant.db_port,
       database: tenant.db_name,
       user: tenant.db_user,
+      subdomain: tenant.subdomain,
       isActive: tenant.is_active,
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,

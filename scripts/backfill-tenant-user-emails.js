@@ -10,7 +10,7 @@ const { registerTenantEmail } = require('../services/tenantEmailRegistryService'
 async function fetchTenantSubdomain(pool, orgId) {
   const result = await pool.query(
     `SELECT subdomain FROM "tenants"
-     WHERE org_id = $1 AND is_active = true AND subdomain IS NOT NULL
+     WHERE grouped_org_id = $1 AND is_active = true AND subdomain IS NOT NULL
      LIMIT 1`,
     [String(orgId).toUpperCase()],
   );
@@ -73,7 +73,7 @@ async function backfillTenant(orgId, subdomain) {
 async function main() {
   const registryPool = initTenantRegistryPool();
   const tenants = await registryPool.query(
-    `SELECT org_id, subdomain FROM "tenants" WHERE is_active = true ORDER BY org_id`,
+    `SELECT grouped_org_id AS org_id, subdomain FROM "tenants" WHERE is_active = true ORDER BY grouped_org_id`,
   );
 
   console.log(`Found ${tenants.rows.length} active tenant(s)`);
