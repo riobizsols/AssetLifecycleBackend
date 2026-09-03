@@ -1503,15 +1503,35 @@ function buildAssetsListFilterClause(
   }));
 
   if (additionalFilters.asset_type_id) {
-    clause += ` AND a.asset_type_id = $${paramIndex}`;
-    params.push(additionalFilters.asset_type_id);
-    paramIndex++;
+    const typeIds = String(additionalFilters.asset_type_id)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (typeIds.length === 1) {
+      clause += ` AND a.asset_type_id = $${paramIndex}`;
+      params.push(typeIds[0]);
+      paramIndex++;
+    } else if (typeIds.length > 1) {
+      clause += ` AND a.asset_type_id = ANY($${paramIndex}::text[])`;
+      params.push(typeIds);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.status) {
-    clause += ` AND a.current_status = $${paramIndex}`;
-    params.push(additionalFilters.status);
-    paramIndex++;
+    const statuses = String(additionalFilters.status)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (statuses.length === 1) {
+      clause += ` AND a.current_status = $${paramIndex}`;
+      params.push(statuses[0]);
+      paramIndex++;
+    } else if (statuses.length > 1) {
+      clause += ` AND a.current_status = ANY($${paramIndex}::text[])`;
+      params.push(statuses);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.vendor_id) {

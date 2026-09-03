@@ -12,6 +12,7 @@ const EXCLUDED_FROM_TENANTS = ['tblRioAdmin'];
 const PROTECTED_RUNTIME_TABLES = [
   'tblAssetMaintSch_BR_Hist',
   'tblAssetExpiryNotify',
+  'tblBR_DEPT',
   'tblJobs',
   'tblJobHistory',
 ];
@@ -364,6 +365,19 @@ async function ensureCriticalRuntimeSchema(client) {
     if (err.code !== '42P01') {
       console.warn('[TenantSchemaAlign] Could not ensure amsbr sequence:', err.message);
     }
+  }
+
+  try {
+    const { ensureBrDeptSchema } = require('../utils/ensureBrDeptSchema');
+    const brDept = await ensureBrDeptSchema(client);
+    results.push({
+      object: 'tblBR_DEPT',
+      status: brDept.created ? 'ensured' : 'skipped',
+      backfilled: brDept.backfilled,
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblBR_DEPT:', err.message);
+    results.push({ object: 'tblBR_DEPT', status: 'error', message: err.message });
   }
 
   console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));

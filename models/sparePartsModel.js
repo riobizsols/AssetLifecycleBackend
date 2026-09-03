@@ -2047,27 +2047,20 @@ const getCategoryMappings = async (org_id, branch_id = null, hasSuperAccess = fa
       m.spcatm_id,
       m.spc_id,
       c.text AS category_name,
-      COALESCE(ib."brandName", sb.text) AS category_brand,
-      COALESCE(im."modelName", sm.text) AS category_model,
+      sb.text AS category_brand,
+      sm.text AS category_model,
       m.asset_type_id,
       at.text AS asset_type_name,
-      ps.brand AS asset_brand,
-      ps.model AS asset_model,
-      m.spbm_id,
-      m.prod_serv_id,
       m.int_status,
       m.org_id,
       m.branch_id,
       m.created_by,
       m.created_on
     FROM "tblSPCatATMap" m
-    LEFT JOIN "tblSPCategory" c ON c.spc_id = m.spc_id
-    LEFT JOIN "tblSPBrand" sb ON sb.spb_id = c.spb_id
-    LEFT JOIN "tblSPBMod" sm ON sm.spbm_id = c.spm_id
+    LEFT JOIN "tblSPCategory" c ON c.spc_id = m.spc_id AND c.org_id = m.org_id
+    LEFT JOIN "tblSPBrand" sb ON sb.spb_id = c.spb_id AND sb.org_id = c.org_id
+    LEFT JOIN "tblSPBMod" sm ON sm.spbm_id = c.spm_id AND sm.org_id = c.org_id
     LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = m.asset_type_id
-    LEFT JOIN "tblISPModel" im ON im."spbmId" = m.spbm_id
-    LEFT JOIN "tblISPBrand" ib ON ib."spbId" = im."spbId"
-    LEFT JOIN "tblProdServs" ps ON ps.prod_serv_id = m.prod_serv_id
     WHERE m.org_id = $1
   `;
 
@@ -2076,7 +2069,7 @@ const getCategoryMappings = async (org_id, branch_id = null, hasSuperAccess = fa
     query += ` AND (m.branch_id IS NULL OR m.branch_id = $${params.length})`;
   }
 
-  query += ` ORDER BY c.text ASC, at.text ASC, ib."brandName" ASC, im."modelName" ASC`;
+  query += ` ORDER BY c.text ASC, at.text ASC, sb.text ASC, sm.text ASC`;
   const result = await dbPool.query(query, params);
   return result.rows;
 };
@@ -2128,119 +2121,33 @@ const createCategoryMapping = async ({
       throw err;
     }
 
-    let spbm_id = null;
 
-    // If caller provided brand/model ids, try to resolve from existing ISP mod-category.
     if (categoryBrandIdVal && categoryModelIdVal) {
-      const modcat = await client.query(
-        `
-          SELECT mc."spbmId" AS spbm_id
-          FROM "tblISPModCat" mc
-          INNER JOIN "tblISPModel" m ON m."spbmId" = mc."spbmId"
-          WHERE mc."spcId" = $1
-            AND mc."spbmId" = $2
-            AND m."spbId" = $3
-            AND COALESCE(mc.int_status, 1) = 1
-            AND COALESCE(m.int_status, 1) = 1
-            AND (mc.org_id = $4 OR mc.org_id IS NULL)
-          LIMIT 1
-        `,
-        [spc_id, categoryModelIdVal, categoryBrandIdVal, org_id]
-      );
-      spbm_id = modcat.rows[0]?.spbm_id || null;
-    }
-
-    // Otherwise (or if not found), fall back to the brand/model saved on tblSPCategory.
-    if (!spbm_id) {
-      // Category created via Spare Part Category (tblSPBrand/tblSPBMod) — ensure ISP link
       await ensureSpBrandModelSchema(client);
-      const catDetail = await client.query(
+      const brandModelCheck = await client.query(
         `
-          SELECT
-            c.spc_id,
-            c.spb_id,
-            c.spm_id,
-            b.text AS brand_name,
-            m.text AS model_name
+          SELECT 1
           FROM "tblSPCategory" c
           LEFT JOIN "tblSPBrand" b ON b.spb_id = c.spb_id AND b.org_id = c.org_id
           LEFT JOIN "tblSPBMod" m ON m.spbm_id = c.spm_id AND m.org_id = c.org_id
-          WHERE c.spc_id = $1 AND c.org_id = $2 AND c.int_status = 1
+          WHERE c.spc_id = $1
+            AND c.org_id = $2
+            AND c.int_status = 1
+            AND (
+              b.spb_id = $3
+              OR LOWER(BTRIM(b.text)) = LOWER($3)
+              OR m.spbm_id = $4
+              OR LOWER(BTRIM(m.text)) = LOWER($4)
+            )
           LIMIT 1
         `,
-        [spc_id, org_id]
+        [spc_id, org_id, categoryBrandIdVal, categoryModelIdVal]
       );
-
-      const detail = catDetail.rows[0];
-      if (!detail?.brand_name || !detail?.model_name) {
+      if (!brandModelCheck.rows.length) {
         const err = new Error('Selected category / brand / model combination was not found');
         err.statusCode = 400;
         throw err;
       }
-
-      const brandMatches =
-        detail.spb_id === category_brand_id ||
-        String(detail.brand_name).toLowerCase() === String(category_brand_id).toLowerCase();
-      const modelMatches =
-        detail.spm_id === category_model_id ||
-        String(detail.model_name).toLowerCase() === String(category_model_id).toLowerCase();
-
-      // Also accept explicit SP brand/model ids even if category columns differ (legacy)
-      const spBrand = await client.query(
-        `
-          SELECT spb_id, text
-          FROM "tblSPBrand"
-          WHERE org_id = $1 AND int_status = 1
-            AND (spb_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
-          LIMIT 1
-        `,
-        [org_id, category_brand_id]
-      );
-      const spModel = await client.query(
-        `
-          SELECT spbm_id AS spm_id, spb_id, text
-          FROM "tblSPBMod"
-          WHERE org_id = $1 AND int_status = 1
-            AND (spbm_id = $2 OR LOWER(BTRIM(text)) = LOWER($2))
-            AND (
-              spb_id = $3
-              OR spb_id = $4
-              OR $3 IS NULL
-            )
-          LIMIT 1
-        `,
-        [
-          org_id,
-          category_model_id,
-          category_brand_id,
-          detail.spb_id,
-        ]
-      );
-      const brand = await findOrCreateIspBrand(client, {
-        org_id,
-        branch_id,
-        created_by,
-        brand_id: spBrand.rows[0]?.spb_id || (brandMatches ? detail.spb_id : null),
-        brand_name: detail.brand_name,
-        strictCreate: false,
-      });
-      const model = await findOrCreateIspModel(client, {
-        org_id,
-        branch_id,
-        created_by,
-        spbId: brand.spbId,
-        model_id: spModel.rows[0]?.spm_id || (modelMatches ? detail.spm_id : null),
-        model_name: detail.model_name,
-        strictCreate: false,
-      });
-      await ensureIspModCat(client, {
-        org_id,
-        branch_id,
-        created_by,
-        spc_id,
-        spbmId: model.spbmId,
-      });
-      spbm_id = model.spbmId;
     }
 
     const at = await client.query(
@@ -2256,11 +2163,10 @@ const createCategoryMapping = async ({
       throw err;
     }
 
-    let prod_serv_id = null;
     if (assetBrandVal && assetModelVal) {
       const prodServ = await client.query(
         `
-          SELECT prod_serv_id
+          SELECT 1
           FROM "tblProdServs"
           WHERE asset_type_id = $1
             AND LOWER(BTRIM(brand)) = LOWER($2)
@@ -2275,44 +2181,19 @@ const createCategoryMapping = async ({
         err.statusCode = 400;
         throw err;
       }
-      prod_serv_id = prodServ.rows[0].prod_serv_id;
     }
 
-    const mapCols = await client.query(
+    const dup = await client.query(
       `
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public' AND table_name = 'tblSPCatATMap'
-      `
+        SELECT 1 FROM "tblSPCatATMap"
+        WHERE org_id = $1
+          AND spc_id = $2
+          AND asset_type_id = $3
+          AND int_status = 1
+        LIMIT 1
+      `,
+      [org_id, spc_id, asset_type_id]
     );
-    const colSet = new Set(mapCols.rows.map((row) => row.column_name));
-
-    const dupParams = [org_id, spc_id, asset_type_id];
-    let dupSql = `
-      SELECT 1 FROM "tblSPCatATMap"
-      WHERE org_id = $1
-        AND spc_id = $2
-        AND asset_type_id = $3
-        AND int_status = 1
-    `;
-    if (colSet.has('spbm_id')) {
-      if (spbm_id == null) {
-        dupSql += ` AND spbm_id IS NULL`;
-      } else {
-        dupParams.push(spbm_id);
-        dupSql += ` AND spbm_id = $${dupParams.length}`;
-      }
-    }
-    if (colSet.has('prod_serv_id')) {
-      if (prod_serv_id == null) {
-        dupSql += ` AND prod_serv_id IS NULL`;
-      } else {
-        dupParams.push(prod_serv_id);
-        dupSql += ` AND prod_serv_id = $${dupParams.length}`;
-      }
-    }
-    dupSql += ` LIMIT 1`;
-    const dup = await client.query(dupSql, dupParams);
     if (dup.rows.length) {
       const err = new Error('This category / asset type mapping already exists');
       err.statusCode = 400;
@@ -2324,11 +2205,11 @@ const createCategoryMapping = async ({
     const result = await client.query(
       `
         INSERT INTO "tblSPCatATMap" (
-          spcatm_id, spc_id, asset_type_id, spbm_id, prod_serv_id, int_status,
+          spcatm_id, spc_id, asset_type_id, int_status,
           org_id, branch_id, created_by, created_on, changed_by, changed_on
         ) VALUES (
-          $1, $2, $3, $4, $5, 1,
-          $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP
+          $1, $2, $3, 1,
+          $4, $5, $6, CURRENT_TIMESTAMP, $6, CURRENT_TIMESTAMP
         )
         RETURNING *
       `,
@@ -2336,8 +2217,6 @@ const createCategoryMapping = async ({
         spcatm_id,
         spc_id,
         asset_type_id,
-        spbm_id,
-        prod_serv_id,
         org_id,
         branch_id || null,
         created_by || null,

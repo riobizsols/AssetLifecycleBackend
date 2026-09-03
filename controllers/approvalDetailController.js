@@ -384,6 +384,8 @@ const approveMaintenanceAction = async (req, res) => {
     res.json({
       success: true,
       message: result.message,
+      alreadyCompleted: !!result.alreadyCompleted,
+      workflowStatus: result.workflowStatus || null,
       timestamp: new Date().toISOString()
     });
 
@@ -1251,6 +1253,7 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       userId: approvalDetail.userId,
       userEmail: approvalDetail.userEmail,
       status: approvalDetail.status,
+      headerStatus: approvalDetail.headerStatus,
       sequence: approvalDetail.sequence,
       daysUntilDue: approvalDetail.daysUntilDue,
       daysUntilCutoff: approvalDetail.daysUntilCutoff,

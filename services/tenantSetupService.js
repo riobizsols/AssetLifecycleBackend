@@ -20,6 +20,7 @@ const {
 } = require('../utils/navigationGroupUtils');
 const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
 const { ensureDefaultScreenApps } = require('../utils/ensureDefaultScreenApps');
+const { ensureBranchDeptMappingProvisioning } = require('../utils/ensureBranchDeptMappingProvisioning');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient, syncJobRoleNavIdSequence } = require('../utils/idGenerator');
@@ -1099,6 +1100,15 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     }
 
     await ensureDefaultScreenApps(tenantClient, orgId, 'TenantSetup');
+
+    try {
+      const branchDept = await ensureBranchDeptMappingProvisioning(tenantClient, orgId, 'TenantSetup');
+      console.log(
+        `[TenantSetup] ✅ Branch-dept mapping: tblBR_DEPT ready, nav=${branchDept.nav}, apps=${branchDept.apps}`,
+      );
+    } catch (branchDeptErr) {
+      console.warn(`[TenantSetup] Branch-dept mapping provision skipped: ${branchDeptErr.message}`);
+    }
 
     // 5. Copy all audit log config from tblAuditLogConfig (reference database)
     console.log(`[TenantSetup] Copying audit log config from reference database...`);
