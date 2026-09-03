@@ -90,7 +90,7 @@ async function getOrgIdFromSubdomain(subdomain) {
     logger.debug(`[SubdomainUtils] Looking up org_id for subdomain: "${subdomain}" (normalized: "${normalizedSubdomain}")`);
 
     const tenantResult = await pool.query(
-      `SELECT org_id, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true LIMIT 1`,
+      `SELECT grouped_org_id AS org_id, subdomain, is_active FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true LIMIT 1`,
       [normalizedSubdomain]
     );
 
@@ -152,11 +152,11 @@ async function isSubdomainAvailable(subdomain, excludeOrgId = null) {
 
     const normalizedSubdomain = subdomain.trim().toLowerCase();
 
-    let tenantQuery = `SELECT org_id FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true`;
+    let tenantQuery = `SELECT grouped_org_id AS org_id FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1 AND is_active = true`;
     const tenantParams = [normalizedSubdomain];
 
     if (excludeOrgId) {
-      tenantQuery += ' AND org_id != $2';
+      tenantQuery += ' AND grouped_org_id != $2';
       tenantParams.push(excludeOrgId);
     }
 

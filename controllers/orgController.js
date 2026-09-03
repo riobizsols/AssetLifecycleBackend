@@ -63,7 +63,7 @@ const addOrganizationController = async (req, res) => {
             if (tenantExists) {
                 const db = require('../config/db');
                 await db.query(
-                    `UPDATE "tenants" SET subdomain = $1 WHERE org_id = $2`,
+                    `UPDATE "tenants" SET subdomain = $1 WHERE grouped_org_id = $2`,
                     [subdomain, org_id]
                 );
             }

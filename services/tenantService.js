@@ -116,7 +116,7 @@ async function checkTenantExists(orgId) {
   
   try {
     const result = await pool.query(
-      `SELECT org_id FROM "tenants" WHERE org_id = $1 AND is_active = true`,
+      `SELECT grouped_org_id AS org_id FROM "tenants" WHERE grouped_org_id = $1 AND is_active = true`,
       [orgId]
     );
     const exists = result.rows.length > 0;
@@ -143,9 +143,9 @@ async function getTenantCredentials(orgId) {
   
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, db_password, is_active
+      `SELECT grouped_org_id AS org_id, db_host, db_port, db_name, db_user, db_password, is_active
        FROM "tenants"
-       WHERE org_id = $1 AND is_active = true`,
+       WHERE grouped_org_id = $1 AND is_active = true`,
       [orgId]
     );
 
@@ -266,9 +266,9 @@ async function registerTenant(orgId, dbConfig) {
 
     if (hasSubdomainColumn && subdomain) {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, subdomain, is_active)
+        `INSERT INTO "tenants" (grouped_org_id, db_host, db_port, db_name, db_user, db_password, subdomain, is_active)
          VALUES ($1, $2, $3, $4, $5, $6, $7, true)
-         ON CONFLICT (org_id) DO UPDATE
+         ON CONFLICT (grouped_org_id) DO UPDATE
          SET db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
              db_name = EXCLUDED.db_name,
@@ -290,9 +290,9 @@ async function registerTenant(orgId, dbConfig) {
       logger.log(`[TenantService] Registered tenant: ${orgId} -> ${dbConfig.database} with subdomain: ${subdomain}`);
     } else {
       await pool.query(
-        `INSERT INTO "tenants" (org_id, db_host, db_port, db_name, db_user, db_password, is_active)
+        `INSERT INTO "tenants" (grouped_org_id, db_host, db_port, db_name, db_user, db_password, is_active)
          VALUES ($1, $2, $3, $4, $5, $6, true)
-         ON CONFLICT (org_id) DO UPDATE
+         ON CONFLICT (grouped_org_id) DO UPDATE
          SET db_host = EXCLUDED.db_host,
              db_port = EXCLUDED.db_port,
              db_name = EXCLUDED.db_name,
@@ -341,7 +341,7 @@ async function updateTenant(orgId, dbConfig) {
            db_user = $4,
            db_password = $5,
            updated_at = CURRENT_TIMESTAMP
-       WHERE org_id = $6`,
+       WHERE grouped_org_id = $6`,
       [
         dbConfig.host,
         dbConfig.port || 5432,
@@ -374,7 +374,7 @@ async function deactivateTenant(orgId) {
       `UPDATE "tenants"
        SET is_active = false,
            updated_at = CURRENT_TIMESTAMP
-       WHERE org_id = $1`,
+       WHERE grouped_org_id = $1`,
       [orgId]
     );
 
