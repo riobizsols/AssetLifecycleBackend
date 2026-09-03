@@ -46,7 +46,7 @@ async function checkOrgIdExists(orgId) {
   
   try {
     const result = await pool.query(
-      `SELECT org_id FROM "tenants" WHERE org_id = $1`,
+      `SELECT grouped_org_id AS org_id FROM "tenants" WHERE grouped_org_id = $1`,
       [orgId.toUpperCase()]
     );
     return result.rows.length > 0;
@@ -90,7 +90,7 @@ async function generateUniqueDatabaseName(orgId, subdomain) {
     let exists = true;
     while (exists) {
       const tenantCheck = await pool.query(
-        `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+        `SELECT grouped_org_id AS org_id FROM "tenants" WHERE db_name = $1`,
         [dbName]
       );
       
@@ -1665,7 +1665,7 @@ async function getAllTenants() {
   
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id AS org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
        FROM "tenants"
        ORDER BY created_at DESC`
     );
@@ -1694,9 +1694,9 @@ async function getTenantById(orgId) {
   
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id AS org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
        FROM "tenants"
-       WHERE org_id = $1`,
+       WHERE grouped_org_id = $1`,
       [orgId]
     );
 
