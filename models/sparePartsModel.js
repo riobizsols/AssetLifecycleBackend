@@ -2261,14 +2261,13 @@ const getProdServAssetTypes = async (org_id) => {
   const dbPool = getDb();
   const result = await dbPool.query(
     `
-      SELECT DISTINCT
-        at.asset_type_id,
-        at.text
-      FROM "tblProdServs" ps
-      INNER JOIN "tblAssetTypes" at
-        ON at.asset_type_id = ps.asset_type_id
-      WHERE (ps.org_id = $1 OR ps.org_id IS NULL)
-      ORDER BY at.text ASC
+      SELECT
+        asset_type_id,
+        text
+      FROM "tblAssetTypes"
+      WHERE org_id = $1
+        AND int_status = 1
+      ORDER BY text ASC
     `,
     [org_id]
   );
