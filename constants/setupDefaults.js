@@ -425,6 +425,7 @@ const DEFAULT_APPS = [
   { id: "DEPARTMENTS", label: "Departments" },
   { id: "DEPARTMENTSADMIN", label: "Departments Admin" },
   { id: "BRANCHES", label: "Branches" },
+  { id: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
   { id: "SPAREPARTS", label: "Spare Part Lot" },
@@ -676,12 +677,22 @@ const DEFAULT_JOB_ROLE_NAV = [
     isGroup: false
   },
   {
+    id: "JRN012A",
+    jobRoleId: "JR001",
+    parentId: "JRN007",
+    appId: "BRANCHDEPTMAPPING",
+    label: "Branch – Department Mapping",
+    sequence: 6,
+    accessLevel: "A",
+    isGroup: false
+  },
+  {
     id: "JRN013",
     jobRoleId: "JR001",
     parentId: "JRN007",
     appId: "VENDORS",
     label: "Vendors",
-    sequence: 6,
+    sequence: 7,
     accessLevel: "A",
     isGroup: false
   },
@@ -691,7 +702,7 @@ const DEFAULT_JOB_ROLE_NAV = [
     parentId: "JRN007",
     appId: "PRODSERV",
     label: "Products / Services",
-    sequence: 7,
+    sequence: 8,
     accessLevel: "A",
     isGroup: false
   },

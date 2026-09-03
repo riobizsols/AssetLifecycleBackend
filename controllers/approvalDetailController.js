@@ -221,7 +221,7 @@ const approveMaintenanceAction = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const { empIntId, note, vendorId, maintenanceDate } = req.body;
+    const { empIntId, note, vendorId, maintenanceDate, technicianId } = req.body;
     const orgId = req.query.orgId || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
@@ -302,7 +302,7 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 5: Execute approval
-    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId, technicianId);
 
     // Step 5.5: Check if approval failed due to vendor status
     if (!result.success) {
@@ -358,6 +358,8 @@ const approveMaintenanceAction = async (req, res) => {
     res.json({
       success: true,
       message: result.message,
+      alreadyCompleted: !!result.alreadyCompleted,
+      workflowStatus: result.workflowStatus || null,
       timestamp: new Date().toISOString()
     });
 
@@ -1216,6 +1218,7 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       userId: approvalDetail.userId,
       userEmail: approvalDetail.userEmail,
       status: approvalDetail.status,
+      headerStatus: approvalDetail.headerStatus,
       sequence: approvalDetail.sequence,
       daysUntilDue: approvalDetail.daysUntilDue,
       daysUntilCutoff: approvalDetail.daysUntilCutoff,

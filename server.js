@@ -194,6 +194,7 @@ app.use("/api/job-role-navigation", jobRoleNavigationRoutes);
 app.use("/api/departments", departmentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
+app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));

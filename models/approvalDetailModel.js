@@ -455,7 +455,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null) => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null, technicianId = null) => {
   try {
     const userId = authenticatedUserId || await getUserIdByEmpIntId(empIntId);
     if (!userId) {
@@ -498,19 +498,17 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       }
     }
     
-    // Determine if maintenance is actually performed inhouse
+    // Determine if maintenance is inhouse from frequency (same logic as getApprovalDetailByWfamshId)
     let isInhouse = false;
     if (isWfamshId) {
       const maintByQuery = `
-        SELECT 
-          CASE 
-            WHEN COALESCE(wfh.vendor_id, a.service_vendor_id) IS NOT NULL
-                 AND COALESCE(wfh.vendor_id, a.service_vendor_id) != ''
-            THEN 'Vendor'
-            ELSE 'Inhouse'
+        SELECT
+          CASE
+            WHEN wfh.maint_type_id = 'MT005' THEN 'Vendor'
+            ELSE COALESCE(atmf.maintained_by, 'Inhouse')
           END as maintained_by
         FROM "tblWFAssetMaintSch_H" wfh
-        LEFT JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
+        LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
       `;
       const maintByRes = await getDb().query(maintByQuery, [assetOrWfamshId, orgId]);
@@ -554,10 +552,15 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       if (isWfamshId) {
         const completedCheck = await getDb().query(
           `SELECT status FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
-          [assetOrWfamshId, orgId]
+          [assetOrWfamshId, orgId],
         );
-        if (completedCheck.rows[0]?.status === 'CO') {
-          throw new Error('This maintenance approval has already been completed.');
+        const headerStatus = completedCheck.rows[0]?.status;
+        if (headerStatus === 'CO' || headerStatus === 'CA') {
+          return {
+            success: true,
+            alreadyCompleted: true,
+            message: 'This maintenance approval has already been completed.',
+          };
         }
       }
       throw new Error('No workflow found for this asset or user does not have required role');
@@ -575,6 +578,42 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     }
     
     console.log(`[APPROVAL] Using workflow step:`, { wfamsd_id: currentUserStep.wfamsd_id, status: currentUserStep.status, sequence: currentUserStep.sequence});
+
+    if (isInhouse) {
+      if (technicianId != null && String(technicianId).trim() !== '') {
+        await getDb().query(
+          `UPDATE "tblWFAssetMaintSch_H"
+           SET emp_int_id = $1,
+               changed_by = $2,
+               changed_on = NOW()::timestamp without time zone
+           WHERE wfamsh_id = $3 AND org_id = $4`,
+          [technicianId, userId.substring(0, 20), currentUserStep.wfamsh_id, orgId],
+        );
+      }
+
+      const headerEmpRes = await getDb().query(
+        `SELECT emp_int_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
+        [currentUserStep.wfamsh_id, orgId],
+      );
+      const headerEmpIntId = headerEmpRes.rows[0]?.emp_int_id;
+      if (!headerEmpIntId || String(headerEmpIntId).trim() === '') {
+        return {
+          success: false,
+          message: 'Technician assignment is required for in-house maintenance before approval.',
+        };
+      }
+
+      const empCheck = await getDb().query(
+        `SELECT emp_int_id FROM "tblEmployees" WHERE emp_int_id = $1 AND int_status = 1`,
+        [headerEmpIntId],
+      );
+      if (!empCheck.rows.length) {
+        return {
+          success: false,
+          message: 'Selected technician is invalid or inactive. Please choose a valid technician.',
+        };
+      }
+    }
     
     // Update vendor_id and maintenance date in header if provided
     // Always update if values are provided (even if same as current) to ensure changes are saved
@@ -613,8 +652,8 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     }
 
     // If a new vendor is explicitly chosen during approval,
-    // persist it to tblAssets.service_vendor_id for this asset.
-    if (vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
+    // persist it to tblAssets.service_vendor_id for this asset (vendor maintenance only).
+    if (!isInhouse && vendorId != null && vendorId !== undefined && String(vendorId).trim() !== '') {
       if (isWfamshId) {
         const updateAssetVendorByWorkflowQuery = `
           UPDATE "tblAssets" a
@@ -669,6 +708,26 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     );
     
     console.log(`Updated workflow step ${currentUserStep.wfamsd_id} status to UA, approved by user ${userId} (${empIntId}) - user_id remains NULL, tracked in history`);
+
+    // Other roles at the same sequence are not needed once one approver acts
+    await getDb().query(
+      `UPDATE "tblWFAssetMaintSch_D"
+       SET status = 'IN',
+           changed_by = $1,
+           changed_on = ARRAY[NOW()::timestamp without time zone]
+       WHERE wfamsh_id = $2
+         AND org_id = $3
+         AND sequence = $4
+         AND status = 'AP'
+         AND wfamsd_id != $5`,
+      [
+        userId.substring(0, 20),
+        currentUserStep.wfamsh_id,
+        orgId,
+        currentUserStep.sequence,
+        currentUserStep.wfamsd_id,
+      ],
+    );
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who approved
     const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
@@ -699,6 +758,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     const nextUserStep = allWorkflowSteps.find(
       w => w.sequence > currentUserStep.sequence && w.status === 'IN'
     );
+    let workflowStatus = null;
     if (nextUserStep) {
       // Update next user's status to AP (Approval Pending)
       await getDb().query(
@@ -755,11 +815,16 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       console.log(`Current user step wfamsh_id: ${currentUserStep.wfamsh_id}`);
       
       // Use helper function to check and update workflow status
-      const workflowStatus = await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
+      workflowStatus = await checkAndUpdateWorkflowStatus(currentUserStep.wfamsh_id, orgId);
       console.log(`Workflow status after approval: ${workflowStatus}`);
     }
     
-    return { success: true, message: 'Maintenance approved successfully' };
+    return {
+      success: true,
+      message: 'Maintenance approved successfully',
+      workflowStatus,
+      alreadyCompleted: workflowStatus === 'CO',
+    };
   } catch (error) {
     console.error('Error in approveMaintenance:', error);
     throw error;
@@ -1093,6 +1158,16 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
        );
        console.log('Workflow completed - Status set to CO');
 
+       // Clear any leftover pending detail rows so list/detail views do not show stale AP steps
+       await getDb().query(
+         `UPDATE "tblWFAssetMaintSch_D"
+          SET status = 'IN',
+              changed_by = 'system',
+              changed_on = ARRAY[NOW()::timestamp without time zone]
+          WHERE wfamsh_id = $1 AND org_id = $2 AND status = 'AP'`,
+         [wfamshId, orgId],
+       );
+
        // Update tblAssetBRDet status to CO if this workflow is for a breakdown
        try {
          // Try to find if any workflow step has a breakdown ID in notes
@@ -1394,13 +1469,10 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
      }
 
      query += ` AND (
-           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR')) OR 
-           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP', 'CO', 'CA', 'UR'))
+           (COALESCE(wfh.maint_type_id, '') = 'MT004' AND wfh.status IN ('IN', 'IP')) OR 
+           (COALESCE(wfh.maint_type_id, '') != 'MT004' AND wfh.status IN ('IN', 'IP'))
          )
-         AND (
-           wfd.status IN ('AP', 'UA', 'UR')
-           OR wfh.status IN ('UR', 'CO', 'CA')
-         )
+         AND wfd.status = 'AP'
          AND (wfh.maint_type_id IS NULL OR wfh.maint_type_id != 'MT005')
        ORDER BY wfh.wfamsh_id DESC, (CASE WHEN wfd.status = 'AP' THEN 0 ELSE 1 END), wfd.sequence DESC
        ) sub
@@ -3023,6 +3095,13 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         getActorRoleIdsByUserId(approvalDetails.map((d) => d.changed_by)),
       ]);
 
+      const headerCompleted = firstRecord.header_status === 'CO';
+      const approvedSequences = new Set(
+        approvalDetails
+          .filter((d) => d.detail_status === 'UA')
+          .map((d) => d.sequence),
+      );
+
       // Step 2+: Users in sequence order
       approvalDetails.forEach((detail, index) => {
         const stepNumber = index + 2; // Start from step 2
@@ -3048,9 +3127,15 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           stepTitle = 'Rejected';
           stepDescription = `Rejected by ${getStepActorDisplayName(detail, actorRoleMap, adminRoleName)}`;
         } else if (detail.detail_status === 'AP') {
-          stepStatus = 'current';
-          stepTitle = 'In Progress';
-          stepDescription = `Action pending by any ${detail.job_role_name}`;
+          if (headerCompleted || approvedSequences.has(detail.sequence)) {
+            stepStatus = 'approved';
+            stepTitle = 'Approved';
+            stepDescription = 'Approval completed for this stage';
+          } else {
+            stepStatus = 'current';
+            stepTitle = 'In Progress';
+            stepDescription = `Action pending by any ${detail.job_role_name}`;
+          }
         } else if (detail.detail_status === 'IN') {
           stepStatus = 'pending';
           stepTitle = 'Awaiting';
