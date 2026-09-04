@@ -1,15 +1,32 @@
 const { getChecklistByAssetType: getChecklistByAssetTypeModel, getChecklistByAssetId: getChecklistByAssetIdModel } = require('../models/checklistModel');
 
+function getRequestOrgId(req) {
+  try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const context = getEffectiveListContext(req);
+    return context.orgId || req.user?.org_id || req.query.orgId || null;
+  } catch {
+    return req.user?.org_id || req.query.orgId || null;
+  }
+}
+
 // Get checklist by asset type
 const getChecklistByAssetType = async (req, res) => {
   try {
     const { assetTypeId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = getRequestOrgId(req);
 
     if (!assetTypeId) {
       return res.status(400).json({
         success: false,
         message: 'Asset Type ID is required'
+      });
+    }
+
+    if (!orgId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Organization context is required'
       });
     }
 
@@ -46,7 +63,8 @@ const getChecklistByAssetType = async (req, res) => {
 const getChecklistByAssetId = async (req, res) => {
   try {
     const { assetId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const orgId = getRequestOrgId(req);
+    const wfamshId = req.query.wfamshId || req.query.wfamsh_id || null;
 
     if (!assetId) {
       return res.status(400).json({
@@ -55,17 +73,22 @@ const getChecklistByAssetId = async (req, res) => {
       });
     }
 
-    const checklistItems = await getChecklistByAssetIdModel(assetId, orgId);
+    if (!orgId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Organization context is required'
+      });
+    }
 
-    // Format the response for frontend
+    const checklistItems = await getChecklistByAssetIdModel(assetId, orgId, wfamshId);
+
+    // Same shape as asset-type checklist for shared ChecklistModal
     const formattedChecklist = checklistItems.map(item => ({
-      id: item.checklist_id,
+      id: item.at_main_checklist_id,
       assetTypeId: item.asset_type_id,
-      item: item.checklist_item,
-      sequence: item.sequence,
-      isMandatory: item.is_mandatory === 'Y' || item.is_mandatory === true,
-      status: item.status,
-      createdOn: item.created_on
+      item: item.text,
+      atMainFreqId: item.at_main_freq_id,
+      orgId: item.org_id
     }));
 
     res.json({
@@ -89,4 +112,4 @@ const getChecklistByAssetId = async (req, res) => {
 module.exports = {
   getChecklistByAssetType,
   getChecklistByAssetId
-}; 
+};

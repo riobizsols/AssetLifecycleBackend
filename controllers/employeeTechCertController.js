@@ -5,6 +5,7 @@ const {
   getPresignedDownloadUrl,
   resolveLocalPath,
 } = require('../utils/documentStorage');
+const { runWithDb, tryGetDb } = require('../utils/dbContext');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
@@ -12,6 +13,20 @@ const fs = require('fs');
 
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
+
+/** Multer can break AsyncLocalStorage; re-bind tenant pool from req before handlers run. */
+function withTenantDb(req, res, next) {
+  if (tryGetDb()) return next();
+  const pool = req.db || req.tenantPool;
+  if (!pool) {
+    return res.status(503).json({
+      success: false,
+      message: 'Tenant database context is required',
+      error: 'TENANT_DB_CONTEXT_REQUIRED',
+    });
+  }
+  return runWithDb(pool, () => next());
+}
 
 const getEmployeeCertificates = async (req, res) => {
   try {
@@ -44,14 +59,23 @@ const getEmployeeCertificates = async (req, res) => {
 const createEmployeeCertificate = [
   (req, res, next) => {
     if (req.is('multipart/form-data')) {
-      return upload.single('file')(req, res, next);
+      return upload.single('file')(req, res, (err) => {
+        if (err) return next(err);
+        return withTenantDb(req, res, next);
+      });
     }
-    return next();
+    return withTenantDb(req, res, next);
   },
   async (req, res) => {
     try {
       const empIntId = req.body?.emp_int_id || req.user?.emp_int_id;
-      const orgId = req.user?.org_id;
+      let orgId = req.user?.org_id;
+      try {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        orgId = getEffectiveListContext(req).orgId || orgId;
+      } catch (_) {
+        /* keep req.user.org_id */
+      }
       const createdBy = req.user?.user_id;
       const { tc_id, certificate_date, certificate_expiry } = req.body || {};
 

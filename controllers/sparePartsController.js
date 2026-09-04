@@ -743,7 +743,13 @@ const getMaintenanceList = async (req, res) => {
 
 const getMaintenanceDetail = async (req, res) => {
   try {
-    const org_id = req.user.org_id;
+    let org_id = req.user.org_id;
+    try {
+      const { getEffectiveListContext } = require('../utils/acmAccess');
+      org_id = getEffectiveListContext(req).orgId || org_id;
+    } catch (_) {
+      /* keep req.user.org_id */
+    }
     const branch_id = req.user.branch_id || null;
     const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
     const { ams_id } = req.params;
@@ -761,6 +767,30 @@ const getMaintenanceDetail = async (req, res) => {
   } catch (error) {
     console.error('Error fetching spare part maintenance detail:', error);
     return res.status(500).json({ success: false, error: 'Failed to fetch maintenance detail' });
+  }
+};
+
+const getRequiredSpareCategories = async (req, res) => {
+  try {
+    let org_id = req.user.org_id;
+    try {
+      const { getEffectiveListContext } = require('../utils/acmAccess');
+      org_id = getEffectiveListContext(req).orgId || org_id;
+    } catch (_) {
+      /* keep req.user.org_id */
+    }
+    const { ams_id } = req.params;
+    if (!ams_id) {
+      return res.status(400).json({ success: false, error: 'Maintenance schedule is required' });
+    }
+    const rows = await model.getChecklistRequiredSpareCategories(ams_id, org_id);
+    return res.status(200).json({ success: true, data: rows || [] });
+  } catch (error) {
+    console.error('Error fetching required spare categories:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch required spare categories',
+    });
   }
 };
 
@@ -1225,6 +1255,7 @@ module.exports = {
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
+  getRequiredSpareCategories,
   getCategoriesByAssetType,
   createIssueRequests,
   getIssueApprovals,
