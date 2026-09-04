@@ -704,12 +704,26 @@ const saveInspectionRecord = async (req, res) => {
     // Prepare list of records to save
     let recordsToSave = [];
     if (Array.isArray(records) && records.length > 0) {
-      // Use the frequency id (aatif_id) as the link (aatisch_id) to satisfy DB FK
+      // aatisch_id stays as frequency id (FK); ais_id scopes the upsert per schedule
       const linkId = insp.aatif_id || null;
-      recordsToSave = records.map(r => ({ aatisch_id: linkId, insp_check_id: r.insp_check_id, recorded_value: r.recorded_value, created_by: callerUserId, org_id }));
+      recordsToSave = records.map(r => ({
+        aatisch_id: linkId,
+        ais_id,
+        insp_check_id: r.insp_check_id,
+        recorded_value: r.recorded_value,
+        created_by: callerUserId,
+        org_id,
+      }));
     } else if (insp_check_id && (recorded_value !== undefined)) {
       const linkId = insp.aatif_id || null;
-      recordsToSave = [{ aatisch_id: linkId, insp_check_id, recorded_value, created_by: callerUserId, org_id }];
+      recordsToSave = [{
+        aatisch_id: linkId,
+        ais_id,
+        insp_check_id,
+        recorded_value,
+        created_by: callerUserId,
+        org_id,
+      }];
     } else {
       // nothing to save
       recordsToSave = [];
