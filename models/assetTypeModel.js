@@ -336,8 +336,9 @@ const getAssetTypesByAssignmentType = async (assignment_type) => {
     return await dbPool.query(query, [assignment_type]);
 };
 
-const getAssetTypesByGroupRequired = async () => {
-    const query = `
+const getAssetTypesByGroupRequired = async (org_id = null) => {
+    const params = [];
+    let query = `
         SELECT 
             org_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
@@ -346,11 +347,17 @@ const getAssetTypesByGroupRequired = async () => {
         FROM "tblAssetTypes"
         WHERE group_required = true
         AND int_status = 1
-        ORDER BY text
     `;
-    
+
+    if (org_id) {
+      params.push(org_id);
+      query += ` AND org_id = $${params.length}`;
+    }
+
+    query += ` ORDER BY text`;
+
     const dbPool = getDb();
-    return await dbPool.query(query);
+    return await dbPool.query(query, params);
 };
 
 const getAssetTypesByMaintRequired = async (org_id = null, scope = {}) => {
