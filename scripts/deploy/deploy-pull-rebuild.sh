@@ -44,26 +44,20 @@ MINIO_PORT_VALUE="${MINIO_PORT_VALUE:-9000}"
 MINIO_USE_SSL_VALUE="${MINIO_USE_SSL_VALUE:-false}"
 MINIO_ACCESS_KEY_VALUE="${MINIO_ACCESS_KEY_VALUE:-minioadmin}"
 MINIO_SECRET_KEY_VALUE="${MINIO_SECRET_KEY_VALUE:-minioadmin123}"
-# Separate buckets: main vs tenant vs Bannari (override with MINIO_BUCKET_VALUE)
+# Separate buckets: main vs tenant (override with MINIO_BUCKET_VALUE)
 if [[ -z "${MINIO_BUCKET_VALUE:-}" ]]; then
   if [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]]; then
     MINIO_BUCKET_VALUE="alm-tenant"
-  elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]]; then
-    MINIO_BUCKET_VALUE="alm-bannari"
   else
     MINIO_BUCKET_VALUE="alm-main"
   fi
 fi
 POSTGRES_CONTAINER="${POSTGRES_CONTAINER:-alm_db}"
 REDIS_CONTAINER="${REDIS_CONTAINER:-alm_redis}"
-BANNARI_DB_NAME="${BANNARI_DB_NAME:-bannari_db}"
-BANNARI_PUBLIC_URL="${BANNARI_PUBLIC_URL:-https://bannari.rioassetmanagement.net}"
-BANNARI_APP_PORT="${BANNARI_APP_PORT:-5001}"
-BANNARI_REDIS_URL="${BANNARI_REDIS_URL:-redis://alm_redis:6379/0}"
-BANNARI_RESERVED_SUBDOMAINS="${BANNARI_RESERVED_SUBDOMAINS:-web,www,api,pressanaorg,bannari}"
-FORCE_COMPOSE_RECREATE="${FORCE_COMPOSE_RECREATE:-1}"
-SKIP_FRONTEND_IF_UNCHANGED="${SKIP_FRONTEND_IF_UNCHANGED:-1}"
-LAST_GIT_PULL_CHANGED=0
+REDIS_COMPOSE_FILE="${REDIS_COMPOSE_FILE:-docker-compose.redis.yml}"
+PGBOUNCER_CONTAINER="${PGBOUNCER_CONTAINER:-alm_pgbouncer}"
+PGBOUNCER_COMPOSE_FILE="${PGBOUNCER_COMPOSE_FILE:-docker-compose.pgbouncer.yml}"
+ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
 
@@ -106,6 +100,18 @@ compose_v1_remove_container_if_exists() {
   done < <(docker ps -aq --filter "name=${cname}" 2>/dev/null)
 }
 
+# Compose v2 does not hit the 1.29 recreate bug, but fixed container_name values
+# (alm-main-backend / alm-main-frontend) still conflict with containers left
+# from an older compose project (e.g. assetlifecyclebackend). Always remove
+# by exact name before force-recreate.
+remove_named_container_if_exists() {
+  local cname="$1"
+  if docker inspect "$cname" >/dev/null 2>&1; then
+    log "Removing existing container ${cname} before recreate..."
+    docker rm -f "$cname" || true
+  fi
+}
+
 repo_has_local_changes() {
   local dir="$1"
   [[ -n "$(cd "$dir" && git status --porcelain 2>/dev/null)" ]]
@@ -115,7 +121,7 @@ repo_has_local_changes() {
 # stash/pull can proceed; ensure_minio_env_files re-applies MinIO values later.
 clear_env_merge_conflicts() {
   local label="${1:-repo}"
-  local unmerged
+  local unmerged leftover
   unmerged="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
   if [[ -z "$unmerged" ]]; then
     return 0
@@ -128,22 +134,84 @@ clear_env_merge_conflicts() {
   [[ -f .env ]] && cp -a .env ".env.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
   [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.$(date -u +%Y%m%d%H%M%S)" 2>/dev/null || true
 
-  # Prefer committed/HEAD versions; fall back to deleting index conflict entries
-  git checkout HEAD -- .env .env.production 2>/dev/null || true
-  git add -- .env .env.production 2>/dev/null || true
+  # Prefer keeping on-disk server env; only use HEAD if file missing
+  if [[ ! -f .env.production ]]; then
+    git checkout HEAD -- .env.production 2>/dev/null || true
+  fi
+  if [[ ! -f .env ]]; then
+    git checkout HEAD -- .env 2>/dev/null || true
+  fi
+  # Clear conflict state in index without overwriting restored files if present
+  git add -u -- .env .env.production 2>/dev/null || true
+  git reset HEAD -- .env .env.production 2>/dev/null || true
 
   # If still unmerged (file only existed on one side), reset the index entry
   if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
     git reset HEAD -- .env .env.production 2>/dev/null || true
-    git checkout -- .env .env.production 2>/dev/null || true
+    git checkout --ours -- .env .env.production 2>/dev/null || true
     git add -- .env .env.production 2>/dev/null || true
   fi
 
   if git diff --name-only --diff-filter=U 2>/dev/null | grep -qE '^\.env'; then
-    die "[$label] Could not clear .env merge conflicts. Run: git checkout HEAD -- .env .env.production && git add .env .env.production"
+    die "[$label] Could not clear .env merge conflicts. Restore from .env.production.bak.* then: git reset HEAD -- .env .env.production"
   fi
 
   log "[$label] Env merge conflicts cleared (backups: .env.bak.* if present)"
+
+  # Stash pop can also conflict on code (e.g. docker-compose.pgbouncer.yml).
+  # Take the just-pulled HEAD for those paths so deploy is not stuck mid-merge.
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    log "[$label] Taking HEAD for remaining unmerged files (local/stash copies discarded for those paths):"
+    printf '%s\n' "$leftover"
+    while IFS= read -r f; do
+      [[ -z "$f" ]] && continue
+      git checkout HEAD -- "$f" 2>/dev/null || true
+      git add -- "$f" 2>/dev/null || true
+    done <<< "$leftover"
+  fi
+
+  leftover="$(git diff --name-only --diff-filter=U 2>/dev/null || true)"
+  if [[ -n "$leftover" ]]; then
+    die "[$label] Still unmerged. On the server run:
+  git checkout HEAD -- $leftover
+  git add $leftover"
+  fi
+}
+
+# Backup server .env files, reset tracked copies so git pull can proceed,
+# then restore the backup after pull (server secrets win over remote template).
+preserve_env_across_pull() {
+  local label="${1:-repo}"
+  local ts
+  ts="$(date -u +%Y%m%d%H%M%S)"
+  ENV_PULL_BACKUP_DIR=""
+
+  if [[ ! -f .env && ! -f .env.production ]]; then
+    return 0
+  fi
+
+  ENV_PULL_BACKUP_DIR=".env-pull-backup.${ts}"
+  mkdir -p "$ENV_PULL_BACKUP_DIR"
+  [[ -f .env ]] && cp -a .env "$ENV_PULL_BACKUP_DIR/.env"
+  [[ -f .env.production ]] && cp -a .env.production "$ENV_PULL_BACKUP_DIR/.env.production"
+  log "[$label] Backed up env files → ${ENV_PULL_BACKUP_DIR}/"
+
+  # Drop local modifications so pull is not blocked (excludes from stash leave these dirty)
+  git checkout HEAD -- .env .env.production 2>/dev/null || true
+}
+
+restore_env_after_pull() {
+  local label="${1:-repo}"
+  [[ -n "${ENV_PULL_BACKUP_DIR:-}" && -d "$ENV_PULL_BACKUP_DIR" ]] || return 0
+
+  log "[$label] Restoring server env files from ${ENV_PULL_BACKUP_DIR}/"
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env" .env
+  [[ -f "$ENV_PULL_BACKUP_DIR/.env.production" ]] && cp -a "$ENV_PULL_BACKUP_DIR/.env.production" .env.production
+  # Keep one dated bak alongside; remove temp dir to avoid clutter growth
+  [[ -f .env.production ]] && cp -a .env.production ".env.production.bak.${ENV_PULL_BACKUP_DIR##*.}" 2>/dev/null || true
+  rm -rf "$ENV_PULL_BACKUP_DIR"
+  ENV_PULL_BACKUP_DIR=""
 }
 
 # Backup server .env files, reset tracked copies so git pull can proceed,
@@ -185,16 +253,11 @@ git_pull_with_stash() {
   local dir="$1"
   local label="${2:-$(basename "$dir")}"
   [[ -d "$dir/.git" ]] || die "Not a git repo: $dir"
-  LAST_GIT_PULL_CHANGED=0
 
   if [[ "$SKIP_GIT_PULL" == "1" ]]; then
     log "SKIP_GIT_PULL=1 — skipping git pull in $label ($dir)"
-    LAST_GIT_PULL_CHANGED=1
     return
   fi
-
-  local before_rev after_rev
-  before_rev="$(git -C "$dir" rev-parse HEAD)"
 
   (
     cd "$dir" || exit 1
@@ -210,13 +273,12 @@ git_pull_with_stash() {
     if [[ "$GIT_STASH" == "1" ]] && repo_has_local_changes "$dir"; then
       log "[$label] Local changes detected — stashing (including untracked)..."
       # Never stash .env* — they are server secrets and cause recurring merge conflicts
-      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . \
-        ':(exclude).env' ':(exclude).env.production' \
-        ':(exclude).env-pull-backup.*' ':(exclude).env.production.bak.*'; then
+      if ! git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production' ':(exclude).env.*'; then
         log "[$label] WARN: pathspec stash failed — trying full stash after resetting env files"
         clear_env_merge_conflicts "$label"
-        git checkout HEAD -- .env .env.production 2>/dev/null || true
-        git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        # Do NOT checkout HEAD for env here — preserve_env already backed them up;
+        # restore after this failed-path stash as well.
+        git stash push -u -m "${STASH_MESSAGE_PREFIX} $(date -u +%Y-%m-%dT%H:%M:%SZ)" -- . ':(exclude).env' ':(exclude).env.production'
       fi
       stashed=1
     elif repo_has_local_changes "$dir"; then
@@ -233,49 +295,28 @@ git_pull_with_stash() {
     if [[ "$stashed" == "1" ]]; then
       log "[$label] git stash pop — restoring local changes..."
       if ! git stash pop; then
-        log "[$label] WARN: stash pop had conflicts — auto-resolving .env / .env.production"
+        log "[$label] WARN: stash pop had conflicts — auto-resolving without wiping restored .env*"
+        # Backup current (restored) env again before conflict cleaner touches them
+        local conflict_bak=".env-conflict-bak.$(date -u +%Y%m%d%H%M%S)"
+        mkdir -p "$conflict_bak"
+        [[ -f .env ]] && cp -a .env "$conflict_bak/.env"
+        [[ -f .env.production ]] && cp -a .env.production "$conflict_bak/.env.production"
         clear_env_merge_conflicts "$label"
-        log "[$label] Env conflict auto-resolved (MinIO settings will be re-applied next)"
-        log "[$label] Remaining stash (if any): git stash list"
+        [[ -f "$conflict_bak/.env" ]] && cp -a "$conflict_bak/.env" .env
+        [[ -f "$conflict_bak/.env.production" ]] && cp -a "$conflict_bak/.env.production" .env.production
+        rm -rf "$conflict_bak"
+        log "[$label] Env restored after conflict resolve (MinIO settings will be re-applied next)"
+        if git stash list | head -1 | grep -q "$STASH_MESSAGE_PREFIX"; then
+          log "[$label] Dropping leftover auto-stash after conflict resolve"
+          git stash drop || true
+        else
+          log "[$label] Remaining stash (if any): git stash list"
+        fi
       else
         log "[$label] Local changes restored after pull"
       fi
     fi
   )
-
-  after_rev="$(git -C "$dir" rev-parse HEAD)"
-  if [[ "$before_rev" != "$after_rev" ]]; then
-    LAST_GIT_PULL_CHANGED=1
-    log "[$label] Git updated ${before_rev:0:7} → ${after_rev:0:7}"
-  else
-    LAST_GIT_PULL_CHANGED=0
-    log "[$label] Git already up to date (${after_rev:0:7})"
-  fi
-}
-
-frontend_http_ok() {
-  curl -sS -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${FRONTEND_HOST_PORT}/" 2>/dev/null | grep -qE '^[23]'
-}
-
-should_skip_frontend_compose() {
-  if [[ "$SKIP_FRONTEND_IF_UNCHANGED" != "1" ]]; then
-    return 1
-  fi
-  if [[ "$LAST_GIT_PULL_CHANGED" == "1" ]]; then
-    log "[frontend] Code changed (or --rebuild) — Docker build required"
-    return 1
-  fi
-  if ! container_is_running "$FRONTEND_CONTAINER_NAME"; then
-    log "[frontend] Container not running — Docker build required"
-    return 1
-  fi
-  if ! frontend_http_ok; then
-    log "[frontend] HTTP not healthy — Docker build required"
-    return 1
-  fi
-  log "[frontend] Skipping Vite/Docker rebuild (git unchanged, ${FRONTEND_CONTAINER_NAME} already healthy on :${FRONTEND_HOST_PORT})"
-  log "[frontend] To force a rebuild: ./deploy-docker.sh --rebuild"
-  return 0
 }
 
 container_is_running() {
@@ -320,82 +361,195 @@ verify_container_health() {
   fi
 }
 
-is_bannari_stack() {
-  [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]] \
-    || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-bannari-frontend" ]] \
-    || [[ "${COMPOSE_PROJECT_NAME:-}" == "bannari-alm" ]]
-}
-
 ensure_alm_shared_network() {
   if [[ "$ENSURE_ALM_SHARED" != "1" ]]; then
     log "ENSURE_ALM_SHARED=0 — skipping shared Docker network setup"
     return
   fi
-  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER} / ${REDIS_CONTAINER}..."
+  log "Ensuring Docker network ${ALM_SHARED_NETWORK} and attaching ${POSTGRES_CONTAINER}..."
   docker network create "$ALM_SHARED_NETWORK" 2>/dev/null || true
-  local c
-  for c in "$POSTGRES_CONTAINER" "$REDIS_CONTAINER"; do
-    if docker inspect "$c" >/dev/null 2>&1; then
-      docker network connect "$ALM_SHARED_NETWORK" "$c" 2>/dev/null \
-        || log "Note: ${c} likely already on ${ALM_SHARED_NETWORK} (OK)."
-    else
-      log "WARN: container ${c} not found — start it or set POSTGRES_CONTAINER / REDIS_CONTAINER."
-    fi
-  done
-}
-
-upsert_env_kv() {
-  local file="$1"
-  local key="$2"
-  local value="$3"
-  [[ -f "$file" ]] || touch "$file"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i.bak "s|^${key}=.*|${key}=${value}|" "$file" && rm -f "${file}.bak"
+  if docker inspect "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+    docker network connect "$ALM_SHARED_NETWORK" "$POSTGRES_CONTAINER" 2>/dev/null \
+      || log "Note: ${POSTGRES_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
   else
-    printf '\n%s=%s\n' "$key" "$value" >> "$file"
+    log "WARN: container ${POSTGRES_CONTAINER} not found — fix POSTGRES_CONTAINER or start Postgres first."
   fi
 }
 
-# Keep user/password/host; only rewrite the database name to Bannari's database.
-rewrite_database_url_dbname() {
+# Shared Redis (alm_redis) is managed separately from backend deploy to avoid
+# container name conflicts when an older compose project already created it.
+ensure_redis() {
+  if ! docker inspect "$REDIS_CONTAINER" >/dev/null 2>&1; then
+    if [[ ! -f "${BACKEND_DIR}/${REDIS_COMPOSE_FILE}" ]]; then
+      log "WARN: Redis ${REDIS_CONTAINER} not found and ${REDIS_COMPOSE_FILE} missing — start it from the main ALM stack (shared alm_redis)."
+      return
+    fi
+    log "Redis container ${REDIS_CONTAINER} not found — creating from ${REDIS_COMPOSE_FILE}..."
+    ensure_alm_shared_network
+    local cmd
+    cmd="$(detect_compose)"
+    ( cd "$BACKEND_DIR" && $cmd -f "$REDIS_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$REDIS_CONTAINER"; then
+    log "Starting stopped Redis container ${REDIS_CONTAINER}..."
+    docker start "$REDIS_CONTAINER"
+  else
+    log "Redis ${REDIS_CONTAINER} already running — reusing existing container"
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$REDIS_CONTAINER" 2>/dev/null \
+    || log "Note: ${REDIS_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+}
+
+run_node() {
+  if command -v node >/dev/null 2>&1; then
+    ( cd "$BACKEND_DIR" && node "$@" )
+    return
+  fi
+  log "Host has no node — running via docker node:20-bookworm-slim"
+  docker run --rm \
+    -v "$BACKEND_DIR":/app \
+    -w /app \
+    node:20-bookworm-slim \
+    node "$@"
+}
+
+ensure_pgbouncer() {
+  if [[ "$ENSURE_PGBOUNCER" != "1" ]]; then
+    log "ENSURE_PGBOUNCER=0 — skipping PgBouncer setup"
+    return
+  fi
+
+  ensure_alm_shared_network
+  log "Rendering PgBouncer config from .env.production..."
+  run_node scripts/db/render-pgbouncer-config.js
+
+  local cmd
+  cmd="$(detect_compose)"
+
+  if ! docker inspect "$PGBOUNCER_CONTAINER" >/dev/null 2>&1; then
+    log "PgBouncer container ${PGBOUNCER_CONTAINER} not found — creating from ${PGBOUNCER_COMPOSE_FILE}..."
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  elif ! container_is_running "$PGBOUNCER_CONTAINER"; then
+    log "Starting stopped PgBouncer container ${PGBOUNCER_CONTAINER}..."
+    docker start "$PGBOUNCER_CONTAINER"
+  else
+    log "PgBouncer ${PGBOUNCER_CONTAINER} already running — applying config refresh"
+    ( cd "$BACKEND_DIR" && $cmd -f "$PGBOUNCER_COMPOSE_FILE" up -d )
+  fi
+
+  docker network connect "$ALM_SHARED_NETWORK" "$PGBOUNCER_CONTAINER" 2>/dev/null \
+    || log "Note: ${PGBOUNCER_CONTAINER} likely already on ${ALM_SHARED_NETWORK} (OK)."
+}
+
+# Return 0 if key is missing or has an empty value in file (after stripping quotes).
+env_key_is_empty() {
   local file="$1"
-  local dbname="$2"
-  [[ -f "$file" ]] || return 0
-  grep -qE '^DATABASE_URL=' "$file" 2>/dev/null || return 0
-  sed -i.bak -E "s|^(DATABASE_URL=postgresql://[^[:space:]/]+/)[^/?#]+|\1${dbname}|" "$file" && rm -f "${file}.bak"
+  local key="$2"
+  local line val
+  line="$(grep -E "^${key}=" "$file" 2>/dev/null | tail -1 || true)"
+  if [[ -z "$line" ]]; then
+    return 0
+  fi
+  val="${line#*=}"
+  if [[ "$val" == \"*\" ]]; then
+    val="${val:1:${#val}-2}"
+  elif [[ "$val" == \'*\' ]]; then
+    val="${val:1:${#val}-2}"
+  fi
+  [[ -z "$val" ]]
 }
 
-# Bannari stack must never inherit another ALM stack's database, port, or domain.
-ensure_bannari_backend_env() {
+# Permanent fix: .env.production is what Docker uses — fill any missing/empty keys
+# from .env (server secrets often live only in .env after manual nano edits).
+# Dies if required keys are still missing after sync.
+ensure_compose_env_complete() {
   local dir="${1:-$BACKEND_DIR}"
-  is_bannari_stack || return 0
+  local src="${dir}/.env"
+  local dst="${dir}/.env.production"
+  local example="${dir}/.env.production.example"
+  local filled=0
+  local line key
+  local -a missing=()
 
-  local f
-  for f in "${dir}/.env.production" "${dir}/.env"; do
-    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
-    log "Ensuring Bannari backend env in $(basename "$f") (db=${BANNARI_DB_NAME}, port=${BANNARI_APP_PORT})"
-    upsert_env_kv "$f" "PORT" "$BANNARI_APP_PORT"
-    upsert_env_kv "$f" "FRONTEND_URL" "$BANNARI_PUBLIC_URL"
-    upsert_env_kv "$f" "BACKEND_URL" "$BANNARI_PUBLIC_URL"
-    upsert_env_kv "$f" "API_BASE_URL" "${BANNARI_PUBLIC_URL}/api"
-    upsert_env_kv "$f" "RESERVED_SUBDOMAINS" "$BANNARI_RESERVED_SUBDOMAINS"
-    upsert_env_kv "$f" "REDIS_URL" "$BANNARI_REDIS_URL"
-    upsert_env_kv "$f" "CACHE_ENABLED" "true"
-    rewrite_database_url_dbname "$f" "$BANNARI_DB_NAME"
+  # Compose lists both files — ensure .env exists so `docker compose` does not fail
+  if [[ ! -f "$src" ]]; then
+    touch "$src"
+    log "[env] Created empty .env (compose env_file requires the path)"
+  fi
+
+  if [[ ! -f "$dst" ]]; then
+    if [[ -f "$src" ]] && grep -qE '^[A-Za-z_][A-Za-z0-9_]*=' "$src" 2>/dev/null; then
+      cp -a "$src" "$dst"
+      log "[env] Created .env.production from .env"
+    elif [[ -f "$example" ]]; then
+      cp -a "$example" "$dst"
+      log "[env] Created .env.production from .env.production.example — fill real secrets"
+    else
+      die "[env] Missing .env.production (and no .env / example to copy)"
+    fi
+  fi
+
+  if [[ -f "$src" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ "$line" =~ ^[[:space:]]*# ]] && continue
+      [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+      [[ "$line" != *=* ]] && continue
+      key="${line%%=*}"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+      if env_key_is_empty "$dst" "$key"; then
+        # Drop empty/placeholder KEY= lines, then append the full source line
+        if grep -qE "^${key}=" "$dst" 2>/dev/null; then
+          sed -i.bak "/^${key}=/d" "$dst" && rm -f "${dst}.bak"
+        fi
+        printf '%s\n' "$line" >> "$dst"
+        filled=$((filled + 1))
+        log "[env] Filled ${key} into .env.production from .env"
+      fi
+    done < "$src"
+    if [[ "$filled" -gt 0 ]]; then
+      log "[env] Synced ${filled} missing/empty key(s) .env → .env.production"
+    else
+      log "[env] .env.production already has all keys present in .env"
+    fi
+  fi
+
+  # Strip empty FIREBASE_/DATABASE_ placeholders so earlier .env can win in compose
+  # (compose: later file wins — empty .env.production must not blank out .env)
+  local empty_stripped=0
+  local ek
+  for ek in \
+    DATABASE_URL TENANT_DATABASE_URL GENERIC_URL JWT_SECRET \
+    FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY_ID FIREBASE_PRIVATE_KEY \
+    FIREBASE_CLIENT_EMAIL FIREBASE_CLIENT_ID \
+    ZOHO_CLIENT_ID ZOHO_CLIENT_SECRET EMAIL_USER EMAIL_PASS \
+    ACCESS_REQUEST_OPS_PASSWORD
+  do
+    if grep -qE "^${ek}=" "$dst" 2>/dev/null && env_key_is_empty "$dst" "$ek"; then
+      sed -i.bak "/^${ek}=/d" "$dst" && rm -f "${dst}.bak"
+      empty_stripped=$((empty_stripped + 1))
+      log "[env] Removed empty ${ek}= from .env.production (so .env can supply it)"
+    fi
   done
-}
+  [[ "$empty_stripped" -gt 0 ]] && log "[env] Stripped ${empty_stripped} empty override(s) from .env.production"
 
-ensure_bannari_frontend_env() {
-  local dir="${1:-$FRONTEND_DIR}"
-  is_bannari_stack || return 0
+  for key in DATABASE_URL JWT_SECRET; do
+    if env_key_is_empty "$dst" "$key" && env_key_is_empty "$src" "$key"; then
+      missing+=("$key")
+    fi
+  done
+  if [[ "${BACKEND_CONTAINER_NAME:-}" == "alm-tenant-backend" ]]; then
+    if env_key_is_empty "$dst" "TENANT_DATABASE_URL" && env_key_is_empty "$src" "TENANT_DATABASE_URL"; then
+      missing+=("TENANT_DATABASE_URL")
+    fi
+  fi
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    die "[env] Required keys missing in both .env and .env.production: ${missing[*]}"
+  fi
 
-  local f
-  for f in "${dir}/.env.production" "${dir}/.env"; do
-    [[ -f "$f" || "$f" == "${dir}/.env.production" ]] || continue
-    log "Ensuring Bannari frontend env in $(basename "$f")"
-    upsert_env_kv "$f" "VITE_API_BASE_URL" "${BANNARI_PUBLIC_URL}/api"
-    upsert_env_kv "$f" "VITE_FRONTEND_URL" "$BANNARI_PUBLIC_URL"
-    upsert_env_kv "$f" "VITE_RESERVED_SUBDOMAINS" "$BANNARI_RESERVED_SUBDOMAINS"
+  for key in FIREBASE_PROJECT_ID FIREBASE_PRIVATE_KEY FIREBASE_CLIENT_EMAIL; do
+    if env_key_is_empty "$dst" "$key" && env_key_is_empty "$src" "$key"; then
+      log "WARN: [env] ${key} unset — FCM push notifications will be disabled"
+    fi
   done
 }
 
@@ -432,6 +586,22 @@ ensure_minio_env_files() {
     upsert_minio_kv "$f" "MINIO_ACCESS_KEY" "$MINIO_ACCESS_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_SECRET_KEY" "$MINIO_SECRET_KEY_VALUE"
     upsert_minio_kv "$f" "MINIO_BUCKET" "$MINIO_BUCKET_VALUE"
+    # Tenant deploy: pin PORT/Redis/SSL so main .env values never override stack (5001 / alm_db no TLS)
+    if [[ -n "${ENSURE_BACKEND_PORT:-}" ]]; then
+      upsert_minio_kv "$f" "PORT" "$ENSURE_BACKEND_PORT"
+      log "Ensured PORT=${ENSURE_BACKEND_PORT} in $(basename "$f")"
+    fi
+    if [[ -n "${ENSURE_REDIS_URL:-}" ]]; then
+      upsert_minio_kv "$f" "REDIS_URL" "$ENSURE_REDIS_URL"
+    fi
+    if [[ -n "${ENSURE_DB_SSL:-}" ]]; then
+      upsert_minio_kv "$f" "DB_SSL" "$ENSURE_DB_SSL"
+      log "Ensured DB_SSL=${ENSURE_DB_SSL} in $(basename "$f")"
+    fi
+    if [[ -n "${ENSURE_DATABASE_SSL:-}" ]]; then
+      upsert_minio_kv "$f" "DATABASE_SSL" "$ENSURE_DATABASE_SSL"
+      log "Ensured DATABASE_SSL=${ENSURE_DATABASE_SSL} in $(basename "$f")"
+    fi
     # Strip leftover conflict markers if any
     sed -i.bak '/^<<<<<<< /d;/^=======/d;/^>>>>>>> /d' "$f" 2>/dev/null && rm -f "${f}.bak" || true
   done
@@ -529,33 +699,26 @@ ensure_minio_bucket() {
 compose_up() {
   local dir="$1"
   local label="$2"
+  local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
-  # Isolate stacks that share the same directory basename (AssetLifecycleBackend)
-  if [[ -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
-    if [[ "${BACKEND_CONTAINER_NAME}" == "alm-bannari-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-bannari-frontend" ]]; then
-      export COMPOSE_PROJECT_NAME="bannari-alm"
-    elif [[ "${BACKEND_CONTAINER_NAME}" == "alm-tenant-backend" ]] || [[ "${FRONTEND_CONTAINER_NAME}" == "alm-tenant-web" ]]; then
-      export COMPOSE_PROJECT_NAME="tenant-alm"
-    fi
+  if [[ -n "$service" ]]; then
+    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
+    ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
+  else
+    log "Compose ($label): cd $dir && $cmd up -d --build"
+    ( cd "$dir" && $cmd up -d --build )
   fi
-  export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
-  local extra=()
-  local env_file_args=()
-  if [[ -f "$dir/.env.production" ]]; then
-    env_file_args+=(--env-file .env.production)
-  fi
-  if [[ "$FORCE_COMPOSE_RECREATE" == "1" ]]; then
-    extra+=(--force-recreate)
-  fi
-  log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-default} $cmd ${env_file_args[*]} up -d --build ${extra[*]}"
-  ( cd "$dir" && $cmd "${env_file_args[@]}" up -d --build "${extra[@]}" )
-  ( cd "$dir" && $cmd "${env_file_args[@]}" ps -a )
+  ( cd "$dir" && $cmd ps -a )
 }
 
 main() {
   local compose_cmd
+  local script_self script_hash_start script_hash_now
   compose_cmd="$(detect_compose)"
+  script_self="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  script_hash_start="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+
   log "Using: $(compose_version_line "$compose_cmd")"
   log "ALM_ROOT=$ALM_ROOT"
   log "BACKEND_DIR=$BACKEND_DIR"
@@ -565,17 +728,47 @@ main() {
     die "Set only one of BACKEND_ONLY=1 or FRONTEND_ONLY=1"
   fi
 
+  # Main stack owns alm_pgbouncer. Tenant (and any non-main backend) defaults off.
+  if [[ "$BACKEND_CONTAINER_NAME" == "alm-main-backend" ]]; then
+    if [[ "$FRONTEND_ONLY" != "1" ]]; then
+      ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-1}"
+    else
+      ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-0}"
+    fi
+  else
+    ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-0}"
+  fi
+
+
   if [[ "$FRONTEND_ONLY" != "1" ]]; then
     [[ -d "$BACKEND_DIR" ]] || die "Backend directory missing: $BACKEND_DIR"
-    git_pull_with_stash "$BACKEND_DIR" "backend"
-    ensure_minio_env_files "$BACKEND_DIR"
-    ensure_bannari_backend_env "$BACKEND_DIR"
-    ensure_alm_shared_network
-    compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
-    if is_bannari_stack; then
-      docker rm -f "$BACKEND_CONTAINER_NAME" 2>/dev/null || true
+    if [[ "${SKIP_BACKEND_GIT_PULL:-0}" == "1" ]]; then
+      log "[backend] SKIP_BACKEND_GIT_PULL=1 — already pulled before deploy-script re-exec"
+    else
+      git_pull_with_stash "$BACKEND_DIR" "backend"
     fi
-    compose_up "$BACKEND_DIR" "backend"
+
+    # git pull may update THIS script while the old version is still running in memory.
+    # Re-exec once so ensure_compose_env_complete / new helpers always run.
+    script_hash_now="$(cksum "$script_self" 2>/dev/null | awk '{print $1}')"
+    if [[ "${DEPLOY_REEXEC_DONE:-0}" != "1" \
+      && -n "$script_hash_start" \
+      && -n "$script_hash_now" \
+      && "$script_hash_now" != "$script_hash_start" ]]; then
+      log "[deploy] deploy-pull-rebuild.sh updated by git pull — re-executing latest script"
+      export DEPLOY_REEXEC_DONE=1
+      export SKIP_BACKEND_GIT_PULL=1
+      exec bash "$script_self" "$@"
+    fi
+
+    ensure_compose_env_complete "$BACKEND_DIR"
+    ensure_minio_env_files "$BACKEND_DIR"
+    ensure_alm_shared_network
+    ensure_redis
+    ensure_pgbouncer
+    compose_v1_remove_container_if_exists "$compose_cmd" "$BACKEND_CONTAINER_NAME"
+    remove_named_container_if_exists "$BACKEND_CONTAINER_NAME"
+    compose_up "$BACKEND_DIR" "backend" "alm-backend"
     verify_container_health "$BACKEND_CONTAINER_NAME" "$BACKEND_HOST_PORT" "backend"
     ensure_minio_network "$BACKEND_CONTAINER_NAME"
     ensure_minio_bucket "$BACKEND_CONTAINER_NAME"
@@ -584,17 +777,10 @@ main() {
   if [[ "$BACKEND_ONLY" != "1" ]]; then
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
-    ensure_bannari_frontend_env "$FRONTEND_DIR"
-    if should_skip_frontend_compose; then
-      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
-    else
-      compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-      local saved_force="$FORCE_COMPOSE_RECREATE"
-      FORCE_COMPOSE_RECREATE="${FRONTEND_FORCE_RECREATE:-0}"
-      compose_up "$FRONTEND_DIR" "frontend"
-      FORCE_COMPOSE_RECREATE="$saved_force"
-      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
-    fi
+    compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
+    remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
+    compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
+    verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
   fi
 
   log "Deploy complete. Public URL: ensure nginx proxies /api → 127.0.0.1:${BACKEND_HOST_PORT}"
