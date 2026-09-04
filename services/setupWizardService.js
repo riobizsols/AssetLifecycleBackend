@@ -578,7 +578,10 @@ const generateDynamicSchemaSql = async () => {
       }
     }
     
-    // Get indexes (non-unique, non-primary key)
+    // Get secondary indexes (including UNIQUE / partial UNIQUE indexes).
+    // Skip primary-key indexes only — those are created via PRIMARY KEY constraints above.
+    // IMPORTANT: do NOT skip CREATE UNIQUE INDEX; many critical uniques (e.g. uq_tblacm_scope,
+    // partial uq_spinddet_org_serial) exist only as indexes, not as UNIQUE table constraints.
     const indexesResult = await genericPool.query(`
       SELECT
         schemaname,
@@ -587,23 +590,26 @@ const generateDynamicSchemaSql = async () => {
         indexdef
       FROM pg_indexes
       WHERE schemaname = 'public'
-        AND indexname NOT LIKE '%_pkey'
         AND indexname NOT IN (
-          SELECT constraint_name 
-          FROM information_schema.table_constraints 
-          WHERE constraint_type IN ('PRIMARY KEY', 'UNIQUE')
+          SELECT constraint_name
+          FROM information_schema.table_constraints
+          WHERE table_schema = 'public'
+            AND constraint_type = 'PRIMARY KEY'
         )
       ORDER BY tablename, indexname
     `);
     
     for (const idx of indexesResult.rows) {
-      // Extract CREATE INDEX statement (remove IF NOT EXISTS if present, we'll add it)
       let indexDef = idx.indexdef;
-      if (!indexDef.includes('CREATE INDEX')) {
+      // Accept both CREATE INDEX and CREATE UNIQUE INDEX
+      if (!/^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(indexDef)) {
         continue;
       }
-      // Replace CREATE INDEX with CREATE INDEX IF NOT EXISTS
-      indexDef = indexDef.replace(/^CREATE (UNIQUE )?INDEX/, 'CREATE $1INDEX IF NOT EXISTS');
+      // Replace CREATE [UNIQUE] INDEX with CREATE [UNIQUE] INDEX IF NOT EXISTS
+      indexDef = indexDef.replace(
+        /^CREATE\s+(UNIQUE\s+)?INDEX\b/i,
+        (_m, uniquePart) => `CREATE ${uniquePart || ''}INDEX IF NOT EXISTS`,
+      );
       schemaParts.push(indexDef + ';\n');
     }
     
