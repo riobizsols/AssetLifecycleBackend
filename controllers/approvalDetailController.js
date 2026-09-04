@@ -1,5 +1,6 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const operationalCache = require('../utils/operationalCache');
+const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch');
 const {
     // Generic helpers
@@ -355,6 +356,7 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+    maintenanceSupervisorCache.invalidateOrgCaches(orgId).catch(() => {});
     res.json({
       success: true,
       message: result.message,
