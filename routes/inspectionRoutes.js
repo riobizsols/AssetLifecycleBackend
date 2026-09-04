@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middlewares/authMiddleware");
+const { withIdempotency } = require("../utils/clientMutation");
 const inspectionScheduleController = require("../controllers/inspectionScheduleController");
 
 /**
@@ -38,10 +39,11 @@ router.get(
 );
 
 // POST /inspection/records
+// Optional Idempotency-Key / body.client_mutation_id for offline outbox replay
 router.post(
   "/records",
   protect,
-  inspectionScheduleController.saveInspectionRecord
+  withIdempotency(inspectionScheduleController.saveInspectionRecord)
 );
 
 // GET /inspection/:id
@@ -51,11 +53,12 @@ router.get(
   inspectionScheduleController.getInspectionDetail
 );
 
-// PUT /inspection/:id
+// PUT /inspection/:id (complete/update)
+// Optional Idempotency-Key / body.client_mutation_id for offline outbox replay
 router.put(
   "/:id",
   protect,
-  inspectionScheduleController.updateInspection
+  withIdempotency(inspectionScheduleController.updateInspection)
 );
 
 // POST /inspection/generate

@@ -645,22 +645,62 @@ const getInspectionChecklistByAssetType = async (assetTypeId, org_id) => {
 };
 
 /**
- * Get inspection records for a specific inspection schedule
- * Using ais_id to link inspection schedule to records
+ * Get inspection records for a specific inspection schedule.
+ *
+ * Prefer schedule-scoped rows (ais_id). Fall back to legacy aatif_id-linked rows
+ * when no ais_id-scoped answers exist yet (pre-migration data).
  */
 const getInspectionRecords = async (aisId, org_id) => {
-  // The tblAAT_Insp_Rec.aatisch_id stores the frequency id (aatif_id).
-  // Map the provided ais_id to its aatif_id before querying records.
-  const freqRes = await getDb().query(`SELECT aatif_id FROM "tblAAT_Insp_Sch" WHERE ais_id = $1 AND org_id = $2 LIMIT 1`, [aisId, org_id]);
+  const db = getDb();
+  const { ensureInspRecAisIdSchema } = require('../utils/ensureInspRecAisIdSchema');
+  try {
+    await ensureInspRecAisIdSchema(db);
+  } catch (err) {
+    console.warn('[inspectionScheduleModel] ensureInspRecAisIdSchema:', err.message);
+  }
+
+  const freqRes = await db.query(
+    `SELECT aatif_id FROM "tblAAT_Insp_Sch" WHERE ais_id = $1 AND org_id = $2 LIMIT 1`,
+    [aisId, org_id]
+  );
   if (!freqRes || freqRes.rows.length === 0) {
     return { rows: [] };
   }
   const aatifId = freqRes.rows[0].aatif_id;
 
-  const query = `
+  const byAisQuery = `
     SELECT 
       air."attirec_id" as attirec_id,
       air."aatisch_id" as aatisch_id,
+      air."ais_id" as ais_id,
+      air."insp_check_id" as insp_check_id,
+      air."recorded_value" as recorded_value,
+      air.created_on,
+      air.created_by,
+      icl."inspection_text" as inspection_text,
+      icl."response_type" as response_type
+    FROM "tblAAT_Insp_Rec" air
+    LEFT JOIN "tblInspCheckList" icl ON air."insp_check_id" = icl."insp_check_id"
+    WHERE air."ais_id" = $1 AND air.org_id = $2
+    ORDER BY air.created_on DESC
+  `;
+
+  try {
+    const byAis = await db.query(byAisQuery, [aisId, org_id]);
+    if (byAis.rows.length > 0) {
+      return byAis;
+    }
+  } catch (err) {
+    // Column may not exist yet on older DBs that skipped ensure — fall through
+    if (err.code !== '42703') throw err;
+  }
+
+  // Legacy: aatisch_id stores frequency id (aatif_id) — may cross schedules
+  const legacyQuery = `
+    SELECT 
+      air."attirec_id" as attirec_id,
+      air."aatisch_id" as aatisch_id,
+      NULL as ais_id,
       air."insp_check_id" as insp_check_id,
       air."recorded_value" as recorded_value,
       air.created_on,
@@ -670,56 +710,178 @@ const getInspectionRecords = async (aisId, org_id) => {
     FROM "tblAAT_Insp_Rec" air
     LEFT JOIN "tblInspCheckList" icl ON air."insp_check_id" = icl."insp_check_id"
     WHERE air."aatisch_id" = $1 AND air.org_id = $2
+      AND (air.ais_id IS NULL)
     ORDER BY air.created_on DESC
   `;
-  return await getDb().query(query, [aatifId, org_id]);
+  try {
+    return await db.query(legacyQuery, [aatifId, org_id]);
+  } catch (err) {
+    if (err.code === '42703') {
+      // ais_id column absent: pure legacy query
+      return await db.query(
+        `
+        SELECT 
+          air."attirec_id" as attirec_id,
+          air."aatisch_id" as aatisch_id,
+          air."insp_check_id" as insp_check_id,
+          air."recorded_value" as recorded_value,
+          air.created_on,
+          air.created_by,
+          icl."inspection_text" as inspection_text,
+          icl."response_type" as response_type
+        FROM "tblAAT_Insp_Rec" air
+        LEFT JOIN "tblInspCheckList" icl ON air."insp_check_id" = icl."insp_check_id"
+        WHERE air."aatisch_id" = $1 AND air.org_id = $2
+        ORDER BY air.created_on DESC
+        `,
+        [aatifId, org_id]
+      );
+    }
+    throw err;
+  }
 };
 
 /**
- * Create or update inspection record
+ * Create or update inspection record.
+ *
+ * Prefer schedule-scoped upsert via ais_id when provided.
+ * aatisch_id remains the frequency id (aatif_id) to satisfy FK fk_aatinsprec_schedule.
  */
 const saveInspectionRecord = async (recordData) => {
-  // Support both passing schedule id (ais_id) or frequency id (aatisch_id).
-  const { ais_id, aatisch_id, insp_check_id, recorded_value, created_by, org_id } = recordData;
-  const linkId = aatisch_id || ais_id; // aatisch_id should be the frequency id (aatif_id)
+  const db = getDb();
+  const { ensureInspRecAisIdSchema } = require('../utils/ensureInspRecAisIdSchema');
+  try {
+    await ensureInspRecAisIdSchema(db);
+  } catch (err) {
+    console.warn('[inspectionScheduleModel] ensureInspRecAisIdSchema:', err.message);
+  }
 
-  // Generate unique ID
+  const { ais_id, aatisch_id, insp_check_id, recorded_value, created_by, org_id } = recordData;
+  // aatisch_id must remain frequency id (FK → tblAAT_Insp_Freq.aatif_id)
+  const freqLinkId = aatisch_id;
+  if (!freqLinkId) {
+    throw new Error('aatisch_id (frequency id) is required to save inspection record');
+  }
+
   const timestamp = Date.now().toString();
   const attirec_id = `ATTIREC_${timestamp}`;
 
-  // Check if record already exists
+  // Schedule-scoped path when ais_id is known
+  if (ais_id) {
+    const checkByAis = `
+      SELECT attirec_id FROM "tblAAT_Insp_Rec"
+      WHERE ais_id = $1 AND insp_check_id = $2
+      LIMIT 1
+    `;
+    try {
+      const existingByAis = await db.query(checkByAis, [ais_id, insp_check_id]);
+      if (existingByAis.rows.length > 0) {
+        return await db.query(
+          `
+          UPDATE "tblAAT_Insp_Rec"
+          SET recorded_value = $1, created_by = $2, created_on = NOW(),
+              aatisch_id = $3
+          WHERE ais_id = $4 AND insp_check_id = $5
+          RETURNING *
+          `,
+          [recorded_value, created_by, freqLinkId, ais_id, insp_check_id]
+        );
+      }
+
+      return await db.query(
+        `
+        INSERT INTO "tblAAT_Insp_Rec" (
+          attirec_id,
+          aatisch_id,
+          ais_id,
+          insp_check_id,
+          recorded_value,
+          org_id,
+          created_by,
+          created_on
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        RETURNING *
+        `,
+        [attirec_id, freqLinkId, ais_id, insp_check_id, recorded_value, org_id, created_by]
+      );
+    } catch (err) {
+      // If ais_id column missing, fall through to legacy aatif_id upsert
+      if (err.code !== '42703') throw err;
+      console.warn('[inspectionScheduleModel] ais_id column unavailable; using legacy upsert');
+    }
+  }
+
+  // Legacy upsert keyed by frequency id + checklist item (can cross schedules)
   const checkQuery = `
     SELECT attirec_id FROM "tblAAT_Insp_Rec"
     WHERE aatisch_id = $1 AND insp_check_id = $2
+      AND (ais_id IS NULL)
+    LIMIT 1
   `;
-  const existingRecord = await getDb().query(checkQuery, [linkId, insp_check_id]);
+  let existingRecord;
+  try {
+    existingRecord = await db.query(checkQuery, [freqLinkId, insp_check_id]);
+  } catch (err) {
+    if (err.code === '42703') {
+      existingRecord = await db.query(
+        `SELECT attirec_id FROM "tblAAT_Insp_Rec"
+         WHERE aatisch_id = $1 AND insp_check_id = $2 LIMIT 1`,
+        [freqLinkId, insp_check_id]
+      );
+    } else {
+      throw err;
+    }
+  }
 
   if (existingRecord.rows.length > 0) {
-    // Update existing record
-    const updateQuery = `
+    return await db.query(
+      `
       UPDATE "tblAAT_Insp_Rec"
       SET recorded_value = $1, created_by = $2, created_on = NOW()
       WHERE aatisch_id = $3 AND insp_check_id = $4
+        AND attirec_id = $5
       RETURNING *
-    `;
-    return await getDb().query(updateQuery, [recorded_value, created_by, linkId, insp_check_id]);
-  } else {
-    // Create new record
-    const insertQuery = `
+      `,
+      [recorded_value, created_by, freqLinkId, insp_check_id, existingRecord.rows[0].attirec_id]
+    );
+  }
+
+  try {
+    return await db.query(
+      `
       INSERT INTO "tblAAT_Insp_Rec" (
         attirec_id,
         aatisch_id,
+        ais_id,
         insp_check_id,
         recorded_value,
         org_id,
         created_by,
         created_on
-      ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
       RETURNING *
-    `;
-    return await getDb().query(insertQuery, [
-      attirec_id, linkId, insp_check_id, recorded_value, org_id, created_by
-    ]);
+      `,
+      [attirec_id, freqLinkId, ais_id || null, insp_check_id, recorded_value, org_id, created_by]
+    );
+  } catch (err) {
+    if (err.code === '42703') {
+      return await db.query(
+        `
+        INSERT INTO "tblAAT_Insp_Rec" (
+          attirec_id,
+          aatisch_id,
+          insp_check_id,
+          recorded_value,
+          org_id,
+          created_by,
+          created_on
+        ) VALUES ($1, $2, $3, $4, $5, $6, NOW())
+        RETURNING *
+        `,
+        [attirec_id, freqLinkId, insp_check_id, recorded_value, org_id, created_by]
+      );
+    }
+    throw err;
   }
 };
 

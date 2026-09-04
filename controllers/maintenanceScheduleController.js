@@ -1099,7 +1099,7 @@ const getAllMaintenanceSchedules = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'list');
+        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'list-all');
 
         const { data: formattedData } = await maintenanceSupervisorCache.getOrSet(
             cacheKey,
