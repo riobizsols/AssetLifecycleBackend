@@ -109,7 +109,7 @@ const createEmployeeCertificate = [
       }
       return res.status(500).json({
         success: false,
-        message: "Failed to upload employee certificate",
+        message: error.message || "Failed to upload employee certificate",
         error: error.message
       });
     }

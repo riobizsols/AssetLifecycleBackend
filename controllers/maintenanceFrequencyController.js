@@ -2,11 +2,21 @@ const MaintenanceFrequencyModel = require('../models/maintenanceFrequencyModel')
 const AssetTypeModel = require('../models/assetTypeModel');
 const operationalCache = require('../utils/operationalCache');
 
+function getRequestOrgId(req) {
+  try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const context = getEffectiveListContext(req);
+    return context.orgId || req.user?.org_id;
+  } catch {
+    return req.user?.org_id;
+  }
+}
+
 class MaintenanceFrequencyController {
   // Get all maintenance frequencies
   static async getAllMaintenanceFrequencies(req, res) {
     try {
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       const { data: frequencies } = await operationalCache.cachedList(
         req,
@@ -33,7 +43,7 @@ class MaintenanceFrequencyController {
   static async getMaintenanceFrequenciesByAssetType(req, res) {
     try {
       const { assetTypeId } = req.params;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       const { data: frequencies } = await operationalCache.cachedList(
         req,
@@ -60,7 +70,7 @@ class MaintenanceFrequencyController {
   static async getMaintenanceFrequencyById(req, res) {
     try {
       const { id } = req.params;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       console.log(`Fetching maintenance frequency: ${id}`);
 
@@ -92,7 +102,7 @@ class MaintenanceFrequencyController {
     try {
       const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type, is_recurring, emp_int_id } = req.body;
       // const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
       const changedBy = req.user.user_id;
 
       if (!asset_type_id) {
@@ -191,7 +201,7 @@ class MaintenanceFrequencyController {
     try {
       const { id } = req.params;
       const { frequency, uom, text, maintained_by, maint_type_id, is_recurring, emp_int_id } = req.body;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       // is_recurring defaults to true if not provided
       const isRecurring = is_recurring !== undefined ? Boolean(is_recurring) : true;
@@ -278,7 +288,7 @@ class MaintenanceFrequencyController {
   static async deleteMaintenanceFrequency(req, res) {
     try {
       const { id } = req.params;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       console.log(`Deleting maintenance frequency ${id}`);
 
@@ -311,7 +321,7 @@ class MaintenanceFrequencyController {
   static async getChecklistItems(req, res) {
     try {
       const { id } = req.params;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       console.log(`Fetching checklist items for maintenance frequency: ${id}`);
 
@@ -336,7 +346,7 @@ class MaintenanceFrequencyController {
     try {
       const { id } = req.params;
       const { asset_type_id, text } = req.body;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       if (!asset_type_id) {
         return res.status(400).json({
@@ -380,7 +390,7 @@ class MaintenanceFrequencyController {
   static async deleteChecklistItem(req, res) {
     try {
       const { id, itemId } = req.params;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       console.log(`Deleting checklist item ${itemId} from maintenance frequency: ${id}`);
 
@@ -411,7 +421,7 @@ class MaintenanceFrequencyController {
     try {
       const { id } = req.params;
       const { items } = req.body;
-      const orgId = req.user.org_id;
+      const orgId = getRequestOrgId(req);
 
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({

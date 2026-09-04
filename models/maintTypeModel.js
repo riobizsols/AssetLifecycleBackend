@@ -22,8 +22,13 @@ const getAllMaintTypes = async (orgId = null) => {
     conditions.push(`int_status = 1`);
     
     if (orgId) {
-        conditions.push(`(org_id = $${params.length + 1} OR org_id IS NULL)`);
+        // Shared catalog IDs (MT001–MT004) are global by primary key but stored with a
+        // single org_id. Always expose them so every tenant can pick a category.
         params.push(orgId);
+        conditions.push(`(
+          org_id = $${params.length}
+          OR maint_type_id IN ('MT001', 'MT002', 'MT003', 'MT004')
+        )`);
     }
     
     if (conditions.length > 0) {

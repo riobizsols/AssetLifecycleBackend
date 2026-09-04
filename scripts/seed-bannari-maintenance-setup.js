@@ -97,12 +97,15 @@ async function seedMaintTypes(client, orgId, stats) {
       continue;
     }
     const hoursRequired = type.id === 'MT002' ? 48.0 : 24.0;
+    // Shared catalog IDs — do not rewrite org_id on conflict (that hid types from other orgs).
     const result = await client.query(
       `
         INSERT INTO "tblMaintTypes" (maint_type_id, org_id, text, int_status, hours_required)
         VALUES ($1, $2, $3, 1, $4)
         ON CONFLICT (maint_type_id) DO UPDATE
-        SET text = EXCLUDED.text, int_status = 1, org_id = EXCLUDED.org_id
+        SET text = EXCLUDED.text,
+            int_status = 1,
+            hours_required = COALESCE("tblMaintTypes".hours_required, EXCLUDED.hours_required)
         RETURNING (xmax = 0) AS inserted
       `,
       [type.id, orgId, type.name, hoursRequired],
@@ -122,7 +125,7 @@ async function seedMaintStatus(client, orgId, stats) {
         INSERT INTO "tblMaintStatus" (maint_status_id, org_id, text, int_status)
         VALUES ($1, $2, $3, 1)
         ON CONFLICT (maint_status_id) DO UPDATE
-        SET text = EXCLUDED.text, int_status = 1, org_id = EXCLUDED.org_id
+        SET text = EXCLUDED.text, int_status = 1
       `,
       [status.id, orgId, status.name],
     );
@@ -316,6 +319,10 @@ async function upsertMaintFrequency(client, orgId, assetTypeId, stats) {
         SCHEDULED_MAINT_TYPE,
       ],
     );
+    await client.query(
+      `UPDATE "tblAssetTypes" SET required_maint = true WHERE asset_type_id = $1 AND org_id = $2`,
+      [assetTypeId, orgId],
+    );
     stats.maintFreqUpdated += 1;
     return existing.rows[0].at_main_freq_id;
   }
@@ -344,6 +351,10 @@ async function upsertMaintFrequency(client, orgId, assetTypeId, stats) {
       SCHEDULED_MAINT_TYPE,
       orgId,
     ],
+  );
+  await client.query(
+    `UPDATE "tblAssetTypes" SET required_maint = true WHERE asset_type_id = $1 AND org_id = $2`,
+    [assetTypeId, orgId],
   );
   stats.maintFreqInserted += 1;
   return atMainFreqId;

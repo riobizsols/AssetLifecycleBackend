@@ -143,7 +143,9 @@ class PropertiesController {
   // Get all properties
   static async getAllProperties(req, res) {
     try {
-      const orgId = req.user.org_id;
+      const { getEffectiveListContext } = require('../utils/acmAccess');
+      const context = getEffectiveListContext(req);
+      const orgId = context.orgId || req.user?.org_id;
 
       console.log(`Fetching all properties for org: ${orgId}`);
 
@@ -254,7 +256,9 @@ class PropertiesController {
   // Get all properties with their list values
   static async getAllPropertiesWithValues(req, res) {
     try {
-      const orgId = req.user.org_id;
+      const { getEffectiveListContext } = require('../utils/acmAccess');
+      const context = getEffectiveListContext(req);
+      const orgId = context.orgId || req.user?.org_id;
 
       const { data: properties } = await operationalCache.cachedList(
         req,

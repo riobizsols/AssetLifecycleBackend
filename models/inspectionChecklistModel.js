@@ -210,6 +210,18 @@ const deleteChecklist = async (id) => {
   }
 };
 
+const DEFAULT_RESPONSE_TYPES = [
+  { irtd_id: 'IRTD_QN_001', name: 'Quantitative' },
+  { irtd_id: 'IRTD_QL_YES_NO_001', name: 'Qualitative' },
+];
+
+const mapResponseTypeName = (name) => {
+  const normalized = String(name || '').trim().toUpperCase();
+  if (normalized === 'QN' || normalized.includes('QUANT')) return 'Quantitative';
+  if (normalized === 'QL' || normalized.includes('QUAL')) return 'Qualitative';
+  return name || 'Qualitative';
+};
+
 const getResponseTypes = async () => {
   try {
     const dbPool = getDb();
@@ -225,13 +237,19 @@ const getResponseTypes = async () => {
     `;
     
     const result = await dbPool.query(query);
+    if (!result.rows.length) {
+      // Master table empty in some tenants — still expose the two UI options
+      return DEFAULT_RESPONSE_TYPES;
+    }
+
     return result.rows.map(row => ({
       irtd_id: row.irtd_id,
-      name: row.name === 'QN' ? 'Quantitative' : 'Qualitative'
+      name: mapResponseTypeName(row.name),
     }));
   } catch (error) {
     console.error('Error fetching response types:', error);
-    throw error;
+    // Don't break Create Checklist modal if master table is missing/empty
+    return DEFAULT_RESPONSE_TYPES;
   }
 };
 

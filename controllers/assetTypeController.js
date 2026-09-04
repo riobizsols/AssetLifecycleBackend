@@ -508,7 +508,9 @@ const deleteAssetType = async (req, res) => {
 // GET /api/asset-types/properties - Get all properties
 const getAllProperties = async (req, res) => {
     try {
-        const org_id = req.user.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id;
         const properties = await model.getAllProperties(org_id);
         
         res.status(200).json({
@@ -530,7 +532,9 @@ const getAllProperties = async (req, res) => {
 const getAssetTypeProperties = async (req, res) => {
     try {
         const { id } = req.params;
-        const org_id = req.user.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id;
         
         console.log('🔍 Controller: Fetching properties for asset type:', id, 'org:', org_id);
         
@@ -545,10 +549,10 @@ const getAssetTypeProperties = async (req, res) => {
         });
     } catch (err) {
         console.error("❌ Controller: Error fetching asset type properties:", err);
-        res.status(500).json({ 
+        res.status(500).json({
             success: false,
             error: "Failed to fetch asset type properties",
-            details: err.message 
+            details: err.message
         });
     }
 };

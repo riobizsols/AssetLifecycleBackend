@@ -104,7 +104,6 @@ class MaintenanceFrequencyModel {
         FROM "tblATMaintFreq" mf
         LEFT JOIN "tblMaintTypes" mt
           ON mf.maint_type_id = mt.maint_type_id
-          AND mf.org_id = mt.org_id
         WHERE mf.asset_type_id = $1 
         AND mf.org_id = $2 
         AND mf.int_status = 1

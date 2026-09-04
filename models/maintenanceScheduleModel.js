@@ -654,7 +654,6 @@ const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         WHERE ams.org_id = $1 AND a.org_id = $1
-          AND at.required_maint IS TRUE
     `;
 
   const params = [orgId];

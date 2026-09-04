@@ -4,7 +4,9 @@ const operationalCache = require('../utils/operationalCache');
 // GET /api/maint-types - Get all maintenance types
 const getAllMaintTypes = async (req, res) => {
     try {
-        const orgId = req.user?.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const orgId = context.orgId || req.user?.org_id;
         const { data: rows } = await operationalCache.cachedList(
             req,
             'maint-types',

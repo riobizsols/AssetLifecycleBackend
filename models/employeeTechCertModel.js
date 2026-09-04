@@ -29,6 +29,15 @@ const getTableColumns = async (tableName) => {
   return columnMap;
 };
 
+const ensureEmpTechCertFilePathColumn = async () => {
+  const dbPool = getDb();
+  await dbPool.query(`
+    ALTER TABLE "tblEmpTechCert"
+    ADD COLUMN IF NOT EXISTS file_path character varying
+  `);
+  columnCache.delete("tblEmpTechCert");
+};
+
 const pickColumn = (columnMap, candidates) => {
   for (const candidate of candidates) {
     const key = candidate.toLowerCase();
@@ -40,6 +49,7 @@ const pickColumn = (columnMap, candidates) => {
 };
 
 const getEmpTechCertColumns = async () => {
+  await ensureEmpTechCertFilePathColumn();
   const columnMap = await getTableColumns("tblEmpTechCert");
 
   return {
