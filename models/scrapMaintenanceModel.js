@@ -126,15 +126,79 @@ async function getScrapSequences(assetTypeId, orgId) {
 }
 
 async function isScrapApprovalRequired(assetTypeId, orgId) {
+  // Scrap requests should enter approval whenever a sequence exists or can be seeded.
+  // Missing sequences used to force direct scrap and skip the Scrap Approval screen.
   try {
-    const r = await getDb().query(
-      `SELECT 1 FROM "tblWFScrapSeq" WHERE asset_type_id = $1 AND org_id = $2 LIMIT 1`,
-      [assetTypeId, orgId]
-    );
-    return r.rows.length > 0;
+    const existing = await getScrapSequences(assetTypeId, orgId);
+    if (existing.length > 0) return true;
+
+    await seedScrapSequencesFromMaintenance(assetTypeId, orgId);
+    const afterMaint = await getScrapSequences(assetTypeId, orgId);
+    if (afterMaint.length > 0) return true;
+
+    await ensureDefaultScrapSequence(assetTypeId, orgId);
+    const afterDefault = await getScrapSequences(assetTypeId, orgId);
+    return afterDefault.length > 0;
   } catch (e) {
+    console.warn('isScrapApprovalRequired failed:', e.message);
     return false;
   }
+}
+
+async function ensureDefaultScrapSequence(assetTypeId, orgId) {
+  const existing = await getScrapSequences(assetTypeId, orgId);
+  if (existing.length) return { created: 0 };
+
+  // Prefer org-specific first step (Bannari uses WFS-BAN00x-01), then shared WFS-02.
+  const preferredSteps = [`WFS-${orgId}-01`, 'WFS-02', 'WFS-01'];
+  let wfStepsId = null;
+  for (const stepId of preferredSteps) {
+    // eslint-disable-next-line no-await-in-loop
+    const step = await getDb().query(
+      `
+        SELECT wf_steps_id
+        FROM "tblWFSteps"
+        WHERE wf_steps_id = $1
+          AND (org_id = $2 OR org_id IS NULL)
+        LIMIT 1
+      `,
+      [stepId, orgId]
+    );
+    if (step.rows.length) {
+      wfStepsId = step.rows[0].wf_steps_id;
+      break;
+    }
+  }
+
+  if (!wfStepsId) {
+    const anyStep = await getDb().query(
+      `
+        SELECT wf_steps_id
+        FROM "tblWFSteps"
+        WHERE org_id = $1
+        ORDER BY wf_steps_id ASC
+        LIMIT 1
+      `,
+      [orgId]
+    );
+    wfStepsId = anyStep.rows[0]?.wf_steps_id || null;
+  }
+
+  if (!wfStepsId) return { created: 0 };
+
+  const id = await generateCustomId('wfscrapseq', 3);
+  await getDb().query(
+    `
+      INSERT INTO "tblWFScrapSeq" (id, asset_type_id, wf_steps_id, seq_no, org_id)
+      SELECT $1::varchar, $2::varchar, $3::varchar, $4::int, $5::varchar
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "tblWFScrapSeq"
+        WHERE asset_type_id = $2::varchar AND org_id = $5::varchar
+      )
+    `,
+    [id, assetTypeId, wfStepsId, 10, orgId]
+  );
+  return { created: 1, wf_steps_id: wfStepsId };
 }
 
 async function seedScrapSequencesFromMaintenance(assetTypeId, orgId) {
@@ -181,7 +245,27 @@ async function getWorkflowJobRoles(wfStepsId) {
     `,
     [wfStepsId]
   );
-  return r.rows;
+  if (r.rows.length) return r.rows;
+
+  // Fallback so scrap details are always created when a sequence exists
+  const fallback = await getDb().query(
+    `
+      SELECT job_role_id
+      FROM "tblJobRoles"
+      WHERE int_status = 1
+        AND (
+          UPPER(COALESCE(text, '')) LIKE '%MAINT%'
+          OR UPPER(COALESCE(text, '')) LIKE '%MANAGER%'
+          OR job_role_id IN ('JR001', 'JR002')
+        )
+      ORDER BY job_role_id ASC
+      LIMIT 1
+    `
+  );
+  if (fallback.rows[0]?.job_role_id) {
+    return [{ wf_job_role_id: null, wf_steps_id: wfStepsId, job_role_id: fallback.rows[0].job_role_id, emp_int_id: null }];
+  }
+  return [{ wf_job_role_id: null, wf_steps_id: wfStepsId, job_role_id: 'JR002', emp_int_id: null }];
 }
 
 async function createScrapWorkflowHeader({
@@ -1471,6 +1555,10 @@ async function createScrapRequest({
   // Do NOT fall back to direct scrapping, because that would bypass approval.
   if (approvalRequired && !sequences.length) {
     await seedScrapSequencesFromMaintenance(assetTypeId, orgId);
+    sequences = await getScrapSequences(assetTypeId, orgId);
+  }
+  if (approvalRequired && !sequences.length) {
+    await ensureDefaultScrapSequence(assetTypeId, orgId);
     sequences = await getScrapSequences(assetTypeId, orgId);
   }
   if (approvalRequired && !sequences.length) {

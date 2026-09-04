@@ -15,10 +15,20 @@ function bustScrapCaches(req, orgId) {
   assetsDashboardCache.invalidateOrgApiCache(oid).catch(() => {});
 }
 
+function getRequestOrgId(req) {
+  try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const context = getEffectiveListContext(req);
+    return context.orgId || req.user?.org_id;
+  } catch {
+    return req.user?.org_id;
+  }
+}
+
 // POST /api/scrap-maintenance/create
 const createScrapRequest = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const userId = req.user?.user_id;
     const branchId = req.user?.branch_id;
 
@@ -53,7 +63,7 @@ const createScrapRequest = async (req, res) => {
 // POST /api/scrap-maintenance/create-from-group-selection
 const createScrapRequestFromGroupSelection = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const userId = req.user?.user_id;
     const branchId = req.user?.branch_id;
 
@@ -98,7 +108,7 @@ function collectUserRoleIds(user) {
 const getScrapMaintenanceApprovals = async (req, res) => {
   try {
     const userId = req.user?.user_id;
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     let userBranchCode = req.user?.branch_code || req.user?.branchCode || null;
     const branchId = req.user?.branch_id;
     const roleIds = collectUserRoleIds(req.user);
@@ -144,7 +154,7 @@ const getScrapMaintenanceApprovals = async (req, res) => {
 // GET /api/scrap-maintenance/workflow/:id
 const getScrapApprovalDetail = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const { id } = req.params;
 
     const cacheKey = scrapApprovalCache.scopeKey(req, 'scrap-approval', 'detail', id);
