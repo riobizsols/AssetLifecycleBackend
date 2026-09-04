@@ -224,7 +224,10 @@ const getAssetTypesByAssignmentType = async (req, res) => {
 // GET /api/asset-types/group-required - Get asset types where group_required is true
 const getAssetTypesByGroupRequired = async (req, res) => {
     try {
-        const result = await model.getAssetTypesByGroupRequired();
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const context = getEffectiveListContext(req);
+        const org_id = context.orgId || req.user?.org_id || null;
+        const result = await model.getAssetTypesByGroupRequired(org_id);
         res.status(200).json({
             success: true,
             message: "Asset types retrieved successfully",
