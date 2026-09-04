@@ -50,8 +50,14 @@ done
 
 export BACKEND_ONLY="${BACKEND_ONLY:-1}"
 export FRONTEND_ONLY="${FRONTEND_ONLY:-0}"
-export MINIO_BUCKET_VALUE="${MINIO_BUCKET_VALUE:-alm-tenant}"
-# Isolate compose project from alm-main / pressana on the same server
-export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-tenant-alm}"
-export COMPOSE_IGNORE_ORPHANS="${COMPOSE_IGNORE_ORPHANS:-1}"
+# Force tenant identity — do not inherit Bannari/pressana/main exports from the shell.
+export BACKEND_CONTAINER_NAME=alm-tenant-backend
+export FRONTEND_CONTAINER_NAME=alm-tenant-web
+export BACKEND_HOST_PORT=5001
+export FRONTEND_HOST_PORT=3001
+export MINIO_BUCKET_VALUE=alm-tenant
+export COMPOSE_PROJECT_NAME=tenant-alm
+export COMPOSE_IGNORE_ORPHANS=1
+# Clear Bannari-only knobs if this shell previously deployed Bannari.
+unset BANNARI_DB_NAME BANNARI_PUBLIC_URL BANNARI_APP_PORT BANNARI_REDIS_URL BANNARI_RESERVED_SUBDOMAINS 2>/dev/null || true
 exec "$DEPLOY"

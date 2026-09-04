@@ -702,11 +702,15 @@ compose_up() {
   local service="${3:-}"
   local cmd
   cmd="$(detect_compose)"
+  # Ensure project name is visible in logs and inherited by compose.
+  if [[ -n "${COMPOSE_PROJECT_NAME:-}" ]]; then
+    export COMPOSE_PROJECT_NAME
+  fi
   if [[ -n "$service" ]]; then
-    log "Compose ($label): cd $dir && $cmd up -d --build --force-recreate $service"
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-} $cmd up -d --build --force-recreate $service"
     ( cd "$dir" && $cmd up -d --build --force-recreate "$service" )
   else
-    log "Compose ($label): cd $dir && $cmd up -d --build"
+    log "Compose ($label): cd $dir && COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-} $cmd up -d --build"
     ( cd "$dir" && $cmd up -d --build )
   fi
   ( cd "$dir" && $cmd ps -a )
@@ -723,6 +727,19 @@ main() {
   log "ALM_ROOT=$ALM_ROOT"
   log "BACKEND_DIR=$BACKEND_DIR"
   log "FRONTEND_DIR=$FRONTEND_DIR"
+  log "BACKEND_CONTAINER_NAME=$BACKEND_CONTAINER_NAME COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-} MINIO_BUCKET_VALUE=${MINIO_BUCKET_VALUE:-}"
+
+  # Guard: tenant-ALM-Wildcard must never deploy as Bannari (stale shell env / bad merge).
+  case "${ALM_ROOT}" in
+    *tenant-ALM*|*tenant-alm*|*ALM-tenant*)
+      if [[ "${BACKEND_CONTAINER_NAME}" == *bannari* \
+        || "${FRONTEND_CONTAINER_NAME}" == *bannari* \
+        || "${COMPOSE_PROJECT_NAME:-}" == *bannari* \
+        || "${MINIO_BUCKET_VALUE:-}" == *bannari* ]]; then
+        die "Tenant stack detected at ${ALM_ROOT} but Bannari deploy identity is set (container=${BACKEND_CONTAINER_NAME}, project=${COMPOSE_PROJECT_NAME:-}, bucket=${MINIO_BUCKET_VALUE:-}). Re-run via ./deploy-docker.sh so tenant defaults are forced."
+      fi
+      ;;
+  esac
 
   if [[ "$FRONTEND_ONLY" == "1" && "$BACKEND_ONLY" == "1" ]]; then
     die "Set only one of BACKEND_ONLY=1 or FRONTEND_ONLY=1"
