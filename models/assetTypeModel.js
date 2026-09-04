@@ -8,6 +8,28 @@ const getDb = () => {
   return contextDb;
 };
 
+const toBool = (value) =>
+    value === true || value === 1 || value === '1' || value === 'true' || value === 'True';
+
+const ensureAssetTypeRequirementColumns = async (dbPool = getDb()) => {
+    await dbPool.query(`
+        ALTER TABLE "tblAssetTypes"
+        ADD COLUMN IF NOT EXISTS require_maintenance boolean NOT NULL DEFAULT false
+    `);
+    await dbPool.query(`
+        ALTER TABLE "tblAssetTypes"
+        ADD COLUMN IF NOT EXISTS require_spare_parts boolean NOT NULL DEFAULT false
+    `);
+};
+
+const resolveRequirementFlags = (require_maintenance, require_spare_parts) => {
+    const maintenance = toBool(require_maintenance);
+    return {
+        require_maintenance: maintenance,
+        require_spare_parts: maintenance ? toBool(require_spare_parts) : false,
+    };
+};
+
 const insertAssetType = async (
     org_id,
     asset_type_id,
@@ -21,17 +43,21 @@ const insertAssetType = async (
     parent_asset_type_id = null,
     maint_lead_type = null,
     depreciation_type = 'ND',
+    require_maintenance = false,
+    require_spare_parts = false,
     branch_id = null
 ) => {
-    // Modern schema: maint_required / maint_type_id were removed from tblAssetTypes.
-    // Maintenance is configured via tblATMaintFreq only.
+    const dbPool = getDb();
+    await ensureAssetTypeRequirementColumns(dbPool);
+    const flags = resolveRequirementFlags(require_maintenance, require_spare_parts);
     const query = `
         INSERT INTO "tblAssetTypes" (
             org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_lead_type, last_gen_seq_no, depreciation_type
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, 0, $13)
+            maint_lead_type, last_gen_seq_no, depreciation_type,
+            require_maintenance, require_spare_parts
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, 0, $13, $14, $15)
         RETURNING *
     `;
 
@@ -48,21 +74,24 @@ const insertAssetType = async (
         is_child,
         parent_asset_type_id,
         maint_lead_type,
-        depreciation_type
+        depreciation_type,
+        flags.require_maintenance,
+        flags.require_spare_parts
     ];
 
-    const dbPool = getDb();
     return await dbPool.query(query, values);
 };
 
 const getAllAssetTypes = async (org_id = null) => {
     const dbPool = getDb();
+    await ensureAssetTypeRequirementColumns(dbPool);
     let query = `
         SELECT 
             org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_lead_type, last_gen_seq_no, depreciation_type
+            maint_lead_type, last_gen_seq_no, depreciation_type,
+            require_maintenance, require_spare_parts
         FROM "tblAssetTypes"
     `;
     
@@ -78,17 +107,18 @@ const getAllAssetTypes = async (org_id = null) => {
 };
 
 const getAssetTypeById = async (asset_type_id) => {
+    const dbPool = getDb();
+    await ensureAssetTypeRequirementColumns(dbPool);
     const query = `
         SELECT 
             org_id, branch_id, asset_type_id, int_status,
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
-            maint_lead_type, last_gen_seq_no, depreciation_type
+            maint_lead_type, last_gen_seq_no, depreciation_type,
+            require_maintenance, require_spare_parts
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
-    
-    const dbPool = getDb();
     return await dbPool.query(query, [asset_type_id]);
 };
 
@@ -96,9 +126,12 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
     const {
         org_id, branch_id, int_status, assignment_type,
         inspection_required, group_required, text, is_child, parent_asset_type_id,
-        maint_lead_type, depreciation_type
+        maint_lead_type, depreciation_type, require_maintenance, require_spare_parts
     } = updateData;
-    
+    const flags = resolveRequirementFlags(require_maintenance, require_spare_parts);
+
+    const dbPool = getDb();
+    await ensureAssetTypeRequirementColumns(dbPool);
     const query = `
         UPDATE "tblAssetTypes"
         SET 
@@ -106,8 +139,9 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
             assignment_type = $4, inspection_required = $5, group_required = $6,
             changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
             is_child = $9, parent_asset_type_id = $10,
-            maint_lead_type = $11, depreciation_type = $12
-        WHERE asset_type_id = $13
+            maint_lead_type = $11, depreciation_type = $12,
+            require_maintenance = $13, require_spare_parts = $14
+        WHERE asset_type_id = $15
         RETURNING *
     `;
     
@@ -124,10 +158,10 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
         parent_asset_type_id,
         maint_lead_type,
         depreciation_type,
+        flags.require_maintenance,
+        flags.require_spare_parts,
         asset_type_id
     ];
-    
-    const dbPool = getDb();
     return await dbPool.query(query, values);
 };
 
@@ -660,5 +694,6 @@ module.exports = {
     insertMaintenanceFrequency,
     getMaintenanceFrequency,
     updateMaintenanceFrequency,
-    deleteMaintenanceFrequency
+    deleteMaintenanceFrequency,
+    ensureAssetTypeRequirementColumns,
 }; 

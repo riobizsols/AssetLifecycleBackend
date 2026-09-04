@@ -796,6 +796,8 @@ const CORE_TABLE_DDL = [
       assignment_type character varying(10) NOT NULL,
       inspection_required boolean NOT NULL DEFAULT false,
       group_required boolean NOT NULL DEFAULT false,
+      require_maintenance boolean NOT NULL DEFAULT false,
+      require_spare_parts boolean NOT NULL DEFAULT false,
       created_by character varying(10),
       created_on date,
       changed_by character varying(10),

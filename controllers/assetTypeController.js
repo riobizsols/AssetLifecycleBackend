@@ -1,6 +1,7 @@
 const model = require("../models/assetTypeModel");
 const operationalCache = require('../utils/operationalCache');
 const assignmentCache = require('../utils/assignmentCache');
+const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const { generateCustomId } = require("../utils/idGenerator");
 const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 
@@ -8,6 +9,7 @@ const invalidateAssetTypeCaches = (req) => {
     const orgId = req.user?.org_id;
     operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     assignmentCache.invalidateOrgCaches(orgId).catch(() => {});
+    maintenanceSupervisorCache.invalidateOrgCaches(orgId).catch(() => {});
 };
 
 // Helper function to convert parent asset type text to ID
@@ -43,6 +45,8 @@ const addAssetType = async (req, res) => {
             int_status,            // from frontend (1 or 0)
             group_required,        // from frontend
             inspection_required,    // from frontend
+            require_maintenance = false,
+            require_spare_parts = false,
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
             maint_lead_type = null,  // from frontend
@@ -106,7 +110,9 @@ const addAssetType = async (req, res) => {
                     is_child,
                     parent_asset_type_id,
                     maint_lead_type,
-                    depreciation_type
+                    depreciation_type,
+                    require_maintenance,
+                    require_spare_parts
                 );
                 break; // Success, exit the loop
             } catch (err) {
@@ -307,6 +313,8 @@ const updateAssetType = async (req, res) => {
             assignment_type,
             inspection_required,
             group_required,
+            require_maintenance,
+            require_spare_parts,
             require_scrap_approval,
             text,
             is_child,
@@ -371,6 +379,8 @@ const updateAssetType = async (req, res) => {
             assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
+            require_maintenance: require_maintenance !== undefined ? require_maintenance : existingAsset.rows[0].require_maintenance,
+            require_spare_parts: require_spare_parts !== undefined ? require_spare_parts : existingAsset.rows[0].require_spare_parts,
             text: proposedText,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),
@@ -775,6 +785,8 @@ const commitBulkUpload = async (req, res) => {
                         assignment_type: record.assignment_type,
                         inspection_required: (record.inspection_required === 'true' || record.inspection_required === true),
                         group_required: (record.group_required === 'true' || record.group_required === true),
+                        require_maintenance: (record.require_maintenance === 'true' || record.require_maintenance === true),
+                        require_spare_parts: (record.require_spare_parts === 'true' || record.require_spare_parts === true),
                         text: record.text,
                         is_child: (record.is_child === 'true' || record.is_child === true),
                         parent_asset_type_id: record.parent_asset_type_id || null,
@@ -816,6 +828,8 @@ const commitBulkUpload = async (req, res) => {
                                 created_by, record.text, (record.is_child === 'true' || record.is_child === true),
                                 record.parent_asset_type_id || null,
                                 record.maint_lead_type || null, record.depreciation_type || 'ND',
+                                (record.require_maintenance === 'true' || record.require_maintenance === true),
+                                (record.require_spare_parts === 'true' || record.require_spare_parts === true),
                                 rowBranchId || null
                             );
                             break; // Success, exit the loop

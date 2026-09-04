@@ -1,6 +1,20 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
 
+const toBool = (value) =>
+  value === true || value === 1 || value === '1' || value === 'true' || value === 'True';
+
+const ensureMaintChecklistSpareColumns = async (dbPool = getDb()) => {
+  await dbPool.query(`
+    ALTER TABLE "tblATMaintCheckList"
+    ADD COLUMN IF NOT EXISTS spare_part_required boolean NOT NULL DEFAULT false
+  `);
+  await dbPool.query(`
+    ALTER TABLE "tblATMaintCheckList"
+    ADD COLUMN IF NOT EXISTS spc_id character varying(20)
+  `);
+};
+
 /** Stored values for on-demand rows. */
 const ON_DEMAND_FREQUENCY = null;
 const ON_DEMAND_UOM = null;
@@ -288,17 +302,23 @@ class MaintenanceFrequencyModel {
   static async getChecklistItems(atMainFreqId, orgId) {
     try {
       const dbPool = getDb();
+      await ensureMaintChecklistSpareColumns(dbPool);
       const query = `
         SELECT 
-          at_main_checklist_id,
-          org_id,
-          asset_type_id,
-          text,
-          at_main_freq_id
-        FROM "tblATMaintCheckList"
-        WHERE at_main_freq_id = $1 
-        AND org_id = $2
-        ORDER BY at_main_checklist_id ASC
+          cl.at_main_checklist_id,
+          cl.org_id,
+          cl.asset_type_id,
+          cl.text,
+          cl.at_main_freq_id,
+          cl.spare_part_required,
+          cl.spc_id,
+          c.text AS category_name
+        FROM "tblATMaintCheckList" cl
+        LEFT JOIN "tblSPCategory" c
+          ON c.spc_id = cl.spc_id AND c.org_id = cl.org_id
+        WHERE cl.at_main_freq_id = $1 
+        AND cl.org_id = $2
+        ORDER BY cl.at_main_checklist_id ASC
       `;
       
       const result = await dbPool.query(query, [atMainFreqId, orgId]);
@@ -312,6 +332,8 @@ class MaintenanceFrequencyModel {
   // Add checklist item
   static async addChecklistItem(assetTypeId, atMainFreqId, text, orgId) {
     try {
+      const dbPool = getDb();
+      await ensureMaintChecklistSpareColumns(dbPool);
       const atMainChecklistId = await generateCustomId('atmcl', 3);
       
       const query = `
@@ -320,12 +342,13 @@ class MaintenanceFrequencyModel {
           org_id,
           asset_type_id,
           text,
-          at_main_freq_id
-        ) VALUES ($1, $2, $3, $4, $5)
+          at_main_freq_id,
+          spare_part_required,
+          spc_id
+        ) VALUES ($1, $2, $3, $4, $5, false, NULL)
         RETURNING *
       `;
       
-      const dbPool = getDb();
       const result = await dbPool.query(query, [
         atMainChecklistId,
         orgId,
@@ -337,6 +360,94 @@ class MaintenanceFrequencyModel {
     } catch (error) {
       console.error('Error adding checklist item:', error);
       throw error;
+    }
+  }
+
+  static async updateChecklistItems(atMainFreqId, orgId, items) {
+    const dbPool = getDb();
+    await ensureMaintChecklistSpareColumns(dbPool);
+    const client = await dbPool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const existing = await client.query(
+        `
+          SELECT at_main_checklist_id
+          FROM "tblATMaintCheckList"
+          WHERE at_main_freq_id = $1 AND org_id = $2
+        `,
+        [atMainFreqId, orgId]
+      );
+      const existingIds = new Set(existing.rows.map((row) => row.at_main_checklist_id));
+      const updated = [];
+
+      for (const item of items || []) {
+        const itemId = item?.at_main_checklist_id;
+        if (!itemId || !existingIds.has(itemId)) {
+          const err = new Error('One or more checklist items were not found');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        const spareRequired = toBool(item.spare_part_required);
+        const spcId = spareRequired ? String(item.spc_id || '').trim() : null;
+        if (spareRequired && !spcId) {
+          const err = new Error('Select a category for each checklist item that requires a spare part');
+          err.statusCode = 400;
+          throw err;
+        }
+
+        if (spcId) {
+          const mapped = await client.query(
+            `
+              SELECT 1
+              FROM "tblSPCatATMap" m
+              INNER JOIN "tblSPCategory" c ON c.spc_id = m.spc_id AND c.org_id = m.org_id
+              INNER JOIN "tblATMaintCheckList" cl
+                ON cl.at_main_checklist_id = $1 AND cl.org_id = $2
+              WHERE m.org_id = $2
+                AND m.asset_type_id = cl.asset_type_id
+                AND m.spc_id = $3
+                AND m.int_status = 1
+                AND c.int_status = 1
+              LIMIT 1
+            `,
+            [itemId, orgId, spcId]
+          );
+          if (!mapped.rows.length) {
+            const err = new Error('Selected category is not mapped to this asset type');
+            err.statusCode = 400;
+            throw err;
+          }
+        }
+
+        const result = await client.query(
+          `
+            UPDATE "tblATMaintCheckList"
+            SET spare_part_required = $3,
+                spc_id = $4
+            WHERE at_main_checklist_id = $1
+              AND org_id = $2
+              AND at_main_freq_id = $5
+            RETURNING *
+          `,
+          [itemId, orgId, spareRequired, spcId, atMainFreqId]
+        );
+        if (result.rows[0]) updated.push(result.rows[0]);
+      }
+
+      await client.query('COMMIT');
+      return updated;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {
+        /* ignore */
+      }
+      throw error;
+    } finally {
+      client.release();
     }
   }
 

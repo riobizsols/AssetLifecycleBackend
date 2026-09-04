@@ -80,6 +80,74 @@ const createCategory = async (req, res) => {
   }
 };
 
+const getCategoryById = async (req, res) => {
+  try {
+    const { spc_id } = req.params;
+    const row = await model.getCategoryById(spc_id, req.user.org_id);
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'Spare part category not found' });
+    }
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Error fetching spare part category:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare part category',
+    });
+  }
+};
+
+const updateCategory = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const changed_by = req.user.user_id;
+    const { spc_id } = req.params;
+    const { text, category, uom, minimum_stock, re_order_level, reorder_level, spb_id, brand_id, spm_id, model_id } = req.body;
+    const categoryName = text ?? category;
+    const reorder = re_order_level ?? reorder_level;
+    const brandId = spb_id || brand_id;
+    const modelId = spm_id || model_id;
+
+    if (!categoryName || !String(categoryName).trim()) {
+      return res.status(400).json({ success: false, error: 'Category is required' });
+    }
+    if (!uom || !String(uom).trim()) {
+      return res.status(400).json({ success: false, error: 'UOM is required' });
+    }
+    if (!brandId) {
+      return res.status(400).json({ success: false, error: 'Brand is required' });
+    }
+    if (!modelId) {
+      return res.status(400).json({ success: false, error: 'Model is required' });
+    }
+
+    const row = await model.updateCategory({
+      spc_id,
+      org_id,
+      text: categoryName,
+      uom,
+      minimum_stock,
+      re_order_level: reorder,
+      spb_id: brandId,
+      spm_id: modelId,
+      changed_by,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Spare part category updated successfully',
+      data: row,
+    });
+  } catch (error) {
+    console.error('Error updating spare part category:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to update spare part category',
+    });
+  }
+};
+
 const getSpBrands = async (req, res) => {
   try {
     const spc_id = req.query.spc_id || req.query.category_id || null;
@@ -260,6 +328,43 @@ const createCategoryMapping = async (req, res) => {
     return res.status(status).json({
       success: false,
       error: error.message || 'Failed to save asset type mapping',
+    });
+  }
+};
+
+const saveCategoryMappingsBulk = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const created_by = req.user.user_id;
+    const branch_id = req.user.branch_id || null;
+    const { asset_type_id, spc_ids } = req.body;
+
+    if (!asset_type_id) {
+      return res.status(400).json({ success: false, error: 'Asset type is required' });
+    }
+    if (!Array.isArray(spc_ids) || spc_ids.length === 0) {
+      return res.status(400).json({ success: false, error: 'Select at least one category' });
+    }
+
+    const rows = await model.saveCategoryMappingsForAssetType({
+      org_id,
+      branch_id,
+      asset_type_id,
+      spc_ids,
+      created_by,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Asset type mappings saved successfully',
+      data: rows,
+    });
+  } catch (error) {
+    console.error('Error saving spare part category mappings:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to save asset type mappings',
     });
   }
 };
@@ -762,6 +867,9 @@ const approveIssue = async (req, res) => {
       org_id,
       branch_id,
       approved_by,
+      spb_id: req.body?.spb_id || null,
+      spm_id: req.body?.spm_id || null,
+      quantity_issued: req.body?.quantity_issued ?? req.body?.required_quantity ?? null,
     });
 
     return res.status(200).json({
@@ -1010,6 +1118,68 @@ const createSparePartMaster = async (req, res) => {
   }
 };
 
+const getSparePartMasterByPartNumber = async (req, res) => {
+  try {
+    const partNumber = decodeURIComponent(req.params.partNumber || '');
+    const row = await model.getSparePartMasterByPartNumber(req.user.org_id, partNumber);
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'Spare part not found' });
+    }
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Error fetching spare part master:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare part',
+    });
+  }
+};
+
+const updateSparePartMaster = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const created_by = req.user.user_id;
+    const originalPartNumber = decodeURIComponent(req.params.partNumber || '');
+    const {
+      spc_id,
+      brand_id,
+      brand_name,
+      model_id,
+      model_name,
+      part_number,
+      properties,
+    } = req.body;
+
+    const result = await model.updateSparePartMaster({
+      org_id,
+      branch_id,
+      created_by,
+      spc_id,
+      brand_id: brand_id || null,
+      brand_name: brand_name || null,
+      model_id: model_id || null,
+      model_name: model_name || null,
+      part_number,
+      properties: Array.isArray(properties) ? properties : [],
+      replace_part_number: originalPartNumber,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Spare part updated successfully',
+      data: result,
+    });
+  } catch (error) {
+    console.error('Error updating spare part master:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to update spare part',
+    });
+  }
+};
+
 const getPropertyListValues = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -1031,13 +1201,16 @@ const getPropertyListValues = async (req, res) => {
 
 module.exports = {
   getCategories,
+  getCategoryById,
   createCategory,
+  updateCategory,
   getSpBrands,
   createSpBrand,
   getSpModels,
   createSpModel,
   getCategoryMappings,
   createCategoryMapping,
+  saveCategoryMappingsBulk,
   getModCatCategories,
   getProdServAssetTypes,
   getProdServBrands,
@@ -1065,6 +1238,8 @@ module.exports = {
   getLotModelsByCategoryAndBrand,
   getLotPartNumber,
   getSparePartMasters,
+  getSparePartMasterByPartNumber,
   createSparePartMaster,
+  updateSparePartMaster,
   getPropertyListValues,
 };
