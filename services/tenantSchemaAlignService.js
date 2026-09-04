@@ -170,6 +170,42 @@ async function ensureCriticalRuntimeSchema(client) {
 
   try {
     await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS spare_part_required boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS spc_id character varying(20)
+    `);
+    results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS require_maintenance boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS require_spare_parts boolean NOT NULL DEFAULT false
+    `);
+    results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
       ALTER TABLE "tblMaintTypes"
       ADD COLUMN IF NOT EXISTS "hours_required" DECIMAL(10,2)
     `);

@@ -4,6 +4,7 @@ const brHistModel = require("./assetMaintSchBrHistModel");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
+const { ensureAssetTypeRequirementColumns } = require("./assetTypeModel");
 
 /** Normalize parsed text to tblAssetBRDet.abr_id (e.g. ABR001). */
 function normalizeAbrId(raw) {
@@ -631,6 +632,8 @@ const getAllMaintenanceSchedules = async (
   branchId,
   hasSuperAccess = false,
 ) => {
+  const dbPool = getDb();
+  await ensureAssetTypeRequirementColumns(dbPool);
   let query = `
         SELECT 
             ams.*,
@@ -638,6 +641,8 @@ const getAllMaintenanceSchedules = async (
             a.serial_number,
             a.description as asset_description,
             at.text as asset_type_name,
+            at.require_maintenance,
+            at.require_spare_parts,
             mt.text as maintenance_type_name,
             COALESCE(mt.hours_required, 0)::numeric as hours_required,
             v.vendor_name,
@@ -653,6 +658,7 @@ const getAllMaintenanceSchedules = async (
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         WHERE ams.org_id = $1 AND a.org_id = $1
+          AND at.require_maintenance IS TRUE
     `;
 
   // Apply branch filter only if user doesn't have super access
@@ -664,7 +670,6 @@ const getAllMaintenanceSchedules = async (
 
   query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
 
-  const dbPool = getDb();
   const result = await dbPool.query(query, params);
   return result;
 };
