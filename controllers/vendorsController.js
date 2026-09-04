@@ -12,6 +12,18 @@ function invalidateVendorCaches(req, orgId) {
   }
 }
 
+/** Returns an error message if contract end is before start; otherwise null. */
+function getContractDateRangeError(contractStartDate, contractEndDate) {
+  if (!contractStartDate || !contractEndDate) return null;
+  const start = String(contractStartDate).slice(0, 10);
+  const end = String(contractEndDate).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+  if (end < start) {
+    return 'Contract end date cannot be earlier than contract start date. Please correct the dates before saving.';
+  }
+  return null;
+}
+
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -116,6 +128,15 @@ exports.createVendor = async (req, res) => {
 
     // Use internal org_id from req.user (already set by authMiddleware from tblOrgs)
     const org_id = req.user.org_id; // This is now the internal org_id from tblOrgs
+
+    const contractDateError = getContractDateRangeError(contract_start_date, contract_end_date);
+    if (contractDateError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid contract dates',
+        message: contractDateError,
+      });
+    }
     
     // Get user's branch information
     const userModel = require("../models/userModel");
@@ -433,6 +454,15 @@ exports.updateVendor = async (req, res) => {
           message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 3 (CRApproved), 4 (Blocked)`
         });
       }
+    }
+
+    const contractDateError = getContractDateRangeError(contract_start_date, contract_end_date);
+    if (contractDateError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid contract dates',
+        message: contractDateError,
+      });
     }
 
     const dbPool = req.db || require("../config/db");
