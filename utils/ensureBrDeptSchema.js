@@ -1,6 +1,6 @@
 /**
  * Ensure tblBR_DEPT exists (branch ↔ department mapping from pressana/ACM).
- * Safe to call on every tenant login — uses CREATE IF NOT EXISTS + idempotent backfill.
+ * Safe to call on every tenant login / startup — uses CREATE IF NOT EXISTS + idempotent backfill.
  */
 async function ensureBrDeptSchema(dbPool) {
   if (!dbPool?.query) return { created: false, backfilled: 0 };

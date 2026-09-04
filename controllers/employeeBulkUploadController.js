@@ -1,5 +1,6 @@
 const model = require('../models/employeeModel');
 const { generateCustomId } = require('../utils/idGenerator');
+const { validateCsvOrgBranch } = require('../utils/validateCsvOrgBranch');
 
 // Check existing employees in database
 const checkExistingEmployees = async (req, res) => {
@@ -73,7 +74,6 @@ const trialUploadEmployees = async (req, res) => {
     // Check which employees already exist
     const employeeIds = csvData.map(row => row.employee_id).filter(id => id);
     const existingIds = await model.checkExistingEmployeeIds(employeeIds);
-    const org_id = req.user?.org_id;
     const seenEmails = new Set();
     
     let newRecords = 0;
@@ -102,6 +102,12 @@ const trialUploadEmployees = async (req, res) => {
           continue;
         }
 
+        const { orgId: rowOrgId } = await validateCsvOrgBranch({
+          orgId: row.org_id,
+          branchId: row.branch_id,
+          branchRequired: true,
+        });
+
         const emailKey = String(row.email_id).trim().toLowerCase();
         if (seenEmails.has(emailKey)) {
           validationErrors.push(
@@ -112,17 +118,15 @@ const trialUploadEmployees = async (req, res) => {
         }
         seenEmails.add(emailKey);
 
-        if (org_id) {
-          const emailOwner = await model.findEmployeeByEmail(row.email_id, org_id, {
-            excludeEmployeeId: row.employee_id || undefined,
-          });
-          if (emailOwner && emailOwner.employee_id !== row.employee_id) {
-            validationErrors.push(
-              `Employee ${row.employee_id}: Email "${row.email_id}" is already used by ${emailOwner.employee_id}`,
-            );
-            errors++;
-            continue;
-          }
+        const emailOwner = await model.findEmployeeByEmail(row.email_id, rowOrgId, {
+          excludeEmployeeId: row.employee_id || undefined,
+        });
+        if (emailOwner && emailOwner.employee_id !== row.employee_id) {
+          validationErrors.push(
+            `Employee ${row.employee_id}: Email "${row.email_id}" is already used by ${emailOwner.employee_id}`,
+          );
+          errors++;
+          continue;
         }
         
         if (!row.dept_id) {

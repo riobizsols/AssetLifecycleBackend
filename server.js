@@ -1,4 +1,5 @@
 const express = require("express");
+require("./utils/pgTimestampUtc");
 const cors = require("cors");
 const { PORT, CORS_ORIGINS } = require("./config/environment");
 const authRoutes = require("./routes/authRoutes");
@@ -201,6 +202,7 @@ app.use("/api/departments", departmentRoutes);
 app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
+app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));

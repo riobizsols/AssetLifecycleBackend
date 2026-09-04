@@ -1,4 +1,5 @@
 const { Pool } = require('pg');
+require('../utils/pgTimestampUtc');
 const { buildPoolConfig } = require('../utils/pgSsl');
 require('dotenv').config();
 

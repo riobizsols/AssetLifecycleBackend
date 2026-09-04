@@ -455,7 +455,7 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
 };
 
 // Approve by wfamshId for precision; fallback to assetId for legacy calls
-const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null) => {
+const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId = 'ORG001', vendorId = null, maintenanceDate = null, authenticatedUserId = null, technicianId = null) => {
   try {
     const userId = authenticatedUserId || await getUserIdByEmpIntId(empIntId);
     if (!userId) {
@@ -551,8 +551,8 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     if (workflowDetails.length === 0) {
       if (isWfamshId) {
         const completedCheck = await getDb().query(
-          `SELECT status FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1`,
-          [assetOrWfamshId],
+          `SELECT status FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
+          [assetOrWfamshId, orgId],
         );
         const headerStatus = completedCheck.rows[0]?.status;
         if (headerStatus === 'CO' || headerStatus === 'CA') {
@@ -578,6 +578,42 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     }
     
     console.log(`[APPROVAL] Using workflow step:`, { wfamsd_id: currentUserStep.wfamsd_id, status: currentUserStep.status, sequence: currentUserStep.sequence});
+
+    if (isInhouse) {
+      if (technicianId != null && String(technicianId).trim() !== '') {
+        await getDb().query(
+          `UPDATE "tblWFAssetMaintSch_H"
+           SET emp_int_id = $1,
+               changed_by = $2,
+               changed_on = NOW()::timestamp without time zone
+           WHERE wfamsh_id = $3 AND org_id = $4`,
+          [technicianId, userId.substring(0, 20), currentUserStep.wfamsh_id, orgId],
+        );
+      }
+
+      const headerEmpRes = await getDb().query(
+        `SELECT emp_int_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2`,
+        [currentUserStep.wfamsh_id, orgId],
+      );
+      const headerEmpIntId = headerEmpRes.rows[0]?.emp_int_id;
+      if (!headerEmpIntId || String(headerEmpIntId).trim() === '') {
+        return {
+          success: false,
+          message: 'Technician assignment is required for in-house maintenance before approval.',
+        };
+      }
+
+      const empCheck = await getDb().query(
+        `SELECT emp_int_id FROM "tblEmployees" WHERE emp_int_id = $1 AND int_status = 1`,
+        [headerEmpIntId],
+      );
+      if (!empCheck.rows.length) {
+        return {
+          success: false,
+          message: 'Selected technician is invalid or inactive. Please choose a valid technician.',
+        };
+      }
+    }
     
     // Update vendor_id and maintenance date in header if provided
     // Always update if values are provided (even if same as current) to ensure changes are saved

@@ -1,9 +1,12 @@
 const model = require('../models/branchDeptMappingModel');
 const operationalCache = require('../utils/operationalCache');
 const { isResourceInAcmScope, getRequestAcm } = require('../utils/acmAccess');
+const { ensureBrDeptSchema } = require('../utils/ensureBrDeptSchema');
+const { getDbFromContext } = require('../utils/dbContext');
 
 const listMappings = async (req, res) => {
   try {
+    await ensureBrDeptSchema(getDbFromContext());
     const orgId = req.query.orgId || null;
     const branchId = req.query.branchId || null;
     const rows = await model.listMappings({ orgId, branchId });
@@ -16,6 +19,7 @@ const listMappings = async (req, res) => {
 
 const createMapping = async (req, res) => {
   try {
+    await ensureBrDeptSchema(getDbFromContext());
     const acm = getRequestAcm(req);
     if (acm && acm.canWrite === false) {
       return res.status(403).json({
@@ -79,6 +83,7 @@ const createMapping = async (req, res) => {
 
 const deleteMapping = async (req, res) => {
   try {
+    await ensureBrDeptSchema(getDbFromContext());
     const acm = getRequestAcm(req);
     if (acm && acm.canWrite === false) {
       return res.status(403).json({

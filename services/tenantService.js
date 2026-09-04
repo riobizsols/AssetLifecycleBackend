@@ -6,6 +6,7 @@
  */
 
 const { Client, Pool } = require('pg');
+require('../utils/pgTimestampUtc');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { buildPoolConfig, pgSslOptions, attachPoolErrorHandler } = require('../utils/pgSsl');

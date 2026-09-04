@@ -4,12 +4,15 @@ const { protect } = require('../middlewares/authMiddleware');
 const {
   getCategories,
   createCategory,
+  getCategoryById,
+  updateCategory,
   getSpBrands,
   createSpBrand,
   getSpModels,
   createSpModel,
   getCategoryMappings,
   createCategoryMapping,
+  saveCategoryMappingsBulk,
   getModCatCategories,
   getProdServAssetTypes,
   getProdServBrands,
@@ -38,6 +41,8 @@ const {
   getLotPartNumber,
   getSparePartMasters,
   createSparePartMaster,
+  getSparePartMasterByPartNumber,
+  updateSparePartMaster,
   getPropertyListValues,
 } = require('../controllers/sparePartsController');
 
@@ -45,6 +50,8 @@ router.use(protect);
 
 router.get('/categories', getCategories);
 router.post('/categories', createCategory);
+router.get('/categories/:spc_id', getCategoryById);
+router.put('/categories/:spc_id', updateCategory);
 router.get('/brands', getSpBrands);
 router.post('/brands', createSpBrand);
 router.get('/models', getSpModels);
@@ -52,6 +59,7 @@ router.post('/models', createSpModel);
 
 router.get('/category-mappings', getCategoryMappings);
 router.post('/category-mappings', createCategoryMapping);
+router.post('/category-mappings/bulk', saveCategoryMappingsBulk);
 router.get('/isp-models', getIspModels);
 router.get('/category-mappings/by-asset-type/:asset_type_id', getCategoriesByAssetType);
 router.get('/mapping-options/categories', getModCatCategories);
@@ -78,6 +86,8 @@ router.get('/property-values/:prop_id', getPropertyListValues);
 
 router.get('/master', getSparePartMasters);
 router.post('/master', createSparePartMaster);
+router.get('/master/:partNumber', getSparePartMasterByPartNumber);
+router.put('/master/:partNumber', updateSparePartMaster);
 
 router.get('/maintenance-list', getMaintenanceList);
 router.get('/maintenance-list/:ams_id', getMaintenanceDetail);

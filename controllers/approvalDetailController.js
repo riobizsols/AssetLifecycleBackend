@@ -231,7 +231,7 @@ const approveMaintenanceAction = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const { empIntId, note, vendorId, maintenanceDate } = req.body;
+    const { empIntId, note, vendorId, maintenanceDate, technicianId } = req.body;
     const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
@@ -320,7 +320,7 @@ const approveMaintenanceAction = async (req, res) => {
     }
 
     // Step 5: Execute approval
-    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId);
+    const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId, technicianId);
 
     // Step 5.5: Check if approval failed due to vendor status
     if (!result.success) {

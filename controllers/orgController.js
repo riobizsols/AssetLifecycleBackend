@@ -51,7 +51,22 @@ const addOrganizationController = async (req, res) => {
         };
         const created = await addOrganization(newOrg);
 
-        res.status(201).json(created);
+        // Also update tenants table if it exists and org is a tenant
+        try {
+            const { checkTenantExists } = require('../services/tenantService');
+            const tenantExists = await checkTenantExists(org_id);
+            if (tenantExists) {
+                const db = require('../config/db');
+                await db.query(
+                    `UPDATE "tenants" SET subdomain = $1 WHERE grouped_org_id = $2`,
+                    [subdomain, org_id]
+                );
+            }
+        } catch (tenantError) {
+            console.warn('[OrgController] Could not update tenants table subdomain:', tenantError.message);
+        }
+
+        res.status(201).json({ ...created, subdomain });
     } catch (err) {
         console.error("Error adding organization:", err);
         res.status(500).json({ message: "Internal server error" });

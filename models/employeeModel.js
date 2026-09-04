@@ -2,6 +2,7 @@ const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
 const { registerFromRequestContext, registerManyFromRequestContext } = require('../services/tenantEmailRegistryService');
 const { generateCustomId } = require("../utils/idGenerator");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -276,7 +277,7 @@ const validateAndFormatDate = (dateString) => {
 };
 
 // Bulk upsert employees (insert or update)
-const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) => {
+const bulkUpsertEmployees = async (csvData, created_by) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
   
@@ -290,11 +291,15 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
     const emailsToRegister = [];
     
     console.log('=== Employee Model Bulk Upload Debug ===');
-    console.log('org_id:', org_id);
-    console.log('userBranchId:', userBranchId);
     
     for (const row of csvData) {
       try {
+        const { orgId: rowOrgId, branchId: rowBranchId } = await validateCsvOrgBranch({
+          orgId: row.org_id,
+          branchId: row.branch_id,
+          branchRequired: true,
+        });
+
         // Generate emp_int_id if not provided
         let finalEmpIntId = row.emp_int_id;
         if (!finalEmpIntId) {
@@ -319,7 +324,7 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
 
         const emailId = String(row.email_id || '').trim();
         if (emailId) {
-          const emailOwner = await findEmployeeByEmail(emailId, org_id, {
+          const emailOwner = await findEmployeeByEmail(emailId, rowOrgId, {
             excludeEmployeeId: finalEmployeeId,
           });
           if (emailOwner) {
@@ -368,8 +373,8 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
             releivingDate,
             row.language_code,
             1, // int_status is always 1 by default
-            org_id,
-            userBranchId,
+            rowOrgId,
+            rowBranchId,
             created_by
           ]);
           updated++;
@@ -401,8 +406,8 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
             releivingDate,
             row.language_code,
             1, // int_status is always 1 by default
-            org_id,
-            userBranchId,
+            rowOrgId,
+            rowBranchId,
             created_by
           ]);
           inserted++;

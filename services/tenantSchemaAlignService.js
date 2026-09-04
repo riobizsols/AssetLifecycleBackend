@@ -222,6 +222,72 @@ async function ensureCriticalRuntimeSchema(client) {
   // Maintenance list joins tblMaintTypes.hours_required
   try {
     await client.query(`
+      ALTER TABLE "tblAssets"
+        ALTER COLUMN org_id DROP NOT NULL,
+        ALTER COLUMN branch_id DROP NOT NULL,
+        ALTER COLUMN purchased_by DROP NOT NULL
+    `);
+    results.push({ object: 'tblAssets.org_id/branch_id/purchased_by', status: 'nullable' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssets.optional_cols', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblAssets nullable columns:', err.message);
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS branch_id character varying(10)
+    `);
+    results.push({ object: 'tblAssetTypes.branch_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.branch_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS spare_part_required boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS spc_id character varying(20)
+    `);
+    results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS require_maintenance boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS require_spare_parts boolean NOT NULL DEFAULT false
+    `);
+    results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
       ALTER TABLE "tblMaintTypes"
       ADD COLUMN IF NOT EXISTS "hours_required" DECIMAL(10,2)
     `);
