@@ -7,11 +7,11 @@ const toBool = (value) =>
 const ensureMaintChecklistSpareColumns = async (dbPool = getDb()) => {
   await dbPool.query(`
     ALTER TABLE "tblATMaintCheckList"
-    ADD COLUMN IF NOT EXISTS spare_part_required boolean NOT NULL DEFAULT false
+    ADD COLUMN IF NOT EXISTS required_spare_part boolean NOT NULL DEFAULT false
   `);
   await dbPool.query(`
     ALTER TABLE "tblATMaintCheckList"
-    ADD COLUMN IF NOT EXISTS spc_id character varying(20)
+    ADD COLUMN IF NOT EXISTS spcatm_id character varying(20)
   `);
 };
 
@@ -310,12 +310,16 @@ class MaintenanceFrequencyModel {
           cl.asset_type_id,
           cl.text,
           cl.at_main_freq_id,
-          cl.spare_part_required,
-          cl.spc_id,
+          cl.required_spare_part,
+          cl.required_spare_part AS spare_part_required,
+          cl.spcatm_id,
+          m.spc_id,
           c.text AS category_name
         FROM "tblATMaintCheckList" cl
+        LEFT JOIN "tblSPCatATMap" m
+          ON m.spcatm_id = cl.spcatm_id AND m.org_id = cl.org_id
         LEFT JOIN "tblSPCategory" c
-          ON c.spc_id = cl.spc_id AND c.org_id = cl.org_id
+          ON c.spc_id = m.spc_id AND c.org_id = cl.org_id
         WHERE cl.at_main_freq_id = $1 
         AND cl.org_id = $2
         ORDER BY cl.at_main_checklist_id ASC
@@ -343,10 +347,12 @@ class MaintenanceFrequencyModel {
           asset_type_id,
           text,
           at_main_freq_id,
-          spare_part_required,
-          spc_id
+          required_spare_part,
+          spcatm_id
         ) VALUES ($1, $2, $3, $4, $5, false, NULL)
-        RETURNING *
+        RETURNING
+          *,
+          required_spare_part AS spare_part_required
       `;
       
       const result = await dbPool.query(query, [
@@ -390,18 +396,22 @@ class MaintenanceFrequencyModel {
           throw err;
         }
 
-        const spareRequired = toBool(item.spare_part_required);
-        const spcId = spareRequired ? String(item.spc_id || '').trim() : null;
-        if (spareRequired && !spcId) {
+        const spareRequired = toBool(item.spare_part_required ?? item.required_spare_part);
+        let spcatmId = spareRequired
+          ? String(item.spcatm_id || '').trim() || null
+          : null;
+        const spcId = spareRequired ? String(item.spc_id || '').trim() || null : null;
+
+        if (spareRequired && !spcatmId && !spcId) {
           const err = new Error('Select a category for each checklist item that requires a spare part');
           err.statusCode = 400;
           throw err;
         }
 
-        if (spcId) {
+        if (spareRequired && !spcatmId && spcId) {
           const mapped = await client.query(
             `
-              SELECT 1
+              SELECT m.spcatm_id
               FROM "tblSPCatATMap" m
               INNER JOIN "tblSPCategory" c ON c.spc_id = m.spc_id AND c.org_id = m.org_id
               INNER JOIN "tblATMaintCheckList" cl
@@ -420,19 +430,42 @@ class MaintenanceFrequencyModel {
             err.statusCode = 400;
             throw err;
           }
+          spcatmId = mapped.rows[0].spcatm_id;
+        } else if (spcatmId) {
+          const mapped = await client.query(
+            `
+              SELECT 1
+              FROM "tblSPCatATMap" m
+              INNER JOIN "tblATMaintCheckList" cl
+                ON cl.at_main_checklist_id = $1 AND cl.org_id = $2
+              WHERE m.spcatm_id = $3
+                AND m.org_id = $2
+                AND m.asset_type_id = cl.asset_type_id
+                AND m.int_status = 1
+              LIMIT 1
+            `,
+            [itemId, orgId, spcatmId]
+          );
+          if (!mapped.rows.length) {
+            const err = new Error('Selected category mapping is not valid for this asset type');
+            err.statusCode = 400;
+            throw err;
+          }
         }
 
         const result = await client.query(
           `
             UPDATE "tblATMaintCheckList"
-            SET spare_part_required = $3,
-                spc_id = $4
+            SET required_spare_part = $3,
+                spcatm_id = $4
             WHERE at_main_checklist_id = $1
               AND org_id = $2
               AND at_main_freq_id = $5
-            RETURNING *
+            RETURNING
+              *,
+              required_spare_part AS spare_part_required
           `,
-          [itemId, orgId, spareRequired, spcId, atMainFreqId]
+          [itemId, orgId, spareRequired, spareRequired ? spcatmId : null, atMainFreqId]
         );
         if (result.rows[0]) updated.push(result.rows[0]);
       }

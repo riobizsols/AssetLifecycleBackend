@@ -14,19 +14,23 @@ const toBool = (value) =>
 const ensureAssetTypeRequirementColumns = async (dbPool = getDb()) => {
     await dbPool.query(`
         ALTER TABLE "tblAssetTypes"
-        ADD COLUMN IF NOT EXISTS require_maintenance boolean NOT NULL DEFAULT false
+        ADD COLUMN IF NOT EXISTS required_maint boolean NOT NULL DEFAULT false
     `);
     await dbPool.query(`
         ALTER TABLE "tblAssetTypes"
-        ADD COLUMN IF NOT EXISTS require_spare_parts boolean NOT NULL DEFAULT false
+        ADD COLUMN IF NOT EXISTS required_spare_parts boolean NOT NULL DEFAULT false
+    `);
+    await dbPool.query(`
+        ALTER TABLE "tblAssetTypes"
+        ADD COLUMN IF NOT EXISTS branch_id character varying(10)
     `);
 };
 
 const resolveRequirementFlags = (require_maintenance, require_spare_parts) => {
     const maintenance = toBool(require_maintenance);
     return {
-        require_maintenance: maintenance,
-        require_spare_parts: maintenance ? toBool(require_spare_parts) : false,
+        required_maint: maintenance,
+        required_spare_parts: maintenance ? toBool(require_spare_parts) : false,
     };
 };
 
@@ -56,9 +60,12 @@ const insertAssetType = async (
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type,
-            require_maintenance, require_spare_parts
+            required_maint, required_spare_parts
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, 0, $13, $14, $15)
-        RETURNING *
+        RETURNING
+            *,
+            required_maint AS require_maintenance,
+            required_spare_parts AS require_spare_parts
     `;
 
     const values = [
@@ -75,8 +82,8 @@ const insertAssetType = async (
         parent_asset_type_id,
         maint_lead_type,
         depreciation_type,
-        flags.require_maintenance,
-        flags.require_spare_parts
+        flags.required_maint,
+        flags.required_spare_parts
     ];
 
     return await dbPool.query(query, values);
@@ -91,7 +98,10 @@ const getAllAssetTypes = async (org_id = null, scope = {}) => {
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type,
-            require_maintenance, require_spare_parts
+            required_maint,
+            required_spare_parts,
+            required_maint AS require_maintenance,
+            required_spare_parts AS require_spare_parts
         FROM "tblAssetTypes"
     `;
     
@@ -181,7 +191,10 @@ const getAssetTypeById = async (asset_type_id) => {
             assignment_type, inspection_required, group_required, created_by,
             created_on, changed_by, changed_on, text, is_child, parent_asset_type_id,
             maint_lead_type, last_gen_seq_no, depreciation_type,
-            require_maintenance, require_spare_parts
+            required_maint,
+            required_spare_parts,
+            required_maint AS require_maintenance,
+            required_spare_parts AS require_spare_parts
         FROM "tblAssetTypes"
         WHERE asset_type_id = $1
     `;
@@ -206,9 +219,12 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
             changed_by = $7, changed_on = CURRENT_TIMESTAMP, text = $8,
             is_child = $9, parent_asset_type_id = $10,
             maint_lead_type = $11, depreciation_type = $12,
-            require_maintenance = $13, require_spare_parts = $14
+            required_maint = $13, required_spare_parts = $14
         WHERE asset_type_id = $15
-        RETURNING *
+        RETURNING
+            *,
+            required_maint AS require_maintenance,
+            required_spare_parts AS require_spare_parts
     `;
     
     const values = [
@@ -224,8 +240,8 @@ const updateAssetType = async (asset_type_id, updateData, changed_by) => {
         parent_asset_type_id,
         maint_lead_type,
         depreciation_type,
-        flags.require_maintenance,
-        flags.require_spare_parts,
+        flags.required_maint,
+        flags.required_spare_parts,
         asset_type_id
     ];
     return await dbPool.query(query, values);

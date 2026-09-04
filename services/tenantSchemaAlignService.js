@@ -253,16 +253,16 @@ async function ensureCriticalRuntimeSchema(client) {
   try {
     await client.query(`
       ALTER TABLE "tblATMaintCheckList"
-      ADD COLUMN IF NOT EXISTS spare_part_required boolean NOT NULL DEFAULT false
+      ADD COLUMN IF NOT EXISTS required_spare_part boolean NOT NULL DEFAULT false
     `);
     await client.query(`
       ALTER TABLE "tblATMaintCheckList"
-      ADD COLUMN IF NOT EXISTS spc_id character varying(20)
+      ADD COLUMN IF NOT EXISTS spcatm_id character varying(20)
     `);
-    results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'ensured' });
+    results.push({ object: 'tblATMaintCheckList.required_spare_part/spcatm_id', status: 'ensured' });
   } catch (err) {
     if (err.code === '42P01') {
-      results.push({ object: 'tblATMaintCheckList.spare_part_required/spc_id', status: 'table_missing' });
+      results.push({ object: 'tblATMaintCheckList.required_spare_part/spcatm_id', status: 'table_missing' });
     } else {
       throw err;
     }
@@ -271,16 +271,16 @@ async function ensureCriticalRuntimeSchema(client) {
   try {
     await client.query(`
       ALTER TABLE "tblAssetTypes"
-      ADD COLUMN IF NOT EXISTS require_maintenance boolean NOT NULL DEFAULT false
+      ADD COLUMN IF NOT EXISTS required_maint boolean NOT NULL DEFAULT false
     `);
     await client.query(`
       ALTER TABLE "tblAssetTypes"
-      ADD COLUMN IF NOT EXISTS require_spare_parts boolean NOT NULL DEFAULT false
+      ADD COLUMN IF NOT EXISTS required_spare_parts boolean NOT NULL DEFAULT false
     `);
-    results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'ensured' });
+    results.push({ object: 'tblAssetTypes.required_maint/required_spare_parts', status: 'ensured' });
   } catch (err) {
     if (err.code === '42P01') {
-      results.push({ object: 'tblAssetTypes.require_maintenance/require_spare_parts', status: 'table_missing' });
+      results.push({ object: 'tblAssetTypes.required_maint/required_spare_parts', status: 'table_missing' });
     } else {
       throw err;
     }

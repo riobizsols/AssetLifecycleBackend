@@ -161,8 +161,8 @@ const getSparePartMaintenanceList = async (
       a.serial_number,
       a.description AS asset_description,
       at.text AS asset_type_name,
-      at.require_maintenance,
-      at.require_spare_parts,
+      at.required_maint,
+      at.required_spare_parts,
       mt.text AS maintenance_type_name,
       v.vendor_name,
       (
@@ -195,8 +195,8 @@ const getSparePartMaintenanceList = async (
     WHERE ams.org_id = $1
       AND a.org_id = $1
       AND ${inhouseOnly}
-      AND at.require_maintenance IS TRUE
-      AND at.require_spare_parts IS TRUE
+      AND at.required_maint IS TRUE
+      AND at.required_spare_parts IS TRUE
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -226,8 +226,8 @@ const getSparePartMaintenanceDetail = async (
       a.serial_number,
       a.description AS asset_description,
       at.text AS asset_type_name,
-      at.require_maintenance,
-      at.require_spare_parts,
+      at.required_maint,
+      at.required_spare_parts,
       mt.text AS maintenance_type_name,
       v.vendor_name,
       (
@@ -252,8 +252,8 @@ const getSparePartMaintenanceDetail = async (
       AND ams.org_id = $2
       AND a.org_id = $2
       AND ${inhouseOnly}
-      AND at.require_maintenance IS TRUE
-      AND at.require_spare_parts IS TRUE
+      AND at.required_maint IS TRUE
+      AND at.required_spare_parts IS TRUE
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -328,8 +328,8 @@ const createSpareIssueRequests = async ({
           ams.vendor_id,
           a.asset_type_id,
           a.branch_id,
-          at.require_maintenance,
-          at.require_spare_parts,
+          at.required_maint,
+          at.required_spare_parts,
           ${maintenanceProviderExpression()} AS maintenance_provider
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
@@ -354,7 +354,7 @@ const createSpareIssueRequests = async ({
       err.statusCode = 400;
       throw err;
     }
-    if (!maint.rows[0].require_maintenance || !maint.rows[0].require_spare_parts) {
+    if (!maint.rows[0].required_maint || !maint.rows[0].required_spare_parts) {
       const err = new Error(
         'Spare part requests are available only when Require Maintenance and Require Spare Parts are enabled for the asset type'
       );
