@@ -96,6 +96,7 @@ const addDeptAsset = async (req, res) => {
 const getAllAssetTypes = async (req, res) => {
     try {
         const { assignment_type } = req.query;
+        const dept_id = String(req.query.dept_id || '').trim() || null;
         const context = getEffectiveListContext(req);
         const org_id = context.orgId || req.user?.org_id;
 
@@ -103,19 +104,25 @@ const getAllAssetTypes = async (req, res) => {
             return res.status(400).json({ error: "Organization context missing" });
         }
 
+        // Employee assignment should scope to the selected department when provided
+        const listContext = dept_id
+            ? { ...context, deptId: dept_id, deptIds: [dept_id], branchId: null, branchIds: [] }
+            : context;
+
         const cacheKey = assignmentCache.scopeKey(
             req,
             'assignment',
             'asset-types',
             'all',
             assignment_type || 'any',
+            dept_id || 'no-dept',
         );
 
         const { data: rows } = await assignmentCache.getOrSet(
             cacheKey,
             assignmentCache.getTtlMs(),
             async () => {
-                const result = await assetTypeModel.getAllAssetTypes(org_id, context);
+                const result = await assetTypeModel.getAllAssetTypes(org_id, listContext);
                 let types = result.rows;
 
                 if (assignment_type) {

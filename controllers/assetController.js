@@ -1174,12 +1174,14 @@ const getInactiveAssetsByAssetType = async (req, res) => {
 
         let rows;
         if (isAssignmentContext) {
+            // Include branch in the key — counts differ per assignment-screen branch
             const cacheKey = assignmentCache.scopeKey(
                 req,
                 'assignment',
                 'inactive',
                 context,
                 asset_type_id,
+                branchFilter || 'all-branches',
             );
             const { data } = await assignmentCache.getOrSet(
                 cacheKey,
