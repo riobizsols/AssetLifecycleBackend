@@ -446,6 +446,30 @@ async function ensureCriticalRuntimeSchema(client) {
     results.push({ object: 'tblBR_DEPT', status: 'error', message: err.message });
   }
 
+  try {
+    const { ensureClientMutationSchema } = require('../utils/ensureClientMutationSchema');
+    const cm = await ensureClientMutationSchema(client);
+    results.push({
+      object: 'tblClientMutation',
+      status: cm.created ? 'ensured' : 'skipped',
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblClientMutation:', err.message);
+    results.push({ object: 'tblClientMutation', status: 'error', message: err.message });
+  }
+
+  try {
+    const { ensureInspRecAisIdSchema } = require('../utils/ensureInspRecAisIdSchema');
+    const inspRec = await ensureInspRecAisIdSchema(client);
+    results.push({
+      object: 'tblAAT_Insp_Rec.ais_id',
+      status: inspRec.ensured ? 'ensured' : (inspRec.reason || 'skipped'),
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblAAT_Insp_Rec.ais_id:', err.message);
+    results.push({ object: 'tblAAT_Insp_Rec.ais_id', status: 'error', message: err.message });
+  }
+
   console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));
   return results;
 }
