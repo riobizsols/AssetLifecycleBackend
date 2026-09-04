@@ -1,23 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
 
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL
-  );
-}
-
-/** Tables that must be seeded from hospitality on every new tenant. */
+/** Tables that must be seeded from schema_db reference on every new tenant. */
 const REQUIRED_MASTER_TABLES = [
   { table: 'tblTextMessagesDefault', pk: ['tmd_id'] },
   { table: 'tblTextMessagesOtherLangs', pk: ['tmol_id'] },
   { table: 'tblStatusCodes', pk: ['id'] },
   { table: 'tblProps', pk: ['prop_id'] },
+  { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
   { table: 'tblApps', pk: ['app_id'], orgIdColumn: 'org_id', missingOnly: true },
 ];
@@ -278,6 +273,11 @@ async function copyReferenceTableRows(referenceClient, tenantClient, tableName, 
   const errors = [];
 
   for (const row of refRows) {
+    if (tableName === 'tblApps' && isLegacyGroupMenuAppId(row.app_id)) {
+      skippedRows += 1;
+      continue;
+    }
+
     if (missingOnly && pkColumns.length > 0) {
       const key = pkColumns.map((col) => String(row[col])).join('|');
       if (existingKeys.has(key)) {

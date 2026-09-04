@@ -314,6 +314,14 @@ const getPrintQueue = async (orgId = 'ORG001', status = null) => {
  */
 const updatePrintQueueStatus = async (psnqId, status, orgId = 'ORG001') => {
   try {
+    const allowedStatuses = ['New', 'In-progress', 'Completed', 'Cancelled'];
+    if (!allowedStatuses.includes(status)) {
+      return {
+        success: false,
+        error: `Invalid status. Allowed: ${allowedStatuses.join(', ')}`
+      };
+    }
+
     const query = `
       UPDATE "tblPrintSerialNoQueue" 
       SET status = $1

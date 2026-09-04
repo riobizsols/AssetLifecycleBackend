@@ -1,4 +1,4 @@
-const { getDbFromContext } = require('../utils/dbContext');
+const { getDbFromContext, tryGetDb } = require('../utils/dbContext');
 
 // Always get pool at call time via getDb() so we use the live pool (no cached/stale reference).
 const getDb = () => getDbFromContext();
@@ -24,21 +24,26 @@ class TechnicalLogConfigModel {
                 FROM "tblTechnicalLogConfig" 
                 WHERE app_id = $1
             `;
-            const dbPool = getDb();
+            const dbPool = tryGetDb();
+            if (!dbPool) {
+                return null;
+            }
             let result;
             try {
                 result = await dbPool.query(query, [appId]);
             } catch (error) {
                 const isPoolEnded = error && /pool after calling end/i.test(String(error.message));
                 if (!isPoolEnded) throw error;
-                // Fallback to live default DB proxy in case context/passed pool became stale.
-                const defaultDb = require('../config/db');
-                result = await defaultDb.query(query, [appId]);
+                console.warn('Technical log config: tenant pool unavailable, skipping log config.');
+                return null;
             }
             const value = result.rows[0] || null;
             logConfigCache.set(appId, { value, at: Date.now() });
             return value;
         } catch (error) {
+            if (error?.code === 'TENANT_DB_CONTEXT_REQUIRED') {
+                return null;
+            }
             const isPoolEnded = error && /pool after calling end/i.test(String(error.message));
             if (isPoolEnded) {
                 console.warn('Technical log config: pool unavailable, skipping log config.');
@@ -165,7 +170,9 @@ class TechnicalLogConfigModel {
             // INFO (0) logs everything, WARNING (1) logs WARNING+ERROR+CRITICAL, etc.
             return requiredLevel >= configuredLevelCode;
         } catch (error) {
-            console.error('Error checking if should log:', error);
+            if (error?.code !== 'TENANT_DB_CONTEXT_REQUIRED') {
+                console.error('Error checking if should log:', error);
+            }
             return false; // Default to not logging on error
         }
     }

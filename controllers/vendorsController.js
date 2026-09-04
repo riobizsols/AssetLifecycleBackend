@@ -11,6 +11,18 @@ function invalidateVendorCaches(req, orgId) {
   }
 }
 
+/** Returns an error message if contract end is before start; otherwise null. */
+function getContractDateRangeError(contractStartDate, contractEndDate) {
+  if (!contractStartDate || !contractEndDate) return null;
+  const start = String(contractStartDate).slice(0, 10);
+  const end = String(contractEndDate).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+  if (end < start) {
+    return 'Contract end date cannot be earlier than contract start date. Please correct the dates before saving.';
+  }
+  return null;
+}
+
 //To get all vendors
 exports.getAllVendors = async (req, res) => {
   try {
@@ -96,6 +108,7 @@ exports.createVendor = async (req, res) => {
       cin_number,
       product_supply,
       service_supply,
+      spare_supply,
       int_status,
       address_line1,
       address_line2,
@@ -117,6 +130,15 @@ exports.createVendor = async (req, res) => {
     const org_id = orgId || req.user.org_id;
     // Vendors are org-level master data — do not stamp a branch
     const branch_code = null;
+
+    const contractDateError = getContractDateRangeError(contract_start_date, contract_end_date);
+    if (contractDateError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid contract dates',
+        message: contractDateError,
+      });
+    }
     
     console.log('=== Vendor Creation Debug ===');
     console.log('ACM org_id:', org_id);
@@ -146,6 +168,9 @@ exports.createVendor = async (req, res) => {
       contact_person_number,
       contract_start_date,
       contract_end_date,
+      product_supply: Boolean(product_supply),
+      service_supply: Boolean(service_supply),
+      spare_supply: Boolean(spare_supply),
       created_by,
       created_on,
       changed_by,
@@ -410,6 +435,15 @@ exports.updateVendor = async (req, res) => {
           message: `Invalid vendor status. Allowed values: 0 (Inactive), 1 (Active), 3 (CRApproved), 4 (Blocked)`
         });
       }
+    }
+
+    const contractDateError = getContractDateRangeError(contract_start_date, contract_end_date);
+    if (contractDateError) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid contract dates',
+        message: contractDateError,
+      });
     }
 
     const dbPool = req.db || require("../config/db");

@@ -406,6 +406,36 @@ class MaintenanceFrequencyController {
       });
     }
   }
+
+  static async updateChecklistItems(req, res) {
+    try {
+      const { id } = req.params;
+      const { items } = req.body;
+      const orgId = req.user.org_id;
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Checklist items are required'
+        });
+      }
+
+      const updated = await MaintenanceFrequencyModel.updateChecklistItems(id, orgId, items);
+      res.json({
+        success: true,
+        data: updated,
+        message: 'Checklist items saved successfully'
+      });
+    } catch (error) {
+      console.error('Error in updateChecklistItems:', error);
+      const status = error.statusCode || 500;
+      res.status(status).json({
+        success: false,
+        message: error.message || 'Failed to save checklist items',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = MaintenanceFrequencyController;

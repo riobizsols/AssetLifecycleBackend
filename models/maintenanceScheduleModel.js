@@ -4,6 +4,7 @@ const brHistModel = require("./assetMaintSchBrHistModel");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
+const { ensureAssetTypeRequirementColumns } = require("./assetTypeModel");
 
 /** Normalize parsed text to tblAssetBRDet.abr_id (e.g. ABR001). */
 function normalizeAbrId(raw) {
@@ -627,7 +628,8 @@ const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
 // Get all maintenance schedules from tblAssetMaintSch
 const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
   const { buildAssetListScopeSql } = require('../utils/acmAccess');
-
+  const dbPool = getDb();
+  await ensureAssetTypeRequirementColumns(dbPool);
   let query = `
         SELECT 
             ams.*,
@@ -635,6 +637,8 @@ const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
             a.serial_number,
             a.description as asset_description,
             at.text as asset_type_name,
+            at.require_maintenance,
+            at.require_spare_parts,
             mt.text as maintenance_type_name,
             COALESCE(mt.hours_required, 0)::numeric as hours_required,
             v.vendor_name,
@@ -650,6 +654,7 @@ const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         WHERE ams.org_id = $1 AND a.org_id = $1
+          AND at.require_maintenance IS TRUE
     `;
 
   const params = [orgId];
@@ -659,7 +664,6 @@ const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
 
   query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
 
-  const dbPool = getDb();
   const result = await dbPool.query(query, params);
   return result;
 };
@@ -778,6 +782,37 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   // Automatically set end date to current date when updating
   const currentDate = new Date().toISOString().split("T")[0];
+  const dbPool = getDb();
+
+  // If technician fields are empty but emp_int_id exists, fill name/email/phone from employee
+  let resolvedName = technician_name;
+  let resolvedEmail = technician_email;
+  let resolvedPhone = technician_phno;
+  const needsResolve =
+    (!resolvedName || String(resolvedName).trim() === "") ||
+    (!resolvedEmail || String(resolvedEmail).trim() === "") ||
+    (!resolvedPhone || String(resolvedPhone).trim() === "");
+  if (needsResolve) {
+    const existing = await dbPool.query(
+      `SELECT emp_int_id, technician_name, technician_email, technician_phno
+       FROM "tblAssetMaintSch" WHERE ams_id = $1 AND org_id = $2 LIMIT 1`,
+      [amsId, orgId]
+    );
+    const row = existing.rows[0];
+    if (row?.emp_int_id) {
+      const { resolveTechnicianFromEmp } = require("../utils/technicianResolveUtils");
+      const tech = await resolveTechnicianFromEmp(row.emp_int_id, dbPool);
+      if (!resolvedName || String(resolvedName).trim() === "") {
+        resolvedName = tech.technician_name || row.technician_name || null;
+      }
+      if (!resolvedEmail || String(resolvedEmail).trim() === "") {
+        resolvedEmail = tech.technician_email || row.technician_email || null;
+      }
+      if (!resolvedPhone || String(resolvedPhone).trim() === "") {
+        resolvedPhone = tech.technician_phno || row.technician_phno || null;
+      }
+    }
+  }
 
   const query = `
         UPDATE "tblAssetMaintSch"
@@ -806,9 +841,9 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     currentDate, // Automatically set to current date
     po_number,
     invoice,
-    technician_name,
-    technician_email,
-    technician_phno,
+    resolvedName,
+    resolvedEmail,
+    resolvedPhone,
     cost,
     hours_spent,
     maint_notes,
@@ -816,7 +851,6 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     changed_on,
     orgId,
   ];
-  const dbPool = getDb();
 
   const result = await dbPool.query(query, values);
 

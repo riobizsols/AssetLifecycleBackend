@@ -7,6 +7,10 @@ require('dotenv').config();
  * - DB_SSL / DATABASE_SSL = false → never TLS
  * - Primary URLs with ?sslmode=disable → never TLS
  * - DB_SSL / DATABASE_SSL = true → TLS
+ * - Otherwise: TLS in production only for unknown hosts (not used when URLs disable SSL)
+ *
+ * Local / Docker Postgres (alm_db) often has no TLS; keep DB_SSL=false /
+ * DATABASE_SSL=false when NODE_ENV=production but the server does not accept SSL.
  */
 
 function envUrlsPreferSslDisable() {
@@ -88,6 +92,7 @@ function pgClientOptsFromDatabaseUrl(databaseUrl) {
     ssl = false;
   } else if (
     host === 'alm_db' ||
+    host === 'alm_pgbouncer' ||
     host === 'localhost' ||
     host === '127.0.0.1' ||
     host === 'host.docker.internal'

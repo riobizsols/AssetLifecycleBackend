@@ -3,7 +3,16 @@ const { getUserRoles } = require('../models/userJobRoleModel');
 const { getUserWithBranch } = require('../models/userModel');
 const logger = require('../utils/logger');
 const cacheService = require('../services/cacheService');
-require('dotenv').config();
+const { runWithDb } = require('../utils/dbContext');
+const { runWithTenantContext } = require('../utils/tenantRequestContext');
+const {
+    TenantDbUnavailableError,
+    getRequestHostname,
+    resolveTenantPoolByOrgId,
+    resolveTenantDatabase,
+} = require('../utils/tenantAuthResolver');
+const { getTenantFromEmail } = require('../services/tenantEmailRegistryService');
+const { extractTenantSubdomain } = require('../utils/subdomainUtils');
 
 function buildAuthCacheKey(decoded) {
     return cacheService.buildKey(
@@ -12,57 +21,59 @@ function buildAuthCacheKey(decoded) {
         'acm-v1',
         decoded.user_id,
         decoded.org_id || 'none',
-        decoded.use_default_db ? '1' : '0',
         decoded.iat || 0,
     );
 }
 
 async function resolveDatabasePool(decoded, req) {
-    const db = require('../config/db');
-    const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
-    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-
-    const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
+    const hostname = getRequestHostname(req);
     const subdomain = extractTenantSubdomain(hostname);
 
-    // Subdomain takes precedence over use_default_db (multi-tenant routing)
     if (subdomain) {
-        try {
-            const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
-            if (tenantOrgId) {
-                const tenantExists = await checkTenantExists(tenantOrgId);
-                if (tenantExists) {
-                    logger.log(`[AuthMiddleware] Subdomain ${subdomain} -> tenant DB org_id: ${tenantOrgId}`);
-                    return { dbPool: await getTenantPool(tenantOrgId), isTenant: true };
-                }
-                logger.warn(`[AuthMiddleware] Subdomain ${subdomain} tenant not active, using default DB`);
-            } else {
-                logger.warn(`[AuthMiddleware] Subdomain ${subdomain} has no org_id, using default DB`);
-            }
-        } catch (subdomainError) {
-            logger.error(`[AuthMiddleware] Error processing subdomain ${subdomain}:`, subdomainError);
+        const resolved = await resolveTenantDatabase({
+            hostname,
+            email: decoded.email,
+            orgId: decoded.org_id,
+        });
+        if (resolved) {
+            logger.log(`[AuthMiddleware] Subdomain ${subdomain} -> tenant DB org_id: ${resolved.registryOrgId}`);
+            return { ...resolved, isTenant: true };
         }
-        return { dbPool: db, isTenant: false };
+        throw new TenantDbUnavailableError(`No active tenant database for subdomain: ${subdomain}`);
     }
 
-    if (decoded.use_default_db === true) {
-        logger.log(`[AuthMiddleware] Normal login (use_default_db=true) -> default DATABASE_URL`);
-        return { dbPool: db, isTenant: false };
-    }
-
-    // Tenant token without subdomain: route by org_id from JWT
     if (decoded.org_id) {
         try {
-            const tenantExists = await checkTenantExists(decoded.org_id);
-            if (tenantExists) {
-                return { dbPool: await getTenantPool(decoded.org_id), isTenant: true };
+            const resolved = await resolveTenantPoolByOrgId(decoded.org_id);
+            if (resolved) {
+                logger.log(`[AuthMiddleware] Tenant JWT org_id ${decoded.org_id} -> tenant database`);
+                return { ...resolved, isTenant: true };
             }
         } catch (tenantError) {
             console.warn(`[AuthMiddleware] Tenant lookup failed for org_id ${decoded.org_id}:`, tenantError.message);
         }
     }
 
-    return { dbPool: db, isTenant: false };
+    if (decoded.email) {
+        try {
+            const emailMapping = await getTenantFromEmail(decoded.email);
+            if (emailMapping?.org_id) {
+                const resolved = await resolveTenantPoolByOrgId(emailMapping.org_id);
+                if (resolved) {
+                    logger.warn(
+                        `[AuthMiddleware] Resolved tenant via email registry for ${decoded.email} (org_id ${emailMapping.org_id})`,
+                    );
+                    return { ...resolved, isTenant: true };
+                }
+            }
+        } catch (emailRegistryError) {
+            console.warn(`[AuthMiddleware] Email registry tenant lookup failed for ${decoded.email}:`, emailRegistryError.message);
+        }
+    }
+
+    throw new TenantDbUnavailableError(
+        `Tenant database unavailable for org_id ${decoded.org_id || 'unknown'}`,
+    );
 }
 
 async function retryOnPoolExhaustion(dbPool, fn, maxRetries = 3, delay = 150) {
@@ -177,28 +188,31 @@ const protect = async (req, res, next) => {
     try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const { runWithDb } = require('../utils/dbContext');
         const cacheKey = buildAuthCacheKey(decoded);
 
-        const { dbPool, isTenant } = await resolveDatabasePool(decoded, req);
+        const { dbPool, isTenant, registryOrgId, subdomain } = await resolveDatabasePool(decoded, req);
+        const tenantCtx = {
+            registryOrgId: isTenant ? registryOrgId : null,
+            subdomain: isTenant ? subdomain : null,
+        };
 
         const cached = await cacheService.get(cacheKey);
         if (cached?.user) {
             req.db = dbPool;
-            req.tenantPool = isTenant ? dbPool : null;
+            req.tenantPool = dbPool;
             req.isTenant = isTenant;
             // Clone so ACM overlay never mutates the cached auth user object
             req.user = { ...cached.user };
             const { attachAcmFilterFromHeaders } = require('../utils/acmAccess');
             await attachAcmFilterFromHeaders(req);
-            return runWithDb(dbPool, () => next());
+            return runWithDb(dbPool, () => runWithTenantContext(tenantCtx, () => next()));
         }
 
         req.db = dbPool;
-        req.tenantPool = isTenant ? dbPool : null;
+        req.tenantPool = dbPool;
         req.isTenant = isTenant;
 
-        return runWithDb(dbPool, async () => {
+        return runWithDb(dbPool, () => runWithTenantContext(tenantCtx, async () => {
             const context = await buildUserContext(decoded, dbPool, isTenant);
             // Cache the pristine user; clone for this request before ACM overlay
             await cacheService.set(cacheKey, { user: context.user }, cacheService.getAuthCacheTtlMs());
@@ -206,8 +220,15 @@ const protect = async (req, res, next) => {
             const { attachAcmFilterFromHeaders } = require('../utils/acmAccess');
             await attachAcmFilterFromHeaders(req);
             next();
-        });
+        }));
     } catch (err) {
+        if (err.code === 'TENANT_DB_UNAVAILABLE') {
+            console.error('[AuthMiddleware] Tenant database routing failed:', err.message);
+            return res.status(503).json({
+                message: 'Unable to connect to your organization database. Please log out and sign in again.',
+                error: 'Tenant database unavailable',
+            });
+        }
         if (err.code === '53300' || (err.message && err.message.includes('too many clients'))) {
             console.error('[AuthMiddleware] Connection pool exhausted:', err.message);
             return res.status(503).json({

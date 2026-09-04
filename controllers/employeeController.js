@@ -434,6 +434,23 @@ const createEmployee = async (req, res) => {
                 error: "Email is required"
             });
         }
+
+        const existingByEmail = await model.findEmployeeByEmail(
+            employeeData.email_id,
+            org_id,
+        );
+        if (existingByEmail) {
+            return res.status(409).json({
+                success: false,
+                error: `Email "${employeeData.email_id.trim()}" is already used by employee ${existingByEmail.employee_id}`,
+                code: "EMAIL_ALREADY_EXISTS",
+                existingEmployee: {
+                    employee_id: existingByEmail.employee_id,
+                    emp_int_id: existingByEmail.emp_int_id,
+                    full_name: existingByEmail.full_name,
+                },
+            });
+        }
         
         if (!employeeData.phone_number || !employeeData.phone_number.trim()) {
             return res.status(400).json({
@@ -480,6 +497,20 @@ const createEmployee = async (req, res) => {
         });
     } catch (error) {
         console.error("Error creating employee:", error);
+        if (error.code === "EMAIL_ALREADY_EXISTS" || error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                error: error.message,
+                code: "EMAIL_ALREADY_EXISTS",
+            });
+        }
+        if (error.code === "23505") {
+            return res.status(409).json({
+                success: false,
+                error: "Email already exists for another employee in this organization",
+                code: "EMAIL_ALREADY_EXISTS",
+            });
+        }
         res.status(500).json({
             success: false,
             error: "Failed to create employee",

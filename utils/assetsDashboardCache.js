@@ -26,6 +26,20 @@ function memoryInvalidatePrefix(prefix) {
   }
 }
 
+/** Keys are scoped as api:{tenantDb}:{orgId}:{branch}:... — match org segment, not api:{orgId} */
+function memoryInvalidateOrg(orgId) {
+  if (!orgId) return 0;
+  const marker = `:${orgId}:`;
+  let deleted = 0;
+  for (const key of memoryL1.keys()) {
+    if (key.startsWith('api:') && key.includes(marker)) {
+      memoryL1.delete(key);
+      deleted += 1;
+    }
+  }
+  return deleted;
+}
+
 function branchScope(req) {
   if (req.user?.hasSuperAccess || req.user?.acmAllBranches) return 'all';
   const acmBranchIds = Array.isArray(req.user?.acmBranchIds)
@@ -86,15 +100,11 @@ async function getOrSet(key, ttlMs, fetcher) {
 
 async function invalidateOrgApiCache(orgId) {
   if (!orgId) return;
-  const orgNeedle = `:${orgId}:`;
-  for (const key of memoryL1.keys()) {
-    if (key.startsWith('api:') && key.includes(orgNeedle)) {
-      memoryL1.delete(key);
-    }
-  }
-  // Clear shared Redis keys for this org (and local cacheService L1 via prefix scan).
-  // Key shape: api:<tenant>:<orgId>:...
-  await cacheService.invalidateByPrefix(`api:`);
+  // Org-scoped only — do NOT wipe all api:* keys (would clear every tenant on shared Redis)
+  memoryInvalidateOrg(orgId);
+  // Legacy prefix shape (api:{orgId}) for older keys
+  memoryInvalidatePrefix(cacheService.buildKey('api', orgId));
+  await cacheService.invalidateOrgApiKeys(orgId);
 }
 
 module.exports = {

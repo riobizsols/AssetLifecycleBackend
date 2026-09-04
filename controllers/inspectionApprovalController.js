@@ -195,7 +195,7 @@ async function processApprovalAction(req, res) {
     if (!inspBranchAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());
     }
-    
+
     const normalizedAction = action.toUpperCase();
     let nextStepMessage = '';
     

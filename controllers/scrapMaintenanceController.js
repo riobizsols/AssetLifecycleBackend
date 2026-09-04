@@ -102,7 +102,7 @@ const getScrapMaintenanceApprovals = async (req, res) => {
     let userBranchCode = req.user?.branch_code || req.user?.branchCode || null;
     const branchId = req.user?.branch_id;
     const roleIds = collectUserRoleIds(req.user);
-    const hasSuperAccess = roleIdsIncludeSystemAdmin(roleIds);
+    const hasSuperAccess = (req.user?.hasSuperAccess || false) || roleIdsIncludeSystemAdmin(roleIds);
 
     if (!userId || !orgId) {
       return res.status(400).json({ success: false, message: 'user_id/org_id missing in user context' });

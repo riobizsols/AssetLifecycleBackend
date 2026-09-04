@@ -4,6 +4,79 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
+const truthyFlag = (value) =>
+  value === true ||
+  value === 1 ||
+  value === '1' ||
+  value === 't' ||
+  String(value).toLowerCase() === 'true';
+
+const ensureVendorSupplyColumns = async (dbPool) => {
+  await dbPool.query(`
+    ALTER TABLE "tblVendors"
+      ADD COLUMN IF NOT EXISTS product_supply boolean DEFAULT false,
+      ADD COLUMN IF NOT EXISTS service_supply boolean DEFAULT false,
+      ADD COLUMN IF NOT EXISTS spare_supply boolean DEFAULT false
+  `);
+};
+
+const attachVendorSupplyFlags = async (vendors) => {
+  const list = Array.isArray(vendors) ? vendors : vendors ? [vendors] : [];
+  if (!list.length) return vendors;
+
+  const ids = list.map((row) => row.vendor_id).filter(Boolean);
+  const dbPool = getDb();
+  const spareSet = new Set();
+  const productSet = new Set();
+  const serviceSet = new Set();
+
+  if (ids.length) {
+    try {
+      const spare = await dbPool.query(
+        `
+          SELECT DISTINCT vendor_id
+          FROM "tblVSPMap"
+          WHERE vendor_id = ANY($1::text[])
+            AND COALESCE(int_status, 1) = 1
+        `,
+        [ids]
+      );
+      spare.rows.forEach((row) => spareSet.add(row.vendor_id));
+    } catch (_) {
+      /* tblVSPMap may be missing in some tenants */
+    }
+    try {
+      const prod = await dbPool.query(
+        `
+          SELECT DISTINCT
+            vps.vendor_id,
+            LOWER(BTRIM(ps.ps_type)) AS ps_type
+          FROM "tblVendorProdService" vps
+          INNER JOIN "tblProdServs" ps
+            ON ps.prod_serv_id = vps.prod_serv_id
+          WHERE vps.vendor_id = ANY($1::text[])
+        `,
+        [ids]
+      );
+      prod.rows.forEach((row) => {
+        if (row.ps_type === 'product') productSet.add(row.vendor_id);
+        if (row.ps_type === 'service') serviceSet.add(row.vendor_id);
+      });
+    } catch (_) {
+      /* product/service mapping tables may be missing */
+    }
+  }
+
+  const mapped = list.map((row) => ({
+    ...row,
+    product_supply: truthyFlag(row.product_supply) || productSet.has(row.vendor_id),
+    service_supply: truthyFlag(row.service_supply) || serviceSet.has(row.vendor_id),
+    spare_supply: truthyFlag(row.spare_supply) || spareSet.has(row.vendor_id),
+  }));
+
+  return Array.isArray(vendors) ? mapped : mapped[0];
+};
+
 // Get all vendors for an organization (org-level master data — visible in every branch)
 const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, serviceOnly = false) => {
   console.log('=== Vendor Model Listing Debug ===');
@@ -26,26 +99,32 @@ const getAllVendors = async (org_id, userBranchCode, hasSuperAccess = false, ser
   query += ` ORDER BY created_on DESC`;
   
   const dbPool = getDb();
+  await ensureVendorSupplyColumns(dbPool);
   const result = await dbPool.query(query, params);
   console.log('Query executed successfully, found vendors:', result.rows.length);
-  return result.rows;
+  return attachVendorSupplyFlags(result.rows);
 };
 
-// Get vendor by ID - try tenant DB first, fallback to default DB
+// Get vendor by ID from tenant database context only
 const getVendorById = async (vendorId) => {
   const dbPool = getDb();
   try {
+    await ensureVendorSupplyColumns(dbPool);
     const result = await dbPool.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
-    if (result.rows && result.rows.length > 0) return result.rows[0];
+    if (result.rows && result.rows.length > 0) {
+      return attachVendorSupplyFlags(result.rows[0]);
+    }
   } catch (e) {
-    console.warn('Vendor lookup in request DB failed:', e.message);
+    console.warn('Vendor lookup in tenant DB failed:', e.message);
   }
 
   // Fallback: try default DB pool
   if (db && db !== dbPool) {
     try {
       const fallback = await db.query('SELECT * FROM "tblVendors" WHERE vendor_id = $1', [vendorId]);
-      if (fallback.rows && fallback.rows.length > 0) return fallback.rows[0];
+      if (fallback.rows && fallback.rows.length > 0) {
+        return attachVendorSupplyFlags(fallback.rows[0]);
+      }
     } catch (e) {
       console.warn('Vendor lookup in default DB failed:', e.message);
     }
@@ -85,6 +164,9 @@ const createVendor = async (vendor) => {
   console.log('org_id:', vendor.org_id);
   console.log('branch_code:', vendor.branch_code);
   
+  const dbPool = getDb();
+  await ensureVendorSupplyColumns(dbPool);
+
   const query = `
     INSERT INTO "tblVendors" (
       vendor_id,
@@ -106,13 +188,16 @@ const createVendor = async (vendor) => {
       contact_person_number,
       contract_start_date,
       contract_end_date,
+      product_supply,
+      service_supply,
+      spare_supply,
       created_by,
       created_on,
       changed_by,
       changed_on
     ) VALUES (
       $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+      $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
     ) RETURNING *;
   `;
 
@@ -136,16 +221,18 @@ const createVendor = async (vendor) => {
     vendor.contact_person_number,
     vendor.contract_start_date || null,
     vendor.contract_end_date || null,
+    Boolean(vendor.product_supply),
+    Boolean(vendor.service_supply),
+    Boolean(vendor.spare_supply),
     vendor.created_by,
     vendor.created_on,
     vendor.changed_by,
     vendor.changed_on
   ];
 
-  const dbPool = getDb();
   const { rows } = await dbPool.query(query, values);
   console.log('Vendor created successfully with branch_code:', vendor.branch_code);
-  return rows[0];
+  return attachVendorSupplyFlags(rows[0]);
 };
 
 module.exports = {

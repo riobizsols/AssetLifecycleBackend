@@ -10,16 +10,24 @@ const {
     updateOwnPassword,
     changePassword
 } = require('../controllers/authController');
+const {
+    zohoLoginStart,
+    zohoLoginCallback,
+} = require('../controllers/zohoAuthController');
 
 const { protect } = require('../middlewares/authMiddleware');
 const authorize = require('../middlewares/authorize');
 
 // 🟢 Public routes
-router.post('/login', login); // Original login (uses default database)
+router.post('/login', login); // Tenant-only login (subdomain or email registry)
 router.post('/tenant-login', tenantLogin); // Multi-tenant login (requires org_id)
 router.post('/refresh', refreshToken);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
+
+// Zoho OIDC SSO (optional additive path — password login unchanged)
+router.get('/zoho/login', zohoLoginStart);
+router.get('/zoho/callback', zohoLoginCallback);
 
 // 🔒 Protected routes
 router.post('/register', protect, authorize(['super_admin']), register); // Only super_admin will be allowed (checked in controller)

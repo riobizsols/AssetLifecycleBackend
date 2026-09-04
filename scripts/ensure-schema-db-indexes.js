@@ -1,88 +1,106 @@
 #!/usr/bin/env node
 /**
- * Ensure critical unique indexes exist on schema_db (tenant template) and optionally
- * backfill an existing tenant DB (e.g. abcd_db).
+ * Ensure functional unique indexes used by tenant provisioning exist on schema_db
+ * (and optionally on existing tenants that were created before the dump fix).
  *
  * Usage:
  *   node scripts/ensure-schema-db-indexes.js
  *   node scripts/ensure-schema-db-indexes.js --also=abcd_db
+ *   node scripts/ensure-schema-db-indexes.js --also=abcd_db,other_db
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
-const { Pool } = require('pg');
-
-const ALSO = process.argv.find((a) => a.startsWith('--also='))?.split('=')[1];
-const TARGETS = ['schema_db', ...(ALSO ? ALSO.split(',').map((s) => s.trim()).filter(Boolean) : [])];
+const { Client } = require('pg');
+const { getReferenceUrl, buildSchemaDbUrl } = require('../utils/tenantSchemaReference');
+const { buildPoolConfig } = require('../utils/pgSsl');
 
 const INDEX_SQL = [
-  {
-    name: 'uq_tblacm_scope',
-    table: 'tblACM',
-    sql: `
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_tblacm_scope
-      ON public."tblACM" USING btree (user_id, access_level, org_id, branch_id, dept_id)
-    `,
-  },
-  {
-    name: 'uq_spinddet_org_serial',
-    table: 'tblSPIndDet',
-    sql: `
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_spinddet_org_serial
-      ON public."tblSPIndDet" USING btree (org_id, serial_number)
-      WHERE ((serial_number IS NOT NULL) AND (btrim((serial_number)::text) <> ''::text))
-    `,
-  },
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_tblacm_scope
+ON public."tblACM" USING btree (user_id, access_level, org_id, branch_id, dept_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS uq_spinddet_org_serial
+ON public."tblSPIndDet" USING btree (org_id, serial_number)
+WHERE ((serial_number IS NOT NULL) AND (btrim((serial_number)::text) <> ''::text))`,
 ];
 
-function dbUrl(name) {
-  const base = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;
-  return base.replace(/\/([^/?]+)(\?|$)/, `/${name}$2`);
+const INDEX_NAMES = ['uq_tblacm_scope', 'uq_spinddet_org_serial'];
+
+function parseAlsoArg(argv) {
+  const flag = argv.find((a) => a.startsWith('--also='));
+  if (!flag) return [];
+  return flag
+    .slice('--also='.length)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
-async function tableExists(pool, table) {
-  const r = await pool.query(
-    `SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=$1`,
-    [table],
-  );
-  return r.rows.length > 0;
+function tenantDbUrl(dbName) {
+  const base =
+    process.env.TENANT_DATABASE_URL ||
+    process.env.DATABASE_URL ||
+    process.env.HOSPITALITY_DATABASE_URL;
+  if (!base) {
+    throw new Error('TENANT_DATABASE_URL or DATABASE_URL is required for --also=');
+  }
+  return buildSchemaDbUrl(base, dbName);
 }
 
-async function indexExists(pool, indexName) {
-  const r = await pool.query(
-    `SELECT 1 FROM pg_indexes WHERE schemaname='public' AND indexname=$1`,
-    [indexName],
-  );
-  return r.rows.length > 0;
-}
+async function ensureIndexes(label, connectionString) {
+  if (!connectionString) {
+    throw new Error(`No connection string for ${label}`);
+  }
 
-async function ensureDb(dbName) {
-  const pool = new Pool({
-    connectionString: dbUrl(dbName),
-    ssl: false,
-    connectionTimeoutMillis: 20000,
-  });
-  console.log(`\n── ${dbName} ──`);
+  const client = new Client(buildPoolConfig(connectionString, { connectionTimeoutMillis: 20000 }));
+  await client.connect();
   try {
-    for (const idx of INDEX_SQL) {
-      if (!(await tableExists(pool, idx.table))) {
-        console.log(`  skip ${idx.name}: table ${idx.table} missing`);
-        continue;
-      }
-      if (await indexExists(pool, idx.name)) {
-        console.log(`  ok   ${idx.name} (already present)`);
-        continue;
-      }
-      await pool.query(idx.sql);
-      console.log(`  +    ${idx.name} created`);
+    console.log(`\n[${label}] Applying unique indexes...`);
+    for (const sql of INDEX_SQL) {
+      await client.query(sql);
     }
+
+    const { rows } = await client.query(
+      `
+        SELECT indexname, indexdef
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname = ANY($1::text[])
+        ORDER BY indexname
+      `,
+      [INDEX_NAMES],
+    );
+
+    for (const name of INDEX_NAMES) {
+      const found = rows.find((r) => r.indexname === name);
+      console.log(found ? `  ✓ ${name}` : `  ✗ MISSING ${name}`);
+    }
+    return rows.length === INDEX_NAMES.length;
   } finally {
-    await pool.end();
+    await client.end();
   }
 }
 
 (async () => {
-  for (const db of TARGETS) await ensureDb(db);
+  const alsoDbs = parseAlsoArg(process.argv.slice(2));
+  const referenceUrl = getReferenceUrl();
+  if (!referenceUrl) {
+    throw new Error(
+      'TENANT_SCHEMA_REFERENCE_URL (or TENANT_DATABASE_URL/DATABASE_URL for schema_db) must be set',
+    );
+  }
+
+  const dbLabel = referenceUrl.split('/').pop()?.split('?')[0] || 'schema_db';
+  let ok = await ensureIndexes(dbLabel, referenceUrl);
+
+  for (const name of alsoDbs) {
+    const tenantOk = await ensureIndexes(name, tenantDbUrl(name));
+    ok = ok && tenantOk;
+  }
+
+  if (!ok) {
+    console.error('\nOne or more indexes are still missing.');
+    process.exit(1);
+  }
   console.log('\nDone.');
-})().catch((e) => {
-  console.error(e);
+})().catch((err) => {
+  console.error('Failed:', err.message);
   process.exit(1);
 });

@@ -1,13 +1,15 @@
 const model = require("../models/assetTypeModel");
 const operationalCache = require('../utils/operationalCache');
 const assignmentCache = require('../utils/assignmentCache');
+const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const { generateCustomId } = require("../utils/idGenerator");
-const { findConflictingAssetTypeName } = require("../utils/assetTypeNameValidation");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 
 const invalidateAssetTypeCaches = (req) => {
     const orgId = req.user?.org_id;
     operationalCache.invalidateOrgCaches(orgId).catch(() => {});
     assignmentCache.invalidateOrgCaches(orgId).catch(() => {});
+    maintenanceSupervisorCache.invalidateOrgCaches(orgId).catch(() => {});
 };
 
 // Helper function to convert parent asset type text to ID
@@ -43,6 +45,8 @@ const addAssetType = async (req, res) => {
             int_status,            // from frontend (1 or 0)
             group_required,        // from frontend
             inspection_required,    // from frontend
+            require_maintenance = false,
+            require_spare_parts = false,
             is_child = false,      // from frontend
             parent_asset_type_id = null,  // from frontend
             maint_lead_type = null,  // from frontend
@@ -62,19 +66,6 @@ const addAssetType = async (req, res) => {
         if (!trimmedText) {
             return res.status(400).json({ 
                 error: "Asset type name (text) is required" 
-            });
-        }
-
-        const existingTypes = await model.getAllAssetTypes(org_id);
-        const conflictingName = findConflictingAssetTypeName(
-            trimmedText,
-            existingTypes.rows
-        );
-        if (conflictingName) {
-            return res.status(409).json({
-                error: "Similar asset type name exists",
-                message: `An asset type with a similar name already exists: "${conflictingName}"`,
-                existingName: conflictingName,
             });
         }
 
@@ -119,7 +110,9 @@ const addAssetType = async (req, res) => {
                     is_child,
                     parent_asset_type_id,
                     maint_lead_type,
-                    depreciation_type
+                    depreciation_type,
+                    require_maintenance,
+                    require_spare_parts
                 );
                 break; // Success, exit the loop
             } catch (err) {
@@ -329,6 +322,8 @@ const updateAssetType = async (req, res) => {
             assignment_type,
             inspection_required,
             group_required,
+            require_maintenance,
+            require_spare_parts,
             require_scrap_approval,
             text,
             is_child,
@@ -384,27 +379,17 @@ const updateAssetType = async (req, res) => {
             });
         }
 
-        const orgIdForCheck = org_id || existingAsset.rows[0].org_id;
-        const existingTypes = await model.getAllAssetTypes(orgIdForCheck);
-        const conflictingName = findConflictingAssetTypeName(
-            proposedText,
-            existingTypes.rows,
-            id
-        );
-        if (conflictingName) {
-            return res.status(409).json({
-                error: "Similar asset type name exists",
-                message: `An asset type with a similar name already exists: "${conflictingName}"`,
-                existingName: conflictingName,
-            });
-        }
-
         const updateData = {
             org_id: org_id || existingAsset.rows[0].org_id,
+            branch_id: req.body.branch_id !== undefined
+                ? (req.body.branch_id || null)
+                : existingAsset.rows[0].branch_id,
             int_status: int_status !== undefined ? int_status : existingAsset.rows[0].int_status,
             assignment_type: assignment_type !== undefined ? assignment_type : existingAsset.rows[0].assignment_type,
             inspection_required: inspection_required !== undefined ? inspection_required : existingAsset.rows[0].inspection_required,
             group_required: group_required !== undefined ? group_required : existingAsset.rows[0].group_required,
+            require_maintenance: require_maintenance !== undefined ? require_maintenance : existingAsset.rows[0].require_maintenance,
+            require_spare_parts: require_spare_parts !== undefined ? require_spare_parts : existingAsset.rows[0].require_spare_parts,
             text: proposedText,
             is_child: is_child !== undefined ? is_child : existingAsset.rows[0].is_child,
             parent_asset_type_id: is_child === false ? null : (parent_asset_type_id !== undefined ? parent_asset_type_id : existingAsset.rows[0].parent_asset_type_id),
@@ -660,8 +645,6 @@ const trialBulkUpload = async (req, res) => {
         console.log('🔍 Asset Types Trial Bulk Upload - Received data:', req.body);
         
         const { csvData } = req.body;
-        const org_id = req.user.org_id;
-        const created_by = req.user.user_id;
         
         if (!csvData || !Array.isArray(csvData)) {
             return res.status(400).json({
@@ -684,9 +667,15 @@ const trialBulkUpload = async (req, res) => {
             console.log(`🔍 Processing record ${i + 1}:`, record);
             
             try {
+                const { orgId: rowOrgId, branchId: rowBranchId } = await validateCsvOrgBranch({
+                    orgId: record.org_id,
+                    branchId: record.branch_id,
+                    branchRequired: false,
+                });
+
                 // Convert parent_asset_type_id from text to ID if needed
                 if (record.parent_asset_type_id && record.parent_asset_type_id.trim() !== '') {
-                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, org_id);
+                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, rowOrgId);
                     if (parentAssetTypeId !== record.parent_asset_type_id) {
                         console.log(`🔄 Converted parent asset type '${record.parent_asset_type_id}' to ID '${parentAssetTypeId}'`);
                         record.parent_asset_type_id = parentAssetTypeId;
@@ -707,7 +696,7 @@ const trialBulkUpload = async (req, res) => {
                 // Validate properties if provided
                 if (record.properties && Array.isArray(record.properties) && record.properties.length > 0) {
                     for (const propId of record.properties) {
-                        const propExists = await model.checkPropertyExists(propId, org_id);
+                        const propExists = await model.checkPropertyExists(propId, rowOrgId);
                         if (!propExists.rows.length) {
                             validationErrors.push(`Row ${i + 1}: Property with ID '${propId}' does not exist`);
                         }
@@ -753,7 +742,6 @@ const commitBulkUpload = async (req, res) => {
         console.log('🔍 Asset Types Commit Bulk Upload - Received data:', req.body);
         
         const { csvData } = req.body;
-        const org_id = req.user.org_id;
         const created_by = req.user.user_id;
         
         if (!csvData || !Array.isArray(csvData)) {
@@ -768,6 +756,7 @@ const commitBulkUpload = async (req, res) => {
         let inserted = 0;
         let updated = 0;
         let errors = 0;
+        const errorDetails = [];
         let totalProcessed = 0;
         
         // Process each record
@@ -777,10 +766,16 @@ const commitBulkUpload = async (req, res) => {
             
             try {
                 totalProcessed++;
+
+                const { orgId: rowOrgId, branchId: rowBranchId } = await validateCsvOrgBranch({
+                    orgId: record.org_id,
+                    branchId: record.branch_id,
+                    branchRequired: false,
+                });
                 
                 // Convert parent_asset_type_id from text to ID if needed
                 if (record.parent_asset_type_id && record.parent_asset_type_id.trim() !== '') {
-                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, org_id);
+                    const parentAssetTypeId = await convertParentAssetTypeToId(record.parent_asset_type_id, rowOrgId);
                     if (parentAssetTypeId !== record.parent_asset_type_id) {
                         console.log(`🔄 Converted parent asset type '${record.parent_asset_type_id}' to ID '${parentAssetTypeId}'`);
                         record.parent_asset_type_id = parentAssetTypeId;
@@ -794,11 +789,14 @@ const commitBulkUpload = async (req, res) => {
                     // Update existing asset type
                     console.log(`📝 Updating existing asset type '${record.asset_type_id}'`);
                     const updateData = {
-                        org_id,
+                        org_id: rowOrgId,
+                        branch_id: rowBranchId || null,
                         int_status: record.int_status,
                         assignment_type: record.assignment_type,
                         inspection_required: (record.inspection_required === 'true' || record.inspection_required === true),
                         group_required: (record.group_required === 'true' || record.group_required === true),
+                        require_maintenance: (record.require_maintenance === 'true' || record.require_maintenance === true),
+                        require_spare_parts: (record.require_spare_parts === 'true' || record.require_spare_parts === true),
                         text: record.text,
                         is_child: (record.is_child === 'true' || record.is_child === true),
                         parent_asset_type_id: record.parent_asset_type_id || null,
@@ -814,7 +812,7 @@ const commitBulkUpload = async (req, res) => {
                         await model.deleteAssetTypePropertyMappings(existingAssetType.rows[0].asset_type_id);
                         // Add new property mappings only if there are properties
                         if (record.properties.length > 0) {
-                            await model.mapAssetTypeToProperties(existingAssetType.rows[0].asset_type_id, record.properties, org_id, created_by);
+                            await model.mapAssetTypeToProperties(existingAssetType.rows[0].asset_type_id, record.properties, rowOrgId, created_by);
                         }
                     }
                     
@@ -834,12 +832,15 @@ const commitBulkUpload = async (req, res) => {
                     while (retryCount < maxRetries) {
                         try {
                             result = await model.insertAssetType(
-                                org_id, asset_type_id, record.int_status || 1,
+                                rowOrgId, asset_type_id, record.int_status || 1,
                                 record.assignment_type || 'user',
                                 (record.inspection_required === 'true' || record.inspection_required === true), (record.group_required === 'true' || record.group_required === true),
                                 created_by, record.text, (record.is_child === 'true' || record.is_child === true),
                                 record.parent_asset_type_id || null,
-                                record.maint_lead_type || null, record.depreciation_type || 'ND'
+                                record.maint_lead_type || null, record.depreciation_type || 'ND',
+                                (record.require_maintenance === 'true' || record.require_maintenance === true),
+                                (record.require_spare_parts === 'true' || record.require_spare_parts === true),
+                                rowBranchId || null
                             );
                             break; // Success, exit the loop
                         } catch (err) {
@@ -857,7 +858,7 @@ const commitBulkUpload = async (req, res) => {
                     
                     // Map properties if provided
                     if (record.properties && Array.isArray(record.properties) && record.properties.length > 0) {
-                        await model.mapAssetTypeToProperties(asset_type_id, record.properties, org_id, created_by);
+                        await model.mapAssetTypeToProperties(asset_type_id, record.properties, rowOrgId, created_by);
                     }
                     
                     inserted++;
@@ -866,6 +867,11 @@ const commitBulkUpload = async (req, res) => {
             } catch (recordError) {
                 console.error(`❌ Error processing record ${i + 1}:`, recordError);
                 errors++;
+                errorDetails.push({
+                    row: i + 1,
+                    asset_type_id: record.asset_type_id || null,
+                    error: recordError.message,
+                });
             }
         }
         
@@ -873,7 +879,8 @@ const commitBulkUpload = async (req, res) => {
             inserted,
             updated,
             errors,
-            totalProcessed
+            totalProcessed,
+            errorDetails,
         };
         
         console.log('🔍 Commit results:', results);

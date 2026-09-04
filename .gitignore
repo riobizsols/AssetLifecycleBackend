@@ -10,8 +10,11 @@ pnpm-debug.log*
 lerna-debug.log*
 .pm2/
 
-# Environment variables
+# Environment variables (server-only — never commit real secrets)
 .env
+.env.*
+!.env.production.example
+!.env.example
 .env.local
 .env.*.local
 
@@ -21,6 +24,7 @@ uploads/
 # Database backups
 backups/
 *.sql
+!migrations/*.sql
 *.md5
 
 # OS files

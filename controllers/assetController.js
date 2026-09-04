@@ -24,6 +24,7 @@ const checkDuplicateAssetDescription = async (
   const assets = await model.getAssetsByOrg(org_id);
   return findConflictingAssetName(trimmed, assets.rows, excludeAssetId);
 };
+
 const {
     // Generic helpers
     logApiCall,
@@ -128,8 +129,7 @@ const addAsset = async (req, res) => {
 
         const created_by = req.user.user_id;
 
-        if (!text || !org_id) {
-            // WARNING: Missing required fields
+        if (!text) {
             await logMissingRequiredFields({
                 text,
                 orgId: org_id,
@@ -138,7 +138,7 @@ const addAsset = async (req, res) => {
                 duration: Date.now() - startTime
             });
             
-            return res.status(400).json({ error: "text, and org_id are required fields" });
+            return res.status(400).json({ error: "text is a required field" });
         }
 
         // Enforce service vendor when asset type maintenance is vendor-managed.
@@ -241,17 +241,11 @@ const addAsset = async (req, res) => {
             }
         }
 
-        const conflictingAssetName = await checkDuplicateAssetDescription(
-            description,
-            org_id
-        );
-        if (conflictingAssetName) {
-            return respondDuplicateAssetName(res, conflictingAssetName);
-        }
-
         const trimmedDescription = String(description || "").trim();
 
-        const resolvedBranchId = await resolveAssetBranchId(branch_id, req.user, req.db);
+        const resolvedBranchId = branch_id
+            ? await resolveAssetBranchId(branch_id, req.user, req.db)
+            : null;
 
         // Prepare asset data (now includes prod_serv_id)
         const assetData = {
@@ -550,19 +544,6 @@ const updateAsset = async (req, res) => {
           error: "Service vendor is required for vendor-maintained asset types",
         });
       }
-    }
-
-    const descriptionToValidate =
-      Object.prototype.hasOwnProperty.call(body, 'description')
-        ? description
-        : existingAssetRow.description;
-    const conflictingAssetName = await checkDuplicateAssetDescription(
-      descriptionToValidate,
-      finalOrgId,
-      asset_id
-    );
-    if (conflictingAssetName) {
-      return respondDuplicateAssetName(res, conflictingAssetName);
     }
 
     const trimmedDescription =

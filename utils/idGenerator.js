@@ -9,7 +9,7 @@ const defaultPrefixesFromSetup = Object.fromEntries(
     DEFAULT_ID_SEQUENCES.map((entry) => [entry.tableKey, entry.prefix])
 );
 
-/** tblIDSequences keys in DB vs keys used in generateCustomId() */
+/** Runtime tableKey aliases → canonical tblIDSequences.table_key */
 const SEQUENCE_KEY_ALIASES = {
     job_role_nav: 'jobrolenav',
     job_role: 'jobrole',
@@ -17,35 +17,6 @@ const SEQUENCE_KEY_ALIASES = {
 
 function resolveSequenceKey(tableKey) {
     return SEQUENCE_KEY_ALIASES[tableKey] || tableKey;
-}
-
-async function syncJobRoleNavSequence(dbPool) {
-    try {
-        const result = await dbPool.query(`
-            SELECT COALESCE(MAX(
-                CASE
-                    WHEN job_role_nav_id ~ '^JRN[0-9]+$'
-                    THEN CAST(SUBSTRING(job_role_nav_id FROM 4) AS INTEGER)
-                    ELSE 0
-                END
-            ), 0) AS max_seq
-            FROM "tblJobRoleNav"
-        `);
-        const maxSeq = Number(result.rows?.[0]?.max_seq || 0);
-        if (maxSeq <= 0) return;
-
-        await dbPool.query(
-            `
-                INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-                VALUES ('jobrolenav', 'JRN', $1)
-                ON CONFLICT (table_key) DO UPDATE
-                SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
-            `,
-            [maxSeq],
-        );
-    } catch (error) {
-        console.warn('[idGenerator] Could not sync jobrolenav sequence:', error.message);
-    }
 }
 
 const defaultPrefixes = {
@@ -70,15 +41,97 @@ const defaultPrefixes = {
     // Existing scrap details table (legacy, used by reports/UI)
     'asset_scrap_det': 'ASD',
     'etc': 'ETC',
+    // Spare parts
+    'sp_category': 'SPC',
+    'sp_lot_det': 'SPLD',
+    'sp_ind_det': 'SPID',
+    'sp_cat_at_map': 'SPCATM',
+    'vsp_map': 'VSPM',
+    'spare_history': 'SPH',
+    'spare_issue': 'SI',
+    'sp_issue': 'SPI',
+    'spare_store': 'SS',
+    'sp_store': 'SS',
+    'sp_brand': 'SPB',
+    'sp_model': 'SPBM',
 };
+
+/**
+ * Align jobrolenav.last_number with the highest JRN### in tblJobRoleNav.
+ * Call after tenant setup seeds admin navigation with fixed IDs.
+ */
+async function syncJobRoleNavIdSequence(dbPool) {
+    const { rows } = await dbPool.query(`
+        SELECT COALESCE(MAX(
+            CAST(SUBSTRING(job_role_nav_id FROM 'JRN([0-9]+)') AS INTEGER)
+        ), 0)::int AS max_n
+        FROM "tblJobRoleNav"
+        WHERE job_role_nav_id ~ '^JRN[0-9]+$'
+    `);
+    const maxN = rows[0]?.max_n || 0;
+    if (maxN <= 0) {
+        return 0;
+    }
+
+    await dbPool.query(
+        `
+            INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+            VALUES ('jobrolenav', 'JRN', $1)
+            ON CONFLICT (table_key) DO UPDATE
+            SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+        `,
+        [maxN],
+    );
+
+    // Merge legacy duplicate sequence row used by older idGenerator calls
+    const legacy = await dbPool.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        ['job_role_nav'],
+    );
+    if (legacy.rows.length > 0) {
+        const { prefix, last_number } = legacy.rows[0];
+        await dbPool.query(
+            `
+                INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+                VALUES ('jobrolenav', $1, $2)
+                ON CONFLICT (table_key) DO UPDATE
+                SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+            `,
+            [prefix, last_number],
+        );
+        await dbPool.query('DELETE FROM "tblIDSequences" WHERE table_key = $1', ['job_role_nav']);
+    }
+
+    return maxN;
+}
+
+async function migrateLegacySequenceKey(dbPool, tableKey, sequenceKey) {
+    if (sequenceKey === tableKey) return;
+
+    const legacy = await dbPool.query(
+        'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
+        [tableKey],
+    );
+    if (legacy.rows.length === 0) return;
+
+    const { prefix, last_number } = legacy.rows[0];
+    await dbPool.query(
+        `
+            INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (table_key) DO UPDATE
+            SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
+        `,
+        [sequenceKey, prefix, last_number],
+    );
+    await dbPool.query('DELETE FROM "tblIDSequences" WHERE table_key = $1', [tableKey]);
+}
 
 async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
     const sequenceKey = resolveSequenceKey(tableKey);
     console.log(`🔢 Generating ID for tableKey: ${tableKey} (sequence: ${sequenceKey})`);
 
-    if (sequenceKey === 'jobrolenav') {
-        await syncJobRoleNavSequence(dbPool);
-    }
+    await migrateLegacySequenceKey(dbPool, tableKey, sequenceKey);
     
     let result = await dbPool.query(
         'SELECT prefix, last_number FROM "tblIDSequences" WHERE table_key = $1',
@@ -208,7 +261,20 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'scrap_asset_hist': 'tblScrapAssetHist',
         // Existing scrap details table (legacy)
         'asset_scrap_det': 'tblAssetScrapDet',
-        'etc': 'tblEmpTechCert'
+        'etc': 'tblEmpTechCert',
+        // Spare parts
+        'sp_category': 'tblSPCategory',
+        'sp_brand': 'tblSPBrand',
+        'sp_model': 'tblSPBMod',
+        'sp_lot_det': 'tblSPLotDet',
+        'sp_ind_det': 'tblSPIndDet',
+        'sp_cat_at_map': 'tblSPCatATMap',
+        'vsp_map': 'tblVSPMap',
+        'spare_history': 'tblSpareHistory',
+        'spare_issue': 'tblSpareIssue',
+        'sp_issue': 'tblSpareIssue',
+        'spare_store': 'tblSpareStore',
+        'sp_store': 'tblSpareStore',
     };
 
     const targetTable = tableMap[tableKey];
@@ -260,7 +326,20 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
             'scrap_asset_hist': 'scraphis_id',
             // Existing scrap details table (legacy)
               'asset_scrap_det': 'asd_id',
-              'etc': 'etc_id'
+              'etc': 'etc_id',
+              // Spare parts
+              'sp_category': 'spc_id',
+              'sp_brand': 'spb_id',
+              'sp_model': 'spbm_id',
+              'sp_lot_det': 'spld_id',
+              'sp_ind_det': 'spid_id',
+              'sp_cat_at_map': 'spcatm_id',
+              'vsp_map': 'vspm_id',
+              'spare_history': 'sph_id',
+              'spare_issue': 'si_id',
+              'sp_issue': 'si_id',
+              'spare_store': 'ss_id',
+              'sp_store': 'ss_id',
         };
 
         const columnName = columnMap[tableKey];
@@ -300,24 +379,25 @@ exports.generateCustomIdForClient = async (client, tableKey, padLength = 3) => {
     return generateCustomIdWithDb(client, tableKey, padLength);
 };
 
+exports.syncJobRoleNavIdSequence = syncJobRoleNavIdSequence;
+
 
 exports.peekNextId = async (prefix, table, column, padding = 3) => {
     const dbPool = getDb();
+    // Prefer numeric suffix ordering so DPT016 > DPT009
     const result = await dbPool.query(
-        `SELECT ${column} FROM ${table} 
-       ORDER BY CAST(SUBSTRING(${column} FROM '[0-9]+$') AS INTEGER) DESC 
-       LIMIT 1`
+        `SELECT ${column} AS id FROM ${table}
+         WHERE ${column} ~ ('^' || $1 || '[0-9]+$')
+         ORDER BY CAST(SUBSTRING(${column} FROM ($2)::int) AS INTEGER) DESC
+         LIMIT 1`,
+        [prefix, prefix.length + 1]
     );
 
     let nextNum = 1;
     if (result.rows.length > 0) {
-        const lastId = result.rows[0][column];
-        const match = lastId.match(/[0-9]+/g); // extract all numeric parts
-        if (match) {
-            // Pick the last numeric part for sequencing
-            const lastPart = match[match.length - 1];
-            nextNum = parseInt(lastPart) + 1;
-        }
+        const lastId = result.rows[0].id;
+        const match = String(lastId).match(/[0-9]+$/);
+        if (match) nextNum = parseInt(match[0], 10) + 1;
     }
 
     return `${prefix}${String(nextNum).padStart(padding, "0")}`;

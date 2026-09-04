@@ -1,7 +1,9 @@
 const express = require("express");
+require("./utils/pgTimestampUtc");
 const cors = require("cors");
 const { PORT, CORS_ORIGINS } = require("./config/environment");
 const authRoutes = require("./routes/authRoutes");
+const accountDeletionRoutes = require("./routes/accountDeletionRoutes");
 const jobRoleRoutes = require("./routes/jobRoleRoutes");
 const jobRoleNavigationRoutes = require("./routes/jobRoleNavigationRoutes");
 const userRoutes = require("./routes/userRoutes");
@@ -17,6 +19,7 @@ const assetAssignmentRoutes = require("./routes/assetAssignmentRoute");
 const assetUsageRoutes = require("./routes/assetUsageRoutes");
 const assetGroupRoutes = require("./routes/assetGroupRoutes");
 const groupAssetRoutes = require("./routes/groupAssetRoutes");
+const sparePartsRoutes = require("./routes/sparePartsRoutes");
 const vendorProdServiceRoutes = require("./routes/vendorProdServiceRoutes");
 const orgRoutes = require("./routes/orgRoutes");
 const acmRoutes = require("./routes/acmRoutes");
@@ -68,6 +71,7 @@ const CronService = require("./services/cronService");
 const { connectRedis, quitRedis } = require("./config/redis");
 const setupWizardRoutes = require("./routes/setupWizardRoutes");
 const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
+const zohoAccessRequestRoutes = require("./routes/zohoAccessRequestRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
@@ -185,8 +189,11 @@ app.use(
 // PORT is now imported from environment config
 
 app.use("/api/auth", authRoutes);
+app.use("/api/account-deletion", accountDeletionRoutes);
 app.use("/api/setup", setupWizardRoutes);
 app.use("/api/tenant-setup", tenantSetupRoutes);
+app.use("/api/access-requests", zohoAccessRequestRoutes);
+app.use("/api/text-messages", textMessagesRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
@@ -195,6 +202,7 @@ app.use("/api/departments", departmentRoutes);
 app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/users", userRoutes);
 app.use("/api/branches", branchRoutes);
+app.use("/api/branch-dept-mappings", require("./routes/branchDeptMappingRoutes"));
 app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
@@ -207,11 +215,14 @@ app.use("/api", techCertRoutes);
 app.use("/api", employeeTechCertRoutes);
 
 app.use("/api/asset-types", asset_typeRoutes); // Fixed the route registration
+// Asset docs must be registered before /api/assets so /assets/:id/docs is not swallowed.
+app.use("/api", assetDocsRoutes);
 app.use("/api/assets", assetRoutes);
 app.use("/api/asset-assignments", assetAssignmentRoutes);
 app.use("/api/asset-usage", assetUsageRoutes);
 app.use("/api/asset-groups", assetGroupRoutes);
 app.use("/api/group-assets", groupAssetRoutes);
+app.use("/api/spare-parts", sparePartsRoutes);
 app.use("/api/orgs", orgRoutes);
 app.use("/api/acm", acmRoutes);
 app.use("/api/properties", propertiesRoutes);
@@ -237,7 +248,6 @@ app.use("/api/cron-jobs", cronJobRoutes);
 app.use("/api/scrap-assets-by-type", scrapAssetsByTypeRoutes);
 app.use("/api/scrap-sales", scrapSalesRoutes);
 app.use("/api/work-orders", workOrderRoutes);
-app.use("/api", assetDocsRoutes);
 app.use("/api/asset-register", assetRegisterRoutes);
 app.use("/api/asset-lifecycle", assetLifecycleRoutes);
 app.use("/api/asset-valuation", assetValuationRoutes);
@@ -269,7 +279,6 @@ app.use("/api/cost-center-transfer", costCenterTransferRoutes);
 app.use("/api/internal", internalRoutes);
 app.use("/api/job-monitor", jobMonitorRoutes);
   app.use("/api/org-settings", orgSettingsRoutes);
-  app.use("/api/text-messages", textMessagesRoutes);
 app.get("/", (req, res) => {
   res.send("Server is running!");
 });
@@ -282,6 +291,11 @@ const server = app.listen(PORT, () => {
 
   connectRedis().catch((err) => {
     console.warn('[Redis] Startup connect skipped:', err.message);
+  });
+
+  const { ensureTenantUserEmailsTable } = require('./services/tenantEmailRegistryService');
+  ensureTenantUserEmailsTable().catch((err) => {
+    console.warn('[TenantEmailRegistry] Startup table ensure skipped:', err.message);
   });
   
   // Initialize cron jobs after server starts

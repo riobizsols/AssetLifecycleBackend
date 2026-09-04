@@ -145,8 +145,13 @@ exports.addProdserv = async (req, res) => {
 
     res.status(201).json({ success: true, prodserv });
   } catch (error) {
-    console.error("Error adding prodserv:", error); 
-    res.status(500).json({ success: false, message: 'Server Error', error: error.message });
+    console.error("Error adding prodserv:", error);
+    const status = error.statusCode || 500;
+    res.status(status).json({
+      success: false,
+      message: error.message || 'Server Error',
+      error: error.message,
+    });
   }
 };
 

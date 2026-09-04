@@ -44,6 +44,25 @@ const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false, acm 
     return result.rows;
 };
 
+/** Find a department by name within an org (case-insensitive, trimmed). */
+const findDepartmentByName = async (org_id, text, excludeDeptId = null) => {
+    const dbPool = getDb();
+    const params = [org_id, String(text || '').trim()];
+    let query = `
+        SELECT dept_id, text, branch_id, org_id
+        FROM "tblDepartments"
+        WHERE org_id = $1
+          AND LOWER(TRIM(text)) = LOWER(TRIM($2))
+    `;
+    if (excludeDeptId) {
+        query += ` AND dept_id <> $3`;
+        params.push(excludeDeptId);
+    }
+    query += ` LIMIT 1`;
+    const result = await dbPool.query(query, params);
+    return result.rows[0] || null;
+};
+
 // Check if department is referenced by other tables
 const checkDepartmentReferences = async (dept_id) => {
     try {
@@ -159,6 +178,7 @@ const updateDepartment = async ({ dept_id, org_id, text, changed_by }) => {
 
 module.exports = {
     getAllDepartments,
+    findDepartmentByName,
     createDepartment,
     mapDepartmentToBranch,
     deleteDepartment,

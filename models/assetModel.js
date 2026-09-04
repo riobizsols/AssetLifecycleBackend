@@ -13,6 +13,7 @@ const getDb = (dbConnection) => {
 };
 const { generateCustomId } = require("../utils/idGenerator");
 const { normalizeBranchId } = require("../utils/branchAccessUtils");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 const {
   convertAssetTypeToSerialFormat,
   generateSerialNumber,
@@ -1517,15 +1518,35 @@ function buildAssetsListFilterClause(
   }));
 
   if (additionalFilters.asset_type_id) {
-    clause += ` AND a.asset_type_id = $${paramIndex}`;
-    params.push(additionalFilters.asset_type_id);
-    paramIndex++;
+    const typeIds = String(additionalFilters.asset_type_id)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (typeIds.length === 1) {
+      clause += ` AND a.asset_type_id = $${paramIndex}`;
+      params.push(typeIds[0]);
+      paramIndex++;
+    } else if (typeIds.length > 1) {
+      clause += ` AND a.asset_type_id = ANY($${paramIndex}::text[])`;
+      params.push(typeIds);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.status) {
-    clause += ` AND a.current_status = $${paramIndex}`;
-    params.push(additionalFilters.status);
-    paramIndex++;
+    const statuses = String(additionalFilters.status)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (statuses.length === 1) {
+      clause += ` AND a.current_status = $${paramIndex}`;
+      params.push(statuses[0]);
+      paramIndex++;
+    } else if (statuses.length > 1) {
+      clause += ` AND a.current_status = ANY($${paramIndex}::text[])`;
+      params.push(statuses);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.vendor_id) {
@@ -1669,7 +1690,7 @@ const getBulkUploadReferenceData = async () => {
   try {
     // Fetch all reference data in parallel
     const dbPool = getDb();
-    const [organizations, assetTypes, branches, vendors, prodServs] =
+    const [organizations, assetTypes, branches, vendors, prodServs, users] =
       await Promise.all([
         dbPool.query(
           'SELECT org_id, text as org_name FROM "tblOrgs" WHERE int_status = 1',
@@ -1686,6 +1707,9 @@ const getBulkUploadReferenceData = async () => {
         dbPool.query(
           'SELECT prod_serv_id, text as prod_serv_name FROM "tblProdServs" WHERE int_status = 1',
         ),
+        dbPool.query(
+          'SELECT user_id, full_name FROM "tblUsers" WHERE int_status = 1',
+        ),
       ]);
 
     return {
@@ -1694,6 +1718,7 @@ const getBulkUploadReferenceData = async () => {
       branches: branches.rows,
       vendors: vendors.rows,
       prodServs: prodServs.rows,
+      users: users.rows,
     };
   } catch (error) {
     console.error("Error fetching reference data:", error);
@@ -1988,8 +2013,8 @@ const validateAndFormatDate = (dateString) => {
 const bulkUpsertAssets = async (
   csvData,
   created_by,
-  user_org_id,
-  user_branch_id,
+  user_org_id = null,
+  user_branch_id = null,
 ) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
@@ -2015,27 +2040,36 @@ const bulkUpsertAssets = async (
       // Declare variables outside try-catch for error handling
       let finalAssetId = row.asset_id;
       let finalSerialNumber = row.serial_number;
-      let finalOrgId = row.org_id || user_org_id; // Use user's org_id if not provided in CSV
-      let finalBranchId = normalizeBranchId(row.branch_id) || user_branch_id;
+      let finalOrgId = null;
+      let finalBranchId = null;
+      let finalPurchasedBy = null;
 
       // Get asset type text for the 'text' field
       const assetTypeText = assetTypesMap[row.asset_type_id] || "";
 
-      // Validate that we have a valid org_id
-      if (!finalOrgId) {
-        throw new Error(
-          "Organization ID is required. Please provide org_id in CSV or ensure user has a valid organization.",
-        );
-      }
-
-      // Validate that we have a valid branch_id
-      if (!finalBranchId) {
-        throw new Error(
-          "Branch ID is required. Please provide branch_id in CSV or ensure user has a valid branch.",
-        );
-      }
-
       try {
+        const orgBranch = await validateCsvOrgBranch({
+          orgId: row.org_id,
+          branchId: normalizeBranchId(row.branch_id) || row.branch_id,
+          orgRequired: false,
+          branchRequired: false,
+        });
+        finalOrgId = orgBranch.orgId;
+        finalBranchId = orgBranch.branchId;
+
+        finalPurchasedBy = row.purchased_by ? String(row.purchased_by).trim() : '';
+        if (finalPurchasedBy) {
+          const buyer = await client.query(
+            'SELECT user_id FROM "tblUsers" WHERE user_id = $1',
+            [finalPurchasedBy],
+          );
+          if (!buyer.rows.length) {
+            throw new Error(`purchased_by '${finalPurchasedBy}' does not exist`);
+          }
+        } else {
+          finalPurchasedBy = null;
+        }
+
         // Generate asset_id if not provided (same as Add Assets screen)
         if (!finalAssetId) {
           finalAssetId = await generateCustomId("asset", 3);
@@ -2137,7 +2171,7 @@ const bulkUpsertAssets = async (
               row.maintsch_id,
               row.purchased_cost ? parseFloat(row.purchased_cost) : null,
               purchasedOn,
-              row.purchased_by,
+              finalPurchasedBy,
               row.current_status || "Active",
               row.warranty_period,
               row.parent_asset_id,
@@ -2193,7 +2227,7 @@ const bulkUpsertAssets = async (
               row.maintsch_id,
               row.purchased_cost ? parseFloat(row.purchased_cost) : null,
               purchasedOn,
-              row.purchased_by,
+              finalPurchasedBy,
               row.current_status || "Active",
               row.warranty_period,
               row.parent_asset_id,
@@ -2232,12 +2266,15 @@ const bulkUpsertAssets = async (
           // Validate all property values first
           const propertyValidationErrors = [];
           for (const [propId, value] of Object.entries(row.properties)) {
+            if (!propId || !/^ATP/i.test(String(propId).trim())) {
+              continue;
+            }
             if (value && value.trim() !== "") {
               const validation = await validatePropertyValue(
                 client,
                 propId,
                 value,
-                finalOrgId,
+                finalOrgId || user_org_id,
                 created_by,
               );
               if (!validation.isValid) {

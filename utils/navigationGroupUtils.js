@@ -115,6 +115,73 @@ async function removeLegacyGroupMenuApps(client) {
   return result.rowCount;
 }
 
+async function dropJobRoleNavAppIdForeignKeys(client) {
+  const { rows } = await client.query(`
+    SELECT tc.constraint_name
+    FROM information_schema.table_constraints tc
+    JOIN information_schema.key_column_usage kcu
+      ON tc.constraint_name = kcu.constraint_name
+     AND tc.table_schema = kcu.table_schema
+    WHERE tc.table_schema = 'public'
+      AND tc.table_name = 'tblJobRoleNav'
+      AND tc.constraint_type = 'FOREIGN KEY'
+      AND kcu.column_name = 'app_id'
+  `);
+
+  for (const { constraint_name } of rows) {
+    await client.query(
+      `ALTER TABLE "tblJobRoleNav" DROP CONSTRAINT IF EXISTS "${constraint_name}"`,
+    );
+  }
+
+  return rows.length;
+}
+
+/**
+ * New tenants / setup wizard: groups use app_id=NULL (no tblApps row required).
+ * Schema copied from an older template may still have NOT NULL on app_id.
+ */
+async function ensureJobRoleNavAppIdNullable(client, logLabel = 'NavSchema') {
+  const tableCheck = await client.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'tblJobRoleNav'
+    ) AS exists
+  `);
+  if (!tableCheck.rows[0]?.exists) {
+    return { skipped: true, reason: 'tblJobRoleNav missing' };
+  }
+
+  const columnCheck = await client.query(`
+    SELECT is_nullable
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tblJobRoleNav'
+      AND column_name = 'app_id'
+  `);
+  if (!columnCheck.rows.length) {
+    return { skipped: true, reason: 'app_id column missing' };
+  }
+
+  const alreadyNullable = columnCheck.rows[0].is_nullable === 'YES';
+  let fksDropped = 0;
+  let altered = false;
+
+  if (!alreadyNullable) {
+    fksDropped = await dropJobRoleNavAppIdForeignKeys(client);
+    await client.query(`
+      ALTER TABLE "tblJobRoleNav"
+      ALTER COLUMN app_id DROP NOT NULL
+    `);
+    altered = true;
+    console.log(
+      `[${logLabel}] tblJobRoleNav.app_id is now nullable (dropped ${fksDropped} FK(s))`,
+    );
+  }
+
+  return { alreadyNullable, altered, fksDropped };
+}
+
 async function applyNavigationGroupModel(client, logLabel = "NavGroup") {
   const navUpdated = await normalizeGroupNavAppIds(client);
   const appsRemoved = await removeLegacyGroupMenuApps(client);
@@ -135,5 +202,7 @@ module.exports = {
   removeDuplicateNavAppAliases,
   normalizeGroupNavAppIds,
   removeLegacyGroupMenuApps,
+  ensureJobRoleNavAppIdNullable,
+  dropJobRoleNavAppIdForeignKeys,
   applyNavigationGroupModel,
 };

@@ -36,10 +36,23 @@ const getVendorProdServiceById = async (ven_prod_serv_id) => {
 const getVendorProdServicesByVendor = async (vendor_id) => {
     const query = `
         SELECT 
-            ven_prod_serv_id, prod_serv_id, vendor_id, org_id
-        FROM "tblVendorProdService"
-        WHERE vendor_id = $1
-        ORDER BY ven_prod_serv_id
+            vps.ven_prod_serv_id,
+            vps.prod_serv_id,
+            vps.vendor_id,
+            vps.org_id,
+            ps.asset_type_id,
+            ps.brand,
+            ps.model,
+            ps.description,
+            ps.ps_type,
+            at.text AS asset_type_text
+        FROM "tblVendorProdService" vps
+        LEFT JOIN "tblProdServs" ps ON vps.prod_serv_id = ps.prod_serv_id
+        LEFT JOIN "tblAssetTypes" at
+          ON ps.asset_type_id = at.asset_type_id
+         AND at.org_id = COALESCE(ps.org_id, vps.org_id)
+        WHERE vps.vendor_id = $1
+        ORDER BY vps.ven_prod_serv_id
     `;
     
     const dbPool = getDb();
@@ -51,10 +64,16 @@ const getVendorProdServicesByVendor = async (vendor_id) => {
 const getVendorProdServicesByProdServ = async (prod_serv_id) => {
     const query = `
         SELECT 
-            ven_prod_serv_id, prod_serv_id, vendor_id, org_id
-        FROM "tblVendorProdService"
-        WHERE prod_serv_id = $1
-        ORDER BY ven_prod_serv_id
+            vps.ven_prod_serv_id,
+            vps.prod_serv_id,
+            vps.vendor_id,
+            vps.org_id,
+            v.vendor_name,
+            v.company_name
+        FROM "tblVendorProdService" vps
+        LEFT JOIN "tblVendors" v ON vps.vendor_id = v.vendor_id
+        WHERE vps.prod_serv_id = $1
+        ORDER BY vps.ven_prod_serv_id
     `;
     
     const dbPool = getDb();

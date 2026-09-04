@@ -1,8 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const CronController = require('../services/cronController');
+const { protect } = require('../middlewares/authMiddleware');
 
 const cronController = new CronController();
+
+// Cron status and manual triggers must use the authenticated tenant context.
+router.use(protect);
 
 // Manual trigger endpoint for maintenance generation (for testing)
 router.post('/trigger-maintenance', cronController.triggerMaintenanceGeneration.bind(cronController));

@@ -173,14 +173,17 @@ const checkSubdomainAvailability = async (req, res) => {
       });
     }
 
-    const exists = await tenantSetupService.checkSubdomainExists(normalizedSubdomain);
+    const result = await tenantSetupService.checkDomainAndDatabaseAvailability(
+      normalizedSubdomain,
+    );
     return res.json({
       success: true,
-      available: !exists,
-      subdomain: normalizedSubdomain,
-      message: exists
-        ? `Sub-domain name "${normalizedSubdomain}" is already taken`
-        : `Sub-domain name "${normalizedSubdomain}" is available`,
+      available: result.available,
+      subdomain: result.subdomain,
+      databaseName: result.databaseName,
+      subdomainTaken: result.subdomainTaken,
+      databaseTaken: result.databaseTaken,
+      message: result.message,
     });
   } catch (error) {
     console.error('[TenantSetup] Error checking subdomain:', error);

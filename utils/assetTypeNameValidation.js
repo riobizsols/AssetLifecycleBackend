@@ -53,11 +53,9 @@ const areAssetTypeNamesSimilar = (nameA, nameB) => {
   const distance = levenshteinDistance(a, b);
   const similarity = 1 - distance / maxLen;
 
-  // Catch typos (e.g. "fruniture" vs "furniture") and minor spelling differences.
   if (distance <= 2) return true;
   if (similarity >= 0.85) return true;
 
-  // Avoid flagging unrelated short names that only share a prefix.
   if (minLen >= 4 && (a.startsWith(b) || b.startsWith(a)) && maxLen - minLen <= 2) {
     return true;
   }
@@ -93,9 +91,6 @@ const findConflictingEntityName = (
   return null;
 };
 
-/**
- * Find an existing asset type name that conflicts with the proposed name.
- */
 const findConflictingAssetTypeName = (
   proposedName,
   existingAssetTypes = [],
@@ -107,9 +102,6 @@ const findConflictingAssetTypeName = (
     excludeId: excludeAssetTypeId,
   });
 
-/**
- * Find an existing asset name (description) that conflicts with the proposed name.
- */
 const findConflictingAssetName = (
   proposedName,
   existingAssets = [],

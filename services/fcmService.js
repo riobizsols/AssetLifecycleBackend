@@ -18,30 +18,43 @@ class FCMService {
      */
     async init() {
         try {
+            const projectId = process.env.FIREBASE_PROJECT_ID;
+            const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+            const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+
+            if (!projectId || !privateKey || !clientEmail) {
+                console.warn(
+                    '[FCM] Skipping init — set FIREBASE_PROJECT_ID, FIREBASE_PRIVATE_KEY, and FIREBASE_CLIENT_EMAIL in .env.production'
+                );
+                this.initialized = false;
+                return;
+            }
+
             if (!admin.apps.length) {
                 const serviceAccount = {
                     type: "service_account",
-                    project_id: process.env.FIREBASE_PROJECT_ID,
+                    project_id: projectId,
                     private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
-                    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-                    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+                    private_key: privateKey.replace(/\\n/g, '\n'),
+                    client_email: clientEmail,
                     client_id: process.env.FIREBASE_CLIENT_ID,
                     auth_uri: "https://accounts.google.com/o/oauth2/auth",
                     token_uri: "https://oauth2.googleapis.com/token",
                     auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-                    client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${process.env.FIREBASE_CLIENT_EMAIL}`
+                    client_x509_cert_url: `https://www.googleapis.com/robot/v1/metadata/x509/${clientEmail}`
                 };
 
                 admin.initializeApp({
                     credential: admin.credential.cert(serviceAccount),
-                    projectId: process.env.FIREBASE_PROJECT_ID
+                    projectId
                 });
             }
             this.initialized = true;
             console.log('FCM Service initialized successfully');
         } catch (error) {
-            console.error('Error initializing FCM Service:', error);
-            throw error;
+            // Never crash the API process over push notifications
+            console.error('Error initializing FCM Service (push disabled):', error.message || error);
+            this.initialized = false;
         }
     }
 

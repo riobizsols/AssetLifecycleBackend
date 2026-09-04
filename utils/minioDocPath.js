@@ -27,7 +27,7 @@ function parseAssetMaintenanceActiveKey(objectKey) {
   const parts = String(objectKey || '').split('/').filter(Boolean);
   const fileName = parts[parts.length - 1] || '';
   const assetId = parts[parts.length - 2] || '';
-  // ORG001/asset-maintenance/ASS148/file.pdf
+  // Path shape: {orgId}/asset-maintenance/{assetId}/{file}
   const orgId = parts[0] || '';
   return { orgId, assetId, fileName };
 }

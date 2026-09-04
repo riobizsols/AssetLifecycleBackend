@@ -17,6 +17,9 @@ const {
   snoozeExpiryNotification,
   mapStatus: mapExpiryStatus,
 } = require('../models/assetExpiryNotifyModel');
+const {
+  getSpareIssuedNotificationsByUser,
+} = require('../models/sparePartsModel');
 const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 
 // Get all maintenance notifications for an organization
@@ -123,6 +126,19 @@ const getUserNotifications = async (req, res) => {
     } catch (expiryErr) {
       console.warn(
         `🐛 [getUserNotifications] Expiry notifications skipped: ${expiryErr.message}`
+      );
+    }
+    let spareIssuedNotifications = [];
+    try {
+      spareIssuedNotifications = await getSpareIssuedNotificationsByUser({
+        empIntId: userId,
+        orgId,
+        branchId,
+        hasSuperAccess: req.user?.hasSuperAccess || false,
+      });
+    } catch (spareErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Spare issued notifications skipped: ${spareErr.message}`
       );
     }
     
@@ -263,6 +279,68 @@ const getUserNotifications = async (req, res) => {
       };
     });
 
+    const formattedSpareIssuedNotifications = (spareIssuedNotifications || []).map(
+      (notification) => {
+        const statusCode = String(notification.status || "").trim().toUpperCase();
+        const isConfirmed = statusCode === "IE";
+        const isApproval = statusCode === "RQ";
+        const workflowType = isConfirmed
+          ? "SPARE_CONFIRMED"
+          : isApproval
+            ? "SPARE_APPROVAL"
+            : "SPARE_ISSUED";
+        const statusLabel = isConfirmed
+          ? "Issued"
+          : isApproval
+            ? "Approval"
+            : "Requested";
+        const maintenanceType = isConfirmed
+          ? "Spare Part Issued"
+          : isApproval
+            ? "Spare Part Approval"
+            : "Spare Part Requested";
+        return {
+        id: notification.si_id,
+        wfamshId: null,
+        workflowId: notification.si_id,
+        workflowType,
+        route: isConfirmed
+          ? "/spare-part-issue"
+          : notification.si_id
+            ? `/spare-part-approval-detail/${notification.si_id}`
+            : "/spare-part-approval",
+        userId: userId,
+        userName: notification.action_by_name || "Unassigned",
+        userEmail: null,
+        status: isConfirmed ? "IE" : isApproval ? "RQ" : "IS",
+        statusLabel,
+        dueDate: notification.due_date || notification.changed_on || notification.created_on,
+        cutoffDate: notification.changed_on || notification.created_on,
+        daysUntilDue: 0,
+        daysUntilCutoff: 999,
+        isUrgent: false,
+        isOverdue: false,
+        maintenanceType,
+        assetId: null,
+        assetTypeName: notification.asset_type_name || "Asset",
+        categoryName: notification.category_name || notification.spc_id || "-",
+        spcId: notification.spc_id || null,
+        maintenanceId: notification.assetmaintsch_id || null,
+        quantityIssued: notification.quantity_issued ?? null,
+        isGroupMaintenance: false,
+        groupId: null,
+        groupName: null,
+        groupAssetCount: null,
+        title: maintenanceType,
+        body: `Maintenance ${notification.assetmaintsch_id || "-"}: ${
+          notification.asset_type_name || "Asset"
+        } / ${
+          notification.category_name || notification.spc_id || ""
+        } — spare part ${isConfirmed ? "issued" : isApproval ? "pending approval" : "requested"}`,
+      };
+      }
+    );
+
     console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);
     console.log('🐛 [getUserNotifications] First 3 formatted notifications:', formattedNotifications.slice(0, 3));
 
@@ -273,11 +351,13 @@ const getUserNotifications = async (req, res) => {
         ...formattedNotifications,
         ...formattedWarrantyNotifications,
         ...formattedExpiryNotifications,
+        ...formattedSpareIssuedNotifications,
       ],
       count:
         formattedNotifications.length +
         formattedWarrantyNotifications.length +
-        formattedExpiryNotifications.length,
+        formattedExpiryNotifications.length +
+        formattedSpareIssuedNotifications.length,
       userId: userId,
       timestamp: new Date().toISOString()
     });

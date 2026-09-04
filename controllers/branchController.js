@@ -2,6 +2,28 @@ const branchModel = require('../models/branchModel');
 const operationalCache = require('../utils/operationalCache');
 const { generateCustomId } = require("../utils/idGenerator");
 
+/** Branch name / city must include at least one letter (not digits-only). */
+const isDigitsOnlyName = (value) => {
+    const cleaned = String(value || '').trim().replace(/\s+/g, '');
+    return cleaned.length > 0 && /^\d+$/.test(cleaned);
+};
+
+const validateBranchNameFields = (text, city) => {
+    if (isDigitsOnlyName(text)) {
+        return {
+            error: "Invalid branch name",
+            message: "Branch name cannot be only numbers"
+        };
+    }
+    if (isDigitsOnlyName(city)) {
+        return {
+            error: "Invalid city",
+            message: "City name cannot be only numbers"
+        };
+    }
+    return null;
+};
+
 const getBranches = async (req, res) => {
     try {
         const { getRequestAcm } = require('../utils/acmAccess');
@@ -62,7 +84,37 @@ const createBranch = async (req, res) => {
             });
         }
 
+        const nameValidationError = validateBranchNameFields(text, city);
+        if (nameValidationError) {
+            return res.status(400).json(nameValidationError);
+        }
+
+        const branches = await branchModel.getAllBranches(org_id);
+        const nameKey = text.toLowerCase();
+        const codeKey = branch_code.toLowerCase();
+
+        const duplicateBranchName = branches.find(
+            (b) => String(b.text || '').trim().toLowerCase() === nameKey
+        );
+        if (duplicateBranchName) {
+            return res.status(400).json({
+                error: "Duplicate branch name",
+                message: "A branch with this name already exists"
+            });
+        }
+
+        const duplicateBranchCode = branches.find(
+            (b) => String(b.branch_code || '').trim().toLowerCase() === codeKey
+        );
+        if (duplicateBranchCode) {
+            return res.status(400).json({
+                error: "Duplicate branch code",
+                message: "This branch code is already in use"
+            });
+        }
+
         const newId = await generateCustomId("branch", 3);
+
 
         const newBranch = await branchModel.addBranch({
             branch_id: newId,
@@ -118,7 +170,11 @@ const updateBranch = async (req, res) => {
             });
         }
 
-        // Check if branch exists (any org)
+        const nameValidationError = validateBranchNameFields(text, city);
+        if (nameValidationError) {
+            return res.status(400).json(nameValidationError);
+        }
+
         const branchExists = await branchModel.getBranchById(currentId);
         
         if (!branchExists) {
@@ -134,7 +190,8 @@ const updateBranch = async (req, res) => {
         const currentName = String(branchExists.text || '').trim().toLowerCase();
         const newName = text.toLowerCase();
 
-        // Only validate uniqueness when the value actually changes
+        // Only validate uniqueness when the value actually changes.
+        // Editing name/city while keeping the same code must not fail as "code already exists".
         if (newCode !== currentCode) {
             const duplicateBranchCode = branches.find(
                 (b) =>

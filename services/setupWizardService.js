@@ -17,14 +17,18 @@ const {
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,
-  DEFAULT_JOB_ROLE_NAV,
 } = require("../constants/setupDefaults");
 const {
   filterScreenApps,
   applyNavigationGroupModel,
   resolveNavAppId,
+  ensureJobRoleNavAppIdNullable,
 } = require("../utils/navigationGroupUtils");
 const { seedTextMessages } = require("../utils/seedTextMessages");
+const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
+const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
+const { ensureDefaultScreenApps } = require("../utils/ensureDefaultScreenApps");
+const { generateCustomIdForClient } = require("../utils/idGenerator");
 
 const DUMP_FILE_PATH = path.join(
   __dirname,
@@ -209,15 +213,23 @@ const generateSetupReport = async (setupData) => {
 
 /**
  * Align freshly created tenant schemas with current application code.
- * Always enforce modern tblAssetTypes (no maint_required / maint_type_id).
+ * Always enforce modern tblAssetTypes (no maint_required / maint_type_id; branch_id present).
  * Maintenance config lives in tblATMaintFreq only.
  */
 const applyPostSchemaMigrations = async (client, logs = []) => {
   await client.query(`
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
+    ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10);
   `);
-  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes.maint_required / maint_type_id)";
+  const navSchema = await ensureJobRoleNavAppIdNullable(client, 'SetupWizard');
+  if (navSchema.altered) {
+    const navMessage = 'tblJobRoleNav.app_id made nullable for menu groups';
+    console.log(`[SetupWizard] ✅ ${navMessage}`);
+    logs.push({ message: navMessage, scope: 'schema' });
+  }
+
+  const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {
     logs.push({ message, scope: "schema" });
@@ -229,17 +241,15 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
-  const referenceUrl =
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL;
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
+  const referenceUrl = getReferenceUrl();
 
   if (!referenceUrl) {
-    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / DATABASE_URL for schema generation');
+    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / schema_db URL for schema generation');
     return null;
   }
 
-  // Template database for new tenants — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
+  // Template database for new tenants — schema_db (not legacy assetLifecycle / live hospitality)
   const genericPool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -579,9 +589,10 @@ const generateDynamicSchemaSql = async () => {
     }
     
     // Get secondary indexes (including UNIQUE / partial UNIQUE indexes).
-    // Skip primary-key indexes only — those are created via PRIMARY KEY constraints above.
+    // Skip primary-key indexes only — those are created via PRIMARY KEY constraints.
     // IMPORTANT: do NOT skip CREATE UNIQUE INDEX; many critical uniques (e.g. uq_tblacm_scope,
     // partial uq_spinddet_org_serial) exist only as indexes, not as UNIQUE table constraints.
+    // Note: match CREATE INDEX and CREATE UNIQUE INDEX with a regex (not includes('CREATE INDEX')).
     const indexesResult = await genericPool.query(`
       SELECT
         schemaname,
@@ -598,7 +609,7 @@ const generateDynamicSchemaSql = async () => {
         )
       ORDER BY tablename, indexname
     `);
-    
+
     for (const idx of indexesResult.rows) {
       let indexDef = idx.indexdef;
       // Accept both CREATE INDEX and CREATE UNIQUE INDEX
@@ -795,11 +806,14 @@ const CORE_TABLE_DDL = [
   `
     CREATE TABLE IF NOT EXISTS "tblAssetTypes" (
       org_id character varying(10) NOT NULL,
+      branch_id character varying(10),
       asset_type_id character varying(10) PRIMARY KEY,
       int_status integer NOT NULL DEFAULT 1,
       assignment_type character varying(10) NOT NULL,
       inspection_required boolean NOT NULL DEFAULT false,
       group_required boolean NOT NULL DEFAULT false,
+      require_maintenance boolean NOT NULL DEFAULT false,
+      require_spare_parts boolean NOT NULL DEFAULT false,
       created_by character varying(10),
       created_on date,
       changed_by character varying(10),
@@ -1062,7 +1076,8 @@ const withClient = async (dbConfig, handler) => {
 
 const normalizeOrg = (org = {}) => ({
   name: (org.name || "Primary Organization").trim(),
-  code: (org.code || "ORG001").trim().toUpperCase(),
+  // Business/org code only — never used as tblOrgs.org_id (that is always ORG###).
+  code: (org.code || "").trim().toUpperCase(),
   city: (org.city || "Head Office").trim(),
   address: (org.address || "").trim(),
   gstNumber: (org.gstNumber || "").trim().toUpperCase(),
@@ -1137,11 +1152,14 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  const { getReferenceUrl } = require('./tenantSchemaAlignService');
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
   const { seedRequiredMasterData } = require('./tenantReferenceDataService');
-  const referenceUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceUrl = getReferenceUrl();
+  if (!referenceUrl) {
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or schema_db must be configured');
+  }
 
-  // Sync tblApps + required master data from hospitality reference
+  // Sync tblApps + required master data from schema_db reference
   const referencePool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -1205,7 +1223,9 @@ const seedReferenceTables = async (client, orgId, logs) => {
     await referencePool.end();
   }
 
-  // Status codes, text messages, props from hospitality
+  await ensureDefaultScreenApps(client, orgId, 'SetupWizard');
+
+  // Status codes, text messages, props from reference DB
   try {
     await seedRequiredMasterData(client, { orgId, referenceUrl });
     logs.push({ message: 'Required master data seeded from hospitality', scope: 'reference' });
@@ -1257,7 +1277,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   try {
     const { buildPoolConfig } = require('../utils/pgSsl');
     const uomPool = new Pool(
-      buildPoolConfig(getReferenceUrl() || process.env.GENERIC_URL, {
+      buildPoolConfig(getReferenceUrl(), {
         max: 2,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 10000,
@@ -1306,7 +1326,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   }
 
   await seedTextMessages(client, {
-    genericUrl: getReferenceUrl() || process.env.GENERIC_URL,
+    genericUrl: getReferenceUrl(),
     logs,
   });
 
@@ -1374,6 +1394,10 @@ const seedOrgSettings = async (client, orgId, selectedKeys = [], editableSetting
   logs.push({ message: `${totalSettings} org settings applied`, scope: "org-settings" });
 };
 
+const insertDefaultJobRoleNav = async (client, orgId) => {
+  await seedDefaultJobRoleNav(client, orgId, "SetupWizard");
+};
+
 const seedJobRolesAndNavigation = async (client, orgId, logs) => {
   for (const role of DEFAULT_JOB_ROLES) {
     await client.query(
@@ -1390,37 +1414,7 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
     );
   }
 
-  for (const item of DEFAULT_JOB_ROLE_NAV) {
-    await client.query(
-      `
-        INSERT INTO "tblJobRoleNav"
-          (job_role_nav_id, org_id, int_status, job_role_id, parent_id, app_id, label, sub_menu, sequence, access_level, is_group, mob_desk)
-        VALUES
-          ($1, $2, 1, $3, $4, $5, $6, NULL, $7, $8, $9, 'D')
-        ON CONFLICT (job_role_nav_id) DO UPDATE
-        SET org_id = EXCLUDED.org_id,
-            int_status = 1,
-            job_role_id = EXCLUDED.job_role_id,
-            parent_id = EXCLUDED.parent_id,
-            app_id = EXCLUDED.app_id,
-            label = EXCLUDED.label,
-            sequence = EXCLUDED.sequence,
-            access_level = EXCLUDED.access_level,
-            is_group = EXCLUDED.is_group
-      `,
-      [
-        item.id,
-        orgId,
-        item.jobRoleId,
-        item.parentId,
-        resolveNavAppId(item),
-        item.label,
-        item.sequence,
-        item.accessLevel,
-        item.isGroup,
-      ]
-    );
-  }
+  await insertDefaultJobRoleNav(client, orgId);
 
   await applyNavigationGroupModel(client, "SetupWizard");
 
@@ -1815,77 +1809,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
     [rioAdminUserId]
   );
 
-  // Add navigation entries in tblJobRoleNav
-  const navEntries = [
-    ['JRN001', orgId, 1, 'JR001', null, 'DASHBOARD', 'Dashboard', null, 1, 'A', false, 'D'],
-    ['JRN002', orgId, 1, 'JR001', null, 'ASSETS', 'Assets', null, 2, 'A', false, 'D'],
-    ['JRN003', orgId, 1, 'JR001', null, null, 'Asset Assignment', null, 3, 'A', true, 'D'],
-    ['JRN004', orgId, 1, 'JR001', 'JRN003', 'DEPTASSIGNMENT', 'Department Assignment', null, 4, 'A', false, 'D'],
-    ['JRN005', orgId, 1, 'JR001', 'JRN003', 'EMPASSIGNMENT', 'Employee Assignment', null, 5, 'A', false, 'D'],
-    ['JRN006', orgId, 1, 'JR001', null, 'WORKORDERMANAGEMENT', 'Workorder Management', null, 6, 'A', false, 'D'],
-    ['JRN007', orgId, 1, 'JR001', null, 'MAINTENANCEAPPROVAL', 'Maintenance Approval', null, 7, 'A', false, 'D'],
-    ['JRN008', orgId, 1, 'JR001', null, 'SUPERVISORAPPROVAL', 'Maintenance List', null, 8, 'A', false, 'D'],
-    ['JRN010', orgId, 1, 'JR001', null, 'SERIALNUMBERPRINT', 'Serial Number Print', null, 10, 'A', false, 'D'],
-    ['JRN011', orgId, 1, 'JR001', null, 'REPORTBREAKDOWN', 'Report Breakdown', null, 11, 'A', false, 'D'],
-    ['JRN042', orgId, 1, 'JR001', null, 'EMPLOYEE REPORT BREAKDOWN', 'Employee Report Breakdown', null, 11, 'A', false, 'D'],
-    ['JRN012', orgId, 1, 'JR001', null, null, 'Reports', null, 12, 'A', true, 'D'],
-    ['JRN013', orgId, 1, 'JR001', 'JRN012', 'ASSETLIFECYCLEREPORT', 'Asset Lifecycle Report', null, 13, 'A', false, 'D'],
-    ['JRN014', orgId, 1, 'JR001', 'JRN012', 'ASSETREPORT', 'Asset Report', null, 14, 'A', false, 'D'],
-    ['JRN015', orgId, 1, 'JR001', 'JRN012', 'MAINTENANCEHISTORY', 'Maintenance History', null, 15, 'A', false, 'D'],
-    ['JRN016', orgId, 1, 'JR001', 'JRN012', 'ASSETVALUATION', 'Asset Valuation', null, 16, 'A', false, 'D'],
-    ['JRN017', orgId, 1, 'JR001', 'JRN012', 'ASSETWORKFLOWHISTORY', 'Asset Workflow History', null, 17, 'A', false, 'D'],
-    ['JRN018', orgId, 1, 'JR001', 'JRN012', 'BREAKDOWNHISTORY', 'Breakdown History', null, 18, 'A', false, 'D'],
-    ['JRN043', orgId, 1, 'JR001', 'JRN012', 'REOPENEDBREAKDOWNS', 'Reopened Breakdowns', null, 19, 'A', false, 'D'],
-    ['JRN019', orgId, 1, 'JR001', 'JRN012', 'USAGEBASEDASSETREPORT', 'Usage Based Asset Report', null, 20, 'A', false, 'D'],
-    ['JRN020', orgId, 1, 'JR001', null, null, 'Settings', null, 20, 'A', true, 'D'],
-    ['JRN021', orgId, 1, 'JR001', 'JRN020', 'AUDITLOGCONFIG', 'Audit Log Config', null, 21, 'A', false, 'D'],
-    ['JRN038', orgId, 1, 'JR001', 'JRN020', 'COLUMNACCESSCONFIG', 'Column Access Config', null, 38, 'A', false, 'D'],
-    ['JRN039', orgId, 1, 'JR001', 'JRN020', 'CERTIFICATIONS', 'Certifications', null, 39, 'A', false, 'D'],
-    ['JRN022', orgId, 1, 'JR001', null, null, 'Master Data', null, 22, 'A', true, 'D'],
-    ['JRN023', orgId, 1, 'JR001', 'JRN022', 'ORGANIZATIONS', 'Organization', null, 23, 'A', false, 'D'],
-    ['JRN024', orgId, 1, 'JR001', 'JRN022', 'ASSETTYPES', 'Asset Types', null, 24, 'A', false, 'D'],
-    ['JRN028', orgId, 1, 'JR001', 'JRN022', 'BRANCHES', 'Branches', null, 25, 'A', false, 'D'],
-    ['JRN025', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTS', 'Departments', null, 26, 'A', false, 'D'],
-    ['JRN026', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSADMIN', 'Departments Admin', null, 27, 'A', false, 'D'],
-    ['JRN027', orgId, 1, 'JR001', 'JRN022', 'DEPARTMENTSASSET', 'Departments Asset type', null, 28, 'A', false, 'D'],
-    ['JRN031', orgId, 1, 'JR001', 'JRN022', 'ROLES', 'Bulk Upload', null, 29, 'A', false, 'D'],
-    ['JRN032', orgId, 1, 'JR001', 'JRN022', 'USERS', 'Users', null, 30, 'A', false, 'D'],
-    ['JRN044', orgId, 1, 'JR001', 'JRN022', 'USERROLES', 'Job Roles', null, 31, 'A', false, 'D'],
-    ['JRN030', orgId, 1, 'JR001', 'JRN022', 'PRODSERV', 'Products/Services', null, 32, 'A', false, 'D'],
-    ['JRN029', orgId, 1, 'JR001', 'JRN022', 'VENDORS', 'Vendors', null, 33, 'A', false, 'D'],
-    ['JRN033', orgId, 0, 'JR001', 'JRN022', 'MAINTENANCESCHEDULE', 'Maintenance Schedule', null, 33, 'A', false, 'D'],
-    ['JRN034', orgId, 1, 'JR001', null, 'AUDITLOGS', 'Audit Log', null, 34, 'A', false, 'D'],
-    ['JRN035', orgId, 1, 'JR001', null, 'SCRAPSALES', 'Scrap Sales', null, 35, 'A', false, 'D'],
-    ['JRN036', orgId, 1, 'JR001', null, 'SCRAPASSETS', 'Scrap Assets', null, 36, 'A', false, 'D'],
-    ['JRN037', orgId, 1, 'JR001', null, 'GROUPASSET', 'Asset Groups', null, 37, 'A', false, 'D'],
-    ['JRN040', orgId, 1, 'JR001', null, 'EMPLOYEE TECH CERTIFICATION', 'Employee Tech Certification', null, 40, 'A', false, 'D'],
-    ['JRN041', orgId, 1, 'JR001', null, 'HR/MANAGERAPPROVAL', 'HR/Manager Approval', null, 41, 'A', false, 'D'],
-  ];
-
-  for (const entry of navEntries) {
-    await client.query(
-      `
-        INSERT INTO "tblJobRoleNav" (
-          job_role_nav_id, org_id, int_status, job_role_id, parent_id,
-          app_id, label, sub_menu, sequence, access_level,
-          is_group, mob_desk
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-        ON CONFLICT (job_role_nav_id) DO UPDATE
-        SET org_id = EXCLUDED.org_id,
-            int_status = EXCLUDED.int_status,
-            job_role_id = EXCLUDED.job_role_id,
-            parent_id = EXCLUDED.parent_id,
-            app_id = EXCLUDED.app_id,
-            label = EXCLUDED.label,
-            sub_menu = EXCLUDED.sub_menu,
-            sequence = EXCLUDED.sequence,
-            access_level = EXCLUDED.access_level,
-            is_group = EXCLUDED.is_group,
-            mob_desk = EXCLUDED.mob_desk
-      `,
-      entry
-    );
-  }
+  // Ensure JR001 navigation matches the current System Administrator sidebar template
+  await insertDefaultJobRoleNav(client, orgId);
 
   await applyNavigationGroupModel(client, "SetupWizard");
 
@@ -2042,12 +1967,13 @@ const runSetup = async (payload = {}) => {
       try {
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required`);
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id`);
+        await client.query(`ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10)`);
         logs.push({
-          message: "Dropped legacy maint_required/maint_type_id from tblAssetTypes",
+          message: "tblAssetTypes: ensured branch_id; dropped legacy maint columns",
           scope: "schema",
         });
       } catch (err) {
-        console.warn("[SetupWizard] Could not drop legacy tblAssetTypes columns:", err.message);
+        console.warn("[SetupWizard] Could not update tblAssetTypes columns:", err.message);
       }
 
       // tblWFJobRole.dept_id is optional in role-based maintenance workflow
@@ -2063,9 +1989,23 @@ const runSetup = async (payload = {}) => {
       
       logs.push({ message: "Core tables verified", scope: "schema" });
 
-      const orgId = org.code.slice(0, 10);
+      // Seed ID sequences first so we can generate canonical org_id (ORG###).
+      // Never use org.code as org_id — that caused maint types / other seeds to
+      // be tagged with the business code (e.g. PRESSANA) while APIs filter by ORG001.
+      await seedIdSequences(client);
+      const orgId = await generateCustomIdForClient(client, "org");
+      if (!/^ORG\d{3}$/.test(orgId)) {
+        throw new Error(
+          `Generated org_id "${orgId}" does not match expected format ORG###`,
+        );
+      }
+      const orgCode = (org.code || "").trim().toUpperCase().slice(0, 50) || orgId;
+      logs.push({
+        message: `Using internal org_id=${orgId}, org_code=${orgCode}`,
+        scope: "org",
+      });
 
-      await upsertOrganization(client, orgId, org, logs);
+      await upsertOrganization(client, orgId, { ...org, code: orgCode }, logs);
       await seedReferenceTables(client, orgId, logs);
       await seedJobRolesAndNavigation(client, orgId, logs);
 
@@ -2166,26 +2106,34 @@ const runSetup = async (payload = {}) => {
 
       // Step 2: Apply foreign key constraints AFTER all data has been seeded
       if (client._foreignKeysSql && client._foreignKeysSql.length > 0) {
-        console.log('[SetupWizard] 🔗 Applying foreign key constraints...');
+        console.log('[SetupWizard] 🔗 Finalizing foreign key constraints (org_id remap + apply)...');
         const info = client._foreignKeysInfo || {};
-        console.log(`[SetupWizard] 📎 Adding ${info.validCount || 0} foreign key constraints...`);
-        
+        console.log(`[SetupWizard] 📎 Target: ${info.validCount || 0} foreign key constraints`);
+
         try {
-          await client.query(client._foreignKeysSql);
-          logs.push({ 
-            message: `Foreign key constraints applied (${info.validCount || 0} valid, ${info.skippedCount || 0} skipped)`, 
-            scope: "schema" 
+          const fkResult = await finalizeTenantForeignKeys(
+            client,
+            orgId,
+            client._foreignKeysSql,
+            {
+              expectedCount: info.validCount || 0,
+              label: 'SetupWizard',
+              adminUserId: adminResult.userId,
+            },
+          );
+          logs.push({
+            message: `Foreign key constraints applied (${fkResult.applied} statements, ${fkResult.totalFkInDb} in DB)`,
+            scope: 'schema',
           });
           console.log('[SetupWizard] ✅ Foreign key constraints applied successfully');
         } catch (fkError) {
           console.error('[SetupWizard] ❌ Error applying foreign key constraints:', fkError.message);
-          console.error('[SetupWizard] Detail:', fkError.detail);
-          // Log but don't fail the entire setup - foreign keys are important but not critical
-          logs.push({ 
-            message: `Warning: Some foreign key constraints failed to apply: ${fkError.message}`, 
-            scope: "schema",
-            warning: true 
+          logs.push({
+            message: `Foreign key constraints failed: ${fkError.message}`,
+            scope: 'schema',
+            warning: true,
           });
+          throw fkError;
         }
       } else {
         console.log('[SetupWizard] ℹ️  No foreign key constraints to apply (using static schema or none defined)');
@@ -2198,6 +2146,8 @@ const runSetup = async (payload = {}) => {
       const setupResult = {
         success: true,
         orgId,
+        orgCode,
+        generatedOrgId: orgId,
         summary: {
           auditRules: auditCount,
           branches: structureMappings.branchMappings.length,

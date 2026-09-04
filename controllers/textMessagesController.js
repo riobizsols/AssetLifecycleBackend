@@ -82,7 +82,24 @@ async function getMessageById(req, res) {
     const messageRow = await textMessagesModel.getMessageByIdWithLanguageFallback(tmdId, requestedLang);
 
     if (!messageRow) {
-      return res.status(404).json({ success: false, message: "Text message not found" });
+      // Missing rows are common for newly added toast strings; return a soft
+      // fallback instead of 404 so ML toast lookup does not spam API errors.
+      const softText =
+        String(tmdId || "")
+          .replace(/^TMD_/i, "")
+          .replace(/_[0-9A-F]{8}$/i, "")
+          .replace(/_/g, " ")
+          .trim() || "Message not found";
+      return res.json({
+        success: true,
+        data: {
+          tmd_id: tmdId,
+          text: softText.charAt(0).toUpperCase() + softText.slice(1).toLowerCase(),
+          lang_code: "en",
+          requested_lang_code: requestedLang,
+          missing: true,
+        },
+      });
     }
 
     return res.json({
@@ -95,6 +112,22 @@ async function getMessageById(req, res) {
       },
     });
   } catch (error) {
+    // Missing message / missing tenant DB should not break the UI with a 500
+    if (
+      error.code === "42P01" ||
+      error.code === "TENANT_DB_CONTEXT_REQUIRED" ||
+      error.name === "TenantDbContextError"
+    ) {
+      return res.status(404).json({
+        success: false,
+        message: "Text message not found",
+        data: {
+          tmd_id: req.params.tmdId,
+          text: "Failed to fetch data. Please try again.",
+          lang_code: "en",
+        },
+      });
+    }
     console.error("Error fetching text message by tmd_id:", error);
     return res.status(404).json({
       success: false,

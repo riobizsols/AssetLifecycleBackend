@@ -109,7 +109,6 @@ async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = n
     
     ORDER BY h.pl_sch_date ASC, d.sequence ASC;
   `;
-
   try {
     const result = await getDb().query(query, values);
     return result.rows;

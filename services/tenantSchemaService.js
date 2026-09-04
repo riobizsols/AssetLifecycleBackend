@@ -221,7 +221,7 @@ const generateTenantSchemaSql = async () => {
       schemaParts.push(createTableSql);
     }
     
-    // Add indexes
+    // Add secondary indexes (including UNIQUE / partial UNIQUE). Skip PK indexes only.
     console.log(`[TenantSchema] 📑 Processing indexes...`);
     const indexesResult = await db.query(`
       SELECT
@@ -231,13 +231,22 @@ const generateTenantSchemaSql = async () => {
       FROM pg_indexes
       WHERE schemaname = 'public'
         AND tablename NOT IN (${EXCLUDED_TABLES.map((_, i) => `$${i + 1}`).join(', ')})
-        AND indexname NOT LIKE '%_pkey'
+        AND indexname NOT IN (
+          SELECT constraint_name
+          FROM information_schema.table_constraints
+          WHERE table_schema = 'public'
+            AND constraint_type = 'PRIMARY KEY'
+        )
       ORDER BY tablename, indexname
     `, EXCLUDED_TABLES);
-    
+
     for (const idx of indexesResult.rows) {
-      // Replace CREATE INDEX with CREATE INDEX IF NOT EXISTS
-      let indexDef = idx.indexdef.replace(/^CREATE INDEX/, 'CREATE INDEX IF NOT EXISTS');
+      let indexDef = idx.indexdef;
+      if (!/^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(indexDef)) continue;
+      indexDef = indexDef.replace(
+        /^CREATE\s+(UNIQUE\s+)?INDEX\b/i,
+        (_m, uniquePart) => `CREATE ${uniquePart || ''}INDEX IF NOT EXISTS`,
+      );
       schemaParts.push(indexDef + ';\n');
     }
     
