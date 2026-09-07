@@ -2,21 +2,28 @@ const { v4: uuidv4 } = require("uuid");
 const prodServModel = require('../models/prodServModel');
 const { generateCustomId } = require('../utils/idGenerator');
 
-// Get all prodserv
+// Get all prodserv (include asset type name — not ACM dept-mapped list)
 exports.getAllProdserv = async (req, res) => {
   try {
     // Filter by organization if user is authenticated
     const orgId = req.user?.org_id;
-    let query = `SELECT * FROM "tblProdServs"`;
+    let query = `
+      SELECT
+        ps.*,
+        at.text AS asset_type_text
+      FROM "tblProdServs" ps
+      LEFT JOIN "tblAssetTypes" at
+        ON at.asset_type_id = ps.asset_type_id
+    `;
     let params = [];
-    
+
     if (orgId) {
-      query += ` WHERE org_id = $1`;
+      query += ` WHERE ps.org_id = $1`;
       params = [orgId];
     }
-    
-    query += ` ORDER BY description, brand, model`;
-    
+
+    query += ` ORDER BY ps.description, ps.brand, ps.model`;
+
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
     const result = await dbPool.query(query, params);
