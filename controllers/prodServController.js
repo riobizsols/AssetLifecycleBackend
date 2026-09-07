@@ -1,24 +1,35 @@
 const { v4: uuidv4 } = require("uuid");
 const prodServModel = require('../models/prodServModel');
 const { generateCustomId } = require('../utils/idGenerator');
+const { getEffectiveListContext } = require('../utils/acmAccess');
 
 // Get all prodserv
 exports.getAllProdserv = async (req, res) => {
   try {
-    // Filter by organization if user is authenticated
-    const orgId = req.user?.org_id;
-    let query = `SELECT * FROM "tblProdServs"`;
-    let params = [];
-    
-    if (orgId) {
-      query += ` WHERE org_id = $1`;
-      params = [orgId];
-    }
-    
-    query += ` ORDER BY description, brand, model`;
-    
+    const { orgId } = getEffectiveListContext(req);
+    const effectiveOrgId = orgId || req.user?.org_id;
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
+
+    // Join asset type name so the UI does not depend on the (dept-scoped) dropdown list
+    let query = `
+      SELECT
+        ps.*,
+        COALESCE(at.text, ps.asset_type_id) AS asset_type_name
+      FROM "tblProdServs" ps
+      LEFT JOIN "tblAssetTypes" at
+        ON at.asset_type_id = ps.asset_type_id
+       AND (at.org_id = ps.org_id OR at.org_id IS NULL)
+    `;
+    let params = [];
+
+    if (effectiveOrgId) {
+      query += ` WHERE ps.org_id = $1`;
+      params = [effectiveOrgId];
+    }
+
+    query += ` ORDER BY COALESCE(at.text, ps.description), ps.brand, ps.model`;
+
     const result = await dbPool.query(query, params);
     res.status(200).json(result.rows);
   } catch (error) {
