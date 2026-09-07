@@ -42,10 +42,13 @@ const getMappedChecklistsByAssetTypeAndAsset = async (assetTypeId, assetId, orgI
             m.changed_by,
             m.changed_on,
             c.response_type,
-            CASE 
-                WHEN c.response_type = 'QN' THEN 'IRTD_QN_001'
-                ELSE 'IRTD_QL_YES_NO_001'
-            END as irtd_id,
+            (
+              SELECT d.irtd_id
+              FROM "tblInspResTypeDet" d
+              WHERE d.name = c.response_type
+              ORDER BY d.irtd_id ASC
+              LIMIT 1
+            ) as irtd_id,
             c.inspection_text as question_text
         FROM "tblAATInspCheckList" m
         LEFT JOIN "tblInspCheckList" c ON m.insp_check_id = c.insp_check_id AND m.org_id = c.org_id

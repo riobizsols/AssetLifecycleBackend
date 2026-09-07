@@ -3,6 +3,58 @@ const { generateCustomId } = require('../utils/idGenerator');
 
 const getDb = () => getDbFromContext();
 
+/** Normalize any legacy/code/id value to full display name stored in DB. */
+function normalizeResponseTypeName(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const upper = raw.toUpperCase();
+  if (upper === 'QUANTITATIVE' || upper === 'QN' || upper.startsWith('IRTD_QN')) {
+    return 'Quantitative';
+  }
+  if (
+    upper === 'QUALITATIVE' ||
+    upper === 'QL' ||
+    upper.startsWith('IRTD_QL') ||
+    upper.startsWith('QL_')
+  ) {
+    return 'Qualitative';
+  }
+  return raw;
+}
+
+async function resolveResponseTypeNameFromIrtd(dbPool, irtdId) {
+  if (!irtdId) return null;
+  const direct = normalizeResponseTypeName(irtdId);
+  if (direct === 'Quantitative' || direct === 'Qualitative') {
+    // Prefer Det.name when available so DB remains source of truth
+    const result = await dbPool.query(
+      `SELECT name FROM "tblInspResTypeDet" WHERE irtd_id = $1 LIMIT 1`,
+      [irtdId]
+    );
+    if (result.rows[0]?.name) {
+      return normalizeResponseTypeName(result.rows[0].name);
+    }
+    return direct;
+  }
+  return direct;
+}
+
+async function resolveRepresentativeIrtdId(dbPool, responseTypeName) {
+  const name = normalizeResponseTypeName(responseTypeName);
+  if (!name) return null;
+  const result = await dbPool.query(
+    `
+      SELECT irtd_id
+      FROM "tblInspResTypeDet"
+      WHERE name = $1
+      ORDER BY irtd_id ASC
+      LIMIT 1
+    `,
+    [name]
+  );
+  return result.rows[0]?.irtd_id || null;
+}
+
 const getColumns = async () => {
   const dbPool = getDb();
   try {
@@ -25,7 +77,6 @@ const getColumns = async () => {
     };
   } catch (err) {
     console.error('Error getting columns for tblInspCheckList:', err);
-    // Return defaults as fallback
     return {
       id: 'insp_check_id',
       question: 'inspection_text',
@@ -44,18 +95,17 @@ const getAllChecklists = async (orgId) => {
   try {
     const dbPool = getDb();
     const cols = await getColumns();
-    
-    // Using double quotes for case-sensitive table names
+
     const query = `
-      SELECT ic.*, 
-             CASE 
-               WHEN ic.${cols.responseTypeId} = 'QN' THEN 'Quantitative'
-               ELSE 'Qualitative'
-             END as res_type_name,
-             CASE 
-               WHEN ic.${cols.responseTypeId} = 'QN' THEN 'IRTD_QN_001'
-               ELSE 'IRTD_QL_YES_NO_001'
-             END as irtd_id
+      SELECT ic.*,
+             ic.${cols.responseTypeId} as res_type_name,
+             (
+               SELECT d.irtd_id
+               FROM "tblInspResTypeDet" d
+               WHERE d.name = ic.${cols.responseTypeId}
+               ORDER BY d.irtd_id ASC
+               LIMIT 1
+             ) as irtd_id
       FROM "tblInspCheckList" ic
       WHERE (ic.org_id = $1 OR ic.org_id = 'default')
       ORDER BY ic.${cols.question} ASC
@@ -63,19 +113,22 @@ const getAllChecklists = async (orgId) => {
     
     const result = await dbPool.query(query, [orgId]);
     
-    return result.rows.map(row => ({
-      ic_id: row[cols.id],
-      inspection_question: row[cols.question],
-      response_type: row[cols.responseTypeId],
-      irtd_id: row.irtd_id, // Add this back
-      res_type_name: row.res_type_name || '-',
-      expected_value: row[cols.expectedValue],
-      min_range: row[cols.minRange],
-      max_range: row[cols.maxRange],
-      trigger_maintenance: row[cols.triggerMaintenance],
-      created_by: row[cols.createdBy],
-      created_on: row[cols.createdOn]
-    }));
+    return result.rows.map(row => {
+      const responseType = normalizeResponseTypeName(row[cols.responseTypeId]);
+      return {
+        ic_id: row[cols.id],
+        inspection_question: row[cols.question],
+        response_type: responseType,
+        irtd_id: row.irtd_id,
+        res_type_name: normalizeResponseTypeName(row.res_type_name) || responseType || '-',
+        expected_value: row[cols.expectedValue],
+        min_range: row[cols.minRange],
+        max_range: row[cols.maxRange],
+        trigger_maintenance: row[cols.triggerMaintenance],
+        created_by: row[cols.createdBy],
+        created_on: row[cols.createdOn]
+      };
+    });
   } catch (error) {
     console.error('Error fetching checklists:', error);
     throw error;
@@ -87,14 +140,9 @@ const createChecklist = async (data) => {
     const dbPool = getDb();
     const cols = await getColumns();
     const id = await generateCustomId('IC');
-    
-    // Map the incoming irtd_id to QN or QL to satisfy tblInspCheckList check constraint
-    let dbResponseType = data.irtd_id;
-    if (data.irtd_id && data.irtd_id.startsWith('IRTD_QN')) {
-      dbResponseType = 'QN';
-    } else if (data.irtd_id && data.irtd_id.startsWith('IRTD_QL')) {
-      dbResponseType = 'QL';
-    }
+    const dbResponseType =
+      (await resolveResponseTypeNameFromIrtd(dbPool, data.irtd_id)) ||
+      normalizeResponseTypeName(data.irtd_id);
     
     const query = `
       INSERT INTO "tblInspCheckList" (
@@ -144,12 +192,9 @@ const updateChecklist = async (id, data) => {
       values.push(data.inspection_question);
     }
     if (data.irtd_id !== undefined) {
-      let dbResponseType = data.irtd_id;
-      if (data.irtd_id && data.irtd_id.startsWith('IRTD_QN')) {
-        dbResponseType = 'QN';
-      } else if (data.irtd_id && data.irtd_id.startsWith('IRTD_QL')) {
-        dbResponseType = 'QL';
-      }
+      const dbResponseType =
+        (await resolveResponseTypeNameFromIrtd(dbPool, data.irtd_id)) ||
+        normalizeResponseTypeName(data.irtd_id);
       updates.push(`${cols.responseTypeId} = $${paramCount++}`);
       values.push(dbResponseType);
     }
@@ -213,21 +258,19 @@ const deleteChecklist = async (id) => {
 const getResponseTypes = async () => {
   try {
     const dbPool = getDb();
-    
-    // Using double quotes for case-sensitive table and column names
-    // Filtering to get only one representative for Quantitative and one for Qualitative
-    // as requested by the user to show only 2 values.
+
+    // One representative row per full name from tblInspResTypeDet
     const query = `
-      SELECT irtd_id, name 
+      SELECT DISTINCT ON (name) irtd_id, name
       FROM "tblInspResTypeDet"
-      WHERE irtd_id IN ('IRTD_QN_001', 'IRTD_QL_YES_NO_001')
-      ORDER BY name DESC
+      WHERE name IN ('Quantitative', 'Qualitative')
+      ORDER BY name DESC, irtd_id ASC
     `;
-    
+
     const result = await dbPool.query(query);
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       irtd_id: row.irtd_id,
-      name: row.name === 'QN' ? 'Quantitative' : 'Qualitative'
+      name: row.name,
     }));
   } catch (error) {
     console.error('Error fetching response types:', error);
@@ -247,18 +290,18 @@ const getChecklistById = async (id, orgId) => {
     if (result.rows.length === 0) return null;
     
     const row = result.rows[0];
-    const colsInfo = await getColumns(); // Refresh to be safe
+    const responseType = normalizeResponseTypeName(row[cols.responseTypeId]);
+    const irtdId = await resolveRepresentativeIrtdId(dbPool, responseType);
     
-    // Map database columns back to camelCase for frontend consistency
     return {
-      ic_id: row[colsInfo.id],
-      inspection_question: row[colsInfo.question],
-      response_type: row[colsInfo.responseTypeId],
-      irtd_id: row[colsInfo.responseTypeId] === 'QN' ? 'IRTD_QN_001' : 'IRTD_QL_YES_NO_001',
-      expected_value: row[colsInfo.expectedValue],
-      min_range: row[colsInfo.minRange],
-      max_range: row[colsInfo.maxRange],
-      trigger_maintenance: row[colsInfo.triggerMaintenance]
+      ic_id: row[cols.id],
+      inspection_question: row[cols.question],
+      response_type: responseType,
+      irtd_id: irtdId,
+      expected_value: row[cols.expectedValue],
+      min_range: row[cols.minRange],
+      max_range: row[cols.maxRange],
+      trigger_maintenance: row[cols.triggerMaintenance]
     };
   } catch (error) {
     console.error('Error fetching checklist by ID:', error);
@@ -272,5 +315,6 @@ module.exports = {
   createChecklist,
   updateChecklist,
   deleteChecklist,
-  getResponseTypes
+  getResponseTypes,
+  normalizeResponseTypeName,
 };
