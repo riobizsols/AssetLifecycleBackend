@@ -796,7 +796,7 @@ const saveInspectionRecord = async (req, res) => {
       }
 
       const checklistItem = checklistById.get(String(r.insp_check_id));
-      if (checklistItem?.response_type === 'QN') {
+      if (checklistItem?.response_type === 'Quantitative') {
         const numValue = parseFloat(r.recorded_value);
         if (Number.isNaN(numValue)) {
           return res.status(400).json({
@@ -809,7 +809,7 @@ const saveInspectionRecord = async (req, res) => {
     }
 
     const isRecordedValueOutOfRange = (checklistItem, value) => {
-      if (checklistItem?.response_type !== 'QN') return false;
+      if (checklistItem?.response_type !== 'Quantitative') return false;
       const numValue = parseFloat(value);
       if (Number.isNaN(numValue)) return false;
 

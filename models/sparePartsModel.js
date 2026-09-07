@@ -247,6 +247,76 @@ const getChecklistRequiredSpareCategories = async (ams_id, org_id) => {
   return result.rows;
 };
 
+/**
+ * Checklist-required spare categories for a maintenance schedule.
+ * Matches checklist line text to spare categories mapped to the asset type
+ * (e.g. "Replace Battery", "Replace Lence").
+ */
+const getRequiredSpareCategoriesForAms = async (
+  ams_id,
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [ams_id, org_id];
+  const inhouseOnly = inhouseMaintenancePredicate();
+  let amsQuery = `
+    SELECT
+      ams.ams_id,
+      ams.at_main_freq_id,
+      a.asset_type_id
+    FROM "tblAssetMaintSch" ams
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
+    WHERE ams.ams_id = $1
+      AND ams.org_id = $2
+      AND a.org_id = $2
+      AND ${inhouseOnly}
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    amsQuery += ` AND a.branch_id = $${params.length}`;
+  }
+  const amsResult = await dbPool.query(amsQuery, params);
+  const ams = amsResult.rows[0];
+  if (!ams?.asset_type_id) return [];
+
+  const categories = await getCategoryMappingsByAssetType(
+    org_id,
+    ams.asset_type_id,
+    branch_id,
+    hasSuperAccess
+  );
+  if (!categories.length) return [];
+
+  const checklistParams = [ams.asset_type_id, org_id];
+  let checklistQuery = `
+    SELECT DISTINCT BTRIM(text) AS text
+    FROM "tblATMaintCheckList"
+    WHERE asset_type_id = $1
+      AND org_id = $2
+      AND text IS NOT NULL
+      AND BTRIM(text) <> ''
+  `;
+  if (ams.at_main_freq_id) {
+    checklistParams.push(ams.at_main_freq_id);
+    checklistQuery += ` AND (at_main_freq_id IS NOT DISTINCT FROM $${checklistParams.length} OR at_main_freq_id IS NULL)`;
+  }
+  const checklistResult = await dbPool.query(checklistQuery, checklistParams);
+  const checklistTexts = new Set(
+    checklistResult.rows.map((row) => String(row.text || '').trim().toLowerCase()).filter(Boolean)
+  );
+  if (!checklistTexts.size) return [];
+
+  return categories.filter((cat) => {
+    const name = String(cat.category_name || '').trim().toLowerCase();
+    return name && checklistTexts.has(name);
+  });
+};
+
 const getSparePartMaintenanceDetail = async (
   ams_id,
   org_id,
@@ -265,6 +335,7 @@ const getSparePartMaintenanceDetail = async (
       a.asset_type_id,
       a.serial_number,
       a.description AS asset_description,
+      a.description AS asset_name,
       at.text AS asset_type_name,
       at.required_maint,
       at.required_spare_parts,
@@ -316,6 +387,21 @@ const getSparePartMaintenanceDetail = async (
       error.message
     );
     detail.checklist_spare_categories = [];
+  }
+
+  try {
+    detail.required_categories = await getRequiredSpareCategoriesForAms(
+      ams_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+  } catch (error) {
+    console.warn(
+      '[spareParts] required categories (text-match) lookup failed:',
+      error.message
+    );
+    detail.required_categories = [];
   }
 
   return detail;
@@ -627,6 +713,7 @@ const getSpareIssueApprovalDetail = async (
       a.asset_type_id,
       a.serial_number,
       COALESCE(NULLIF(BTRIM(a.text), ''), a.description) AS asset_name,
+      a.description AS asset_description,
       at.text AS asset_type_name,
       mt.text AS maintenance_type_name,
       v.vendor_name,
@@ -670,6 +757,7 @@ const getSpareIssueApprovalDetail = async (
   let model_id = remarks.spm_id || remarks.model_id || null;
   if (spc_id && (!brand_id || !model_id)) {
     try {
+      await ensureSpBrandModelSchema(dbPool);
       const catIds = await dbPool.query(
         `
           SELECT spb_id, spm_id
@@ -3958,7 +4046,7 @@ const updateSparePartLot = async ({
     if (brand_id) {
       const brand = await findOrCreateIspBrand(client, {
         org_id,
-        branch_id,
+        branch_id: branch_id || existing.rows[0].branch_id || null,
         created_by: changed_by,
         brand_id,
         brand_name: null,
@@ -3968,7 +4056,7 @@ const updateSparePartLot = async ({
       if (model_id) {
         const model = await findOrCreateIspModel(client, {
           org_id,
-          branch_id,
+          branch_id: branch_id || existing.rows[0].branch_id || null,
           created_by: changed_by,
           spbId: resolvedBrandId,
           model_id,
@@ -5294,6 +5382,7 @@ module.exports = {
   getChecklistRequiredSpareCategories,
   getSparePartMaintenanceList,
   getSparePartMaintenanceDetail,
+  getRequiredSpareCategoriesForAms,
   createSpareIssueRequests,
   getSpareIssueApprovals,
   getSpareIssueApprovalDetail,
