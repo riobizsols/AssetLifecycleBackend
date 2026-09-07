@@ -28,6 +28,7 @@ const {
   getMaintenanceList,
   getMaintenanceDetail,
   getCategoriesByAssetType,
+  getRequiredCategories,
   createIssueRequests,
   getIssueApprovals,
   getIssueApprovalDetail,
@@ -90,6 +91,7 @@ router.get('/master/:partNumber', getSparePartMasterByPartNumber);
 router.put('/master/:partNumber', updateSparePartMaster);
 
 router.get('/maintenance-list', getMaintenanceList);
+router.get('/maintenance-list/:ams_id/required-categories', getRequiredCategories);
 router.get('/maintenance-list/:ams_id', getMaintenanceDetail);
 
 router.post('/issue-requests', createIssueRequests);

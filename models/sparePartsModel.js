@@ -207,6 +207,76 @@ const getSparePartMaintenanceList = async (
   return result.rows;
 };
 
+/**
+ * Checklist-required spare categories for a maintenance schedule.
+ * Matches checklist line text to spare categories mapped to the asset type
+ * (e.g. "Replace Battery", "Replace Lence").
+ */
+const getRequiredSpareCategoriesForAms = async (
+  ams_id,
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [ams_id, org_id];
+  const inhouseOnly = inhouseMaintenancePredicate();
+  let amsQuery = `
+    SELECT
+      ams.ams_id,
+      ams.at_main_freq_id,
+      a.asset_type_id
+    FROM "tblAssetMaintSch" ams
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
+    WHERE ams.ams_id = $1
+      AND ams.org_id = $2
+      AND a.org_id = $2
+      AND ${inhouseOnly}
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    amsQuery += ` AND a.branch_id = $${params.length}`;
+  }
+  const amsResult = await dbPool.query(amsQuery, params);
+  const ams = amsResult.rows[0];
+  if (!ams?.asset_type_id) return [];
+
+  const categories = await getCategoryMappingsByAssetType(
+    org_id,
+    ams.asset_type_id,
+    branch_id,
+    hasSuperAccess
+  );
+  if (!categories.length) return [];
+
+  const checklistParams = [ams.asset_type_id, org_id];
+  let checklistQuery = `
+    SELECT DISTINCT BTRIM(text) AS text
+    FROM "tblATMaintCheckList"
+    WHERE asset_type_id = $1
+      AND org_id = $2
+      AND text IS NOT NULL
+      AND BTRIM(text) <> ''
+  `;
+  if (ams.at_main_freq_id) {
+    checklistParams.push(ams.at_main_freq_id);
+    checklistQuery += ` AND (at_main_freq_id IS NOT DISTINCT FROM $${checklistParams.length} OR at_main_freq_id IS NULL)`;
+  }
+  const checklistResult = await dbPool.query(checklistQuery, checklistParams);
+  const checklistTexts = new Set(
+    checklistResult.rows.map((row) => String(row.text || '').trim().toLowerCase()).filter(Boolean)
+  );
+  if (!checklistTexts.size) return [];
+
+  return categories.filter((cat) => {
+    const name = String(cat.category_name || '').trim().toLowerCase();
+    return name && checklistTexts.has(name);
+  });
+};
+
 const getSparePartMaintenanceDetail = async (
   ams_id,
   org_id,
@@ -225,6 +295,7 @@ const getSparePartMaintenanceDetail = async (
       a.asset_type_id,
       a.serial_number,
       a.description AS asset_description,
+      a.description AS asset_name,
       at.text AS asset_type_name,
       at.require_maintenance,
       at.require_spare_parts,
@@ -260,7 +331,22 @@ const getSparePartMaintenanceDetail = async (
     query += ` AND a.branch_id = $${params.length}`;
   }
   const result = await dbPool.query(query, params);
-  return result.rows[0] || null;
+  const row = result.rows[0] || null;
+  if (!row) return null;
+
+  const requiredCategories = await getRequiredSpareCategoriesForAms(
+    ams_id,
+    org_id,
+    branch_id,
+    hasSuperAccess
+  );
+  const hasRequired = requiredCategories.length > 0;
+  return {
+    ...row,
+    required_categories: requiredCategories,
+    required_spare_parts: hasRequired,
+    require_spare_parts: hasRequired,
+  };
 };
 
 const assertInhouseMaintenance = async (client, amsId, orgId) => {
@@ -569,6 +655,7 @@ const getSpareIssueApprovalDetail = async (
       a.asset_type_id,
       a.serial_number,
       COALESCE(NULLIF(BTRIM(a.text), ''), a.description) AS asset_name,
+      a.description AS asset_description,
       at.text AS asset_type_name,
       mt.text AS maintenance_type_name,
       v.vendor_name,
@@ -608,14 +695,37 @@ const getSpareIssueApprovalDetail = async (
   const remarks = parseIssueRemarks(row.remarks);
   const { brand_name, model_name } = await resolveCategoryBrandModel(dbPool, org_id, spc_id);
 
+  let brand_id = remarks.spb_id || null;
+  let model_id = remarks.spm_id || null;
+  if (spc_id && (!brand_id || !model_id)) {
+    try {
+      await ensureSpBrandModelSchema(dbPool);
+      const ids = await dbPool.query(
+        `
+          SELECT spb_id, spm_id
+          FROM "tblSPCategory"
+          WHERE spc_id = $1 AND org_id = $2
+          LIMIT 1
+        `,
+        [spc_id, org_id]
+      );
+      brand_id = brand_id || ids.rows[0]?.spb_id || null;
+      model_id = model_id || ids.rows[0]?.spm_id || null;
+    } catch (_) {
+      /* optional enrichment */
+    }
+  }
+
   return {
     ...row,
     spc_id,
     category_name,
     brand_name,
     model_name,
-    spb_id: remarks.spb_id || null,
-    spm_id: remarks.spm_id || null,
+    brand_id,
+    model_id,
+    spb_id: brand_id,
+    spm_id: model_id,
     available_qty,
     is_approved: row.status === SPARE_ISSUE_STATUS.RESERVED || row.status === SPARE_ISSUE_STATUS.ISSUED,
   };
@@ -3569,6 +3679,29 @@ const createSparePartLot = async ({
       });
     }
 
+    // tblSPLotDet.brand_id / model_id FK to tblISPBrand / tblISPModel — resolve SP ids
+    let resolvedBrandId = null;
+    let resolvedModelId = null;
+    if (brand_id) {
+      const brand = await findOrCreateIspBrand(client, {
+        org_id,
+        branch_id,
+        created_by,
+        brand_id,
+      });
+      resolvedBrandId = brand.spbId;
+      if (model_id) {
+        const model = await findOrCreateIspModel(client, {
+          org_id,
+          branch_id,
+          created_by,
+          spbId: brand.spbId,
+          model_id,
+        });
+        resolvedModelId = model.spbmId;
+      }
+    }
+
     const spld_id = await generateCustomIdForClient(client, 'sp_lot_det', 3);
 
     const lotResult = await client.query(
@@ -3602,8 +3735,8 @@ const createSparePartLot = async ({
         spld_id,
         spc_id,
         vendor_id || null,
-        brand_id || null,
-        model_id || null,
+        resolvedBrandId,
+        resolvedModelId,
         part_number || null,
         unit_price,
         lot_purchase_date || null,
@@ -3842,6 +3975,29 @@ const updateSparePartLot = async ({
       throw err;
     }
 
+    // tblSPLotDet.brand_id / model_id FK to tblISPBrand / tblISPModel — resolve SP ids
+    let resolvedBrandId = null;
+    let resolvedModelId = null;
+    if (brand_id) {
+      const brand = await findOrCreateIspBrand(client, {
+        org_id,
+        branch_id: branch_id || existing.rows[0].branch_id || null,
+        created_by: changed_by,
+        brand_id,
+      });
+      resolvedBrandId = brand.spbId;
+      if (model_id) {
+        const model = await findOrCreateIspModel(client, {
+          org_id,
+          branch_id: branch_id || existing.rows[0].branch_id || null,
+          created_by: changed_by,
+          spbId: brand.spbId,
+          model_id,
+        });
+        resolvedModelId = model.spbmId;
+      }
+    }
+
     const lotResult = await client.query(
       `
         UPDATE "tblSPLotDet"
@@ -3868,8 +4024,8 @@ const updateSparePartLot = async ({
         org_id,
         spc_id,
         vendor_id || null,
-        brand_id || null,
-        model_id || null,
+        resolvedBrandId,
+        resolvedModelId,
         part_number || null,
         unit_price,
         lot_purchase_date || null,
@@ -5134,6 +5290,7 @@ module.exports = {
   getCategoryMappingsByAssetType,
   getSparePartMaintenanceList,
   getSparePartMaintenanceDetail,
+  getRequiredSpareCategoriesForAms,
   createSpareIssueRequests,
   getSpareIssueApprovals,
   getSpareIssueApprovalDetail,

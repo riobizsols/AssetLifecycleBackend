@@ -788,6 +788,38 @@ const getCategoriesByAssetType = async (req, res) => {
   }
 };
 
+const getRequiredCategories = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { ams_id } = req.params;
+
+    if (!ams_id) {
+      return res.status(400).json({ success: false, error: 'Maintenance schedule is required' });
+    }
+
+    const rows = await model.getRequiredSpareCategoriesForAms(
+      ams_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+    return res.status(200).json({
+      success: true,
+      data: rows,
+      required_spare_parts: rows.length > 0,
+      require_spare_parts: rows.length > 0,
+    });
+  } catch (error) {
+    console.error('Error fetching required spare categories:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch required spare categories',
+    });
+  }
+};
+
 const createIssueRequests = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -1226,6 +1258,7 @@ module.exports = {
   getMaintenanceList,
   getMaintenanceDetail,
   getCategoriesByAssetType,
+  getRequiredCategories,
   createIssueRequests,
   getIssueApprovals,
   getIssueApprovalDetail,
