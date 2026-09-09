@@ -1791,11 +1791,15 @@ const validatePropertyValue = async (
   }
 
   // 3. No match found - create new property value (this is commit mode)
+  const savepoint = `sp_aplv_${String(assetTypePropId).replace(/[^a-zA-Z0-9]/g, "")}`;
   try {
-    const { generateCustomId } = require("../utils/idGenerator");
+    const { generateCustomIdForClient } = require("../utils/idGenerator");
 
-    // Generate unique APLV ID
-    const aplvId = await generateCustomId("aplv", 3);
+    // Isolate auto-create so a failed INSERT does not abort the outer bulk transaction
+    await client.query(`SAVEPOINT ${savepoint}`);
+
+    // Generate unique APLV ID on the same transaction client
+    const aplvId = await generateCustomIdForClient(client, "aplv", 3);
 
     const insertQuery = `
       INSERT INTO "tblAssetPropListValues" (
@@ -1816,12 +1820,19 @@ const validatePropertyValue = async (
       orgId,
     ]);
 
+    await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+
     console.log(
       `✅ Auto-created new property value: '${trimmedValue}' for property '${actualPropId}' with ID ${aplvId}`,
     );
 
     return { isValid: true, error: null };
   } catch (error) {
+    try {
+      await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+    } catch (_) {
+      /* ignore if savepoint missing */
+    }
     console.error("Error creating new property value:", error);
     return {
       isValid: false,
@@ -2036,18 +2047,23 @@ const bulkUpsertAssets = async (
       assetTypesMap[at.asset_type_id] = at.text;
     });
 
-    for (const row of csvData) {
+    for (let rowIndex = 0; rowIndex < csvData.length; rowIndex++) {
+      const row = csvData[rowIndex];
+      const rowSavepoint = `sp_asset_row_${rowIndex}`;
       // Declare variables outside try-catch for error handling
       let finalAssetId = row.asset_id;
       let finalSerialNumber = row.serial_number;
       let finalOrgId = null;
       let finalBranchId = null;
       let finalPurchasedBy = null;
+      let rowWasUpdate = false;
 
       // Get asset type text for the 'text' field
       const assetTypeText = assetTypesMap[row.asset_type_id] || "";
 
       try {
+        await client.query(`SAVEPOINT ${rowSavepoint}`);
+
         const orgBranch = await validateCsvOrgBranch({
           orgId: row.org_id,
           branchId: normalizeBranchId(row.branch_id) || row.branch_id,
@@ -2196,7 +2212,7 @@ const bulkUpsertAssets = async (
               created_by,
             ],
           );
-          updated++;
+          rowWasUpdate = true;
         } else {
           // Insert new asset
           await client.query(
@@ -2252,7 +2268,7 @@ const bulkUpsertAssets = async (
               created_by,
             ],
           );
-          inserted++;
+          rowWasUpdate = false;
         }
 
         // Handle property values (like Add Assets screen)
@@ -2330,7 +2346,16 @@ const bulkUpsertAssets = async (
             }
           }
         }
+
+        await client.query(`RELEASE SAVEPOINT ${rowSavepoint}`);
+        if (rowWasUpdate) updated++;
+        else inserted++;
       } catch (error) {
+        try {
+          await client.query(`ROLLBACK TO SAVEPOINT ${rowSavepoint}`);
+        } catch (_) {
+          /* transaction may already be unusable */
+        }
         console.error(`Error processing asset ${finalAssetId}:`, error);
         errors++;
         errorDetails.push({
@@ -2340,7 +2365,11 @@ const bulkUpsertAssets = async (
       }
     }
 
-    await client.query("COMMIT");
+    if (errors > 0 && inserted === 0 && updated === 0) {
+      await client.query("ROLLBACK");
+    } else {
+      await client.query("COMMIT");
+    }
 
     return {
       totalProcessed: csvData.length,

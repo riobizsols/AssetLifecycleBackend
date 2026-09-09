@@ -141,16 +141,36 @@ class PropertiesController {
   }
 
   // Get all properties
+  // ?scope=acm_grants → all orgs the user is granted (ignore header org narrow) for bulk upload
   static async getAllProperties(req, res) {
     try {
-      const { getEffectiveListContext } = require('../utils/acmAccess');
+      const { getEffectiveListContext, getRequestAcm } = require('../utils/acmAccess');
+      const scope = String(req.query.scope || '').trim().toLowerCase();
       const context = getEffectiveListContext(req);
       const orgId = context.orgId || req.user?.org_id;
 
-      console.log(`Fetching all properties for org: ${orgId}`);
+      let properties;
+      if (scope === 'acm_grants' || scope === 'bulk') {
+        const acm = getRequestAcm(req) || context.acm;
+        let orgIds = null;
+        if (acm?.hasAcm) {
+          if (acm.allOrgs) {
+            orgIds = null; // all orgs in tenant DB
+          } else {
+            orgIds = Array.isArray(acm.orgIds) ? acm.orgIds.filter(Boolean) : [];
+            if (orgIds.length === 0 && orgId) orgIds = [orgId];
+          }
+        } else if (orgId) {
+          orgIds = [orgId];
+        }
 
-      const properties = await PropertiesModel.getAllProperties(orgId);
-      
+        console.log(`Fetching properties for ACM grants (scope=${scope}):`, orgIds || 'ALL');
+        properties = await PropertiesModel.getAllPropertiesForOrgs(orgIds);
+      } else {
+        console.log(`Fetching all properties for org: ${orgId}`);
+        properties = await PropertiesModel.getAllProperties(orgId);
+      }
+
       console.log(`Found ${properties.length} properties`);
 
       res.json({
