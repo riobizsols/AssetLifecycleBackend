@@ -1216,6 +1216,47 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
     }
 
+    // 13. Copy UOM master (maintenance + spare-parts units)
+    console.log(`[TenantSetup] Copying UOM from reference database...`);
+    const uomResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblUom', orgId);
+    if (uomResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${uomResult.copied} UOM rows`);
+    } else if (!uomResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No UOM rows copied from reference (will apply DEFAULT_UOM next)`);
+    }
+
+    // Always upsert canonical defaults (ensures Piece exists for spare parts even if schema_db is stale)
+    try {
+      const { ensureDefaultUom } = require('./tenantReferenceDataService');
+      const uomSeed = await ensureDefaultUom(tenantClient);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_UOM (${uomSeed.upserted} upserted)`);
+    } catch (uomErr) {
+      console.warn(`[TenantSetup] DEFAULT_UOM ensure skipped: ${uomErr.message}`);
+    }
+
+    // 14. Copy inspection response types from reference (Qualitative / Quantitative)
+    console.log(`[TenantSetup] Copying inspection response types from reference database...`);
+    const inspResResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblInspResTypeDet',
+      orgId,
+      { orgIdColumn: 'org_id' },
+    );
+    if (inspResResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${inspResResult.copied} inspection response type rows`);
+    } else if (!inspResResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No inspection response types copied from reference (will apply defaults next)`);
+    }
+
+    try {
+      const { ensureDefaultInspResTypeDet } = require('./tenantReferenceDataService');
+      const inspResSeed = await ensureDefaultInspResTypeDet(tenantClient, orgId);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_INSP_RES_TYPE_DET (${inspResSeed.upserted} upserted)`);
+    } catch (inspErr) {
+      console.warn(`[TenantSetup] DEFAULT_INSP_RES_TYPE_DET ensure skipped: ${inspErr.message}`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {

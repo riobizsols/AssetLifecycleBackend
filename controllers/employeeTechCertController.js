@@ -14,6 +14,12 @@ const fs = require('fs');
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+function invalidateEmployeeTechCertCaches(req) {
+  const orgId = req?.user?.org_id;
+  if (!orgId) return;
+  operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+}
+
 /** Multer can break AsyncLocalStorage; re-bind tenant pool from req before handlers run. */
 function withTenantDb(req, res, next) {
   if (tryGetDb()) return next();
@@ -117,6 +123,8 @@ const createEmployeeCertificate = [
         createdBy,
         orgId
       });
+
+      invalidateEmployeeTechCertCaches(req);
 
       return res.status(201).json({
         success: true,
@@ -248,6 +256,8 @@ const updateEmployeeCertificate = async (req, res) => {
       });
     }
 
+    invalidateEmployeeTechCertCaches(req);
+
     return res.status(200).json({
       success: true,
       message: "Certificate updated successfully",
@@ -282,6 +292,8 @@ const deleteEmployeeCertificate = async (req, res) => {
         message: "Certificate not found"
       });
     }
+
+    invalidateEmployeeTechCertCaches(req);
 
     return res.status(200).json({
       success: true,

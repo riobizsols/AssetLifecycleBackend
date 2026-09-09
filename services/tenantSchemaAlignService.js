@@ -314,6 +314,35 @@ async function ensureCriticalRuntimeSchema(client) {
     }
   }
 
+  // Generated + manufacturer serials can exceed legacy varchar(15)
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssets"
+      ALTER COLUMN serial_number TYPE character varying(50)
+    `);
+    results.push({ object: 'tblAssets.serial_number', status: 'varchar(50)' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssets.serial_number', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblAssets.serial_number widen:', err.message);
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblPrintSerialNoQueue"
+      ALTER COLUMN serial_no TYPE character varying(50)
+    `);
+    results.push({ object: 'tblPrintSerialNoQueue.serial_no', status: 'varchar(50)' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblPrintSerialNoQueue.serial_no', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblPrintSerialNoQueue.serial_no widen:', err.message);
+    }
+  }
+
   try {
     await client.query(`
       ALTER TABLE "tblAssetTypes"

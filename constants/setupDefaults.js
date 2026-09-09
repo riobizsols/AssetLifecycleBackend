@@ -500,7 +500,22 @@ const DEFAULT_UOM = [
   { id: "UOM002", name: "Weeks" },
   { id: "UOM003", name: "Months" },
   { id: "UOM004", name: "Years" },
-  { id: "UOM005", name: "KMS" }
+  { id: "UOM005", name: "KMS" },
+  // Spare-parts / quantity UOMs (required for spare part category create)
+  { id: "UOM006", name: "Piece" },
+];
+
+/** Inspection checklist response types (Qualitative / Quantitative). */
+const DEFAULT_INSP_RES_TYPE_DET = [
+  { id: "IRTD_QN_001", name: "Quantitative", expected_value: null, option: null },
+  { id: "IRTD_QL_YES_NO_001", name: "Qualitative", expected_value: "Yes", option: "Yes" },
+  { id: "IRTD_QL_YES_NO_002", name: "Qualitative", expected_value: "No", option: "No" },
+  { id: "IRTD_QL_MULTI_001", name: "Qualitative", expected_value: null, option: "Good" },
+  { id: "IRTD_QL_MULTI_002", name: "Qualitative", expected_value: null, option: "Excellent" },
+  { id: "IRTD_QL_MULTI_003", name: "Qualitative", expected_value: null, option: "Fair" },
+  { id: "IRTD_QL_MULTI_004", name: "Qualitative", expected_value: null, option: "Poor" },
+  { id: "IRTD_QL_MULTI_005", name: "Qualitative", expected_value: null, option: "Maybe" },
+  { id: "IRTD_QL_MULTI_006", name: "Qualitative", expected_value: null, option: "Not Applicable" },
 ];
 
 const DEFAULT_MAINT_STATUS = [
@@ -648,6 +663,7 @@ module.exports = {
   DEFAULT_AUDIT_EVENTS,
   DEFAULT_MAINT_TYPES,
   DEFAULT_UOM,
+  DEFAULT_INSP_RES_TYPE_DET,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,

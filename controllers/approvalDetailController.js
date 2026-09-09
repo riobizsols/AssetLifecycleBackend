@@ -793,9 +793,16 @@ const getMaintenanceApprovalsController = async (req, res) => {
   
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
-    const { orgId } = resolveApprovalScope(req);
+    const { orgId, acmCtx } = resolveApprovalScope(req);
     const userBranchCode = branchCodeFromReq(req);
     const userBranchId = branchIdFromReq(req);
+    // Org-level ACM with branch=* must be treated as super for list filtering.
+    // Otherwise branchId is cleared and the model wrongly keeps only null-branch assets.
+    const hasSuperAccess =
+      userHasSystemAdminRole(req.user) ||
+      Boolean(acmCtx?.hasSuperAccess) ||
+      Boolean(req.user?.hasSuperAccess) ||
+      Boolean(req.user?.acmAllBranches);
 
     // Log API called
     await logApiCall({
@@ -832,7 +839,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
           empIntId,
           orgId,
           userBranchCode,
-          userHasSystemAdminRole(req.user),
+          hasSuperAccess,
           req.user?.job_role_id || null,
           userBranchId
         );
