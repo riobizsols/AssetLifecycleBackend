@@ -207,6 +207,7 @@ class PropertiesModel {
         SELECT 
           prop_id,
           property,
+          org_id,
           int_status
         FROM "tblProps"
         WHERE org_id = $1 
@@ -218,6 +219,44 @@ class PropertiesModel {
       return result.rows;
     } catch (error) {
       console.error('Error fetching all properties:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Properties across one or more orgs (bulk upload / multi-org).
+   * @param {string[]|null} orgIds - null/empty = all active properties
+   */
+  static async getAllPropertiesForOrgs(orgIds = null) {
+    try {
+      const dbPool = getDb();
+      const ids = Array.isArray(orgIds)
+        ? [...new Set(orgIds.map((id) => String(id || '').trim()).filter(Boolean))]
+        : [];
+
+      if (ids.length === 0) {
+        const result = await dbPool.query(`
+          SELECT prop_id, property, org_id, int_status
+          FROM "tblProps"
+          WHERE int_status = 1
+          ORDER BY org_id, property
+        `);
+        return result.rows;
+      }
+
+      const result = await dbPool.query(
+        `
+          SELECT prop_id, property, org_id, int_status
+          FROM "tblProps"
+          WHERE int_status = 1
+            AND org_id = ANY($1::text[])
+          ORDER BY org_id, property
+        `,
+        [ids],
+      );
+      return result.rows;
+    } catch (error) {
+      console.error('Error fetching properties for orgs:', error);
       throw error;
     }
   }
