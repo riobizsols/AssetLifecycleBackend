@@ -2,10 +2,19 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
-const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 const { DEFAULT_UOM, DEFAULT_INSP_RES_TYPE_DET } = require('../constants/setupDefaults');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
+
+/** Main (non-tenant) app — resolve reference DB from env, no tenantSchemaReference util. */
+function getReferenceUrl() {
+  return (
+    process.env.TENANT_SCHEMA_REFERENCE_URL ||
+    process.env.DATABASE_URL ||
+    process.env.HOSPITALITY_DATABASE_URL ||
+    null
+  );
+}
 
 /** Tables that must be seeded from schema_db reference on every new tenant. */
 const REQUIRED_MASTER_TABLES = [
