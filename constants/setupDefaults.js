@@ -207,7 +207,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "Latitude 7440",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "High-end business ultrabook."
   },
   {
@@ -216,7 +216,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "HP",
     model: "EliteBook 845",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Enterprise-class laptop."
   },
   {
@@ -225,7 +225,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Lenovo",
     model: "ThinkPad X1 Carbon",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Flagship ultra portable."
   },
   {
@@ -234,7 +234,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "ProSupport Plus",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Laptop AMC support."
   },
   {
@@ -243,7 +243,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Microsoft",
     model: "365 E3",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Productivity suite subscription."
   },
   {
@@ -252,7 +252,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Adobe",
     model: "Creative Cloud",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Creative suite licenses."
   },
   {
@@ -261,7 +261,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Kirloskar",
     model: "Green 10kVA",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Diesel generator."
   },
   {
@@ -270,7 +270,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Apple",
     model: "iPhone 15",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Executive smartphone."
   },
   {
@@ -279,7 +279,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Samsung",
     model: "Galaxy S24",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Corporate Android device."
   },
   {
@@ -288,7 +288,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "UltraSharp 27",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Professional monitor."
   },
   {
@@ -297,7 +297,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Epson",
     model: "EB-S41",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Meeting room projector."
   },
   {
@@ -306,7 +306,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Otis",
     model: "Gen2",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Lift AMC package."
   },
   {
@@ -315,7 +315,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Toyota",
     model: "Innova Hycross",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Corporate fleet car."
   },
   {
@@ -324,7 +324,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Tata",
     model: "407",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Logistics truck."
   },
   {
@@ -333,7 +333,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Ashok Leyland",
     model: "Viking",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Employee transport bus."
   },
   {
@@ -342,7 +342,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "APC",
     model: "Smart-UPS 5kVA",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Data center UPS."
   },
   {
@@ -351,7 +351,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Daikin",
     model: "VRV S",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "HVAC unit."
   },
   {
@@ -360,7 +360,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Havells",
     model: "Stealth Air",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Ceiling fan."
   },
   {
@@ -369,7 +369,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Urban Ladder",
     model: "Nova Desk",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Workstation table."
   },
   {
@@ -378,7 +378,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Hikvision",
     model: "DS-2CD2143",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Fixed dome camera."
   }
 ];

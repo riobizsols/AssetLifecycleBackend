@@ -355,7 +355,7 @@ async function seedRelevantUserTypes(client, { dryRun, orgId }) {
           `
           INSERT INTO "tblProdServs" (
             prod_serv_id, org_id, asset_type_id, brand, model, status, ps_type, description
-          ) VALUES ($1, $2, $3, $4, $5, 'active', 'product', $6)
+          ) VALUES ($1, $2, $3, $4, $5, 1, 'product', $6)
           `,
           [
             prodId,

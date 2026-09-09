@@ -756,7 +756,7 @@ function buildGeneratedData(hierarchy) {
           asset_type_id: assetTypeId,
           brand: productCatalog.brand,
           model: productCatalog.model,
-          status: 'active',
+          status: 1,
           ps_type: 'product',
           description: `${assetName} supplied by ${productCatalog.brand}, model ${productCatalog.model}`,
         });

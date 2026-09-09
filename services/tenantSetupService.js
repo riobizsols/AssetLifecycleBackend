@@ -202,6 +202,16 @@ async function getTenantRegistryRowBySubdomain(subdomain) {
   return result.rows[0] || null;
 }
 
+async function getTenantRegistryRowByDbName(dbName) {
+  const pool = initTenantRegistryPool();
+  await ensureTenantsSchema(pool).catch(() => {});
+  const result = await pool.query(
+    `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, is_active, email FROM "tenants" WHERE db_name = $1`,
+    [String(dbName || '').trim()],
+  );
+  return result.rows[0] || null;
+}
+
 /** Derive a short org_code for tblOrgs from the subdomain (user no longer enters org ID). */
 function deriveOrgCodeFromSubdomain(subdomain) {
   const normalized = String(subdomain || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1717,23 +1727,53 @@ async function createTenant(tenantData) {
 
   // Internally generated registry PK (ORG###) — also used as tblOrgs.org_id
   let groupedOrgId = null;
+  // Only roll back DROP DATABASE for DBs this request created (never wipe a concurrent create).
+  let createdDbInThisRequest = false;
 
   try {
     await adminClient.connect();
 
-    // Check if database already exists
+    // Check if database already exists (common after gateway 504 — first request succeeded server-side)
     const dbCheckResult = await adminClient.query(
       `SELECT 1 FROM pg_database WHERE datname = $1`,
       [dbName]
     );
 
     if (dbCheckResult.rows.length > 0) {
-      throw new Error(`Database ${dbName} already exists`);
-    }
+      const existingBySubdomain = await tryResolveExistingTenant(
+        orgCodeUpper,
+        subdomain,
+        adminUser,
+        orgName,
+        orgCity,
+      );
+      if (existingBySubdomain) {
+        console.log(`[TenantSetup] Database ${dbName} already provisioned for subdomain ${subdomain}; returning existing tenant`);
+        return existingBySubdomain;
+      }
 
-    // Create the database
-    await adminClient.query(`CREATE DATABASE "${dbName}"`);
-    console.log(`[TenantSetup] Created database: ${dbName}`);
+      const existingByDb = await getTenantRegistryRowByDbName(dbName);
+      if (existingByDb && existingByDb.is_active !== false) {
+        const resolved = await tryResolveExistingTenant(
+          orgCodeUpper,
+          existingByDb.subdomain || subdomain,
+          adminUser,
+          orgName,
+          orgCity,
+        );
+        if (resolved) {
+          console.log(`[TenantSetup] Database ${dbName} already registered; returning existing tenant`);
+          return resolved;
+        }
+      }
+
+      // Orphan DB (created but registry row missing) — resume provisioning instead of failing.
+      console.warn(`[TenantSetup] Database ${dbName} exists without a resolvable registry row; resuming setup`);
+    } else {
+      await adminClient.query(`CREATE DATABASE "${dbName}"`);
+      createdDbInThisRequest = true;
+      console.log(`[TenantSetup] Created database: ${dbName}`);
+    }
 
     // Register tenant in registry (includes admin email on tenants.email for org management).
     const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
@@ -1741,18 +1781,27 @@ async function createTenant(tenantData) {
       throw new Error('Admin user email is required');
     }
 
-    groupedOrgId = await generateNextGroupedOrgId();
-    await registerTenant(groupedOrgId, {
-      host: dbConfig.host,
-      port: dbConfig.port,
-      database: dbName,
-      user: dbConfig.user,
-      password: dbConfig.password,
-      subdomain: subdomain,
-      email: adminEmail,
-      orgName: String(orgName).trim(),
-    });
-    console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
+    const existingRegistry =
+      (await getTenantRegistryRowBySubdomain(subdomain)) ||
+      (await getTenantRegistryRowByDbName(dbName));
+
+    if (existingRegistry && existingRegistry.is_active !== false) {
+      groupedOrgId = existingRegistry.org_id;
+      console.log(`[TenantSetup] Reusing existing registry row grouped_org_id=${groupedOrgId} for resume`);
+    } else {
+      groupedOrgId = await generateNextGroupedOrgId();
+      await registerTenant(groupedOrgId, {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        database: dbName,
+        user: dbConfig.user,
+        password: dbConfig.password,
+        subdomain: subdomain,
+        email: adminEmail,
+        orgName: String(orgName).trim(),
+      });
+      console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
+    }
 
     const tenantClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, dbName)));
 
@@ -2201,13 +2250,20 @@ async function createTenant(tenantData) {
   } catch (error) {
     console.error('[TenantSetup] Error creating tenant:', error);
 
-    try {
-      await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
-      if (groupedOrgId) {
-        await deactivateTenant(groupedOrgId);
+    // Never DROP a database we did not create in this request (504 retries / concurrent creates).
+    if (createdDbInThisRequest) {
+      try {
+        await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+        if (groupedOrgId) {
+          await deactivateTenant(groupedOrgId);
+        }
+      } catch (dropError) {
+        console.error('[TenantSetup] Error rolling back tenant:', dropError);
       }
-    } catch (dropError) {
-      console.error('[TenantSetup] Error rolling back tenant:', dropError);
+    } else {
+      console.warn(
+        `[TenantSetup] Skipping DROP DATABASE for ${dbName} (not created in this request; left intact for retry/idempotent complete)`,
+      );
     }
 
     throw error;

@@ -37,8 +37,30 @@ const getOrganizationByIdController = async (req, res) => {
 const addOrganizationController = async (req, res) => {
     try {
         const { org_code, org_name, org_city } = req.body;
+        if (!org_code || !org_name || !org_city) {
+            return res.status(400).json({
+                message: "org_code, org_name, and org_city are required",
+            });
+        }
+
         // Generate org_id using ID sequence
         const org_id = await generateCustomId("org");
+
+        // Unique subdomain for response / optional tenant registry update
+        let subdomain = null;
+        try {
+            const { generateUniqueSubdomain } = require("../utils/subdomainUtils");
+            subdomain = await generateUniqueSubdomain(org_name);
+        } catch (subErr) {
+            console.warn(
+                "[OrgController] Could not generate subdomain:",
+                subErr.message
+            );
+            subdomain = String(org_code || org_name || "org")
+                .toLowerCase()
+                .replace(/[^a-z0-9-]/g, "")
+                .slice(0, 63) || `org-${Date.now().toString(36)}`;
+        }
 
         const newOrg = {
             org_id,
@@ -51,24 +73,33 @@ const addOrganizationController = async (req, res) => {
         };
         const created = await addOrganization(newOrg);
 
-        // Also update tenants table if it exists and org is a tenant
+        // Also update tenants table if this org_id is already a registered tenant
         try {
-            const { checkTenantExists } = require('../services/tenantService');
+            const { checkTenantExists } = require("../services/tenantService");
             const tenantExists = await checkTenantExists(org_id);
             if (tenantExists) {
-                const db = require('../config/db');
+                const db = require("../config/db");
                 await db.query(
                     `UPDATE "tenants" SET subdomain = $1 WHERE grouped_org_id = $2`,
                     [subdomain, org_id]
                 );
             }
         } catch (tenantError) {
-            console.warn('[OrgController] Could not update tenants table subdomain:', tenantError.message);
+            console.warn(
+                "[OrgController] Could not update tenants table subdomain:",
+                tenantError.message
+            );
         }
 
         res.status(201).json({ ...created, subdomain });
     } catch (err) {
         console.error("Error adding organization:", err);
+        const msg = String(err?.message || "");
+        if (err?.code === "23505" || /duplicate|unique/i.test(msg)) {
+            return res.status(409).json({
+                message: "Organization code or ID already exists",
+            });
+        }
         res.status(500).json({ message: "Internal server error" });
     }
 };
