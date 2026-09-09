@@ -2,24 +2,67 @@ const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
 const { registerFromRequestContext, registerManyFromRequestContext } = require('../services/tenantEmailRegistryService');
 const { generateCustomId } = require("../utils/idGenerator");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-// GET all employees
-const getAllEmployees = async () => {
-  const query = `
+// GET all employees — scoped by ACM / request user org-branch-dept
+const getAllEmployees = async (orgId = null, branchId = null, deptId = null, hasSuperAccess = false, scope = {}) => {
+  let query = `
         SELECT 
             emp_int_id, employee_id, name, first_name, last_name, 
             middle_name, full_name, email_id, dept_id, phone_number, 
             employee_type, joining_date, releiving_date, language_code, 
-            int_status, created_by, created_on, changed_by, changed_on
+            int_status, created_by, created_on, changed_by, changed_on,
+            org_id, branch_id
         FROM "tblEmployees"
-        ORDER BY created_on DESC
+        WHERE 1=1
     `;
+  const params = [];
+  let i = 1;
+
+  if (orgId) {
+    query += ` AND org_id = $${i}`;
+    params.push(orgId);
+    i += 1;
+  }
+
+  const branchIds = Array.isArray(scope.branchIds) && scope.branchIds.length
+    ? scope.branchIds.map((id) => String(id).trim()).filter(Boolean)
+    : (branchId ? [String(branchId).trim()] : []);
+  const deptIds = Array.isArray(scope.deptIds) && scope.deptIds.length
+    ? scope.deptIds.map((id) => String(id).trim()).filter(Boolean)
+    : (deptId ? [String(deptId).trim()] : []);
+
+  if (!hasSuperAccess) {
+    if (branchIds.length === 1) {
+      query += ` AND branch_id = $${i}`;
+      params.push(branchIds[0]);
+      i += 1;
+    } else if (branchIds.length > 1) {
+      query += ` AND branch_id = ANY($${i}::text[])`;
+      params.push(branchIds);
+      i += 1;
+    } else if (Array.isArray(scope.branchIds)) {
+      query += ' AND 1=0';
+    }
+  }
+
+  if (deptIds.length === 1) {
+    query += ` AND dept_id = $${i}`;
+    params.push(deptIds[0]);
+    i += 1;
+  } else if (deptIds.length > 1) {
+    query += ` AND dept_id = ANY($${i}::text[])`;
+    params.push(deptIds);
+    i += 1;
+  }
+
+  query += ` ORDER BY created_on DESC`;
 
   const dbPool = getDb();
-  return await dbPool.query(query);
+  return await dbPool.query(query, params);
 };
 
 // GET employee by ID
@@ -36,6 +79,45 @@ const getEmployeeById = async (employee_id) => {
 
   const dbPool = getDb();
   return await dbPool.query(query, [employee_id]);
+};
+
+/**
+ * Find employee by email within an org (case-insensitive).
+ * @param {string} email
+ * @param {string} orgId
+ * @param {{ excludeEmpIntId?: string, excludeEmployeeId?: string }} [opts]
+ */
+const findEmployeeByEmail = async (email, orgId, opts = {}) => {
+  const normalized = String(email || '').trim().toLowerCase();
+  if (!normalized || !orgId) return null;
+
+  const params = [normalized, orgId];
+  let excludeSql = '';
+
+  if (opts.excludeEmpIntId) {
+    params.push(opts.excludeEmpIntId);
+    excludeSql += ` AND emp_int_id <> $${params.length}`;
+  }
+  if (opts.excludeEmployeeId) {
+    params.push(opts.excludeEmployeeId);
+    excludeSql += ` AND employee_id <> $${params.length}`;
+  }
+
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `
+      SELECT emp_int_id, employee_id, full_name, email_id, org_id, int_status
+      FROM "tblEmployees"
+      WHERE org_id = $2
+        AND email_id IS NOT NULL
+        AND lower(btrim(email_id)) = $1
+        ${excludeSql}
+      ORDER BY created_on ASC
+      LIMIT 1
+    `,
+    params,
+  );
+  return result.rows[0] || null;
 };
 
 // GET employees by department
@@ -195,7 +277,7 @@ const validateAndFormatDate = (dateString) => {
 };
 
 // Bulk upsert employees (insert or update)
-const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) => {
+const bulkUpsertEmployees = async (csvData, created_by) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
   
@@ -209,11 +291,15 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
     const emailsToRegister = [];
     
     console.log('=== Employee Model Bulk Upload Debug ===');
-    console.log('org_id:', org_id);
-    console.log('userBranchId:', userBranchId);
     
     for (const row of csvData) {
       try {
+        const { orgId: rowOrgId, branchId: rowBranchId } = await validateCsvOrgBranch({
+          orgId: row.org_id,
+          branchId: row.branch_id,
+          branchRequired: true,
+        });
+
         // Generate emp_int_id if not provided
         let finalEmpIntId = row.emp_int_id;
         if (!finalEmpIntId) {
@@ -235,6 +321,18 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
           'SELECT employee_id FROM "tblEmployees" WHERE employee_id = $1',
           [finalEmployeeId]
         );
+
+        const emailId = String(row.email_id || '').trim();
+        if (emailId) {
+          const emailOwner = await findEmployeeByEmail(emailId, rowOrgId, {
+            excludeEmployeeId: finalEmployeeId,
+          });
+          if (emailOwner) {
+            throw new Error(
+              `Email "${emailId}" is already used by employee ${emailOwner.employee_id}`,
+            );
+          }
+        }
         
         if (existingEmployee.rows.length > 0) {
           // Update existing employee
@@ -275,8 +373,8 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
             releivingDate,
             row.language_code,
             1, // int_status is always 1 by default
-            org_id,
-            userBranchId,
+            rowOrgId,
+            rowBranchId,
             created_by
           ]);
           updated++;
@@ -308,8 +406,8 @@ const bulkUpsertEmployees = async (csvData, created_by, org_id, userBranchId) =>
             releivingDate,
             row.language_code,
             1, // int_status is always 1 by default
-            org_id,
-            userBranchId,
+            rowOrgId,
+            rowBranchId,
             created_by
           ]);
           inserted++;
@@ -384,6 +482,18 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
     if (employeeData.middle_name) nameParts.push(employeeData.middle_name.trim());
     if (employeeData.last_name) nameParts.push(employeeData.last_name.trim());
     const fullName = nameParts.join(' ').trim();
+
+    const emailId = String(employeeData.email_id || '').trim();
+    const existingByEmail = await findEmployeeByEmail(emailId, org_id);
+    if (existingByEmail) {
+      const err = new Error(
+        `Email "${emailId}" is already used by employee ${existingByEmail.employee_id}`,
+      );
+      err.code = 'EMAIL_ALREADY_EXISTS';
+      err.statusCode = 409;
+      err.existingEmployee = existingByEmail;
+      throw err;
+    }
     
     // Insert new employee
     const result = await client.query(`
@@ -404,7 +514,7 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
       employeeData.last_name || null,
       employeeData.middle_name || null,
       fullName || null,
-      employeeData.email_id,
+      emailId,
       employeeData.dept_id,
       employeeData.phone_number,
       employeeData.employee_type || null,
@@ -440,6 +550,7 @@ const createEmployee = async (employeeData, created_by, org_id, userBranchId) =>
 module.exports = {
   getAllEmployees,
   getEmployeeById,
+  findEmployeeByEmail,
   getEmployeesByDepartment,
   getAllEmployeesWithJobRoles,
   updateEmployeeStatus,

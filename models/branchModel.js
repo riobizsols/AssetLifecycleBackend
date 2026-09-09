@@ -4,10 +4,58 @@ const { getDbFromContext } = require('../utils/dbContext');
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
 
-const getAllBranches = async (org_id) => {
+const getAllBranches = async (org_id = null, acm = null) => {
   const dbPool = getDb();
-  const result = await dbPool.query('SELECT * FROM "tblBranches" WHERE org_id = $1', [org_id]);
+  const { applyAcmSqlFilters } = require('../utils/acmAccess');
+
+  let query = `
+    SELECT b.*, o.text AS org_name, o.org_code
+    FROM "tblBranches" b
+    LEFT JOIN "tblOrgs" o ON o.org_id = b.org_id
+    WHERE 1=1
+  `;
+  const params = [];
+
+  if (org_id && !acm) {
+    params.push(org_id);
+    query += ` AND b.org_id = $${params.length}`;
+  }
+
+  if (acm) {
+    const filter = applyAcmSqlFilters(
+      acm,
+      { org: 'b.org_id', branch: 'b.branch_id' },
+      params.length + 1
+    );
+    query += filter.sql;
+    params.push(...filter.params);
+  }
+
+  query += ` ORDER BY b.org_id, b.created_on DESC`;
+  const result = await dbPool.query(query, params);
   return result.rows;
+};
+
+const orgExists = async (org_id) => {
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `SELECT 1 FROM "tblOrgs" WHERE org_id = $1 LIMIT 1`,
+    [org_id]
+  );
+  return result.rows.length > 0;
+};
+
+const getBranchById = async (branch_id) => {
+  const dbPool = getDb();
+  const result = await dbPool.query(
+    `SELECT b.*, o.text AS org_name, o.org_code
+     FROM "tblBranches" b
+     LEFT JOIN "tblOrgs" o ON o.org_id = b.org_id
+     WHERE b.branch_id = $1
+     LIMIT 1`,
+    [branch_id]
+  );
+  return result.rows[0] || null;
 };
 
 const addBranch = async (branch) => {
@@ -100,6 +148,8 @@ const updateBranch = async (branch_id, data, changed_by) => {
 
 module.exports = {
   getAllBranches,
+  orgExists,
+  getBranchById,
   addBranch,
   deleteBranches,
   updateBranch,

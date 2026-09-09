@@ -11,7 +11,8 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 const getOrganizationsController = async (req, res) => {
     try {
-        const data = await getAllOrganizations();
+        const { getRequestAcm } = require('../utils/acmAccess');
+        const data = await getAllOrganizations(getRequestAcm(req));
         res.status(200).json(data);
     } catch (err) {
         console.error("Error fetching organizations:", err);
@@ -38,24 +39,18 @@ const addOrganizationController = async (req, res) => {
         const { org_code, org_name, org_city } = req.body;
         // Generate org_id using ID sequence
         const org_id = await generateCustomId("org");
-        
-        // Generate unique subdomain from organization name
-        const { generateUniqueSubdomain } = require('../utils/subdomainUtils');
-        const subdomain = await generateUniqueSubdomain(org_name);
-        
-        // Prepare new org object
+
         const newOrg = {
             org_id,
             org_code,
             text: org_name,
             org_city,
-            subdomain, // Add subdomain
             int_status: 1,
             valid_from: null,
             valid_to: null,
         };
         const created = await addOrganization(newOrg);
-        
+
         // Also update tenants table if it exists and org is a tenant
         try {
             const { checkTenantExists } = require('../services/tenantService');
@@ -63,14 +58,14 @@ const addOrganizationController = async (req, res) => {
             if (tenantExists) {
                 const db = require('../config/db');
                 await db.query(
-                    `UPDATE "tenants" SET subdomain = $1 WHERE org_id = $2`,
+                    `UPDATE "tenants" SET subdomain = $1 WHERE grouped_org_id = $2`,
                     [subdomain, org_id]
                 );
             }
         } catch (tenantError) {
             console.warn('[OrgController] Could not update tenants table subdomain:', tenantError.message);
         }
-        
+
         res.status(201).json({ ...created, subdomain });
     } catch (err) {
         console.error("Error adding organization:", err);

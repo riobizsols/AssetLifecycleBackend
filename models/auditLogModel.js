@@ -12,13 +12,14 @@ class AuditLogModel {
      */
     static async generateSequentialId() {
         try {
-            // Get the highest existing al_id that matches the new format (AL001, AL002, etc.)
+            // Include any AL + digits length (AL001, AL1000, AL2014, ...)
+            // Old regex '^AL[0-9]{3}$' stopped at AL999 and kept regenerating AL1000.
             const dbPool = getDb();
 
             const result = await dbPool.query(`
                 SELECT al_id 
                 FROM "tblAuditLogs" 
-                WHERE al_id ~ '^AL[0-9]{3}$'
+                WHERE al_id ~ '^AL[0-9]+$'
                 ORDER BY CAST(SUBSTRING(al_id FROM 3) AS INTEGER) DESC 
                 LIMIT 1
             `);
@@ -26,12 +27,13 @@ class AuditLogModel {
             let nextNumber = 1;
             if (result.rows.length > 0) {
                 const lastId = result.rows[0].al_id;
-                const lastNumber = parseInt(lastId.substring(2));
+                const lastNumber = parseInt(lastId.substring(2), 10);
                 nextNumber = lastNumber + 1;
             }
             
-            // Format as AL001, AL002, etc. (pad with zeros to 3 digits)
-            return `AL${nextNumber.toString().padStart(3, '0')}`;
+            // Keep at least 3 digits (AL001); grow past that (AL1000, AL2015, ...)
+            const width = Math.max(3, String(nextNumber).length);
+            return `AL${String(nextNumber).padStart(width, '0')}`;
         } catch (error) {
             console.error('Error in generateSequentialId:', error);
             // Fallback to timestamp-based ID if sequential generation fails
@@ -45,9 +47,24 @@ class AuditLogModel {
      * @param {string} eventId - The event ID
      * @returns {Promise<Object|null>} Configuration object if enabled, null if disabled
      */
-    static async isEventEnabled(appId, eventId) {
+    static async isEventEnabled(appId, eventId, orgId = null) {
         try {
-            const query = `
+            const query = orgId
+              ? `
+                SELECT 
+                    alc_id,
+                    app_id,
+                    event_id,
+                    enabled,
+                    reporting_required,
+                    description
+                FROM "tblAuditLogConfig"
+                WHERE app_id = $1 
+                AND event_id = $2 
+                AND org_id = $3
+                AND enabled = true
+            `
+              : `
                 SELECT 
                     alc_id,
                     app_id,
@@ -63,8 +80,8 @@ class AuditLogModel {
             
             const dbPool = getDb();
 
-            
-            const result = await dbPool.query(query, [appId, eventId]);
+            const params = orgId ? [appId, eventId, orgId] : [appId, eventId];
+            const result = await dbPool.query(query, params);
             return result.rows[0] || null;
         } catch (error) {
             console.error('Error in isEventEnabled:', error);
@@ -131,7 +148,7 @@ class AuditLogModel {
             const { user_id, app_id, event_id, text, org_id } = actionData;
             
             // First, check if the event is enabled for this app
-            const eventConfig = await this.isEventEnabled(app_id, event_id);
+            const eventConfig = await this.isEventEnabled(app_id, event_id, org_id);
             
             if (!eventConfig) {
                 return {

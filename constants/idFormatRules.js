@@ -69,7 +69,7 @@ const LEGACY_ID_REMAPS = [
     from: 'BRANCH001',
     to: 'BR001',
     primaryExtra: { branch_code: 'HO' },
-    fkUpdates: [{ table: 'tblDepartments', column: 'branch_id' }],
+    fkUpdates: [{ table: 'tblBR_DEPT', column: 'branch_id' }],
   },
 ];
 

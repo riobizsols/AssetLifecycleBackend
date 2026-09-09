@@ -1,5 +1,5 @@
 const model = require("../models/assetModel");
-const { resolveAssetBranchId } = require("../utils/branchAccessUtils");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 
 // Check existing asset IDs for bulk upload validation
 const checkExistingAssets = async (req, res) => {
@@ -55,18 +55,15 @@ const validateBulkUploadAssets = async (req, res) => {
             // Required field validation
             if (!row.asset_id) rowErrors.push('asset_id is required');
             if (!row.text) rowErrors.push('text is required');
-            if (!row.org_id) rowErrors.push('org_id is required');
-            
-            // Data type validation
+
             if (row.purchased_cost && isNaN(parseFloat(row.purchased_cost))) {
                 rowErrors.push('purchased_cost must be a number');
             }
-            
             if (row.purchased_on && isNaN(new Date(row.purchased_on).getTime())) {
                 rowErrors.push('purchased_on must be a valid date');
             }
-            
-            // Referential integrity validation
+
+            // Optional org/branch/purchased_by: if present they must exist
             if (row.org_id && !referenceData.organizations.find(org => org.org_id === row.org_id)) {
                 rowErrors.push(`org_id '${row.org_id}' does not exist`);
             }
@@ -77,6 +74,10 @@ const validateBulkUploadAssets = async (req, res) => {
             
             if (row.branch_id && !referenceData.branches.find(b => b.branch_id === row.branch_id)) {
                 rowErrors.push(`branch_id '${row.branch_id}' does not exist`);
+            }
+
+            if (row.purchased_by && !referenceData.users?.find(u => u.user_id === row.purchased_by)) {
+                rowErrors.push(`purchased_by '${row.purchased_by}' does not exist`);
             }
             
             if (row.purchase_vendor_id && !referenceData.vendors.find(v => v.vendor_id === row.purchase_vendor_id)) {
@@ -168,6 +169,22 @@ const trialUploadAssets = async (req, res) => {
             });
             
             try {
+                await validateCsvOrgBranch({
+                    orgId: row.org_id,
+                    branchId: row.branch_id,
+                    orgRequired: false,
+                    branchRequired: false,
+                });
+                if (row.purchased_by && String(row.purchased_by).trim()) {
+                    const dbPool = req.db || require("../config/db");
+                    const buyer = await dbPool.query(
+                        'SELECT user_id FROM "tblUsers" WHERE user_id = $1',
+                        [String(row.purchased_by).trim()],
+                    );
+                    if (!buyer.rows.length) {
+                        throw new Error(`purchased_by '${row.purchased_by}' does not exist`);
+                    }
+                }
                 // Check if asset exists
                 if (existingIds.includes(row.asset_id)) {
                     updatedRecords++;
@@ -178,6 +195,9 @@ const trialUploadAssets = async (req, res) => {
                 // Validate property values if they exist
                 if (row.properties && Object.keys(row.properties).length > 0) {
                     for (const [propId, value] of Object.entries(row.properties)) {
+                        if (!propId || !/^ATP/i.test(String(propId).trim())) {
+                            continue;
+                        }
                         if (value && value.trim() !== '') {
                             console.log(`🔍 Backend validating property: ${propId} = "${value}" for org ${user_org_id}`);
                             const validation = await model.validatePropertyValueStandalone(propId, value, user_org_id, req.user.user_id, true); // isTrial = true
@@ -240,9 +260,11 @@ const commitBulkUploadAssets = async (req, res) => {
         }
 
         const created_by = req.user.user_id;
-        const user_org_id = req.user.org_id;
-        const user_branch_id = await resolveAssetBranchId(null, req.user, req.db);
-        const results = await model.bulkUpsertAssets(csvData, created_by, user_org_id, user_branch_id);
+        const results = await model.bulkUpsertAssets(
+          csvData,
+          created_by,
+          req.user.org_id,
+        );
         
         res.json({
             success: true,
@@ -251,7 +273,8 @@ const commitBulkUploadAssets = async (req, res) => {
                 totalProcessed: results.totalProcessed,
                 inserted: results.inserted,
                 updated: results.updated,
-                errors: results.errors
+                errors: results.errors,
+                errorDetails: results.errorDetails || [],
             }
         });
     } catch (error) {

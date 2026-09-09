@@ -76,16 +76,9 @@ const getAssetLifecycle = async (req, res) => {
     
     console.log('🔍 [AssetLifecycleController] Parsed filters:', JSON.stringify(filters, null, 2));
 
-    // Add user's branch_id as default filter only if user doesn't have super access
-    const userBranchId = req.user?.branch_id;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
-    filters.hasSuperAccess = hasSuperAccess; // Pass to model
-    if (!hasSuperAccess && userBranchId) {
-      filters.branch_id = userBranchId;
-      console.log('🔍 [AssetLifecycleController] Added user branch_id filter:', userBranchId);
-    } else if (hasSuperAccess) {
-      console.log('🔍 [AssetLifecycleController] User has super access - no branch filter applied');
-    }
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    filters.acmCtx = getEffectiveListContext(req);
+    filters.acmCtx.orgId = filters.acmCtx.orgId || req.user?.org_id;
 
     // Step 2: Log filters applied
     const appliedFilters = Object.keys(filters).filter(key => 
@@ -221,10 +214,16 @@ const getAssetLifecycle = async (req, res) => {
 // Get filter options for asset lifecycle
 const getAssetLifecycleFilterOptions = async (req, res) => {
   try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    if (!acmCtx.orgId) {
+      acmCtx.orgId = req.user?.org_id;
+    }
+
     const { data: options } = await reportsCache.cachedFilterOptions(
       req,
       'asset-lifecycle',
-      () => assetLifecycleModel.getAssetLifecycleFilterOptions(),
+      () => assetLifecycleModel.getAssetLifecycleFilterOptions(acmCtx),
     );
     
     res.status(200).json({
@@ -245,9 +244,9 @@ const getAssetLifecycleFilterOptions = async (req, res) => {
 // Get asset lifecycle summary statistics
 const getAssetLifecycleSummary = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
-    const branchId = req.user?.branch_id;
-    const hasSuperAccess = req.user?.hasSuperAccess || false;
+    const { getEffectiveListContext, buildAssetListScopeSql } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const orgId = acmCtx.orgId || req.user?.org_id;
     
     let summaryQuery = `
       SELECT 
@@ -284,11 +283,10 @@ const getAssetLifecycleSummary = async (req, res) => {
     `;
     
     const params = [orgId];
-    
-    // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && branchId) {
-      summaryQuery += ` AND a.branch_id = $2`;
-      params.push(branchId);
+    const scope = buildAssetListScopeSql(acmCtx, { startIndex: 2 });
+    if (scope.sql) {
+      summaryQuery += scope.sql;
+      params.push(...scope.params);
     }
 
     // Use tenant database from request context (set by middleware)

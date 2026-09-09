@@ -131,8 +131,11 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
         console.log('🔍 [MaintenanceHistoryModel] Processing advanced conditions:', filters.advancedConditions);
         filters.advancedConditions.forEach((condition, index) => {
             console.log(`🔍 [MaintenanceHistoryModel] Processing condition ${index + 1}:`, condition);
-            if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
-                const { field, op, val } = condition;
+            // Accept both { op, val } and legacy { operator, value } shapes from clients
+            const field = condition.field;
+            const op = condition.op || condition.operator;
+            let val = condition.val !== undefined ? condition.val : condition.value;
+            if (field && op && val !== undefined && val !== '') {
                 
                 // Map frontend field names to database column names
                 let dbField = field;
@@ -224,6 +227,8 @@ const getMaintenanceHistory = async (filters = {}, orgId = 'ORG001') => {
                     dbField = 'ams.invoice';
                 } else if (field === 'technicianName') {
                     dbField = 'ams.technician_name';
+                } else if (field === 'empIntId' || field === 'emp_int_id') {
+                    dbField = 'ams.emp_int_id';
                 } else if (field === 'technicianEmail') {
                     dbField = 'ams.technician_email';
                 } else if (field === 'technicianPhone') {
@@ -459,8 +464,11 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
     // Process advanced conditions (same logic as in getMaintenanceHistory)
     if (filters.advancedConditions && Array.isArray(filters.advancedConditions) && filters.advancedConditions.length > 0) {
         filters.advancedConditions.forEach(condition => {
-            if (condition.field && condition.op && condition.val !== undefined && condition.val !== '') {
-                const { field, op, val } = condition;
+            // Accept both { op, val } and legacy { operator, value } shapes from clients
+            const field = condition.field;
+            const op = condition.op || condition.operator;
+            let val = condition.val !== undefined ? condition.val : condition.value;
+            if (field && op && val !== undefined && val !== '') {
                 
                 // Map frontend field names to database column names
                 let dbField = field;
@@ -552,6 +560,8 @@ const getMaintenanceHistoryCount = async (filters = {}, orgId = 'ORG001') => {
                     dbField = 'ams.invoice';
                 } else if (field === 'technicianName') {
                     dbField = 'ams.technician_name';
+                } else if (field === 'empIntId' || field === 'emp_int_id') {
+                    dbField = 'ams.emp_int_id';
                 } else if (field === 'technicianEmail') {
                     dbField = 'ams.technician_email';
                 } else if (field === 'technicianPhone') {

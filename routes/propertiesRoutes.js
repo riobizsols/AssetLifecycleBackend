@@ -12,6 +12,9 @@ router.get('/', PropertiesController.getAllProperties); //..
 // Get all properties with their list values
 router.get('/with-values', PropertiesController.getAllPropertiesWithValues);
 
+// Get list values for a property from tblAssetPropListValues
+router.get('/:propId/values', PropertiesController.getPropertyValues);
+
 // Create a new property
 router.post('/', PropertiesController.createProperty);
 

@@ -6,6 +6,7 @@
 const GROUP_PARENT_SPECS = {
   MASTERDATA: { label: "Master Data", legacyAppId: "MASTERDATA" },
   ASSETASSIGNMENT: { label: "Asset Assignment", legacyAppId: "ASSETASSIGNMENT" },
+  SPAREPARTS: { label: "Spare Parts", legacyAppId: "SPAREPARTSGROUP" },
 };
 
 async function findGroupParentNavId(client, jobRoleId, spec) {

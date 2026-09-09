@@ -42,11 +42,22 @@ const buildQueryWithBranchFilter = (options = {}) => {
     // Build branch column reference
     const branchColRef = tableAlias ? `${tableAlias}.${branchColumn}` : branchColumn;
 
+    const branchIds = Array.isArray(options.branchIds) ? options.branchIds.filter(Boolean) : null;
+    const effectiveBranchIds = branchIds?.length
+        ? branchIds
+        : (userBranchId ? [userBranchId] : []);
+
     // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && userBranchId) {
+    if (!hasSuperAccess && effectiveBranchIds.length === 1) {
         conditions.push(`${branchColRef} = $${paramIndex}`);
-        params.push(userBranchId);
+        params.push(effectiveBranchIds[0]);
         paramIndex++;
+    } else if (!hasSuperAccess && effectiveBranchIds.length > 1) {
+        conditions.push(`${branchColRef} = ANY($${paramIndex}::text[])`);
+        params.push(effectiveBranchIds);
+        paramIndex++;
+    } else if (!hasSuperAccess && options.denyIfNoBranch) {
+        conditions.push('1=0');
     }
     // If hasSuperAccess is true, no branch filter is applied (user can see all branches)
 
@@ -59,7 +70,7 @@ const buildQueryWithBranchFilter = (options = {}) => {
         whereClause,
         params,
         nextParamIndex: paramIndex,
-        hasBranchFilter: !hasSuperAccess && !!userBranchId
+        hasBranchFilter: !hasSuperAccess && effectiveBranchIds.length > 0
     };
 };
 
@@ -102,10 +113,20 @@ const buildQuery = (options = {}) => {
     let paramIndex = params.length + 1;
 
     // Apply branch filter
-    if (!hasSuperAccess && userBranchId) {
+    const branchIds = Array.isArray(options.branchIds) ? options.branchIds.filter(Boolean) : null;
+    const effectiveBranchIds = branchIds?.length
+        ? branchIds
+        : (userBranchId ? [userBranchId] : []);
+
+    if (!hasSuperAccess && effectiveBranchIds.length === 1) {
         const branchColRef = tableAlias ? `${tableAlias}.${branchColumn}` : branchColumn;
         conditions.push(`${branchColRef} = $${paramIndex}`);
-        params.push(userBranchId);
+        params.push(effectiveBranchIds[0]);
+        paramIndex++;
+    } else if (!hasSuperAccess && effectiveBranchIds.length > 1) {
+        const branchColRef = tableAlias ? `${tableAlias}.${branchColumn}` : branchColumn;
+        conditions.push(`${branchColRef} = ANY($${paramIndex}::text[])`);
+        params.push(effectiveBranchIds);
         paramIndex++;
     }
 
@@ -145,14 +166,27 @@ const getUserContext = (reqUser) => {
             userId: null,
             orgId: null,
             userBranchId: null,
+            branchIds: [],
+            deptId: null,
+            deptIds: [],
             hasSuperAccess: false
         };
     }
+
+    const branchIds = Array.isArray(reqUser.acmBranchIds) && reqUser.acmBranchIds.length
+        ? reqUser.acmBranchIds
+        : (reqUser.branch_id ? [reqUser.branch_id] : []);
+    const deptIds = Array.isArray(reqUser.acmDeptIds) && reqUser.acmDeptIds.length
+        ? reqUser.acmDeptIds
+        : (reqUser.dept_id ? [reqUser.dept_id] : []);
 
     return {
         userId: reqUser.user_id,
         orgId: reqUser.org_id,
         userBranchId: reqUser.branch_id,
+        branchIds,
+        deptId: reqUser.dept_id || null,
+        deptIds,
         hasSuperAccess: reqUser.hasSuperAccess || false
     };
 };

@@ -82,7 +82,24 @@ async function getMessageById(req, res) {
     const messageRow = await textMessagesModel.getMessageByIdWithLanguageFallback(tmdId, requestedLang);
 
     if (!messageRow) {
-      return res.status(404).json({ success: false, message: "Text message not found" });
+      // Missing rows are common for newly added toast strings; return a soft
+      // fallback instead of 404 so ML toast lookup does not spam API errors.
+      const softText =
+        String(tmdId || "")
+          .replace(/^TMD_/i, "")
+          .replace(/_[0-9A-F]{8}$/i, "")
+          .replace(/_/g, " ")
+          .trim() || "Message not found";
+      return res.json({
+        success: true,
+        data: {
+          tmd_id: tmdId,
+          text: softText.charAt(0).toUpperCase() + softText.slice(1).toLowerCase(),
+          lang_code: "en",
+          requested_lang_code: requestedLang,
+          missing: true,
+        },
+      });
     }
 
     return res.json({

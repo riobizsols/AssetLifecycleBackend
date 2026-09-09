@@ -4,6 +4,7 @@ const {
   alignTenantColumnsFromReference,
   seedRequiredMasterData,
 } = require('./tenantReferenceDataService');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 
 const EXCLUDED_FROM_TENANTS = ['tblRioAdmin'];
 
@@ -11,17 +12,10 @@ const EXCLUDED_FROM_TENANTS = ['tblRioAdmin'];
 const PROTECTED_RUNTIME_TABLES = [
   'tblAssetMaintSch_BR_Hist',
   'tblAssetExpiryNotify',
+  'tblBR_DEPT',
   'tblJobs',
   'tblJobHistory',
 ];
-
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL
-  );
-}
 
 function tenantUrl(dbName) {
   const base = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;
@@ -228,6 +222,72 @@ async function ensureCriticalRuntimeSchema(client) {
   // Maintenance list joins tblMaintTypes.hours_required
   try {
     await client.query(`
+      ALTER TABLE "tblAssets"
+        ALTER COLUMN org_id DROP NOT NULL,
+        ALTER COLUMN branch_id DROP NOT NULL,
+        ALTER COLUMN purchased_by DROP NOT NULL
+    `);
+    results.push({ object: 'tblAssets.org_id/branch_id/purchased_by', status: 'nullable' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssets.optional_cols', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblAssets nullable columns:', err.message);
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS branch_id character varying(10)
+    `);
+    results.push({ object: 'tblAssetTypes.branch_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.branch_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS required_spare_part boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblATMaintCheckList"
+      ADD COLUMN IF NOT EXISTS spcatm_id character varying(20)
+    `);
+    results.push({ object: 'tblATMaintCheckList.required_spare_part/spcatm_id', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblATMaintCheckList.required_spare_part/spcatm_id', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS required_maint boolean NOT NULL DEFAULT false
+    `);
+    await client.query(`
+      ALTER TABLE "tblAssetTypes"
+      ADD COLUMN IF NOT EXISTS required_spare_parts boolean NOT NULL DEFAULT false
+    `);
+    results.push({ object: 'tblAssetTypes.required_maint/required_spare_parts', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssetTypes.required_maint/required_spare_parts', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
       ALTER TABLE "tblMaintTypes"
       ADD COLUMN IF NOT EXISTS "hours_required" DECIMAL(10,2)
     `);
@@ -371,6 +431,43 @@ async function ensureCriticalRuntimeSchema(client) {
     if (err.code !== '42P01') {
       console.warn('[TenantSchemaAlign] Could not ensure amsbr sequence:', err.message);
     }
+  }
+
+  try {
+    const { ensureBrDeptSchema } = require('../utils/ensureBrDeptSchema');
+    const brDept = await ensureBrDeptSchema(client);
+    results.push({
+      object: 'tblBR_DEPT',
+      status: brDept.created ? 'ensured' : 'skipped',
+      backfilled: brDept.backfilled,
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblBR_DEPT:', err.message);
+    results.push({ object: 'tblBR_DEPT', status: 'error', message: err.message });
+  }
+
+  try {
+    const { ensureClientMutationSchema } = require('../utils/ensureClientMutationSchema');
+    const cm = await ensureClientMutationSchema(client);
+    results.push({
+      object: 'tblClientMutation',
+      status: cm.created ? 'ensured' : 'skipped',
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblClientMutation:', err.message);
+    results.push({ object: 'tblClientMutation', status: 'error', message: err.message });
+  }
+
+  try {
+    const { ensureInspRecAisIdSchema } = require('../utils/ensureInspRecAisIdSchema');
+    const inspRec = await ensureInspRecAisIdSchema(client);
+    results.push({
+      object: 'tblAAT_Insp_Rec.ais_id',
+      status: inspRec.ensured ? 'ensured' : (inspRec.reason || 'skipped'),
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblAAT_Insp_Rec.ais_id:', err.message);
+    results.push({ object: 'tblAAT_Insp_Rec.ais_id', status: 'error', message: err.message });
   }
 
   console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));

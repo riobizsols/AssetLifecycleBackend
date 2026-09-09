@@ -38,7 +38,8 @@ class PropertiesModel {
   static async getPropertyValues(propId, orgId) {
     try {
       const dbPool = getDb();
-      const query = `
+      let result = await dbPool.query(
+        `
         SELECT 
           aplv_id,
           value,
@@ -48,9 +49,26 @@ class PropertiesModel {
         AND org_id = $2 
         AND int_status = 1
         ORDER BY value
-      `;
-      
-      const result = await dbPool.query(query, [propId, orgId]);
+      `,
+        [propId, orgId]
+      );
+
+      if (!result.rows.length) {
+        result = await dbPool.query(
+          `
+          SELECT 
+            aplv_id,
+            value,
+            int_status
+          FROM "tblAssetPropListValues"
+          WHERE prop_id = $1 
+          AND int_status = 1
+          ORDER BY value
+        `,
+          [propId]
+        );
+      }
+
       return result.rows;
     } catch (error) {
       console.error('Error fetching property values:', error);

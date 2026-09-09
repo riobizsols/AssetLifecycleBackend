@@ -27,6 +27,7 @@ const {
 const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
 const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
+const { ensureDefaultScreenApps } = require("../utils/ensureDefaultScreenApps");
 const { generateCustomIdForClient } = require("../utils/idGenerator");
 
 const DUMP_FILE_PATH = path.join(
@@ -212,23 +213,23 @@ const generateSetupReport = async (setupData) => {
 
 /**
  * Align freshly created tenant schemas with current application code.
- * Always enforce modern tblAssetTypes (no maint_required / maint_type_id).
+ * Always enforce modern tblAssetTypes (no maint_required / maint_type_id; branch_id present).
  * Maintenance config lives in tblATMaintFreq only.
  */
 const applyPostSchemaMigrations = async (client, logs = []) => {
   await client.query(`
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required;
     ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id;
+    ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10);
   `);
-
   const navSchema = await ensureJobRoleNavAppIdNullable(client, 'SetupWizard');
   if (navSchema.altered) {
-    const message = 'tblJobRoleNav.app_id made nullable for menu groups';
-    console.log(`[SetupWizard] ✅ ${message}`);
-    logs.push({ message, scope: 'schema' });
+    const navMessage = 'tblJobRoleNav.app_id made nullable for menu groups';
+    console.log(`[SetupWizard] ✅ ${navMessage}`);
+    logs.push({ message: navMessage, scope: 'schema' });
   }
 
-  const message = "Post-schema migrations applied (removed deprecated tblAssetTypes.maint_required / maint_type_id)";
+  const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {
     logs.push({ message, scope: "schema" });
@@ -240,17 +241,15 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
  * This includes all tables, columns, constraints, indexes, and sequences
  */
 const generateDynamicSchemaSql = async () => {
-  const referenceUrl =
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL;
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
+  const referenceUrl = getReferenceUrl();
 
   if (!referenceUrl) {
-    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / DATABASE_URL for schema generation');
+    console.warn('[SetupWizard] ⚠️ No TENANT_SCHEMA_REFERENCE_URL / schema_db URL for schema generation');
     return null;
   }
 
-  // Template database for new tenants — hospitality (DATABASE_URL), not legacy assetLifecycle (GENERIC_URL)
+  // Template database for new tenants — schema_db (not legacy assetLifecycle / live hospitality)
   const genericPool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -591,8 +590,9 @@ const generateDynamicSchemaSql = async () => {
     
     // Get secondary indexes (including UNIQUE / partial UNIQUE indexes).
     // Skip primary-key indexes only — those are created via PRIMARY KEY constraints.
-    // Note: `CREATE UNIQUE INDEX` does not contain the substring `CREATE INDEX`, so we must
-    // match both forms with a regex (not String.includes('CREATE INDEX')).
+    // IMPORTANT: do NOT skip CREATE UNIQUE INDEX; many critical uniques (e.g. uq_tblacm_scope,
+    // partial uq_spinddet_org_serial) exist only as indexes, not as UNIQUE table constraints.
+    // Note: match CREATE INDEX and CREATE UNIQUE INDEX with a regex (not includes('CREATE INDEX')).
     const indexesResult = await genericPool.query(`
       SELECT
         schemaname,
@@ -612,7 +612,11 @@ const generateDynamicSchemaSql = async () => {
 
     for (const idx of indexesResult.rows) {
       let indexDef = idx.indexdef;
-      if (!/^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(indexDef)) continue;
+      // Accept both CREATE INDEX and CREATE UNIQUE INDEX
+      if (!/^CREATE\s+(UNIQUE\s+)?INDEX\b/i.test(indexDef)) {
+        continue;
+      }
+      // Replace CREATE [UNIQUE] INDEX with CREATE [UNIQUE] INDEX IF NOT EXISTS
       indexDef = indexDef.replace(
         /^CREATE\s+(UNIQUE\s+)?INDEX\b/i,
         (_m, uniquePart) => `CREATE ${uniquePart || ''}INDEX IF NOT EXISTS`,
@@ -802,11 +806,14 @@ const CORE_TABLE_DDL = [
   `
     CREATE TABLE IF NOT EXISTS "tblAssetTypes" (
       org_id character varying(10) NOT NULL,
+      branch_id character varying(10),
       asset_type_id character varying(10) PRIMARY KEY,
       int_status integer NOT NULL DEFAULT 1,
       assignment_type character varying(10) NOT NULL,
       inspection_required boolean NOT NULL DEFAULT false,
       group_required boolean NOT NULL DEFAULT false,
+      required_maint boolean NOT NULL DEFAULT false,
+      required_spare_parts boolean NOT NULL DEFAULT false,
       created_by character varying(10),
       created_on date,
       changed_by character varying(10),
@@ -856,8 +863,20 @@ const CORE_TABLE_DDL = [
       created_on date,
       changed_on date,
       changed_by character varying(10),
-      created_by character varying(10),
-      branch_id character varying(50)
+      created_by character varying(10)
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblBR_DEPT" (
+      branch_id character varying(20) NOT NULL,
+      dept_id character varying(20) NOT NULL,
+      org_id character varying(20),
+      int_status integer DEFAULT 1,
+      created_by character varying(20),
+      created_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      changed_by character varying(20),
+      changed_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (branch_id, dept_id)
     );
   `,
   `
@@ -1133,11 +1152,14 @@ const seedIdSequences = async (client) => {
 const seedReferenceTables = async (client, orgId, logs) => {
   await seedIdSequences(client);
 
-  const { getReferenceUrl } = require('./tenantSchemaAlignService');
+  const { getReferenceUrl } = require('../utils/tenantSchemaReference');
   const { seedRequiredMasterData } = require('./tenantReferenceDataService');
-  const referenceUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceUrl = getReferenceUrl();
+  if (!referenceUrl) {
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or schema_db must be configured');
+  }
 
-  // Sync tblApps + required master data from hospitality reference
+  // Sync tblApps + required master data from schema_db reference
   const referencePool = new Pool({
     connectionString: referenceUrl,
     max: 5,
@@ -1201,7 +1223,9 @@ const seedReferenceTables = async (client, orgId, logs) => {
     await referencePool.end();
   }
 
-  // Status codes, text messages, props from hospitality
+  await ensureDefaultScreenApps(client, orgId, 'SetupWizard');
+
+  // Status codes, text messages, props from reference DB
   try {
     await seedRequiredMasterData(client, { orgId, referenceUrl });
     logs.push({ message: 'Required master data seeded from hospitality', scope: 'reference' });
@@ -1253,7 +1277,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   try {
     const { buildPoolConfig } = require('../utils/pgSsl');
     const uomPool = new Pool(
-      buildPoolConfig(getReferenceUrl() || process.env.GENERIC_URL, {
+      buildPoolConfig(getReferenceUrl(), {
         max: 2,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 10000,
@@ -1302,7 +1326,7 @@ const seedReferenceTables = async (client, orgId, logs) => {
   }
 
   await seedTextMessages(client, {
-    genericUrl: getReferenceUrl() || process.env.GENERIC_URL,
+    genericUrl: getReferenceUrl(),
     logs,
   });
 
@@ -1580,15 +1604,24 @@ const seedBranchesAndDepartments = async (client, orgId, org, logs, adminUserId 
       await client.query(
         `
           INSERT INTO "tblDepartments"
-            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by, branch_id)
+            (org_id, dept_id, int_status, text, parent_id, created_on, changed_on, changed_by, created_by)
           VALUES
-            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4, $5)
+            ($1, $2, 1, $3, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4)
           ON CONFLICT (dept_id) DO UPDATE
           SET text = EXCLUDED.text,
-              branch_id = EXCLUDED.branch_id,
               org_id = EXCLUDED.org_id
         `,
-        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId, branchId]
+        [orgId, deptId, `${deptName} (${deptCode})`, adminUserId]
+      );
+
+      await client.query(
+        `
+          INSERT INTO "tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_by, created_on)
+          VALUES ($1, $2, $3, 1, $4, CURRENT_TIMESTAMP)
+          ON CONFLICT (branch_id, dept_id) DO UPDATE
+          SET int_status = 1, org_id = EXCLUDED.org_id
+        `,
+        [branchId, deptId, orgId, adminUserId]
       );
 
       deptMappings.push({
@@ -1934,12 +1967,13 @@ const runSetup = async (payload = {}) => {
       try {
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_required`);
         await client.query(`ALTER TABLE "tblAssetTypes" DROP COLUMN IF EXISTS maint_type_id`);
+        await client.query(`ALTER TABLE "tblAssetTypes" ADD COLUMN IF NOT EXISTS branch_id character varying(10)`);
         logs.push({
-          message: "Dropped legacy maint_required/maint_type_id from tblAssetTypes",
+          message: "tblAssetTypes: ensured branch_id; dropped legacy maint columns",
           scope: "schema",
         });
       } catch (err) {
-        console.warn("[SetupWizard] Could not drop legacy tblAssetTypes columns:", err.message);
+        console.warn("[SetupWizard] Could not update tblAssetTypes columns:", err.message);
       }
 
       // tblWFJobRole.dept_id is optional in role-based maintenance workflow

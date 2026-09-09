@@ -857,8 +857,11 @@ const deleteMultipleAssetAssignments = async (req, res) => {
 const getDepartmentWiseAssetAssignments = async (req, res) => {
     const startTime = Date.now();
     const userId = req.user?.user_id;
-    const org_id = req.user?.org_id;
-    const branch_id = req.user?.branch_id;
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const acmCtx = getEffectiveListContext(req);
+    const org_id = acmCtx.orgId || req.user?.org_id;
+    const branch_id = acmCtx.branchId || req.user?.branch_id;
+    const hasSuperAccess = Boolean(acmCtx.hasSuperAccess);
     
     try {
         const { dept_id } = req.params;
@@ -884,7 +887,7 @@ const getDepartmentWiseAssetAssignments = async (req, res) => {
                     dept_id,
                     org_id,
                     branch_id,
-                    req.user?.hasSuperAccess || false,
+                    hasSuperAccess,
                 );
 
                 if (!result.department) {

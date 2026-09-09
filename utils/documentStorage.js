@@ -4,9 +4,10 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('./minioClient
 
 const LOCAL_PREFIX = 'local-uploads';
 const LOCAL_ROOT = path.join(__dirname, '..', 'uploads');
+// Prefer MinIO; if unreachable, always fall back to disk so uploads don't hard-fail
+// (set MINIO_LOCAL_FALLBACK=false to require MinIO in locked-down environments).
 const USE_LOCAL_FALLBACK =
-  String(process.env.MINIO_LOCAL_FALLBACK || '').toLowerCase() === 'true' ||
-  process.env.NODE_ENV !== 'production';
+  String(process.env.MINIO_LOCAL_FALLBACK || 'true').toLowerCase() !== 'false';
 
 const withTimeout = (promise, ms, message) => {
   let timeoutId;

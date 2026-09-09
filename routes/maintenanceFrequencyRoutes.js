@@ -29,8 +29,7 @@ router.get('/:id/checklist', MaintenanceFrequencyController.getChecklistItems);
 
 // Add checklist item to a maintenance frequency
 router.post('/:id/checklist', MaintenanceFrequencyController.addChecklistItem);
-
-// Delete checklist item
+router.put('/:id/checklist', MaintenanceFrequencyController.updateChecklistItems);
 router.delete('/:id/checklist/:itemId', MaintenanceFrequencyController.deleteChecklistItem);
 
 module.exports = router;

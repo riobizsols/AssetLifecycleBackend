@@ -6,19 +6,38 @@ const getDb = () => getDbFromContext();
 
 const { generateCustomId } = require('../utils/idGenerator');
 
-// Get all departments
-// Supports super access users who can view all branches
-const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false) => {
+// Get all departments — prefer ACM scope when provided
+const getAllDepartments = async (org_id, branch_id, hasSuperAccess = false, acm = null) => {
     const dbPool = getDb();
-    let query = `SELECT dept_id, text FROM "tblDepartments" WHERE int_status = 1 AND org_id = $1`;
-    const params = [org_id];
-    
-    // Apply branch filter only if user doesn't have super access
-    if (!hasSuperAccess && branch_id) {
-        query += ` AND branch_id = $2`;
-        params.push(branch_id);
+    const { applyAcmSqlFilters } = require('../utils/acmAccess');
+
+    let query = `
+        SELECT DISTINCT d.dept_id, d.text, d.org_id, bd.branch_id
+        FROM "tblDepartments" d
+        LEFT JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
+        WHERE d.int_status = 1
+    `;
+    const params = [];
+
+    if (acm) {
+        const filter = applyAcmSqlFilters(
+            acm,
+            { org: 'd.org_id', branch: 'bd.branch_id', dept: 'd.dept_id' },
+            params.length + 1
+        );
+        query += filter.sql;
+        params.push(...filter.params);
+    } else if (!hasSuperAccess) {
+        params.push(org_id);
+        query += ` AND d.org_id = $${params.length}`;
+        if (branch_id) {
+            params.push(branch_id);
+            query += ` AND bd.branch_id = $${params.length}`;
+        }
     }
-    
+
+    query += ` ORDER BY d.text`;
+
     const result = await dbPool.query(query, params);
     return result.rows;
 };
@@ -32,12 +51,17 @@ const getDepartmentIdByName = async (deptName, org_id, branch_id, hasSuperAccess
     console.log('hasSuperAccess:', hasSuperAccess);
     
     const dbPool = getDb();
-    let query = `SELECT dept_id FROM "tblDepartments" WHERE text = $1 AND org_id = $2`;
+    let query = `
+        SELECT d.dept_id
+        FROM "tblDepartments" d
+        LEFT JOIN "tblBR_DEPT" bd ON bd.dept_id = d.dept_id AND bd.int_status = 1
+        WHERE d.text = $1 AND d.org_id = $2
+    `;
     const params = [deptName, org_id];
     
     // Apply branch filter only if user doesn't have super access
     if (!hasSuperAccess && branch_id) {
-        query += ` AND branch_id = $3`;
+        query += ` AND bd.branch_id = $3`;
         params.push(branch_id);
     }
     
@@ -87,7 +111,10 @@ const getUsersByDeptId = async (dept_id, org_id, branch_id, hasSuperAccess = fal
     
     // Apply branch filter only if user doesn't have super access
     if (!hasSuperAccess && branch_id) {
-        query += ` AND d.branch_id = $3`;
+        query += ` AND EXISTS (
+            SELECT 1 FROM "tblBR_DEPT" bd
+            WHERE bd.dept_id = d.dept_id AND bd.branch_id = $3 AND bd.int_status = 1
+        )`;
         params.push(branch_id);
     }
     

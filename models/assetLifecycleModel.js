@@ -1,9 +1,9 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
+const { buildReportAssetScopeClause } = require('../utils/acmAccess');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
-
 
 // Get asset lifecycle data with all necessary joins
 const getAssetLifecycleData = async (filters = {}) => {
@@ -20,22 +20,15 @@ const getAssetLifecycleData = async (filters = {}) => {
     buyer,
     saleDateRange,
     saleAmount,
-    branch_id,
     advancedConditions,
     limit = 1000,
     offset = 0
   } = filters;
 
+  const acmScope = buildReportAssetScopeClause(filters.acmCtx || {});
   let whereConditions = [];
-  let queryParams = [];
-  let paramCount = 0;
-
-  // Add branch_id filter only if user doesn't have super access
-  if (branch_id && !filters.hasSuperAccess) {
-    paramCount++;
-    whereConditions.push(`a.branch_id = $${paramCount}`);
-    queryParams.push(branch_id);
-  }
+  let queryParams = [...acmScope.params];
+  let paramCount = acmScope.paramCount;
 
   // Build dynamic WHERE conditions
   if (purchaseDateRange && purchaseDateRange.length === 2 && 
@@ -360,6 +353,7 @@ const getAssetLifecycleData = async (filters = {}) => {
       LEFT JOIN latest_scrap ls ON a.asset_id = ls.asset_id
       LEFT JOIN "tblScrapSales_D" ssd ON ls.asd_id = ssd.asd_id
       LEFT JOIN "tblScrapSales_H" ssh ON ssd.ssh_id = ssh.ssh_id
+      ${acmScope.clause}
     )
     SELECT 
       asset_id as "Asset ID",
@@ -432,20 +426,13 @@ const getAssetLifecycleCount = async (filters = {}) => {
     buyer,
     saleDateRange,
     saleAmount,
-    branch_id,
     advancedConditions
   } = filters;
 
+  const acmScope = buildReportAssetScopeClause(filters.acmCtx || {});
   let whereConditions = [];
-  let queryParams = [];
-  let paramCount = 0;
-
-  // Add branch_id filter only if user doesn't have super access
-  if (branch_id && !filters.hasSuperAccess) {
-    paramCount++;
-    whereConditions.push(`a.branch_id = $${paramCount}`);
-    queryParams.push(branch_id);
-  }
+  let queryParams = [...acmScope.params];
+  let paramCount = acmScope.paramCount;
 
   // Build dynamic WHERE conditions (same as above)
   if (purchaseDateRange && purchaseDateRange.length === 2 && 
@@ -738,6 +725,7 @@ const getAssetLifecycleCount = async (filters = {}) => {
       LEFT JOIN latest_scrap ls ON a.asset_id = ls.asset_id
       LEFT JOIN "tblScrapSales_D" ssd ON ls.asd_id = ssd.asd_id
       LEFT JOIN "tblScrapSales_H" ssh ON ssd.ssh_id = ssh.ssh_id
+      ${acmScope.clause}
     )
     SELECT COUNT(*) as total
     FROM asset_lifecycle
@@ -755,21 +743,29 @@ const getAssetLifecycleCount = async (filters = {}) => {
   }
 };
 
-// Get filter options for dropdowns
-const getAssetLifecycleFilterOptions = async () => {
+// Get filter options for dropdowns (scoped to ACM)
+const getAssetLifecycleFilterOptions = async (acmCtx = {}) => {
+  const acmScope = buildLifecycleAssetScopeClause(acmCtx);
+  const params = [...acmScope.params];
+
   const query = `
     SELECT 
       (SELECT JSON_AGG(DISTINCT at.text) FROM "tblAssetTypes" at 
-       INNER JOIN "tblAssets" a ON a.asset_type_id = at.asset_type_id) as categories,
+       INNER JOIN "tblAssets" a ON a.asset_type_id = at.asset_type_id
+       ${acmScope.clause}) as categories,
       (SELECT JSON_AGG(DISTINCT b.text) FROM "tblBranches" b 
-       INNER JOIN "tblAssets" a ON a.branch_id = b.branch_id) as locations,
+       INNER JOIN "tblAssets" a ON a.branch_id = b.branch_id
+       ${acmScope.clause}) as locations,
       (SELECT JSON_AGG(DISTINCT d.text) FROM "tblDepartments" d 
        INNER JOIN "tblAssetAssignments" aa ON aa.dept_id = d.dept_id 
-       WHERE aa.latest_assignment_flag = true) as departments,
+       INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+       ${acmScope.clause}
+       AND aa.latest_assignment_flag = true) as departments,
       (SELECT JSON_AGG(DISTINCT COALESCE(v.vendor_name, vs.vendor_name)) 
        FROM "tblVendors" v 
        INNER JOIN "tblAssets" a ON a.purchase_vendor_id = v.vendor_id
-       LEFT JOIN "tblVendors" vs ON a.service_vendor_id = vs.vendor_id) as vendors,
+       LEFT JOIN "tblVendors" vs ON a.service_vendor_id = vs.vendor_id
+       ${acmScope.clause}) as vendors,
       (SELECT JSON_AGG(DISTINCT CASE 
         WHEN ssh.buyer_name IS NOT NULL THEN 'Scrap Sold'
         WHEN asd.scrapped_date IS NOT NULL THEN 'Scrapped'
@@ -779,7 +775,8 @@ const getAssetLifecycleFilterOptions = async () => {
       LEFT JOIN "tblAssetScrapDet" asd ON a.asset_id = asd.asset_id
       LEFT JOIN "tblScrapSales_D" ssd ON asd.asd_id = ssd.asd_id
       LEFT JOIN "tblScrapSales_H" ssh ON ssd.ssh_id = ssh.ssh_id
-      WHERE a.current_status IS NOT NULL) as current_statuses,
+      ${acmScope.clause}
+      AND a.current_status IS NOT NULL) as current_statuses,
       (SELECT JSON_AGG(DISTINCT 
          CASE 
            WHEN aa.action = 'A' THEN 'Assigned'
@@ -789,19 +786,29 @@ const getAssetLifecycleFilterOptions = async () => {
            ELSE aa.action
          END
        ) FROM "tblAssetAssignments" aa 
-       WHERE aa.action IS NOT NULL AND aa.latest_assignment_flag = true) as asset_usage_history,
+       INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+       ${acmScope.clause}
+       AND aa.action IS NOT NULL AND aa.latest_assignment_flag = true) as asset_usage_history,
       (SELECT JSON_AGG(DISTINCT asd.location) FROM "tblAssetScrapDet" asd 
-       WHERE asd.location IS NOT NULL AND asd.location != '') as scrap_locations,
+       INNER JOIN "tblAssets" a ON a.asset_id = asd.asset_id
+       ${acmScope.clause}
+       AND asd.location IS NOT NULL AND asd.location != '') as scrap_locations,
       (SELECT JSON_AGG(DISTINCT asd.scrapped_by) FROM "tblAssetScrapDet" asd 
-       WHERE asd.scrapped_by IS NOT NULL AND asd.scrapped_by != '') as scrapped_by_users,
+       INNER JOIN "tblAssets" a ON a.asset_id = asd.asset_id
+       ${acmScope.clause}
+       AND asd.scrapped_by IS NOT NULL AND asd.scrapped_by != '') as scrapped_by_users,
       (SELECT JSON_AGG(DISTINCT ssh.buyer_name) FROM "tblScrapSales_H" ssh 
-       WHERE ssh.buyer_name IS NOT NULL AND ssh.buyer_name != '') as buyers
+       INNER JOIN "tblScrapSales_D" ssd ON ssd.ssh_id = ssh.ssh_id
+       INNER JOIN "tblAssetScrapDet" asd ON asd.asd_id = ssd.asd_id
+       INNER JOIN "tblAssets" a ON a.asset_id = asd.asset_id
+       ${acmScope.clause}
+       AND ssh.buyer_name IS NOT NULL AND ssh.buyer_name != '') as buyers
   `;
 
   try {
     const dbPool = getDb();
 
-    const result = await dbPool.query(query);
+    const result = await dbPool.query(query, params);
     return result.rows[0];
   } catch (error) {
     console.error('❌ [AssetLifecycleModel] Filter options query error:', error);

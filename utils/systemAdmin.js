@@ -16,6 +16,10 @@ function userHasSystemAdminRole(user) {
   return collectUserJobRoleIds(user).includes(SYSTEM_ADMIN_JOB_ROLE_ID);
 }
 
+function roleIdsIncludeSystemAdmin(roleIds = []) {
+  return (Array.isArray(roleIds) ? roleIds : [roleIds]).includes(SYSTEM_ADMIN_JOB_ROLE_ID);
+}
+
 function applyFullAccessToNavigationTree(items) {
   if (!Array.isArray(items)) return items;
 
@@ -32,5 +36,6 @@ module.exports = {
   SYSTEM_ADMIN_JOB_ROLE_ID,
   collectUserJobRoleIds,
   userHasSystemAdminRole,
+  roleIdsIncludeSystemAdmin,
   applyFullAccessToNavigationTree,
 };

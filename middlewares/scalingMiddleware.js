@@ -13,10 +13,31 @@ function applyScalingMiddleware(app) {
 
   app.use(
     helmet({
+      // API returns JSON; CSP is primarily enforced on the SPA via nginx.
       contentSecurityPolicy: false,
       crossOriginEmbedderPolicy: false,
+      crossOriginOpenerPolicy: { policy: 'same-origin' },
+      crossOriginResourcePolicy: { policy: 'same-site' },
+      referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+      frameguard: { action: 'sameorigin' },
+      noSniff: true,
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: false,
+      },
+      permittedCrossDomainPolicies: { permittedPolicies: 'none' },
     }),
   );
+
+  // Permissions-Policy is not set by default helmet — add explicitly for API responses.
+  app.use((_req, res, next) => {
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()',
+    );
+    next();
+  });
 
   app.use(
     compression({

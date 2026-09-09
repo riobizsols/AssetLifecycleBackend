@@ -1,6 +1,6 @@
 const { Client } = require('pg');
 const bcrypt = require('bcrypt');
-const { registerTenant, deactivateTenant, testTenantConnection: testConnection, initTenantRegistryPool, ensureTenantsEmailColumn } = require('./tenantService');
+const { registerTenant, deactivateTenant, testTenantConnection: testConnection, initTenantRegistryPool, ensureTenantsEmailColumn, ensureTenantsSchema, generateNextGroupedOrgId } = require('./tenantService');
 const tenantSchemaService = require('./tenantSchemaService');
 const setupWizardService = require('./setupWizardService');
 const {
@@ -19,6 +19,8 @@ const {
   ensureJobRoleNavAppIdNullable,
 } = require('../utils/navigationGroupUtils');
 const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
+const { ensureDefaultScreenApps } = require('../utils/ensureDefaultScreenApps');
+const { ensureBranchDeptMappingProvisioning } = require('../utils/ensureBranchDeptMappingProvisioning');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
 const { generateCustomIdForClient, syncJobRoleNavIdSequence } = require('../utils/idGenerator');
@@ -31,6 +33,10 @@ const {
   parseDatabaseUrl,
   pgClientOptsFromDatabaseUrl,
 } = require('../utils/pgSslOption');
+const {
+  getPostgresDirectClientOpts,
+  getAppDatabaseEndpoint,
+} = require('../utils/postgresConnection');
 // Removed DEFAULT constants - all data now comes from reference database (GENERIC_URL)
 require('dotenv').config();
 
@@ -54,15 +60,16 @@ function pgClientOpts(base) {
  */
 async function checkOrgIdExists(orgId) {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id FROM "tenants" WHERE org_id = $1`,
-      [orgId.toUpperCase()]
+      `SELECT grouped_org_id FROM "tenants" WHERE grouped_org_id = $1`,
+      [String(orgId || '').toUpperCase()]
     );
     return result.rows.length > 0;
   } catch (error) {
-    console.error('[TenantSetup] Error checking org_id:', error);
+    console.error('[TenantSetup] Error checking grouped_org_id:', error);
     throw error;
   }
 }
@@ -83,7 +90,7 @@ function getProposedDatabaseName(subdomain) {
 async function isDatabaseNameTaken(dbName) {
   const pool = initTenantRegistryPool();
   const tenantCheck = await pool.query(
-    `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+    `SELECT grouped_org_id FROM "tenants" WHERE db_name = $1`,
     [dbName],
   );
   if (tenantCheck.rows.length > 0) {
@@ -121,17 +128,19 @@ async function isDatabaseNameTaken(dbName) {
  */
 async function checkDomainAndDatabaseAvailability(subdomainInput) {
   const { validateSubdomain } = require('../utils/subdomainUtils');
+  const { isSubdomainHeldByPendingRequest } = require('../models/zohoAccessRequestModel');
   const normalizedSubdomain = validateSubdomain(subdomainInput);
   const databaseName = getProposedDatabaseName(normalizedSubdomain);
   const subdomainTaken = await checkSubdomainExists(normalizedSubdomain);
+  const pendingRequestTaken = await isSubdomainHeldByPendingRequest(normalizedSubdomain);
   const databaseTaken = await isDatabaseNameTaken(databaseName);
-  const available = !subdomainTaken && !databaseTaken;
+  const available = !subdomainTaken && !pendingRequestTaken && !databaseTaken;
 
   let message;
-  if (subdomainTaken && databaseTaken) {
-    message = `Login domain "${normalizedSubdomain}" and database "${databaseName}" are already taken.`;
-  } else if (subdomainTaken) {
-    message = `Login domain "${normalizedSubdomain}" is already taken.`;
+  if (subdomainTaken) {
+    message = `Login domain "${normalizedSubdomain}" is already taken by an organization.`;
+  } else if (pendingRequestTaken) {
+    message = `Login domain "${normalizedSubdomain}" is already reserved by a pending access request.`;
   } else if (databaseTaken) {
     message = `Database name "${databaseName}" is already taken.`;
   } else {
@@ -142,8 +151,9 @@ async function checkDomainAndDatabaseAvailability(subdomainInput) {
     available,
     subdomain: normalizedSubdomain,
     databaseName,
-    subdomainTaken,
+    subdomainTaken: subdomainTaken || pendingRequestTaken,
     databaseTaken,
+    pendingRequestTaken,
     message,
   };
 }
@@ -162,6 +172,7 @@ function buildSubdomainUrl(subdomain) {
 
 async function getTenantRegistryRow(orgId) {
   const pool = initTenantRegistryPool();
+  await ensureTenantsSchema(pool);
   const subdomainColumnCheck = await pool.query(`
     SELECT EXISTS (
       SELECT 1 FROM information_schema.columns
@@ -170,12 +181,12 @@ async function getTenantRegistryRow(orgId) {
   `);
   const hasSubdomainColumn = subdomainColumnCheck.rows[0].exists;
   const columns = hasSubdomainColumn
-    ? 'org_id, db_name, subdomain, is_active'
-    : 'org_id, db_name, is_active';
+    ? 'grouped_org_id AS org_id, org_name, db_name, subdomain, is_active'
+    : 'grouped_org_id AS org_id, org_name, db_name, is_active';
 
   const result = await pool.query(
-    `SELECT ${columns} FROM "tenants" WHERE org_id = $1`,
-    [orgId.toUpperCase()],
+    `SELECT ${columns} FROM "tenants" WHERE grouped_org_id = $1`,
+    [String(orgId || '').toUpperCase()],
   );
 
   return result.rows[0] || null;
@@ -183,23 +194,24 @@ async function getTenantRegistryRow(orgId) {
 
 async function getTenantRegistryRowBySubdomain(subdomain) {
   const pool = initTenantRegistryPool();
-  await ensureTenantsEmailColumn(pool).catch(() => {});
+  await ensureTenantsSchema(pool).catch(() => {});
   const result = await pool.query(
-    `SELECT org_id, db_name, subdomain, is_active, email FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
+    `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, is_active, email FROM "tenants" WHERE LOWER(TRIM(subdomain)) = $1`,
     [String(subdomain || '').trim().toLowerCase()],
   );
   return result.rows[0] || null;
 }
 
-function deriveRegistryOrgId(subdomain) {
+/** Derive a short org_code for tblOrgs from the subdomain (user no longer enters org ID). */
+function deriveOrgCodeFromSubdomain(subdomain) {
   const normalized = String(subdomain || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   if (!normalized) {
-    throw new Error('Invalid domain name for tenant registry');
+    throw new Error('Invalid domain name for organization code');
   }
   return normalized.slice(0, 10);
 }
 
-async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgName, orgCity) {
+async function tryResolveExistingTenant(orgCodeUpper, subdomain, adminUser, orgName, orgCity) {
   const row = await getTenantRegistryRowBySubdomain(subdomain);
   if (!row || row.is_active === false) {
     return null;
@@ -235,28 +247,31 @@ async function tryResolveExistingTenant(orgIdUpper, subdomain, adminUser, orgNam
 
   const effectiveSubdomain = rowSubdomain || subdomain;
   const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
+  const displayName = orgName || row.org_name || orgCodeUpper;
 
-  // Backfill tenants.email when missing on an existing registry row
-  if (adminEmail && !row.email) {
+  // Backfill tenants.email / org_name when missing on an existing registry row
+  if (adminEmail || displayName) {
     try {
       const pool = initTenantRegistryPool();
-      await ensureTenantsEmailColumn(pool);
+      await ensureTenantsSchema(pool);
       await pool.query(
         `UPDATE "tenants"
-         SET email = $1, updated_at = CURRENT_TIMESTAMP
-         WHERE org_id = $2 AND (email IS NULL OR TRIM(email) = '')`,
-        [adminEmail, row.org_id],
+         SET email = COALESCE(NULLIF(TRIM(email), ''), $1),
+             org_name = COALESCE(NULLIF(TRIM(org_name), ''), $2),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE grouped_org_id = $3`,
+        [adminEmail, displayName, row.org_id],
       );
-      console.log(`[TenantSetup] Backfilled tenants.email for ${row.org_id}: ${adminEmail}`);
     } catch (backfillErr) {
-      console.warn(`[TenantSetup] Could not backfill tenants.email: ${backfillErr.message}`);
+      console.warn(`[TenantSetup] Could not backfill tenants row: ${backfillErr.message}`);
     }
   }
 
   return {
-    orgId: orgIdUpper,
-    orgCode: orgIdUpper,
-    orgName,
+    orgId: row.org_id,
+    generatedOrgId: row.org_id,
+    orgCode: orgCodeUpper || deriveOrgCodeFromSubdomain(effectiveSubdomain),
+    orgName: displayName,
     orgCity,
     subdomain: effectiveSubdomain,
     subdomainUrl: buildSubdomainUrl(effectiveSubdomain),
@@ -289,13 +304,7 @@ async function generateUniqueDatabaseName(orgId, subdomain) {
   }
   
   const tenantDbConfig = parseDatabaseUrl(tenantDbUrl);
-  const adminClient = new Client(pgClientOpts({
-    host: tenantDbConfig.host,
-    port: tenantDbConfig.port,
-    user: tenantDbConfig.user,
-    password: tenantDbConfig.password,
-    database: 'postgres',
-  }));
+  const adminClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDbUrl, 'postgres')));
   
   try {
     await adminClient.connect();
@@ -304,7 +313,7 @@ async function generateUniqueDatabaseName(orgId, subdomain) {
     let exists = true;
     while (exists) {
       const tenantCheck = await pool.query(
-        `SELECT org_id FROM "tenants" WHERE db_name = $1`,
+        `SELECT grouped_org_id FROM "tenants" WHERE db_name = $1`,
         [dbName]
       );
       
@@ -423,21 +432,26 @@ async function ensureBranchAndDepartment(client, orgId, adminUserId = 'USR001', 
       console.log(`[TenantSetup] Using existing department: ${deptId}`);
       // Keep department linked to the BR### branch when possible
       await client.query(`
-        UPDATE public."tblDepartments"
-        SET branch_id = $1, changed_on = CURRENT_DATE, changed_by = $3
-        WHERE dept_id = $2 AND (branch_id IS NULL OR btrim(branch_id) = '' OR branch_id !~ '^BR[0-9]+$')
-      `, [branchId, deptId, adminUserId]).catch(() => {});
+        INSERT INTO public."tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_on)
+        VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT (branch_id, dept_id) DO NOTHING
+      `, [branchId, deptId, orgId]).catch(() => {});
     } else {
       deptId = await generateCustomIdForClient(client, 'department', 3);
 
       await client.query(`
         INSERT INTO public."tblDepartments" (
-          org_id, dept_id, text, branch_id, int_status,
+          org_id, dept_id, text, int_status,
           parent_id, created_on, changed_on, changed_by, created_by
         )
-        VALUES ($1, $2, 'Administration', $3, 1, NULL, CURRENT_DATE, CURRENT_DATE, $4, $4)
+        VALUES ($1, $2, 'Administration', 1, NULL, CURRENT_DATE, CURRENT_DATE, $3, $3)
         ON CONFLICT (dept_id) DO NOTHING
-      `, [orgId, deptId, branchId, adminUserId]);
+      `, [orgId, deptId, adminUserId]);
+      await client.query(`
+        INSERT INTO public."tblBR_DEPT" (branch_id, dept_id, org_id, int_status, created_on)
+        VALUES ($1, $2, $3, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT (branch_id, dept_id) DO NOTHING
+      `, [branchId, deptId, orgId]);
       console.log(`[TenantSetup] ✅ Created department: ${deptId}`);
     }
     
@@ -495,7 +509,6 @@ async function createAdminUser(client, orgId, adminData, registryMeta = null) {
   const {
     fullName = 'System Administrator',
     email,
-    username = 'USR001',
     phone = '',
   } = adminData;
 
@@ -507,10 +520,17 @@ async function createAdminUser(client, orgId, adminData, registryMeta = null) {
     throw new Error('Organization ID is required');
   }
 
-  // Use a fixed initial password for newly created tenant admin
+  // Use pre-allocated ID from createTenant, or generate next USR### from tblIDSequences
+  const userId = registryMeta.userId
+    ? String(registryMeta.userId).toUpperCase()
+    : await generateCustomIdForClient(client, 'user', 3);
+
+  if (!/^USR\d{3}$/.test(userId)) {
+    throw new Error(`Generated user_id "${userId}" does not match expected format USR###`);
+  }
+
   const plainPassword = 'Initial1';
   const passwordHash = await bcrypt.hash(plainPassword, 10);
-  const userId = username.toUpperCase();
 
   await client.query('SET search_path TO public');
 
@@ -979,24 +999,26 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
     throw new Error('Organization ID is required');
   }
   
-  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceDbUrl = getReferenceUrl();
   if (!referenceDbUrl) {
-    throw new Error('TENANT_SCHEMA_REFERENCE_URL, DATABASE_URL, or GENERIC_URL must be set to copy reference data.');
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or schema_db (via TENANT_DATABASE_URL) must be set to copy reference data.');
   }
 
   const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
 
-  if (process.env.GENERIC_URL && process.env.DATABASE_URL) {
+  if (process.env.GENERIC_URL) {
     const genericDbConfig = parseDatabaseUrl(process.env.GENERIC_URL);
-    const defaultDbConfig = parseDatabaseUrl(process.env.DATABASE_URL);
-    if (referenceDbConfig.database === genericDbConfig.database &&
-        referenceDbConfig.host === genericDbConfig.host) {
-      console.warn(`[TenantSetup] ⚠️ WARNING: Reference URL points to GENERIC_URL legacy DB. Use hospitality (DATABASE_URL) instead.`);
-    }
-    if (referenceDbConfig.database !== defaultDbConfig.database) {
-      console.log(`[TenantSetup] Using hospitality reference: ${referenceDbConfig.database}`);
+    if (
+      referenceDbConfig.database === genericDbConfig.database &&
+      referenceDbConfig.host === genericDbConfig.host
+    ) {
+      console.warn(
+        `[TenantSetup] ⚠️ WARNING: Reference URL points to legacy GENERIC_URL DB (${genericDbConfig.database}). Use schema_db instead.`
+      );
     }
   }
+
+  console.log(`[TenantSetup] Using schema reference database: ${referenceDbConfig.database}`);
   
   const referenceClient = new Client(pgClientOpts({
     host: referenceDbConfig.host,
@@ -1046,18 +1068,12 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       } else {
         const idSequences = await referenceClient.query('SELECT * FROM "tblIDSequences"');
         for (const seq of idSequences.rows) {
-          // For employee and user sequences, set last_number to 1 since we've already created EMP001 and USR001
-          let lastNumber = seq.last_number;
-          if (seq.table_key === 'employee' || seq.table_key === 'user') {
-            lastNumber = 1; // We've used 001, so next will be 002
-          }
-          
           await tenantClient.query(`
             INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
             VALUES ($1, $2, $3)
             ON CONFLICT (table_key) DO UPDATE
             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)
-          `, [seq.table_key, seq.prefix, lastNumber]);
+          `, [seq.table_key, seq.prefix, seq.last_number]);
         }
         console.log(`[TenantSetup] ✅ Copied ${idSequences.rows.length} ID sequences`);
       }
@@ -1087,6 +1103,17 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ✅ Copied ${appsResult.copied} apps`);
     } else if (!appsResult.skipped) {
       console.log(`[TenantSetup] ⚠️ No apps copied (table may be empty or columns don't match)`);
+    }
+
+    await ensureDefaultScreenApps(tenantClient, orgId, 'TenantSetup');
+
+    try {
+      const branchDept = await ensureBranchDeptMappingProvisioning(tenantClient, orgId, 'TenantSetup');
+      console.log(
+        `[TenantSetup] ✅ Branch-dept mapping: tblBR_DEPT ready, nav=${branchDept.nav}, apps=${branchDept.apps}`,
+      );
+    } catch (branchDeptErr) {
+      console.warn(`[TenantSetup] Branch-dept mapping provision skipped: ${branchDeptErr.message}`);
     }
 
     // 5. Copy all audit log config from tblAuditLogConfig (reference database)
@@ -1426,7 +1453,7 @@ async function ensureJobRoleNavigation(client, orgId) {
   `);
   const tenantCount = tenantCountResult.rows[0]?.count || 0;
 
-  const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+  const referenceDbUrl = getReferenceUrl();
   if (referenceDbUrl) {
     const referenceClient = new Client(pgClientOptsFromDatabaseUrl(referenceDbUrl));
 
@@ -1582,10 +1609,14 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     );
     if ((textMsgCount.rows[0]?.count || 0) === 0) {
       console.log('[TenantSetup] No text messages found after reference copy; running text message seed...');
-      await seedTextMessages(client, { genericUrl: getReferenceUrl() || process.env.GENERIC_URL });
+      await seedTextMessages(client, { genericUrl: getReferenceUrl() });
     }
 
     await ensureJobRoleNavigation(client, orgId);
+
+    console.log('[TenantSetup] Ensuring default screen apps + JR001 navigation template...');
+    await ensureDefaultScreenApps(client, orgId, 'TenantSetup');
+    await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
 
     console.log('[TenantSetup] Verifying required master data from hospitality...');
     await seedRequiredMasterData(client, { orgId });
@@ -1629,9 +1660,9 @@ async function createTenant(tenantData) {
     adminUser,
   } = tenantData;
 
-  // Validate required fields
-  if (!orgId || !orgName) {
-    throw new Error('Missing required fields: orgId, orgName');
+  // Validate required fields — org ID is generated internally; only name + subdomain required
+  if (!orgName || !String(orgName).trim()) {
+    throw new Error('Missing required field: orgName');
   }
 
   if (!subdomainInput) {
@@ -1644,13 +1675,12 @@ async function createTenant(tenantData) {
 
   const { validateSubdomain } = require('../utils/subdomainUtils');
   const subdomain = validateSubdomain(subdomainInput);
-  const registryOrgId = deriveRegistryOrgId(subdomain);
 
-  // User-facing org code (e.g. PRESSANA). Internal tblOrgs.org_id is always ORG###.
-  const orgCodeUpper = (orgCodeInput || orgId).toUpperCase().trim();
-  if (orgCodeUpper.length > 10) {
-    throw new Error('Organization ID must be 10 characters or less.');
-  }
+  // org_code for tblOrgs: optional legacy input, else derived from subdomain
+  const orgCodeUpper = (orgCodeInput || orgId || deriveOrgCodeFromSubdomain(subdomain))
+    .toUpperCase()
+    .trim()
+    .slice(0, 10);
 
   const subdomainExists = await checkSubdomainExists(subdomain);
   if (subdomainExists) {
@@ -1669,7 +1699,7 @@ async function createTenant(tenantData) {
 
   console.log(`[TenantSetup] Using user-specified subdomain: ${subdomain}`);
 
-  // Generate unique database name from org code (not internal ORG###)
+  // Generate unique database name from subdomain
   const dbName = await generateUniqueDatabaseName(orgCodeUpper, subdomain);
 
   // CRITICAL: Use TENANT_DATABASE_URL for all tenant database operations
@@ -1680,15 +1710,13 @@ async function createTenant(tenantData) {
   }
 
   const dbConfig = parseDatabaseUrl(tenantDatabaseUrl);
+  const appEndpoint = getAppDatabaseEndpoint();
   
-  // Connect to postgres database to create new database
-  const adminClient = new Client(pgClientOpts({
-    host: dbConfig.host,
-    port: dbConfig.port,
-    user: dbConfig.user,
-    password: dbConfig.password,
-    database: 'postgres', // Connect to postgres database to create new DB
-  }));
+  // DDL and schema provisioning must bypass PgBouncer (direct Postgres)
+  const adminClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, 'postgres')));
+
+  // Internally generated registry PK (ORG###) — also used as tblOrgs.org_id
+  let groupedOrgId = null;
 
   try {
     await adminClient.connect();
@@ -1707,12 +1735,14 @@ async function createTenant(tenantData) {
     await adminClient.query(`CREATE DATABASE "${dbName}"`);
     console.log(`[TenantSetup] Created database: ${dbName}`);
 
-    // Register tenant in registry (includes admin email on tenants.email for org management)
+    // Register tenant in registry (includes admin email on tenants.email for org management).
     const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
     if (!adminEmail) {
       throw new Error('Admin user email is required');
     }
-    await registerTenant(registryOrgId, {
+
+    groupedOrgId = await generateNextGroupedOrgId();
+    await registerTenant(groupedOrgId, {
       host: dbConfig.host,
       port: dbConfig.port,
       database: dbName,
@@ -1720,17 +1750,11 @@ async function createTenant(tenantData) {
       password: dbConfig.password,
       subdomain: subdomain,
       email: adminEmail,
+      orgName: String(orgName).trim(),
     });
-    console.log(`[TenantSetup] Registered tenants.email for ${registryOrgId}: ${adminEmail}`);
+    console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
 
-    // Create all tables in the new database using DATABASE_URL credentials
-    const tenantClient = new Client(pgClientOpts({
-      host: dbConfig.host,
-      port: dbConfig.port,
-      user: dbConfig.user,
-      password: dbConfig.password,
-      database: dbName,
-    }));
+    const tenantClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, dbName)));
 
     try {
       await tenantClient.connect();
@@ -1937,7 +1961,7 @@ async function createTenant(tenantData) {
 
       try {
         console.log('[TenantSetup] Applying tenant schema extras (views, job monitor, AT insp certs)...');
-        const referenceDbUrl = getReferenceUrl() || process.env.GENERIC_URL;
+        const referenceDbUrl = getReferenceUrl();
         const referenceDbConfig = parseDatabaseUrl(referenceDbUrl);
         const refClient = new Client(pgClientOpts({
           host: referenceDbConfig.host,
@@ -2020,19 +2044,19 @@ async function createTenant(tenantData) {
         // This is not critical, continue
       }
 
-      // Step 1: Seed ID sequences, then generate canonical org_id (ORG###)
+      // Step 1: Seed ID sequences, then use registry grouped_org_id as tblOrgs.org_id
       await tenantClient.query('SET search_path TO public');
       console.log(`[TenantSetup] Seeding default ID sequences...`);
       await seedDefaultIdSequences(tenantClient);
 
-      const internalOrgId = await generateCustomIdForClient(tenantClient, 'org');
-      if (!/^ORG\d{3}$/.test(internalOrgId)) {
+      const internalOrgId = groupedOrgId;
+      if (!internalOrgId || !/^ORG\d{3}$/.test(internalOrgId)) {
         throw new Error(
-          `Generated org_id "${internalOrgId}" does not match expected format ORG###`,
+          `grouped_org_id "${internalOrgId}" does not match expected format ORG###`,
         );
       }
       console.log(
-        `[TenantSetup] Using internal org_id=${internalOrgId}, org_code=${orgCodeUpper} across tenant database`,
+        `[TenantSetup] Using grouped_org_id=${internalOrgId}, org_code=${orgCodeUpper} across tenant database`,
       );
 
       // Step 2: Create organization record — org_id is ORG###, org_code is user-facing code
@@ -2071,16 +2095,23 @@ async function createTenant(tenantData) {
         `[TenantSetup] Organization record created in tblOrgs: ${internalOrgId} (code: ${orgCodeUpper}) with subdomain: ${subdomain}`,
       );
 
-      // Step 3: Ensure branch and department exist (tagged with internal org_id)
+      // Step 3: Allocate admin user_id (USR001 on fresh tenant) and ensure branch/department
       console.log(`[TenantSetup] Ensuring branch and department exist...`);
-      const plannedAdminUserId = (adminUser.username || 'USR001').toUpperCase();
-      await ensureBranchAndDepartment(tenantClient, internalOrgId, plannedAdminUserId, orgCity);
+      const adminUserId = await generateCustomIdForClient(tenantClient, 'user', 3);
+      if (!/^USR\d{3}$/.test(adminUserId)) {
+        throw new Error(
+          `Generated admin user_id "${adminUserId}" does not match expected format USR###`,
+        );
+      }
+      console.log(`[TenantSetup] Allocated admin user_id: ${adminUserId}`);
+      await ensureBranchAndDepartment(tenantClient, internalOrgId, adminUserId, orgCity);
       
       // Step 4: Create admin user and add to tblUsers in the created database
       console.log(`[TenantSetup] Creating admin user in tblUsers...`);
       const adminCredentials = await createAdminUser(tenantClient, internalOrgId, adminUser, {
-        registryOrgId,
+        registryOrgId: groupedOrgId,
         subdomain,
+        userId: adminUserId,
       });
       console.log(`[TenantSetup] Admin user added to tblUsers: ${adminCredentials.userId} (${adminCredentials.email})`);
 
@@ -2146,7 +2177,8 @@ async function createTenant(tenantData) {
       console.log(`[TenantSetup] Generated subdomain URL: ${finalSubdomainUrl}`);
 
       return {
-        orgId: orgCodeUpper,
+        orgId: internalOrgId,
+        groupedOrgId: internalOrgId,
         generatedOrgId: internalOrgId,
         orgCode: orgCodeUpper,
         orgName,
@@ -2154,8 +2186,8 @@ async function createTenant(tenantData) {
         subdomain,
         subdomainUrl: finalSubdomainUrl, // Add subdomain URL to response
         database: dbName,
-        host: dbConfig.host,
-        port: dbConfig.port,
+        host: appEndpoint.host,
+        port: appEndpoint.port,
         user: dbConfig.user,
         adminCredentials,
         message: 'Tenant created successfully with all tables and admin user',
@@ -2171,7 +2203,9 @@ async function createTenant(tenantData) {
 
     try {
       await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
-      await deactivateTenant(registryOrgId);
+      if (groupedOrgId) {
+        await deactivateTenant(groupedOrgId);
+      }
     } catch (dropError) {
       console.error('[TenantSetup] Error rolling back tenant:', dropError);
     }
@@ -2187,20 +2221,24 @@ async function createTenant(tenantData) {
  */
 async function getAllTenants() {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id, org_name, db_host, db_port, db_name, db_user, is_active, subdomain, created_at, updated_at
        FROM "tenants"
        ORDER BY created_at DESC`
     );
 
     return result.rows.map(tenant => ({
-      orgId: tenant.org_id,
+      orgId: tenant.grouped_org_id,
+      groupedOrgId: tenant.grouped_org_id,
+      orgName: tenant.org_name,
       host: tenant.db_host,
       port: tenant.db_port,
       database: tenant.db_name,
       user: tenant.db_user,
+      subdomain: tenant.subdomain,
       isActive: tenant.is_active,
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,
@@ -2212,16 +2250,17 @@ async function getAllTenants() {
 }
 
 /**
- * Get tenant by org_id
+ * Get tenant by grouped_org_id
  */
 async function getTenantById(orgId) {
   const pool = initTenantRegistryPool();
-  
+  await ensureTenantsSchema(pool);
+
   try {
     const result = await pool.query(
-      `SELECT org_id, db_host, db_port, db_name, db_user, is_active, created_at, updated_at
+      `SELECT grouped_org_id, org_name, db_host, db_port, db_name, db_user, is_active, subdomain, created_at, updated_at
        FROM "tenants"
-       WHERE org_id = $1`,
+       WHERE grouped_org_id = $1`,
       [orgId]
     );
 
@@ -2231,11 +2270,14 @@ async function getTenantById(orgId) {
 
     const tenant = result.rows[0];
     return {
-      orgId: tenant.org_id,
+      orgId: tenant.grouped_org_id,
+      groupedOrgId: tenant.grouped_org_id,
+      orgName: tenant.org_name,
       host: tenant.db_host,
       port: tenant.db_port,
       database: tenant.db_name,
       user: tenant.db_user,
+      subdomain: tenant.subdomain,
       isActive: tenant.is_active,
       createdAt: tenant.created_at,
       updatedAt: tenant.updated_at,
@@ -2299,6 +2341,7 @@ module.exports = {
   checkSubdomainExists,
   checkDomainAndDatabaseAvailability,
   getProposedDatabaseName,
+  buildSubdomainUrl,
   copyJobRoleNavigationForRole,
   seedDefaultJobRoleNavigationIfMissing,
   ensureJobRoleNavigation,

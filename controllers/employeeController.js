@@ -26,12 +26,17 @@ const getOrganizationNameFromEmployee = async (emp_int_id) => {
 // GET /api/employees - Get all employees
 const getAllEmployees = async (req, res) => {
     try {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId, branchId, deptId, hasSuperAccess, branchIds, deptIds } = getEffectiveListContext(req);
         const { data: rows } = await operationalCache.cachedList(
             req,
             'employees',
             'list',
             async () => {
-                const result = await model.getAllEmployees();
+                const result = await model.getAllEmployees(orgId, branchId, deptId, hasSuperAccess, {
+                  branchIds,
+                  deptIds,
+                });
                 return result.rows;
             },
         );
@@ -395,7 +400,9 @@ const updateUserRole = async (req, res) => {
 const createEmployee = async (req, res) => {
     try {
         const created_by = req.user?.user_id;
-        const org_id = req.user?.org_id;
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const { orgId, branchId, deptId } = getEffectiveListContext(req);
+        const org_id = orgId || req.user?.org_id;
         
         if (!org_id) {
             return res.status(400).json({
@@ -404,12 +411,14 @@ const createEmployee = async (req, res) => {
             });
         }
         
-        // Get user's branch information
-        const userModel = require("../models/userModel");
-        const userWithBranch = await userModel.getUserWithBranch(req.user.user_id);
-        const userBranchId = userWithBranch?.branch_id;
+        // ACM context is the source of truth (never re-read login home branch)
+        const userBranchId = branchId || null;
         
-        const employeeData = req.body;
+        const employeeData = { ...req.body };
+        // Prefer ACM dept when body omitted
+        if (!employeeData.dept_id && deptId) {
+            employeeData.dept_id = deptId;
+        }
         
         // Validate required fields
         if (!employeeData.first_name || !employeeData.first_name.trim()) {
@@ -423,6 +432,23 @@ const createEmployee = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 error: "Email is required"
+            });
+        }
+
+        const existingByEmail = await model.findEmployeeByEmail(
+            employeeData.email_id,
+            org_id,
+        );
+        if (existingByEmail) {
+            return res.status(409).json({
+                success: false,
+                error: `Email "${employeeData.email_id.trim()}" is already used by employee ${existingByEmail.employee_id}`,
+                code: "EMAIL_ALREADY_EXISTS",
+                existingEmployee: {
+                    employee_id: existingByEmail.employee_id,
+                    emp_int_id: existingByEmail.emp_int_id,
+                    full_name: existingByEmail.full_name,
+                },
             });
         }
         
@@ -471,6 +497,20 @@ const createEmployee = async (req, res) => {
         });
     } catch (error) {
         console.error("Error creating employee:", error);
+        if (error.code === "EMAIL_ALREADY_EXISTS" || error.statusCode === 409) {
+            return res.status(409).json({
+                success: false,
+                error: error.message,
+                code: "EMAIL_ALREADY_EXISTS",
+            });
+        }
+        if (error.code === "23505") {
+            return res.status(409).json({
+                success: false,
+                error: "Email already exists for another employee in this organization",
+                code: "EMAIL_ALREADY_EXISTS",
+            });
+        }
         res.status(500).json({
             success: false,
             error: "Failed to create employee",

@@ -10,8 +10,11 @@ pnpm-debug.log*
 lerna-debug.log*
 .pm2/
 
-# Environment variables
+# Environment variables (server-only — never commit real secrets)
 .env
+.env.*
+!.env.production.example
+!.env.example
 .env.local
 .env.*.local
 

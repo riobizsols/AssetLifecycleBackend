@@ -1,6 +1,8 @@
 const cron = require('node-cron');
 const axios = require('axios');
+const { randomUUID } = require('crypto');
 const { BACKEND_URL } = require('../config/environment');
+const { runWithDb } = require('../utils/dbContext');
 const { startWorkflowEscalationCron } = require('../cron/workflowEscalationCron');
 const { startVendorContractRenewalCron } = require('../cron/vendorContractRenewalCron');
 const { startWfAtSeqBackfillCron } = require('../cron/wfAtSeqBackfillCron');
@@ -20,6 +22,14 @@ class CronService {
         this.baseURL = BACKEND_URL;
         this.apiToken = process.env.CRON_API_TOKEN;
         this.maintenanceCronTask = null; // Store the cron task reference
+        this.maintenanceRun = {
+            runId: null,
+            status: 'idle',
+            startedAt: null,
+            completedAt: null,
+            result: null,
+            error: null,
+        };
     }
 
     // Initialize all cron jobs with staggered startup to avoid a "connection storm"
@@ -357,6 +367,83 @@ class CronService {
         }
     }
 
+    /**
+     * Start maintenance generation without holding the HTTP request open.
+     *
+     * Schedule generation can scan many assets and perform several database
+     * operations per asset. Running it in the request handler allows Nginx to
+     * time out even though the Node process is still working. Keep the
+     * request-scoped database context when scheduling the background task so
+     * tenant requests continue using the correct tenant pool.
+     */
+    startMaintenanceGeneration({ dbConnection = null } = {}) {
+        if (['queued', 'running'].includes(this.maintenanceRun.status)) {
+            return {
+                accepted: false,
+                runId: this.maintenanceRun.runId,
+                status: this.maintenanceRun.status,
+                startedAt: this.maintenanceRun.startedAt,
+                message: 'Maintenance generation is already in progress',
+            };
+        }
+
+        const runId = randomUUID();
+        const startedAt = new Date().toISOString();
+        this.maintenanceRun = {
+            runId,
+            status: 'queued',
+            startedAt,
+            completedAt: null,
+            result: null,
+            error: null,
+        };
+
+        setImmediate(() => {
+            const execute = async () => {
+                this.maintenanceRun = {
+                    ...this.maintenanceRun,
+                    status: 'running',
+                };
+
+                try {
+                    const result = await this.generateMaintenanceSchedules();
+                    this.maintenanceRun = {
+                        ...this.maintenanceRun,
+                        status: 'completed',
+                        completedAt: new Date().toISOString(),
+                        result,
+                        error: null,
+                    };
+                } catch (error) {
+                    console.error('[CRON] Background maintenance generation failed:', error);
+                    this.maintenanceRun = {
+                        ...this.maintenanceRun,
+                        status: 'failed',
+                        completedAt: new Date().toISOString(),
+                        result: null,
+                        error: error.message || 'Maintenance generation failed',
+                    };
+                }
+            };
+
+            const task = dbConnection
+                ? runWithDb(dbConnection, execute)
+                : execute();
+
+            Promise.resolve(task).catch((error) => {
+                console.error('[CRON] Background maintenance task crashed:', error);
+            });
+        });
+
+        return {
+            accepted: true,
+            runId,
+            status: 'queued',
+            startedAt,
+            message: 'Maintenance generation started in the background',
+        };
+    }
+
     // Manual trigger for vendor contract renewal
     async triggerVendorContractRenewal() {
         const userId = 'SYSTEM';
@@ -389,6 +476,10 @@ class CronService {
     }
 
     // Get cron job status
+    getMaintenanceRunStatus() {
+        return { ...this.maintenanceRun };
+    }
+
     // Trigger inspection generation
     async triggerInspection(orgId) {
         console.log(`[CRON SERVICE] Triggering inspection generation for org ${orgId}`);

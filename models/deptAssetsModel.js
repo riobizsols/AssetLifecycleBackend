@@ -62,7 +62,10 @@ exports.getAllDeptAssets = (org_id, branch_id, hasSuperAccess = false) => {
     
     // Apply branch filter only if user doesn't have super access
     if (!hasSuperAccess && branch_id) {
-        query += ` AND d.branch_id = $2`;
+        query += ` AND EXISTS (
+            SELECT 1 FROM "tblBR_DEPT" bd
+            WHERE bd.dept_id = d.dept_id AND bd.branch_id = $2 AND bd.int_status = 1
+        )`;
         params.push(branch_id);
     }
     

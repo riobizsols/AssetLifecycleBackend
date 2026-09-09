@@ -55,7 +55,7 @@ async function getSubdomainByOrgId(orgId) {
   const pool = await getRegistryPool();
   const result = await pool.query(
     `SELECT subdomain FROM "tenants"
-     WHERE org_id = $1 AND is_active = true AND subdomain IS NOT NULL
+     WHERE grouped_org_id = $1 AND is_active = true AND subdomain IS NOT NULL
      LIMIT 1`,
     [String(orgId).toUpperCase().trim()],
   );
@@ -76,7 +76,7 @@ async function getTenantFromEmail(email) {
     const result = await pool.query(
       `SELECT e.org_id, e.subdomain, t.is_active
        FROM "tenant_user_emails" e
-       INNER JOIN "tenants" t ON t.org_id = e.org_id
+       INNER JOIN "tenants" t ON t.grouped_org_id = e.org_id
        WHERE e.email_normalized = $1
          AND t.is_active = true
        LIMIT 1`,

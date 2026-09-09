@@ -4,7 +4,9 @@ const { generateCustomId } = require("../utils/idGenerator");
 
 let wfScrapSeqBackfillCronJob = null;
 
-/** Default scrap approval step (one level). Override via env if needed. */
+/** Default scrap approval step (one level). Override via env if needed.
+ * Bannari orgs use WFS-BAN00x-01; shared tenants often use WFS-02.
+ */
 const DEFAULT_WF_STEP_ID =
   process.env.WFSCRAPSEQ_DEFAULT_WF_STEP_ID || "WFS-02";
 const DEFAULT_SEQ_NO = Number(process.env.WFSCRAPSEQ_DEFAULT_SEQ_NO || 10);
@@ -23,6 +25,33 @@ const getEligibleAssetTypesWithoutScrapSeq = async () => {
     ORDER BY at.org_id, at.asset_type_id
   `;
   return getDb().query(query);
+};
+
+const resolveDefaultWfStepId = async (orgId) => {
+  const preferred = [
+    process.env.WFSCRAPSEQ_DEFAULT_WF_STEP_ID,
+    `WFS-${orgId}-01`,
+    DEFAULT_WF_STEP_ID,
+    'WFS-01',
+  ].filter(Boolean);
+
+  for (const stepId of preferred) {
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await wfStepExists(stepId, orgId);
+    if (exists) return stepId;
+  }
+
+  const any = await getDb().query(
+    `
+      SELECT wf_steps_id
+      FROM "tblWFSteps"
+      WHERE org_id = $1
+      ORDER BY wf_steps_id ASC
+      LIMIT 1
+    `,
+    [orgId]
+  );
+  return any.rows[0]?.wf_steps_id || null;
 };
 
 const wfStepExists = async (wfStepId, orgId) => {

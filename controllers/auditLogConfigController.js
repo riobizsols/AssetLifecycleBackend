@@ -1,11 +1,17 @@
 const AuditLogConfigModel = require('../models/auditLogConfigModel');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+function resolveAuditOrgId(req) {
+  const acmCtx = getEffectiveListContext(req);
+  return acmCtx.orgId || req.user?.org_id || null;
+}
 
 class AuditLogConfigController {
   // Get all audit log configurations
   static async getAll(req, res) {
     try {
-      const orgId = req.user?.org_id;
+      const orgId = resolveAuditOrgId(req);
       if (!orgId) {
         return res.status(401).json({
           success: false,
@@ -131,7 +137,7 @@ class AuditLogConfigController {
   static async getByAppId(req, res) {
     try {
       const { appId } = req.params;
-      const orgId = req.user?.org_id;
+      const orgId = resolveAuditOrgId(req);
       
       if (!appId) {
         return res.status(400).json({

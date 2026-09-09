@@ -4,6 +4,7 @@ const brHistModel = require("./assetMaintSchBrHistModel");
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
+const { ensureAssetTypeRequirementColumns } = require("./assetTypeModel");
 
 /** Normalize parsed text to tblAssetBRDet.abr_id (e.g. ABR001). */
 function normalizeAbrId(raw) {
@@ -625,12 +626,10 @@ const getAssetUsageSinceDate = async (asset_id, sinceDate) => {
 };
 
 // Get all maintenance schedules from tblAssetMaintSch
-// Supports super access users who can view all branches
-const getAllMaintenanceSchedules = async (
-  orgId = "ORG001",
-  branchId,
-  hasSuperAccess = false,
-) => {
+const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
+  const { buildAssetListScopeSql } = require('../utils/acmAccess');
+  const dbPool = getDb();
+  await ensureAssetTypeRequirementColumns(dbPool);
   let query = `
         SELECT 
             ams.*,
@@ -638,6 +637,8 @@ const getAllMaintenanceSchedules = async (
             a.serial_number,
             a.description as asset_description,
             at.text as asset_type_name,
+            at.required_maint,
+            at.required_spare_parts,
             mt.text as maintenance_type_name,
             COALESCE(mt.hours_required, 0)::numeric as hours_required,
             v.vendor_name,
@@ -649,34 +650,31 @@ const getAllMaintenanceSchedules = async (
             END as days_until_due
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
-        INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+        LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
         WHERE ams.org_id = $1 AND a.org_id = $1
     `;
 
-  // Apply branch filter only if user doesn't have super access
   const params = [orgId];
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $2`;
-    params.push(branchId);
-  }
+  const scope = buildAssetListScopeSql(acmCtx, { assetAlias: 'a', startIndex: 2 });
+  query += scope.sql;
+  params.push(...scope.params);
 
   query += ` ORDER BY ams.created_on DESC, ams.ams_id DESC`;
 
-  const dbPool = getDb();
   const result = await dbPool.query(query, params);
   return result;
 };
 
 // Get maintenance schedule details by ID from tblAssetMaintSch
-// Supports super access users who can view all branches
 const getMaintenanceScheduleById = async (
   amsId,
   orgId = "ORG001",
-  branchId,
-  hasSuperAccess = false,
+  acmCtx = {},
 ) => {
+  const { buildAssetListScopeSql } = require('../utils/acmAccess');
+
   let query = `
         SELECT 
             ams.*,
@@ -698,12 +696,10 @@ const getMaintenanceScheduleById = async (
         WHERE ams.ams_id = $1 AND ams.org_id = $2 AND a.org_id = $2
     `;
 
-  // Apply branch filter only if user doesn't have super access
   const params = [amsId, orgId];
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $3`;
-    params.push(branchId);
-  }
+  const scope = buildAssetListScopeSql(acmCtx, { assetAlias: 'a', startIndex: 3 });
+  query += scope.sql;
+  params.push(...scope.params);
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
@@ -785,6 +781,37 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
 
   // Automatically set end date to current date when updating
   const currentDate = new Date().toISOString().split("T")[0];
+  const dbPool = getDb();
+
+  // If technician fields are empty but emp_int_id exists, fill name/email/phone from employee
+  let resolvedName = technician_name;
+  let resolvedEmail = technician_email;
+  let resolvedPhone = technician_phno;
+  const needsResolve =
+    (!resolvedName || String(resolvedName).trim() === "") ||
+    (!resolvedEmail || String(resolvedEmail).trim() === "") ||
+    (!resolvedPhone || String(resolvedPhone).trim() === "");
+  if (needsResolve) {
+    const existing = await dbPool.query(
+      `SELECT emp_int_id, technician_name, technician_email, technician_phno
+       FROM "tblAssetMaintSch" WHERE ams_id = $1 AND org_id = $2 LIMIT 1`,
+      [amsId, orgId]
+    );
+    const row = existing.rows[0];
+    if (row?.emp_int_id) {
+      const { resolveTechnicianFromEmp } = require("../utils/technicianResolveUtils");
+      const tech = await resolveTechnicianFromEmp(row.emp_int_id, dbPool);
+      if (!resolvedName || String(resolvedName).trim() === "") {
+        resolvedName = tech.technician_name || row.technician_name || null;
+      }
+      if (!resolvedEmail || String(resolvedEmail).trim() === "") {
+        resolvedEmail = tech.technician_email || row.technician_email || null;
+      }
+      if (!resolvedPhone || String(resolvedPhone).trim() === "") {
+        resolvedPhone = tech.technician_phno || row.technician_phno || null;
+      }
+    }
+  }
 
   const query = `
         UPDATE "tblAssetMaintSch"
@@ -813,9 +840,9 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     currentDate, // Automatically set to current date
     po_number,
     invoice,
-    technician_name,
-    technician_email,
-    technician_phno,
+    resolvedName,
+    resolvedEmail,
+    resolvedPhone,
     cost,
     hours_spent,
     maint_notes,
@@ -823,7 +850,6 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     changed_on,
     orgId,
   ];
-  const dbPool = getDb();
 
   const result = await dbPool.query(query, values);
 
@@ -1460,10 +1486,8 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       headerEmpInt,
     ]);
 
-    // Create workflow details
-    const minSeq = Math.min(...sequences.map((s) => Number(s.seqs_no)));
-    let detailCreated = 0;
-
+    // Create workflow details — first sequence that has job roles gets AP
+    const sequencesWithRoles = [];
     for (const seq of sequences) {
       const jobRolesResult = await client.query(
         `SELECT wf_job_role_id, wf_steps_id, job_role_id, emp_int_id
@@ -1472,10 +1496,17 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                  ORDER BY wf_job_role_id ASC`,
         [seq.wf_steps_id],
       );
-
       if (jobRolesResult.rows.length === 0) continue;
+      sequencesWithRoles.push({ seq, jobRoles: jobRolesResult.rows });
+    }
 
-      for (const jr of jobRolesResult.rows) {
+    const minSeq = sequencesWithRoles.length
+      ? Math.min(...sequencesWithRoles.map(({ seq }) => Number(seq.seqs_no)))
+      : null;
+    let detailCreated = 0;
+
+    for (const { seq, jobRoles } of sequencesWithRoles) {
+      for (const jr of jobRoles) {
         // Generate WFAMSD ID within transaction
         const wfamsdQuery = `
                     SELECT wfamsd_id 

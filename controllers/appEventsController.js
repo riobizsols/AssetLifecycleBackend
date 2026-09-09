@@ -1,5 +1,11 @@
 const AppEventsModel = require('../models/appEventsModel');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+function resolveAuditOrgId(req) {
+    const acmCtx = getEffectiveListContext(req);
+    return acmCtx.orgId || req.user?.org_id || null;
+}
 
 class AppEventsController {
     /**
@@ -31,7 +37,8 @@ class AppEventsController {
             }
 
             // Get enabled events for the app
-            const enabledEvents = await AppEventsModel.getEnabledEventsForApp(appId);
+            const orgId = resolveAuditOrgId(req);
+            const enabledEvents = await AppEventsModel.getEnabledEventsForApp(appId, orgId);
 
             // Format the response
             const response = {

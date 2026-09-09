@@ -13,6 +13,7 @@ const getDb = (dbConnection) => {
 };
 const { generateCustomId } = require("../utils/idGenerator");
 const { normalizeBranchId } = require("../utils/branchAccessUtils");
+const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 const {
   convertAssetTypeToSerialFormat,
   generateSerialNumber,
@@ -274,12 +275,16 @@ const getInactiveAssetsByAssetType = async (
   orgId,
   branchId,
   assignmentType = null,
+  acmScopeSql = '',
+  acmScopeParams = [],
 ) => {
   console.log("=== Inactive Assets Model Debug ===");
   console.log("asset_type_id:", asset_type_id);
   console.log("orgId:", orgId);
   console.log("branchId:", branchId);
   console.log("assignmentType:", assignmentType);
+
+  const isAssignmentContext = Boolean(assignmentType);
 
   let query = `
         SELECT 
@@ -292,15 +297,20 @@ const getInactiveAssetsByAssetType = async (
         WHERE a.asset_type_id = $1
         AND a.org_id = $2
         AND a.current_status = 'Active'
+    `;
+
+  const params = [asset_type_id, orgId];
+  let paramIndex = 3;
+
+  if (isAssignmentContext) {
+    query += `
         AND a.asset_id NOT IN (
             SELECT DISTINCT aa.asset_id 
             FROM "tblAssetAssignments" aa
             WHERE aa.action = 'A' AND aa.latest_assignment_flag = true
         )
     `;
-
-  const params = [asset_type_id, orgId];
-  let paramIndex = 3;
+  }
 
   // Filter by assignment_type if provided (for department vs employee assignments)
   if (assignmentType) {
@@ -314,6 +324,11 @@ const getInactiveAssetsByAssetType = async (
     query += ` AND a.branch_id = $${paramIndex}`;
     params.push(branchId);
     paramIndex++;
+  }
+
+  if (acmScopeSql) {
+    query += acmScopeSql;
+    params.push(...acmScopeParams);
   }
 
   query += ` ORDER BY a.created_on DESC`;
@@ -1306,25 +1321,114 @@ let finalSerialNumber = serial_number;
   }
 };
 
+// Active assignment in selected department:
+// - department assignment stores dept_id on tblAssetAssignments
+// - employee assignment also stores dept_id; fallback to employee.dept_id
+const ACM_DEPT_ASSIGNMENT_EXISTS = (assetAlias, paramIndex) => `
+  AND EXISTS (
+    SELECT 1
+    FROM "tblAssetAssignments" aa_acm
+    LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+    WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+      AND aa_acm.action = 'A'
+      AND aa_acm.latest_assignment_flag = true
+      AND (
+        aa_acm.dept_id = $${paramIndex}
+        OR e_acm.dept_id = $${paramIndex}
+      )
+  )
+`;
+
+const ACM_DEPT_ASSIGNMENT_EXISTS_ANY = (assetAlias, paramIndex) => `
+  AND EXISTS (
+    SELECT 1
+    FROM "tblAssetAssignments" aa_acm
+    LEFT JOIN "tblEmployees" e_acm ON e_acm.emp_int_id = aa_acm.employee_int_id
+    WHERE aa_acm.asset_id = ${assetAlias}.asset_id
+      AND aa_acm.action = 'A'
+      AND aa_acm.latest_assignment_flag = true
+      AND (
+        aa_acm.dept_id = ANY($${paramIndex}::text[])
+        OR e_acm.dept_id = ANY($${paramIndex}::text[])
+      )
+  )
+`;
+
+function normalizeScopeIds(singleId, ids) {
+  if (Array.isArray(ids) && ids.length) {
+    return ids.map((id) => String(id).trim()).filter(Boolean);
+  }
+  if (singleId) return [String(singleId).trim()];
+  return [];
+}
+
+/** Apply ACM branch + dept assignment filters to an assets query fragment. */
+function applyAssetAcmScopeFilters(query, params, paramIndex, {
+  hasSuperAccess = false,
+  branchId = null,
+  deptId = null,
+  branchIds = null,
+  deptIds = null,
+  assetAlias = 'a',
+} = {}) {
+  const bIds = normalizeScopeIds(branchId, branchIds);
+  const dIds = normalizeScopeIds(deptId, deptIds);
+  let q = query;
+  let i = paramIndex;
+  const p = params;
+
+  if (!hasSuperAccess) {
+    if (bIds.length === 1) {
+      q += ` AND ${assetAlias}.branch_id = $${i}`;
+      p.push(bIds[0]);
+      i += 1;
+    } else if (bIds.length > 1) {
+      q += ` AND ${assetAlias}.branch_id = ANY($${i}::text[])`;
+      p.push(bIds);
+      i += 1;
+    } else if (Array.isArray(branchIds)) {
+      // Explicit empty ACM branch grant → no rows
+      q += ' AND 1=0';
+    }
+  }
+
+  if (dIds.length === 1) {
+    q += ACM_DEPT_ASSIGNMENT_EXISTS(assetAlias, i);
+    p.push(dIds[0]);
+    i += 1;
+  } else if (dIds.length > 1) {
+    q += ACM_DEPT_ASSIGNMENT_EXISTS_ANY(assetAlias, i);
+    p.push(dIds);
+    i += 1;
+  }
+
+  return { query: q, params: p, paramIndex: i };
+}
+
 // Get total count of assets - supports super access users who can view all branches
 const getAssetsCount = async (
   orgId,
   branchId = null,
   hasSuperAccess = false,
+  deptId = null,
+  scope = {},
 ) => {
   let query = `
     SELECT COUNT(*) as count
-    FROM "tblAssets"
-    WHERE org_id = $1
+    FROM "tblAssets" a
+    WHERE a.org_id = $1
   `;
 
   const params = [orgId];
+  let paramIndex = 2;
 
-  // Apply branch filter only if user doesn't have super access
-  if (!hasSuperAccess && branchId) {
-    query += ` AND branch_id = $2`;
-    params.push(branchId);
-  }
+  ({ query, paramIndex } = applyAssetAcmScopeFilters(query, params, paramIndex, {
+    hasSuperAccess,
+    branchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   const dbPool = getDb();
   const result = await dbPool.query(query, params);
@@ -1339,6 +1443,8 @@ const getAssetsByUserContext = async (
   branchId = null,
   dbConnection = null,
   hasSuperAccess = false,
+  deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
 
@@ -1360,13 +1466,15 @@ const getAssetsByUserContext = async (
   `;
 
   const params = [orgId];
+  let paramIndex = 2;
 
-  // Apply branch filter only if user doesn't have super access
-  // If hasSuperAccess is true, user can see all branches (no filter applied)
-  if (!hasSuperAccess && branchId) {
-    query += ` AND a.branch_id = $2`;
-    params.push(branchId);
-  }
+  ({ query, paramIndex } = applyAssetAcmScopeFilters(query, params, paramIndex, {
+    hasSuperAccess,
+    branchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   query += ` ORDER BY a.created_on DESC`;
 
@@ -1389,27 +1497,56 @@ const ASSETS_LIST_SELECT = `
     LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
 `;
 
-function buildAssetsListFilterClause(userOrgId, userBranchId, additionalFilters = {}, hasSuperAccess = false) {
+function buildAssetsListFilterClause(
+  userOrgId,
+  userBranchId,
+  additionalFilters = {},
+  hasSuperAccess = false,
+  deptId = null,
+  scope = {},
+) {
   let clause = ` WHERE a.org_id = $1`;
   const params = [userOrgId];
   let paramIndex = 2;
 
-  if (!hasSuperAccess && userBranchId) {
-    clause += ` AND a.branch_id = $${paramIndex}`;
-    params.push(userBranchId);
-    paramIndex++;
-  }
+  ({ query: clause, paramIndex } = applyAssetAcmScopeFilters(clause, params, paramIndex, {
+    hasSuperAccess,
+    branchId: userBranchId,
+    deptId,
+    branchIds: scope.branchIds,
+    deptIds: scope.deptIds,
+  }));
 
   if (additionalFilters.asset_type_id) {
-    clause += ` AND a.asset_type_id = $${paramIndex}`;
-    params.push(additionalFilters.asset_type_id);
-    paramIndex++;
+    const typeIds = String(additionalFilters.asset_type_id)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (typeIds.length === 1) {
+      clause += ` AND a.asset_type_id = $${paramIndex}`;
+      params.push(typeIds[0]);
+      paramIndex++;
+    } else if (typeIds.length > 1) {
+      clause += ` AND a.asset_type_id = ANY($${paramIndex}::text[])`;
+      params.push(typeIds);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.status) {
-    clause += ` AND a.current_status = $${paramIndex}`;
-    params.push(additionalFilters.status);
-    paramIndex++;
+    const statuses = String(additionalFilters.status)
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+    if (statuses.length === 1) {
+      clause += ` AND a.current_status = $${paramIndex}`;
+      params.push(statuses[0]);
+      paramIndex++;
+    } else if (statuses.length > 1) {
+      clause += ` AND a.current_status = ANY($${paramIndex}::text[])`;
+      params.push(statuses);
+      paramIndex++;
+    }
   }
 
   if (additionalFilters.vendor_id) {
@@ -1450,6 +1587,8 @@ const getAssetsByUserContextWithFilters = async (
   dbConnection = null,
   hasSuperAccess = false,
   pagination = null,
+  deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params, paramIndex } = buildAssetsListFilterClause(
@@ -1457,6 +1596,8 @@ const getAssetsByUserContextWithFilters = async (
     userBranchId,
     additionalFilters,
     hasSuperAccess,
+    deptId,
+    scope,
   );
 
   let query = `${ASSETS_LIST_SELECT}${clause} ORDER BY a.created_on DESC`;
@@ -1476,6 +1617,8 @@ const countAssetsByUserContextWithFilters = async (
   additionalFilters = {},
   dbConnection = null,
   hasSuperAccess = false,
+  deptId = null,
+  scope = {},
 ) => {
   const dbPool = getDb(dbConnection);
   const { clause, params } = buildAssetsListFilterClause(
@@ -1483,6 +1626,8 @@ const countAssetsByUserContextWithFilters = async (
     userBranchId,
     additionalFilters,
     hasSuperAccess,
+    deptId,
+    scope,
   );
 
   const query = `SELECT COUNT(*)::int AS total_count FROM "tblAssets" a${clause}`;
@@ -1545,7 +1690,7 @@ const getBulkUploadReferenceData = async () => {
   try {
     // Fetch all reference data in parallel
     const dbPool = getDb();
-    const [organizations, assetTypes, branches, vendors, prodServs] =
+    const [organizations, assetTypes, branches, vendors, prodServs, users] =
       await Promise.all([
         dbPool.query(
           'SELECT org_id, text as org_name FROM "tblOrgs" WHERE int_status = 1',
@@ -1562,6 +1707,9 @@ const getBulkUploadReferenceData = async () => {
         dbPool.query(
           'SELECT prod_serv_id, text as prod_serv_name FROM "tblProdServs" WHERE int_status = 1',
         ),
+        dbPool.query(
+          'SELECT user_id, full_name FROM "tblUsers" WHERE int_status = 1',
+        ),
       ]);
 
     return {
@@ -1570,6 +1718,7 @@ const getBulkUploadReferenceData = async () => {
       branches: branches.rows,
       vendors: vendors.rows,
       prodServs: prodServs.rows,
+      users: users.rows,
     };
   } catch (error) {
     console.error("Error fetching reference data:", error);
@@ -1864,8 +2013,8 @@ const validateAndFormatDate = (dateString) => {
 const bulkUpsertAssets = async (
   csvData,
   created_by,
-  user_org_id,
-  user_branch_id,
+  user_org_id = null,
+  user_branch_id = null,
 ) => {
   const dbPool = getDb();
   const client = await dbPool.connect();
@@ -1891,27 +2040,36 @@ const bulkUpsertAssets = async (
       // Declare variables outside try-catch for error handling
       let finalAssetId = row.asset_id;
       let finalSerialNumber = row.serial_number;
-      let finalOrgId = row.org_id || user_org_id; // Use user's org_id if not provided in CSV
-      let finalBranchId = normalizeBranchId(row.branch_id) || user_branch_id;
+      let finalOrgId = null;
+      let finalBranchId = null;
+      let finalPurchasedBy = null;
 
       // Get asset type text for the 'text' field
       const assetTypeText = assetTypesMap[row.asset_type_id] || "";
 
-      // Validate that we have a valid org_id
-      if (!finalOrgId) {
-        throw new Error(
-          "Organization ID is required. Please provide org_id in CSV or ensure user has a valid organization.",
-        );
-      }
-
-      // Validate that we have a valid branch_id
-      if (!finalBranchId) {
-        throw new Error(
-          "Branch ID is required. Please provide branch_id in CSV or ensure user has a valid branch.",
-        );
-      }
-
       try {
+        const orgBranch = await validateCsvOrgBranch({
+          orgId: row.org_id,
+          branchId: normalizeBranchId(row.branch_id) || row.branch_id,
+          orgRequired: false,
+          branchRequired: false,
+        });
+        finalOrgId = orgBranch.orgId;
+        finalBranchId = orgBranch.branchId;
+
+        finalPurchasedBy = row.purchased_by ? String(row.purchased_by).trim() : '';
+        if (finalPurchasedBy) {
+          const buyer = await client.query(
+            'SELECT user_id FROM "tblUsers" WHERE user_id = $1',
+            [finalPurchasedBy],
+          );
+          if (!buyer.rows.length) {
+            throw new Error(`purchased_by '${finalPurchasedBy}' does not exist`);
+          }
+        } else {
+          finalPurchasedBy = null;
+        }
+
         // Generate asset_id if not provided (same as Add Assets screen)
         if (!finalAssetId) {
           finalAssetId = await generateCustomId("asset", 3);
@@ -2013,7 +2171,7 @@ const bulkUpsertAssets = async (
               row.maintsch_id,
               row.purchased_cost ? parseFloat(row.purchased_cost) : null,
               purchasedOn,
-              row.purchased_by,
+              finalPurchasedBy,
               row.current_status || "Active",
               row.warranty_period,
               row.parent_asset_id,
@@ -2069,7 +2227,7 @@ const bulkUpsertAssets = async (
               row.maintsch_id,
               row.purchased_cost ? parseFloat(row.purchased_cost) : null,
               purchasedOn,
-              row.purchased_by,
+              finalPurchasedBy,
               row.current_status || "Active",
               row.warranty_period,
               row.parent_asset_id,
@@ -2108,12 +2266,15 @@ const bulkUpsertAssets = async (
           // Validate all property values first
           const propertyValidationErrors = [];
           for (const [propId, value] of Object.entries(row.properties)) {
+            if (!propId || !/^ATP/i.test(String(propId).trim())) {
+              continue;
+            }
             if (value && value.trim() !== "") {
               const validation = await validatePropertyValue(
                 client,
                 propId,
                 value,
-                finalOrgId,
+                finalOrgId || user_org_id,
                 created_by,
               );
               if (!validation.isValid) {

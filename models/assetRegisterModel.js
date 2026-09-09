@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
+const { buildReportAssetScopeClause, buildReportAssetScopeConditions } = require('../utils/acmAccess');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -34,9 +35,12 @@ const getAssetRegisterData = async (filters = {}) => {
   // Store orgId for use in property filters
   filters.orgId = orgId || org_id;
 
-  let whereConditions = [];
-  let queryParams = [];
-  let paramCount = 0;
+  const acmBase = buildReportAssetScopeConditions(
+    filters.acmCtx || { orgId: filters.orgId },
+  );
+  let whereConditions = [...acmBase.conditions];
+  let queryParams = [...acmBase.params];
+  let paramCount = acmBase.paramCount;
 
   // Build dynamic WHERE conditions
   if (assetId) {
@@ -90,13 +94,6 @@ const getAssetRegisterData = async (filters = {}) => {
     paramCount++;
     whereConditions.push(`b.text = ANY($${paramCount})`);
     queryParams.push(location);
-  }
-
-  // Apply branch filter only if user doesn't have super access
-  if (branch_id && !filters.hasSuperAccess) {
-    paramCount++;
-    whereConditions.push(`a.branch_id = $${paramCount}`);
-    queryParams.push(branch_id);
   }
 
   if (purchaseDateRange && purchaseDateRange.length === 2) {
@@ -376,11 +373,14 @@ const getAssetRegisterCount = async (filters = {}) => {
     advancedConditions
   } = filters;
 
-  let whereConditions = [];
-  let queryParams = [];
-  let paramCount = 0;
+  const acmBase = buildReportAssetScopeConditions(
+    filters.acmCtx || { orgId: filters.orgId || filters.org_id },
+  );
+  let whereConditions = [...acmBase.conditions];
+  let queryParams = [...acmBase.params];
+  let paramCount = acmBase.paramCount;
 
-  // Build dynamic WHERE conditions (same as above)
+  // Build dynamic WHERE conditions (same as getAssetRegisterData)
   if (assetId) {
     paramCount++;
     whereConditions.push(`a.asset_id ILIKE $${paramCount}`);
@@ -432,13 +432,6 @@ const getAssetRegisterCount = async (filters = {}) => {
     paramCount++;
     whereConditions.push(`b.text = ANY($${paramCount})`);
     queryParams.push(location);
-  }
-
-  // Apply branch filter only if user doesn't have super access
-  if (branch_id && !filters.hasSuperAccess) {
-    paramCount++;
-    whereConditions.push(`a.branch_id = $${paramCount}`);
-    queryParams.push(branch_id);
   }
 
   if (purchaseDateRange && purchaseDateRange.length === 2) {
@@ -598,22 +591,44 @@ const getAssetRegisterCount = async (filters = {}) => {
 };
 
 // Get filter options for dropdowns
-const getAssetRegisterFilterOptions = async () => {
+const getAssetRegisterFilterOptions = async (acmCtx = {}) => {
+  const acmScope = buildReportAssetScopeClause(acmCtx);
+  const params = [...acmScope.params];
+
   const query = `
     SELECT 
-      (SELECT JSON_AGG(DISTINCT at.text) FROM "tblAssetTypes" at WHERE at.int_status = 1) as categories,
-      (SELECT JSON_AGG(DISTINCT b.text) FROM "tblBranches" b) as locations,
-      (SELECT JSON_AGG(DISTINCT d.text) FROM "tblDepartments" d) as departments,
-      (SELECT JSON_AGG(DISTINCT e.name) FROM "tblEmployees" e) as employees,
-      (SELECT JSON_AGG(DISTINCT v.vendor_name) FROM "tblVendors" v) as vendors,
-      (SELECT JSON_AGG(DISTINCT a.current_status) FROM "tblAssets" a WHERE a.current_status IS NOT NULL) as current_statuses,
-      (SELECT JSON_AGG(DISTINCT a.current_status) FROM "tblAssets" a WHERE a.current_status IS NOT NULL) as statuses
+      (SELECT JSON_AGG(DISTINCT at.text) FROM "tblAssetTypes" at
+       INNER JOIN "tblAssets" a ON a.asset_type_id = at.asset_type_id
+       ${acmScope.clause}
+       AND at.int_status = 1) as categories,
+      (SELECT JSON_AGG(DISTINCT b.text) FROM "tblBranches" b
+       INNER JOIN "tblAssets" a ON a.branch_id = b.branch_id
+       ${acmScope.clause}) as locations,
+      (SELECT JSON_AGG(DISTINCT d.text) FROM "tblDepartments" d
+       INNER JOIN "tblAssetAssignments" aa ON aa.dept_id = d.dept_id
+       INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+       ${acmScope.clause}
+       AND aa.latest_assignment_flag = true) as departments,
+      (SELECT JSON_AGG(DISTINCT e.name) FROM "tblEmployees" e
+       INNER JOIN "tblAssetAssignments" aa ON aa.employee_int_id = e.emp_int_id
+       INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+       ${acmScope.clause}
+       AND aa.latest_assignment_flag = true) as employees,
+      (SELECT JSON_AGG(DISTINCT v.vendor_name) FROM "tblVendors" v
+       INNER JOIN "tblAssets" a ON a.purchase_vendor_id = v.vendor_id
+       ${acmScope.clause}) as vendors,
+      (SELECT JSON_AGG(DISTINCT a.current_status) FROM "tblAssets" a
+       ${acmScope.clause}
+       AND a.current_status IS NOT NULL) as current_statuses,
+      (SELECT JSON_AGG(DISTINCT a.current_status) FROM "tblAssets" a
+       ${acmScope.clause}
+       AND a.current_status IS NOT NULL) as statuses
   `;
 
   const dbPool = getDb();
 
 
-  const result = await dbPool.query(query);
+  const result = await dbPool.query(query, params);
   return result.rows[0];
 };
 

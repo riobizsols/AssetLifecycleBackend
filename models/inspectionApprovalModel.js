@@ -1,4 +1,6 @@
 const { getDbFromContext } = require('../utils/dbContext');
+const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
 
 const getDb = () => getDbFromContext();
 
@@ -44,11 +46,27 @@ const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
  * @param {string|string[]} jobRoles - Job role ID or array of IDs (e.g., 'JR001' or ['JR001', 'JR002'])
  * @returns {Array} List of pending approvals
  */
-async function getPendingInspectionApprovals(orgId, jobRoles) {
+async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false } = {}) {
   // Ensure jobRoles is an array
   const roles = Array.isArray(jobRoles) ? jobRoles : [jobRoles];
   
   if (roles.length === 0) return [];
+
+  const includeAllRoles = roleIdsIncludeSystemAdmin(roles);
+  const roleFilter = includeAllRoles ? '' : 'AND d.job_role_id = ANY($2::text[])';
+  const seeAllBranches = isSystemAdmin || includeAllRoles;
+  let branchFilter = '';
+  const values = seeAllBranches && includeAllRoles ? [orgId] : includeAllRoles ? [orgId] : [orgId, roles];
+
+  if (!seeAllBranches) {
+    const branchParam = values.length + 1;
+    if (userBranchId) {
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${branchParam})`;
+      values.push(userBranchId);
+    } else {
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
+    }
+  }
 
   const query = `
     SELECT 
@@ -84,15 +102,13 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
     LEFT JOIN "tblBranches" b ON h.branch_code = b.branch_code
     
     WHERE d.org_id = $1
-      AND d.job_role_id = ANY($2::text[])
+      ${roleFilter}
+      ${branchFilter}
       AND UPPER(d.status) = 'AP'
       AND h.org_id = $1
     
     ORDER BY h.pl_sch_date ASC, d.sequence ASC;
   `;
-  
-  const values = [orgId, roles];
-  
   try {
     const result = await getDb().query(query, values);
     return result.rows;
@@ -129,6 +145,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       a.purchased_on,
       a.purchase_vendor_id,
       a.service_vendor_id,
+      a.branch_id as asset_branch_id,
       h.vendor_id,
       
       ast.text as asset_type_name,
@@ -228,7 +245,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
     
     return {
       header: headerResult.rows[0],
-      approvalLevels: detailResult.rows,
+      approvalLevels: await enrichWorkflowActors(detailResult.rows),
       workflowConfiguration: [] // Empty for now to avoid table issues
     };
   } catch (error) {
@@ -630,7 +647,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
         branch_code
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        'IN', $8, NOW(), 
+        'IN', $8, NULL,
         $9, NOW(), $10, NOW(), $11, $12
       )
       RETURNING *
@@ -644,7 +661,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.aatif_id,
       finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
       empIntToSave, // emp_int_id - do not store for vendor-maintained inspections
-      header.pl_sch_date || new Date(), // act_insp_st_date
+      new Date(), // act_insp_st_date — execution starts when workflow is approved
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
       orgId,

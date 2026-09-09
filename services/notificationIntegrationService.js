@@ -176,9 +176,11 @@ class NotificationIntegrationService {
                     maintenanceType: workflowData.maintenanceType,
                     dueDate: workflowData.dueDate,
                     isUrgent: workflowData.isUrgent,
-                    type: 'workflow_approval'
+                    type: 'workflow_approval',
+                    branch_id: workflowData.branchId || workflowData.branch_id || ''
                 },
-                notificationType: 'workflow_approval'
+                notificationType: 'workflow_approval',
+                branchId: workflowData.branchId || workflowData.branch_id || null
             });
 
             // Also send email notification (existing functionality)
@@ -213,9 +215,11 @@ class NotificationIntegrationService {
                     workflowId: workflowData.workflowId,
                     assetTypeName: workflowData.assetTypeName,
                     escalatedDate: new Date().toISOString(),
-                    type: 'workflow_escalated'
+                    type: 'workflow_escalated',
+                    branch_id: workflowData.branchId || workflowData.branch_id || ''
                 },
-                notificationType: 'workflow_escalated'
+                notificationType: 'workflow_escalated',
+                branchId: workflowData.branchId || workflowData.branch_id || null
             });
 
             const duration = Date.now() - startTime;

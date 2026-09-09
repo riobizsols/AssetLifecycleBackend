@@ -107,7 +107,7 @@ async function persistTenantEmail(orgId, email) {
     await pool.query(
       `UPDATE "tenants"
        SET email = $2, updated_at = CURRENT_TIMESTAMP
-       WHERE org_id = $1
+       WHERE grouped_org_id = $1
          AND (email IS NULL OR LOWER(TRIM(email)) <> LOWER(TRIM($2)))`,
       [orgId, String(email).trim()],
     );
@@ -122,7 +122,7 @@ async function persistTenantEmail(orgId, email) {
  */
 async function resolveOrgEmailAndName(tenant) {
   const orgEmail = tenant.email ? String(tenant.email).trim() : null;
-  let orgName = tenant.subdomain || tenant.org_id;
+  let orgName = tenant.org_name || tenant.subdomain || tenant.org_id;
 
   try {
     const credentials = await getTenantCredentials(tenant.org_id);
@@ -161,7 +161,7 @@ async function findTenantByEmail(email) {
   const normalized = String(email).trim().toLowerCase();
 
   const direct = await pool.query(
-    `SELECT org_id, db_name, subdomain, email, is_active
+    `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, email, is_active
      FROM "tenants"
      WHERE is_active = true
        AND email IS NOT NULL
@@ -201,7 +201,7 @@ async function lookupTenant(identifier) {
       throw err;
     }
     const result = await pool.query(
-      `SELECT org_id, db_name, subdomain, email, is_active
+      `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, email, is_active
        FROM "tenants"
        WHERE LOWER(subdomain) = LOWER($1) AND is_active = true
        LIMIT 1`,
@@ -609,7 +609,7 @@ async function removeRegistryRows(orgId) {
   } catch (err) {
     logger.warn(`[AccountDeletion] tenant_user_emails cleanup skipped: ${err.message}`);
   }
-  await pool.query(`DELETE FROM "tenants" WHERE org_id = $1`, [orgId]);
+  await pool.query(`DELETE FROM "tenants" WHERE grouped_org_id = $1`, [orgId]);
 
   try {
     clearTenantPoolCache(orgId);
@@ -798,7 +798,7 @@ async function runDeletionJob(requestId, confirmationToken) {
     });
 
     const tenantRes = await pool.query(
-      `SELECT org_id, db_name, subdomain, is_active FROM "tenants" WHERE org_id = $1 LIMIT 1`,
+      `SELECT grouped_org_id AS org_id, db_name, subdomain, is_active FROM "tenants" WHERE grouped_org_id = $1 LIMIT 1`,
       [row.org_id],
     );
     const tenant = tenantRes.rows[0];

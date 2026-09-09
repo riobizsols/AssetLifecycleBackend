@@ -1,26 +1,39 @@
 const model = require("../models/maintenanceScheduleModel");
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
 
 // Import supervisor approval logger
 const supervisorApprovalLogger = require('../eventLoggers/supervisorApprovalEventLogger');
 
 function bustMaintenanceSupervisorCaches(req, orgId) {
-  const oid = orgId || req.user?.org_id;
+  const oid = orgId || getEffectiveListContext(req).orgId || req.user?.org_id;
   maintenanceSupervisorCache.invalidateOrgCaches(oid).catch(() => {});
   // Maintenance Approval list is cached under operationalCache (slug: maintenance-approval)
   operationalCache.invalidateOrgCaches(oid).catch(() => {});
 }
 
+function resolveMaintenanceScope(req) {
+  const acmCtx = getEffectiveListContext(req);
+  return {
+    acmCtx,
+    orgId: acmCtx.orgId || req.user?.org_id || 'ORG001',
+  };
+}
+
 const normalizeOrgId = (orgId) => (orgId || '').toString().trim().toUpperCase();
 
-/** First workflow sequence (lowest seqs_no) is approval-pending (AP); others start IN. */
-const getInitialWorkflowDetailStatus = (sequences, seqNo) => {
-    const nums = (sequences || [])
-        .map((s) => parseInt(s.seqs_no, 10))
+/**
+ * First sequence that actually creates detail rows (has job roles) is AP; others IN.
+ * Pass only seq numbers that will be created — not raw tblWFATSeqs rows that may
+ * include empty-role sequences (those are skipped and would incorrectly steal minSeq).
+ */
+const getInitialWorkflowDetailStatus = (activeSeqNumbers, seqNo) => {
+    const nums = (activeSeqNumbers || [])
+        .map((s) => parseInt(s, 10))
         .filter((n) => !Number.isNaN(n));
-    const minSeq = nums.length ? Math.min(...nums) : 10;
-    return seqNo === minSeq ? 'AP' : 'IN';
+    const minSeq = nums.length ? Math.min(...nums) : Number(seqNo);
+    return Number(seqNo) === minSeq ? 'AP' : 'IN';
 };
 
 const USAGE_BASED_UOMS = new Set([
@@ -213,6 +226,17 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
         let totalDetailsCreated = 0;
         const sequenceRows = workflowSequences.rows;
         
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
+        
         for (const sequence of sequenceRows) {
             const workflowJobRoles = await model.getWorkflowJobRoles(sequence.wf_steps_id);
             
@@ -224,7 +248,7 @@ const processGroupMaintenance = async (group_id, assetType, frequencies, testDat
                 const wfamsdId = await model.getNextWFAMSDId();
                 
                 const seqNo = parseInt(sequence.seqs_no, 10);
-                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                 
                 const scheduleDetailData = {
                     wfamsd_id: wfamsdId,
@@ -577,6 +601,17 @@ const generateMaintenanceSchedules = async (req, res) => {
                     // Step 3j: Create workflow maintenance schedule details
                     let totalDetailsCreated = 0;
                     const sequenceRows = workflowSequences.rows;
+        
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
                     
                     for (const sequence of sequenceRows) {
                         console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
@@ -593,7 +628,7 @@ const generateMaintenanceSchedules = async (req, res) => {
                             const wfamsdId = await model.getNextWFAMSDId();
                             
                             const seqNo = parseInt(sequence.seqs_no, 10);
-                            const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                            const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                             
                             console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                             
@@ -882,6 +917,17 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                         
                         let totalDetailsCreated = 0;
                         const sequenceRows = workflowSequences.rows;
+        
+        // Only sequences with job roles can become the first AP step
+        const activeSeqNumbers = [];
+        for (const seqRow of sequenceRows) {
+            const rolesForSeq = await model.getWorkflowJobRoles(seqRow.wf_steps_id);
+            if (rolesForSeq.rows.length > 0) {
+                const n = parseInt(seqRow.seqs_no, 10);
+                if (!Number.isNaN(n)) activeSeqNumbers.push(n);
+            }
+        }
+
                         
                         for (const sequence of sequenceRows) {
                             console.log(`Processing sequence ${sequence.seqs_no} with wf_steps_id: ${sequence.wf_steps_id}`);
@@ -898,7 +944,7 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                                 const wfamsdId = await model.getNextWFAMSDId();
                                 
                                 const seqNo = parseInt(sequence.seqs_no, 10);
-                                const status = getInitialWorkflowDetailStatus(sequenceRows, seqNo);
+                                const status = getInitialWorkflowDetailStatus(activeSeqNumbers, seqNo);
                                 
                                 console.log(`Sequence number: ${sequence.seqs_no} (type: ${typeof sequence.seqs_no}), parsed: ${seqNo}, status: ${status}`);
                                 
@@ -1045,13 +1091,12 @@ const getAllMaintenanceSchedules = async (req, res) => {
     const userId = req.user?.user_id;
     
     try {
-        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-        const branchId = req.user?.branch_id;
+        const { acmCtx, orgId } = resolveMaintenanceScope(req);
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         
         console.log('=== Maintenance Schedule Controller Debug ===');
-        console.log('org_id from req.user:', orgId);
-        console.log('branch_id from req.user:', branchId);
+        console.log('org_id from ACM context:', orgId);
+        console.log('branch_id from ACM context:', acmCtx.branchId);
         
         // Log API called (context-aware)
         if (context === 'SUPERVISORAPPROVAL') {
@@ -1062,13 +1107,13 @@ const getAllMaintenanceSchedules = async (req, res) => {
             }).catch(err => console.error('Logging error:', err));
         }
         
-        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'list');
+        const cacheKey = maintenanceSupervisorCache.scopeKey(req, 'maintenance-supervisor', 'list-all');
 
         const { data: formattedData } = await maintenanceSupervisorCache.getOrSet(
             cacheKey,
             maintenanceSupervisorCache.getTtlMs(),
             async () => {
-                const result = await model.getAllMaintenanceSchedules(orgId, branchId, req.user?.hasSuperAccess || false);
+                const result = await model.getAllMaintenanceSchedules(orgId, acmCtx);
                 return result.rows.map((record) => {
                     const baseRecord = {};
                     Object.keys(record).forEach((key) => {
@@ -1138,13 +1183,12 @@ const getMaintenanceScheduleById = async (req, res) => {
     
     try {
         const { id } = req.params;
-        const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
-        const branchId = req.user?.branch_id;
+        const { acmCtx, orgId } = resolveMaintenanceScope(req);
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         
         console.log('=== Maintenance Schedule Detail Controller Debug ===');
-        console.log('org_id from req.user:', orgId);
-        console.log('branch_id from req.user:', branchId);
+        console.log('org_id from ACM context:', orgId);
+        console.log('branch_id from ACM context:', acmCtx.branchId);
         console.log('ams_id:', id);
         
         // Log API called (context-aware)
@@ -1179,7 +1223,7 @@ const getMaintenanceScheduleById = async (req, res) => {
             cacheKey,
             maintenanceSupervisorCache.getTtlMs(),
             async () => {
-                const result = await model.getMaintenanceScheduleById(id, orgId, branchId, req.user?.hasSuperAccess || false);
+                const result = await model.getMaintenanceScheduleById(id, orgId, acmCtx);
                 if (!result.rows.length) return null;
                 return { ...result.rows[0] };
             },
@@ -1246,7 +1290,7 @@ const updateMaintenanceSchedule = async (req, res) => {
     
     try {
         const { id } = req.params;
-            const orgId = req.query.orgId || req.user?.org_id;
+        const { orgId, acmCtx } = resolveMaintenanceScope(req);
         const updateData = req.body;
         const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
         const changedBy = req.user ? req.user.user_id : 'system'; // Get user from token
@@ -1284,6 +1328,36 @@ const updateMaintenanceSchedule = async (req, res) => {
                 }).catch(err => console.error('Logging error:', err));
             }
             return res.status(400).json({ success: false, message: 'Status is required' });
+        }
+
+        // Notes (maint_notes) required only when actual hours exceed the maintenance time limit
+        if (context === 'SUPERVISORAPPROVAL' && updateData.hours_spent != null && updateData.hours_spent !== '') {
+            const hoursSpent = parseFloat(updateData.hours_spent);
+            if (!Number.isNaN(hoursSpent)) {
+                const existing = await model.getMaintenanceScheduleById(
+                    id,
+                    orgId,
+                    acmCtx,
+                );
+                const hoursRequired = parseFloat(existing.rows[0]?.hours_required || 0);
+                if (hoursRequired > 0 && hoursSpent > hoursRequired) {
+                    const delayNotes = updateData.maint_notes != null ? String(updateData.maint_notes).trim() : '';
+                    if (!delayNotes) {
+                        if (context === 'SUPERVISORAPPROVAL') {
+                            supervisorApprovalLogger.logMissingRequiredFields({
+                                operation: 'Update Supervisor Maintenance',
+                                missingFields: ['maint_notes'],
+                                userId,
+                                duration: Date.now() - startTime
+                            }).catch(err => console.error('Logging error:', err));
+                        }
+                        return res.status(400).json({
+                            success: false,
+                            message: 'Notes are required when actual hours spent exceed the time limit'
+                        });
+                    }
+                }
+            }
         }
 
         const result = await model.updateMaintenanceSchedule(id, { ...updateData, changed_by: changedBy, changed_on: changedOn }, orgId);
@@ -1337,7 +1411,7 @@ const updateMaintenanceSchedule = async (req, res) => {
 const createManualMaintenanceSchedule = async (req, res) => {
     try {
         const { asset_id, asset_type_id } = req.body;
-        const orgId = req.user?.org_id || req.body.org_id;
+        const { orgId } = resolveMaintenanceScope(req);
         const userId = req.user?.user_id;
 
         if (!asset_id || !asset_type_id) {

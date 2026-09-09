@@ -4,6 +4,10 @@ const controller = require("../controllers/assetController");
 const bulkController = require("../controllers/assetBulkUploadController");
 const { authorize } = require("../middlewares/authorize");
 const { protect } = require("../middlewares/authMiddleware");
+const {
+  uploadAssetDoc,
+  listDocs,
+} = require("../controllers/assetDocsController");
 
 // Public route for testing - Get assets expiring within 30 days grouped by asset type
 router.get("/expiring-30-days-by-type", controller.getAssetsExpiringWithin30DaysByType);
@@ -75,6 +79,14 @@ router.delete("/:asset_id", controller.deleteAsset);
 
 // GET /api/assets/printers - Get printer assets using organization settings
 router.get("/printers", controller.getPrinterAssets);
+
+// Document list/upload must be before GET /:id
+router.post("/:asset_id/docs/upload", (req, res, next) => {
+  req.body = req.body || {};
+  req.body.asset_id = req.params.asset_id;
+  next();
+}, uploadAssetDoc);
+router.get("/:asset_id/docs", listDocs);
 
 // GET /api/assets/:id - Get asset by ID (MUST BE LAST to avoid conflicts)
 router.get("/:id", controller.getAssetById);  //......

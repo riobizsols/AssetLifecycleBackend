@@ -12,13 +12,16 @@ class CronController {
         console.log('═══════════════════════════════════════════════════════════\n');
         
         try {
-            const result = await this.cronService.triggerMaintenanceGeneration();
+            const result = this.cronService.startMaintenanceGeneration({
+                dbConnection: req.db,
+            });
             
-            console.log('\n✅ [CRON CONTROLLER] Maintenance generation completed successfully');
+            console.log('\n✅ [CRON CONTROLLER] Maintenance generation accepted');
             console.log('═══════════════════════════════════════════════════════════\n');
             
-            res.status(200).json({
-                message: "Maintenance generation triggered successfully",
+            res.status(result.accepted ? 202 : 200).json({
+                success: true,
+                message: result.message,
                 result: result
             });
         } catch (error) {
@@ -108,9 +111,13 @@ class CronController {
     // Get cron job status
     getCronStatus(req, res) {
         try {
+            const status = this.cronService.getCronStatus();
+            status.maintenanceGeneration.currentRun =
+                this.cronService.getMaintenanceRunStatus();
+
             res.status(200).json({
                 message: "Cron job status",
-                status: this.cronService.getCronStatus()
+                status
             });
         } catch (error) {
             console.error('Error getting cron status:', error);

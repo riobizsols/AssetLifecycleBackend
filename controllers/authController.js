@@ -14,6 +14,7 @@ const { sendResetEmail } = require('../utils/mailer');
 const { getUserRoles } = require('../models/userJobRoleModel');
 const { getInitialPassword } = require('../utils/orgSettingsUtils');
 const { ensureJobRoleNavigation } = require('../services/tenantSetupService');
+const { ensureBrDeptSchema } = require('../utils/ensureBrDeptSchema');
 const { 
     logLoginApiCalled,
     logCheckingUserInDatabase,
@@ -164,6 +165,11 @@ const login = async (req, res) => {
 
         if (isTenant && orgId) {
             try {
+                await ensureBrDeptSchema(dbPool);
+            } catch (brDeptErr) {
+                console.warn(`[AuthController] tblBR_DEPT ensure on login failed: ${brDeptErr.message}`);
+            }
+            try {
                 await ensureJobRoleNavigation(dbPool, orgId);
             } catch (navErr) {
                 console.warn(`[AuthController] Navigation sync on login failed: ${navErr.message}`);
@@ -197,7 +203,7 @@ const login = async (req, res) => {
                             b.branch_code, jr.text as job_role_name
                      FROM "tblRioAdmin" ra
                      LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
-                     LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                     LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id
                      LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
                      WHERE ra.user_id = $1`,
                     [loginUser.user_id]
@@ -964,7 +970,7 @@ const tenantLogin = async (req, res) => {
                     jr.text as job_role_name
                 FROM "tblRioAdmin" ra
                 LEFT JOIN "tblDepartments" d ON ra.dept_id = d.dept_id
-                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id OR d.branch_id = b.branch_id
+                LEFT JOIN "tblBranches" b ON ra.branch_id = b.branch_id
                 LEFT JOIN "tblJobRoles" jr ON ra.job_role_id = jr.job_role_id
                 WHERE ra.user_id = $1
             `;

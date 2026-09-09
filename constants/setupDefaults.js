@@ -425,15 +425,22 @@ const DEFAULT_APPS = [
   { id: "DEPARTMENTS", label: "Departments" },
   { id: "DEPARTMENTSADMIN", label: "Departments Admin" },
   { id: "BRANCHES", label: "Branches" },
+  { id: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
+  { id: "SPAREPARTS", label: "Spare Part Lot" },
+  { id: "SPAREPARTSCONFIG", label: "Spare Part Category" },
+  { id: "SPAREPARTMASTER", label: "Spare Part" },
   { id: "USERS", label: "Users" },
   { id: "AUDITLOGS", label: "Audit Logs" },
   { id: "AUDITLOGCONFIG", label: "Audit Log Config" },
   { id: "COLUMNACCESSCONFIG", label: "Column Access Config" },
   { id: "BULKUPLOAD", label: "Bulk Upload" },
   { id: "MAINTENANCEAPPROVAL", label: "Maintenance Approval" },
-  { id: "SUPERVISORAPPROVAL", label: "Supervisor Approval" }
+  { id: "SUPERVISORAPPROVAL", label: "Supervisor Approval" },
+  { id: "SPAREPARTLIST", label: "Spare Part List" },
+  { id: "SPAREPARTISSUE", label: "Spare Part Issue" },
+  { id: "SPAREPARTAPPROVAL", label: "Spare Part Approval" }
 ];
 
 const DEFAULT_AUDIT_EVENTS = [
@@ -524,7 +531,19 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "vendor", prefix: "V", lastNumber: 0 },
   { tableKey: "vendor_prod_serv", prefix: "VPS", lastNumber: 0 },
   { tableKey: "org", prefix: "ORG", lastNumber: 0 },
-  { tableKey: "aplv", prefix: "APLV", lastNumber: 0 }
+  { tableKey: "aplv", prefix: "APLV", lastNumber: 0 },
+  { tableKey: "sp_category", prefix: "SPC", lastNumber: 0 },
+  { tableKey: "sp_brand", prefix: "SPB", lastNumber: 0 },
+  { tableKey: "sp_model", prefix: "SPBM", lastNumber: 0 },
+  { tableKey: "sp_lot_det", prefix: "SPLD", lastNumber: 0 },
+  { tableKey: "sp_ind_det", prefix: "SPID", lastNumber: 0 },
+  { tableKey: "sp_cat_at_map", prefix: "SPCATM", lastNumber: 0 },
+  { tableKey: "vsp_map", prefix: "VSPM", lastNumber: 0 },
+  { tableKey: "spare_history", prefix: "SPH", lastNumber: 0 },
+  { tableKey: "spare_issue", prefix: "SI", lastNumber: 0 },
+  { tableKey: "sp_issue", prefix: "SPI", lastNumber: 0 },
+  { tableKey: "spare_store", prefix: "SS", lastNumber: 0 },
+  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -547,6 +566,13 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN003", jobRoleId: "JR001", parentId: null, appId: null, label: "Asset Assignment", sequence: 3, accessLevel: "A", isGroup: true },
   { id: "JRN010", jobRoleId: "JR001", parentId: "JRN003", appId: "DEPTASSIGNMENT", label: "Department Assignment", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN011", jobRoleId: "JR001", parentId: "JRN003", appId: "EMPASSIGNMENT", label: "Employee Assignment", sequence: 2, accessLevel: "A", isGroup: false },
+
+  // Spare parts (from main) — use JRN014A–G so they do not collide with tenant JRN014=DEPARTMENTS
+  { id: "JRN014A", jobRoleId: "JR001", parentId: null, appId: null, label: "Spare Parts", sequence: 4, accessLevel: "A", isGroup: true },
+  { id: "JRN014B", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTS", label: "Spare Part Lot", sequence: 1, accessLevel: "A", isGroup: false },
+  { id: "JRN014D", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTLIST", label: "Spare Part List", sequence: 2, accessLevel: "A", isGroup: false },
+  { id: "JRN014E", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTAPPROVAL", label: "Spare Part Approval", sequence: 3, accessLevel: "A", isGroup: false },
+  { id: "JRN014F", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTISSUE", label: "Spare Part Issue", sequence: 4, accessLevel: "A", isGroup: false },
 
   { id: "JRN040", jobRoleId: "JR001", parentId: null, appId: null, label: "Maintenance", sequence: 5, accessLevel: "A", isGroup: true },
   { id: "JRN006", jobRoleId: "JR001", parentId: "JRN040", appId: "SUPERVISORAPPROVAL", label: "Maintenance List", sequence: 1, accessLevel: "A", isGroup: false },
@@ -581,15 +607,19 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN021", jobRoleId: "JR001", parentId: "JRN008", appId: "AUDITLOGCONFIG", label: "Audit Log Config", sequence: 2, accessLevel: "A", isGroup: false },
 
   { id: "JRN009", jobRoleId: "JR001", parentId: null, appId: null, label: "Master Data", sequence: 9, accessLevel: "A", isGroup: true },
+  { id: "JRN800", jobRoleId: "JR001", parentId: "JRN009", appId: "ORGANIZATIONS", label: "Organizations", sequence: 0, accessLevel: "A", isGroup: false },
   { id: "JRN013", jobRoleId: "JR001", parentId: "JRN009", appId: "ASSETTYPES", label: "Asset Types", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN014", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTS", label: "Departments", sequence: 2, accessLevel: "A", isGroup: false },
   { id: "JRN016", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTSADMIN", label: "Departments Admin", sequence: 3, accessLevel: "A", isGroup: false },
   { id: "JRN017", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTSASSET", label: "Departments AssetType", sequence: 4, accessLevel: "A", isGroup: false },
   { id: "JRN018", jobRoleId: "JR001", parentId: "JRN009", appId: "BRANCHES", label: "Branches", sequence: 5, accessLevel: "A", isGroup: false },
-  { id: "JRN019", jobRoleId: "JR001", parentId: "JRN009", appId: "VENDORS", label: "Vendors", sequence: 6, accessLevel: "A", isGroup: false },
-  { id: "JRN020", jobRoleId: "JR001", parentId: "JRN009", appId: "PRODSERV", label: "Products/Services", sequence: 7, accessLevel: "A", isGroup: false },
-  { id: "JRN028", jobRoleId: "JR001", parentId: "JRN009", appId: "ROLES", label: "Bulk Upload", sequence: 8, accessLevel: "A", isGroup: false },
-  { id: "JRN078", jobRoleId: "JR001", parentId: "JRN009", appId: "USERS", label: "User Roles", sequence: 9, accessLevel: "A", isGroup: false },
+  { id: "JRN018A", jobRoleId: "JR001", parentId: "JRN009", appId: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping", sequence: 6, accessLevel: "A", isGroup: false },
+  { id: "JRN019", jobRoleId: "JR001", parentId: "JRN009", appId: "VENDORS", label: "Vendors", sequence: 7, accessLevel: "A", isGroup: false },
+  { id: "JRN020", jobRoleId: "JR001", parentId: "JRN009", appId: "PRODSERV", label: "Products/Services", sequence: 8, accessLevel: "A", isGroup: false },
+  { id: "JRN014C", jobRoleId: "JR001", parentId: "JRN009", appId: "SPAREPARTSCONFIG", label: "Spare Parts Configuration", sequence: 9, accessLevel: "A", isGroup: false },
+  { id: "JRN014G", jobRoleId: "JR001", parentId: "JRN009", appId: "SPAREPARTMASTER", label: "Spare Part", sequence: 10, accessLevel: "A", isGroup: false },
+  { id: "JRN028", jobRoleId: "JR001", parentId: "JRN009", appId: "ROLES", label: "Bulk Upload", sequence: 11, accessLevel: "A", isGroup: false },
+  { id: "JRN078", jobRoleId: "JR001", parentId: "JRN009", appId: "USERS", label: "User Roles", sequence: 12, accessLevel: "A", isGroup: false },
 
   { id: "JRN004", jobRoleId: "JR001", parentId: null, appId: "WORKORDERMANAGEMENT", label: "Workorder Management", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN036", jobRoleId: "JR001", parentId: null, appId: "SERIALNUMBERPRINT", label: "Serial Number Print", sequence: 11, accessLevel: "A", isGroup: false },
