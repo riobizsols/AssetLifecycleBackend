@@ -40,8 +40,17 @@ const addOrganizationController = async (req, res) => {
         const org_id = await generateCustomId("org");
         
         // Generate unique subdomain from organization name
-        const { generateUniqueSubdomain } = require('../utils/subdomainUtils');
-        const subdomain = await generateUniqueSubdomain(org_name);
+        let subdomain = null;
+        try {
+            const { generateUniqueSubdomain } = require('../utils/subdomainUtils');
+            subdomain = await generateUniqueSubdomain(org_name);
+        } catch (subErr) {
+            console.warn('[OrgController] Could not generate subdomain:', subErr.message);
+            subdomain = String(org_code || org_name || 'org')
+                .toLowerCase()
+                .replace(/[^a-z0-9-]/g, '')
+                .slice(0, 63) || `org-${Date.now().toString(36)}`;
+        }
         
         // Prepare new org object
         const newOrg = {

@@ -75,12 +75,23 @@ exports.findByBrandAndModel = async (req, res) => {
     
     // Use tenant database from request context (set by middleware)
     const dbPool = req.db || require("../config/db");
-    const result = await dbPool.query(
-      `SELECT prod_serv_id, brand, model, description FROM "tblProdServs" 
-       WHERE brand = $1 AND model = $2 AND status = '1' 
-       LIMIT 1`,
-      [brand, model]
-    );
+    const orgId = req.user?.org_id || null;
+    // status is integer: 1 = active, 0 = inactive
+    const params = [String(brand).trim(), String(model).trim()];
+    let query = `
+      SELECT prod_serv_id, brand, model, description, org_id
+      FROM "tblProdServs"
+      WHERE LOWER(TRIM(brand)) = LOWER(TRIM($1))
+        AND LOWER(TRIM(model)) = LOWER(TRIM($2))
+        AND status = 1
+    `;
+    if (orgId) {
+      params.push(orgId);
+      query += ` AND org_id = $${params.length}`;
+    }
+    query += ` ORDER BY prod_serv_id ASC LIMIT 1`;
+
+    const result = await dbPool.query(query, params);
     
     if (result.rows.length > 0) {
       const prodServ = result.rows[0];
@@ -95,9 +106,11 @@ exports.findByBrandAndModel = async (req, res) => {
         }
       });
     } else {
+      // Soft miss — brand/model may exist in UI lists without a prod_serv row yet
       console.log('❌ No matching prod_serv_id found');
-      res.status(404).json({ 
-        success: false, 
+      res.status(200).json({ 
+        success: false,
+        data: null,
         message: 'No matching product service found for the given brand and model' 
       });
     }

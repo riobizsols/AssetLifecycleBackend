@@ -165,6 +165,84 @@ async function ensureAtInspCertStructure(client) {
  * Fixes maintenance list 500 (hours_required), reopened breakdowns 500 (BR_Hist),
  * and dashboard expiry notifications 500 (tblAssetExpiryNotify).
  */
+/**
+ * tblProdServs.status must be integer 0 (inactive) / 1 (active).
+ * Older seeds used varchar 'active' / 'inactive'.
+ */
+async function ensureProdServStatusZeroOne(client) {
+  const exists = await client.query(`
+    SELECT EXISTS (
+      SELECT 1 FROM information_schema.tables
+      WHERE table_schema = 'public' AND table_name = 'tblProdServs'
+    ) AS exists
+  `);
+  if (!exists.rows[0]?.exists) {
+    return { status: 'missing' };
+  }
+
+  await client.query(`ALTER TABLE "tblProdServs" DROP CONSTRAINT IF EXISTS tblProdServs_status_check`);
+  await client.query(`ALTER TABLE "tblProdServs" DROP CONSTRAINT IF EXISTS tblprodservs_status_check`);
+
+  const col = await client.query(`
+    SELECT data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tblProdServs'
+      AND column_name = 'status'
+  `);
+  if (!col.rows[0]) {
+    return { status: 'no_status_column' };
+  }
+
+  const dataType = String(col.rows[0].data_type || '').toLowerCase();
+  try {
+    await client.query(`ALTER TABLE "tblProdServs" ALTER COLUMN status DROP DEFAULT`);
+  } catch (_) {
+    /* ignore */
+  }
+
+  if (dataType === 'character varying' || dataType === 'text' || dataType === 'character') {
+    await client.query(`
+      ALTER TABLE "tblProdServs"
+      ALTER COLUMN status TYPE integer
+      USING (
+        CASE
+          WHEN NULLIF(TRIM(status::text), '') IS NULL THEN 0
+          WHEN LOWER(TRIM(status::text)) IN ('1', 'active', 'true', 't', 'yes') THEN 1
+          WHEN LOWER(TRIM(status::text)) IN ('0', 'inactive', 'false', 'f', 'no', 'retired') THEN 0
+          WHEN TRIM(status::text) ~ '^[0-9]+$' THEN TRIM(status::text)::integer
+          ELSE 0
+        END
+      )
+    `);
+  } else if (dataType !== 'integer' && dataType !== 'smallint' && dataType !== 'bigint') {
+    await client.query(`
+      ALTER TABLE "tblProdServs"
+      ALTER COLUMN status TYPE integer
+      USING (
+        CASE
+          WHEN status::text ~ '^[0-9]+$' THEN status::text::integer
+          ELSE 0
+        END
+      )
+    `);
+  }
+
+  await client.query(`
+    UPDATE "tblProdServs"
+    SET status = CASE WHEN status = 1 THEN 1 ELSE 0 END
+  `);
+  await client.query(`ALTER TABLE "tblProdServs" ALTER COLUMN status SET DEFAULT 1`);
+  await client.query(`ALTER TABLE "tblProdServs" ALTER COLUMN status SET NOT NULL`);
+  await client.query(`
+    ALTER TABLE "tblProdServs"
+    ADD CONSTRAINT tblProdServs_status_check CHECK (status IN (0, 1))
+  `);
+
+  console.log('[TenantSchemaAlign] tblProdServs.status ensured as integer 0/1');
+  return { status: 'ensured_0_1', from: dataType };
+}
+
 async function ensureCriticalRuntimeSchema(client) {
   const results = [];
 
@@ -181,6 +259,35 @@ async function ensureCriticalRuntimeSchema(client) {
       results.push({ object: 'tblAssets.optional_cols', status: 'table_missing' });
     } else {
       console.warn('[TenantSchemaAlign] tblAssets nullable columns:', err.message);
+    }
+  }
+
+  // Generated + manufacturer serials can exceed legacy varchar(15)
+  try {
+    await client.query(`
+      ALTER TABLE "tblAssets"
+      ALTER COLUMN serial_number TYPE character varying(50)
+    `);
+    results.push({ object: 'tblAssets.serial_number', status: 'varchar(50)' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblAssets.serial_number', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblAssets.serial_number widen:', err.message);
+    }
+  }
+
+  try {
+    await client.query(`
+      ALTER TABLE "tblPrintSerialNoQueue"
+      ALTER COLUMN serial_no TYPE character varying(50)
+    `);
+    results.push({ object: 'tblPrintSerialNoQueue.serial_no', status: 'varchar(50)' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblPrintSerialNoQueue.serial_no', status: 'table_missing' });
+    } else {
+      console.warn('[TenantSchemaAlign] tblPrintSerialNoQueue.serial_no widen:', err.message);
     }
   }
 
@@ -414,6 +521,14 @@ async function ensureCriticalRuntimeSchema(client) {
     results.push({ object: 'tblAAT_Insp_Rec.ais_id', status: 'error', message: err.message });
   }
 
+  try {
+    const prodServStatus = await ensureProdServStatusZeroOne(client);
+    results.push({ object: 'tblProdServs.status', ...prodServStatus });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure tblProdServs.status 0/1:', err.message);
+    results.push({ object: 'tblProdServs.status', status: 'error', message: err.message });
+  }
+
   console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));
   return results;
 }
@@ -589,6 +704,7 @@ module.exports = {
   alignTenantDatabase,
   ensureJobMonitorTables,
   ensureAtInspCertStructure,
+  ensureProdServStatusZeroOne,
   ensureCriticalRuntimeSchema,
   ensureReferenceViews,
 };

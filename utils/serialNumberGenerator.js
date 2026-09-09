@@ -4,22 +4,26 @@ const { generateCustomId } = require('./idGenerator');
 const getPool = () => getDbFromContext();
 
 /**
- * Convert asset type ID to serial number format
- * AT001 -> 01, AT002 -> 02, AT003 -> 03, etc.
- * This follows the format: [AssetTypeCode (2 digits)] + [Year (2 digits)] + [Month (2 digits)] + [Running Number (5 digits)]
+ * Convert asset type ID to a 2-digit serial prefix.
+ * AT001 -> 01, BNT000394 -> 94, AST012 -> 12.
+ * Must stay 2 digits so generated serials fit varchar limits
+ * (prefix + YY + MM + 5-digit seq = 11 chars).
  */
 const convertAssetTypeToSerialFormat = (assetTypeId) => {
-  if (assetTypeId.startsWith('AT')) {
-    // Extract number from AT001, AT002, etc.
-    const numericPart = assetTypeId.replace('AT', '');
-    const assetTypeNumber = parseInt(numericPart);
-    
-    // Take the last two digits of the asset type number
-    return assetTypeNumber.toString().padStart(2, '0');
-  } else {
-    // Fallback for other formats
-    return assetTypeId.toString().padStart(2, '0');
+  const id = String(assetTypeId || '').trim();
+  const trailingDigits = id.match(/(\d+)\s*$/);
+  if (trailingDigits) {
+    const assetTypeNumber = parseInt(trailingDigits[1], 10);
+    if (!Number.isNaN(assetTypeNumber)) {
+      return String(assetTypeNumber % 100).padStart(2, '0');
+    }
   }
+  // Last resort: keep only digits anywhere in the id
+  const allDigits = id.replace(/\D/g, '');
+  if (allDigits) {
+    return String(parseInt(allDigits, 10) % 100).padStart(2, '0');
+  }
+  return '00';
 };
 
 /**

@@ -1,24 +1,21 @@
 const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
+const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
+const { DEFAULT_UOM, DEFAULT_INSP_RES_TYPE_DET } = require('../constants/setupDefaults');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
 
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL
-  );
-}
-
-/** Tables that must be seeded from hospitality on every new tenant. */
+/** Tables that must be seeded from schema_db reference on every new tenant. */
 const REQUIRED_MASTER_TABLES = [
   { table: 'tblTextMessagesDefault', pk: ['tmd_id'] },
   { table: 'tblTextMessagesOtherLangs', pk: ['tmol_id'] },
   { table: 'tblStatusCodes', pk: ['id'] },
   { table: 'tblProps', pk: ['prop_id'] },
+  { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
+  { table: 'tblInspResTypeDet', pk: ['irtd_id'], orgIdColumn: 'org_id' },
   { table: 'tblApps', pk: ['app_id'], orgIdColumn: 'org_id', missingOnly: true },
 ];
 
@@ -143,7 +140,7 @@ async function buildColumnAlignPlan(referenceClient, tenantClient, tableFilter =
   `);
   const plan = [];
 
-  for (const { table_name: table } of refTables.rows) {
+  for (const { table_name: table } of refTables) {
     if (tableFilter && !tableFilter.has(table)) continue;
     const refCols = await getColumnsDetailed(referenceClient, table);
     const tenCols = await getColumnsDetailed(tenantClient, table);
@@ -278,6 +275,11 @@ async function copyReferenceTableRows(referenceClient, tenantClient, tableName, 
   const errors = [];
 
   for (const row of refRows) {
+    if (tableName === 'tblApps' && isLegacyGroupMenuAppId(row.app_id)) {
+      skippedRows += 1;
+      continue;
+    }
+
     if (missingOnly && pkColumns.length > 0) {
       const key = pkColumns.map((col) => String(row[col])).join('|');
       if (existingKeys.has(key)) {
@@ -348,10 +350,82 @@ async function seedRequiredMasterData(tenantClient, options = {}) {
       );
     }
 
+    // Always upsert canonical UOMs (maintenance + spare-parts Piece) even if reference is stale.
+    const uomSeed = await ensureDefaultUom(tenantClient);
+    results.push(uomSeed);
+    console.log(`[TenantReferenceData] tblUom defaults: upserted ${uomSeed.upserted}`);
+
+    // Always upsert Qualitative / Quantitative inspection response types.
+    const inspResSeed = await ensureDefaultInspResTypeDet(tenantClient, options.orgId);
+    results.push(inspResSeed);
+    console.log(`[TenantReferenceData] tblInspResTypeDet defaults: upserted ${inspResSeed.upserted}`);
+
     return { results, referenceUrl: referenceUrl.replace(/:[^:@/]+@/, ':***@') };
   } finally {
     await referenceClient.end();
   }
+}
+
+/**
+ * Upsert DEFAULT_UOM into tblUom (Days/Weeks/... + Piece for spare parts).
+ */
+async function ensureDefaultUom(tenantClient) {
+  if (!(await tableExists(tenantClient, 'tblUom'))) {
+    return { table: 'tblUom', upserted: 0, skipped: true, reason: 'table_missing' };
+  }
+
+  let upserted = 0;
+  for (const uom of DEFAULT_UOM) {
+    const result = await tenantClient.query(
+      `
+      INSERT INTO "tblUom" (uom_id, uom)
+      VALUES ($1, $2)
+      ON CONFLICT (uom_id) DO UPDATE
+      SET uom = EXCLUDED.uom
+      `,
+      [uom.id, uom.name],
+    );
+    upserted += result.rowCount || 0;
+  }
+
+  return { table: 'tblUom', upserted, source: 'DEFAULT_UOM' };
+}
+
+/**
+ * Upsert Qualitative / Quantitative rows into tblInspResTypeDet for new tenants.
+ */
+async function ensureDefaultInspResTypeDet(tenantClient, orgId) {
+  if (!(await tableExists(tenantClient, 'tblInspResTypeDet'))) {
+    return { table: 'tblInspResTypeDet', upserted: 0, skipped: true, reason: 'table_missing' };
+  }
+
+  let resolvedOrgId = orgId ? String(orgId).trim() : null;
+  if (!resolvedOrgId) {
+    const orgRes = await tenantClient.query(`SELECT org_id FROM "tblOrgs" ORDER BY org_id LIMIT 1`);
+    resolvedOrgId = orgRes.rows[0]?.org_id || 'ORG001';
+  }
+
+  let upserted = 0;
+  for (const row of DEFAULT_INSP_RES_TYPE_DET) {
+    const result = await tenantClient.query(
+      `
+      INSERT INTO "tblInspResTypeDet" (
+        irtd_id, name, expected_value, option, org_id, created_by, created_on
+      ) VALUES ($1, $2, $3, $4, $5, 'SYSTEM', CURRENT_TIMESTAMP)
+      ON CONFLICT (irtd_id) DO UPDATE SET
+        name = EXCLUDED.name,
+        expected_value = COALESCE("tblInspResTypeDet".expected_value, EXCLUDED.expected_value),
+        option = COALESCE("tblInspResTypeDet".option, EXCLUDED.option),
+        org_id = COALESCE(NULLIF(TRIM("tblInspResTypeDet".org_id), ''), EXCLUDED.org_id),
+        changed_by = 'SYSTEM',
+        changed_on = CURRENT_TIMESTAMP
+      `,
+      [row.id, row.name, row.expected_value, row.option, resolvedOrgId],
+    );
+    upserted += result.rowCount || 0;
+  }
+
+  return { table: 'tblInspResTypeDet', upserted, source: 'DEFAULT_INSP_RES_TYPE_DET', orgId: resolvedOrgId };
 }
 
 /**
@@ -469,6 +543,8 @@ module.exports = {
   COLUMN_ALIGN_TABLES,
   copyReferenceTableRows,
   seedRequiredMasterData,
+  ensureDefaultUom,
+  ensureDefaultInspResTypeDet,
   alignTenantColumnsFromReference,
   seedTenantDatabase,
   writeSeedReport,

@@ -818,7 +818,7 @@ const CORE_TABLE_DDL = [
       asset_type_id character varying NOT NULL,
       brand character varying,
       model character varying,
-      status character varying NOT NULL,
+      status integer NOT NULL DEFAULT 1 CHECK (status IN (0, 1)),
       ps_type character varying NOT NULL,
       description character varying
     );
@@ -1492,7 +1492,13 @@ const seedProdServices = async (client, orgId, assetTypeIds, selectedIds = [], l
         item.assetTypeId,
         item.brand || null,
         item.model || null,
-        (item.status || "active").toLowerCase(),
+        (() => {
+          const raw = item.status;
+          if (raw === 0 || raw === '0') return 0;
+          const s = String(raw ?? '1').trim().toLowerCase();
+          if (['0', 'inactive', 'false', 'f', 'no', 'retired'].includes(s)) return 0;
+          return 1;
+        })(),
         (item.psType || "product").toLowerCase(),
         item.description || null,
       ]
