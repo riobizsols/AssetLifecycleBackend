@@ -806,11 +806,12 @@ main() {
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
     fe_head_after="$(cd "$FRONTEND_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
 
+    # Function calls cannot go inside [[ ]]; evaluate container_is_running outside.
     if [[ "$FORCE_FRONTEND_REBUILD" != "1" \
       && "$SKIP_UNCHANGED_FRONTEND" == "1" \
       && "$fe_head_before" == "$fe_head_after" \
-      && "$fe_head_after" != "unknown" \
-      && container_is_running "$FRONTEND_CONTAINER_NAME" ]]; then
+      && "$fe_head_after" != "unknown" ]] \
+      && container_is_running "$FRONTEND_CONTAINER_NAME"; then
       log "[frontend] Git HEAD unchanged (${fe_head_after:0:10}) and ${FRONTEND_CONTAINER_NAME} already running — skipping rebuild"
       log "[frontend] Tip: FORCE_FRONTEND_REBUILD=1 ./deploy-docker.sh --all to rebuild anyway"
       verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend" || true
