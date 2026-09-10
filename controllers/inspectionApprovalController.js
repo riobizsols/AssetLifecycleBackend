@@ -52,14 +52,25 @@ async function getPendingApprovals(req, res) {
       req,
       'inspection-approval',
       operationalCache.hashQuery(jobRoles),
-      () => inspectionApprovalModel.getPendingInspectionApprovals(
-        orgId,
-        jobRoles,
-        {
-          userBranchId: req.user?.branch_id || null,
-          isSystemAdmin: userHasSystemAdminRole(req.user),
-        }
-      ),
+      () => {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const seeAll =
+          userHasSystemAdminRole(req.user) ||
+          Boolean(acmCtx?.hasSuperAccess) ||
+          Boolean(acmCtx?.allBranches) ||
+          Boolean(req.user?.acmAllBranches) ||
+          Boolean(req.user?.hasSuperAccess);
+        return inspectionApprovalModel.getPendingInspectionApprovals(
+          orgId,
+          jobRoles,
+          {
+            userBranchId: seeAll ? null : (acmCtx?.branchId || req.user?.branch_id || null),
+            isSystemAdmin: seeAll,
+            allowedBranchIds: seeAll ? [] : (acmCtx?.branchIds || req.user?.acmBranchIds || []),
+          }
+        );
+      },
     );
     
     return res.json({ success: true, count: approvals.length, data: approvals });

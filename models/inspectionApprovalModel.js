@@ -47,7 +47,7 @@ const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
  * @param {string|string[]} jobRoles - Job role ID or array of IDs (e.g., 'JR001' or ['JR001', 'JR002'])
  * @returns {Array} List of pending approvals
  */
-async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false } = {}) {
+async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false, allowedBranchIds = null } = {}) {
   // Ensure jobRoles is an array
   const roles = Array.isArray(jobRoles) ? jobRoles : [jobRoles];
   
@@ -60,13 +60,19 @@ async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = n
   const values = seeAllBranches && includeAllRoles ? [orgId] : includeAllRoles ? [orgId] : [orgId, roles];
 
   if (!seeAllBranches) {
-    const branchParam = values.length + 1;
+    const scopedBranchIds = Array.isArray(allowedBranchIds)
+      ? [...new Set(allowedBranchIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
     if (userBranchId) {
+      const branchParam = values.length + 1;
       branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${branchParam})`;
       values.push(userBranchId);
-    } else {
-      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
+    } else if (scopedBranchIds.length) {
+      const branchParam = values.length + 1;
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = ANY($${branchParam}::varchar[]))`;
+      values.push(scopedBranchIds);
     }
+    // Org view with ACM all-branches should pass isSystemAdmin/seeAllBranches; never force null-only branches.
   }
 
   const query = `

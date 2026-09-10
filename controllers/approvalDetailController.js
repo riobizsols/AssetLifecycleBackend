@@ -797,15 +797,29 @@ const getMaintenanceApprovalsController = async (req, res) => {
     const hasSuperAccess =
       userHasSystemAdminRole(req.user) ||
       Boolean(acmCtx?.hasSuperAccess) ||
+      Boolean(acmCtx?.allBranches) ||
       Boolean(req.user?.hasSuperAccess) ||
       Boolean(req.user?.acmAllBranches);
+    const allowedBranchIds = hasSuperAccess
+      ? []
+      : (Array.isArray(acmCtx?.branchIds) && acmCtx.branchIds.length
+          ? acmCtx.branchIds
+          : Array.isArray(req.user?.acmBranchIds)
+            ? req.user.acmBranchIds
+            : []);
 
     // Log API called
     await logApiCall({
       operation: 'Get Maintenance Approvals',
       method: req.method,
       url: req.originalUrl,
-      requestData: { emp_int_id: empIntId, org_id: orgId, branch_code: userBranchCode },
+      requestData: {
+        emp_int_id: empIntId,
+        org_id: orgId,
+        branch_code: userBranchCode,
+        hasSuperAccess,
+        allowedBranchIds,
+      },
       userId
     });
 
@@ -829,7 +843,7 @@ const getMaintenanceApprovalsController = async (req, res) => {
     const { data: formattedData } = await operationalCache.cachedList(
       req,
       'maintenance-approval',
-      empIntId || 'none',
+      `${empIntId || 'none'}:super:${hasSuperAccess ? 1 : 0}:br:${userBranchId || 'all'}`,
       async () => {
         const maintenanceApprovals = await getMaintenanceApprovals(
           empIntId,
@@ -837,7 +851,8 @@ const getMaintenanceApprovalsController = async (req, res) => {
           userBranchCode,
           hasSuperAccess,
           req.user?.job_role_id || null,
-          userBranchId
+          userBranchId,
+          allowedBranchIds,
         );
 
         return maintenanceApprovals.map(record => ({

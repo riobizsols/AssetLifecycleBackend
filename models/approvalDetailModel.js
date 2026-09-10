@@ -1360,7 +1360,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 
 // Supports super access users who can view all branches
 // tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null, userBranchId = null) => {
+const getMaintenanceApprovals = async (
+  empIntId,
+  orgId = 'ORG001',
+  userBranchCode,
+  hasSuperAccess = false,
+  tokenJobRoleId = null,
+  userBranchId = null,
+  allowedBranchIds = null,
+) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
@@ -1447,7 +1455,15 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            AND a.org_id = $1
      `;
      
-     // Branch: strict equality excluded rows when wfh.branch_code was NULL (org-wide workflow)
+     // Branch scope:
+     // - hasSuperAccess / ACM branch=* → all branches in org
+     // - explicit branch selected → that branch
+     // - org view with specific ACM branch grants → any of those branches
+     // Never fall back to "only null branch_id" (that emptied org view for normal assets).
+     const scopedBranchIds = Array.isArray(allowedBranchIds)
+       ? [...new Set(allowedBranchIds.map((id) => String(id || '').trim()).filter(Boolean))]
+       : [];
+
      if (!hasSuperAccess && userBranchCode) {
        query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
@@ -1458,8 +1474,10 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
        query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${paramIndex})`;
        params.push(userBranchId);
        paramIndex++;
-     } else if (!hasSuperAccess && !userBranchId) {
-       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
+     } else if (!hasSuperAccess && scopedBranchIds.length) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = ANY($${paramIndex}::varchar[]))`;
+       params.push(scopedBranchIds);
+       paramIndex++;
      }
      
      // Only apply role filter if user doesn't have super access
