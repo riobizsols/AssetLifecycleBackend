@@ -3310,7 +3310,10 @@ const getLotVendors = async (org_id, branch_id = null, hasSuperAccess = false) =
 };
 
 /**
- * Categories for lot entry: vendor mappings when present, otherwise all active categories.
+ * Categories for lot entry.
+ * Requires a vendor selection in the UI, but returns all active org categories
+ * so newly created master categories (e.g. PCB) are not hidden until someone
+ * adds a vendor spare-supply mapping in tblVSPMap.
  */
 const getLotCategoriesByVendor = async (
   org_id,
@@ -3318,22 +3321,24 @@ const getLotCategoriesByVendor = async (
   branch_id = null,
   hasSuperAccess = false
 ) => {
-  const dbPool = getDb();
   if (!vendor_id) {
     return [];
   }
 
+  // All active categories for the org (branch-scoped when applicable).
+  const allCategories = await getCategories(
+    org_id,
+    branch_id,
+    hasSuperAccess,
+    true,
+    false
+  );
+
+  // Prefer mapped rows first when present, then remaining master categories.
+  const dbPool = getDb();
   const params = [org_id, vendor_id];
-  let query = `
-    SELECT DISTINCT
-      c.spc_id,
-      c.text,
-      c.uom,
-      c.minimum_stock,
-      c.re_order_level,
-      c.int_status,
-      c.org_id,
-      c.branch_id
+  let mappedQuery = `
+    SELECT DISTINCT c.spc_id
     FROM "tblVSPMap" v
     INNER JOIN "tblSPCategory" c
       ON c.spc_id = v.spc_id
@@ -3343,16 +3348,30 @@ const getLotCategoriesByVendor = async (
       AND COALESCE(v.int_status, 1) = 1
       AND c.int_status = 1
   `;
-
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
-    query += ` AND (v.branch_id IS NULL OR v.branch_id = $${params.length})`;
-    query += ` AND (c.branch_id IS NULL OR c.branch_id = $${params.length})`;
+    mappedQuery += ` AND (v.branch_id IS NULL OR v.branch_id = $${params.length})`;
   }
 
-  query += ` ORDER BY c.text ASC`;
-  const result = await dbPool.query(query, params);
-  return result.rows;
+  let mappedIds = new Set();
+  try {
+    const mapped = await dbPool.query(mappedQuery, params);
+    mappedIds = new Set(mapped.rows.map((r) => r.spc_id).filter(Boolean));
+  } catch (error) {
+    console.warn('[spareParts] lot category vendor map lookup failed:', error.message);
+  }
+
+  if (!mappedIds.size) {
+    return allCategories;
+  }
+
+  const mapped = [];
+  const rest = [];
+  for (const row of allCategories) {
+    if (mappedIds.has(row.spc_id)) mapped.push(row);
+    else rest.push(row);
+  }
+  return [...mapped, ...rest];
 };
 
 /**
