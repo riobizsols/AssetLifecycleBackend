@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDb } = require('../utils/dbContext');
 const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
@@ -731,10 +732,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     );
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who approved
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    const wfamhisId = await generateCustomId('wfamhis', 3);
     
     await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
@@ -772,10 +770,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       console.log(`Updated next user ${nextUserStep.user_id} status to AP`);
       
       // Insert history record for next user status change
-      const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-      const nextHistoryIdResult = await getDb().query(nextHistoryIdQuery);
-      const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
-      const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
+      const nextWfamhisId = await generateCustomId('wfamhis', 3);
       
       await getDb().query(
         `INSERT INTO "tblWFAssetMaintHist" (
@@ -891,10 +886,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     console.log(`Updated workflow step ${currentUserStep.wfamsd_id} status to UR, rejected by user ${userId} (${empIntId}) - user_id remains NULL, tracked in history`);
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who rejected
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    const wfamhisId = await generateCustomId('wfamhis', 3);
     
     await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
@@ -2073,21 +2065,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        }
        
        // Get the next ams_id
-       const maxIdQuery = `
-         SELECT MAX(
-           CASE 
-             WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-             WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-             ELSE 0
-           END
-         ) as max_num 
-         FROM "tblAssetMaintSch"
-       `;
-       const maxIdResult = await getDb().query(maxIdQuery);
-       const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-       const amsId = `ams${nextId.toString().padStart(3, '0')}`;
-       
-       console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
+       const amsId = await generateCustomId('ams', 3);
        
        // Create ONE maintenance record using the representative asset_id from workflow header
        // Notes field is left empty (null) for group maintenance
@@ -2519,21 +2497,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      
       // Get the next auto-increment ID for ams_id
       // Get the latest ams_id and extract the numeric part
-      const maxIdQuery = `
-        SELECT MAX(
-          CASE 
-            WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-            WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-            ELSE 0
-          END
-        ) as max_num 
-        FROM "tblAssetMaintSch"
-      `;
-      const maxIdResult = await getDb().query(maxIdQuery);
-      const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-      const amsId = `ams${nextId.toString().padStart(3, '0')}`;
-      
-      console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
+      const amsId = await generateCustomId('ams', 3);
      
            // Insert maintenance record
       const insertQuery = `

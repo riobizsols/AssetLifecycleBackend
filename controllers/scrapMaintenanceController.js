@@ -4,7 +4,7 @@ const assetsDashboardCache = require('../utils/assetsDashboardCache');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const {
   getScrapAssetBranchId,
-  getApprovalBranchAccessForUser,
+  getApprovalBranchAccessForRequest,
   attachBranchAccess,
   crossBranchForbiddenBody,
 } = require('../utils/approvalBranchAccess');
@@ -171,7 +171,7 @@ const getScrapApprovalDetail = async (req, res) => {
     const scrapBranchId =
       detail.assets?.find((a) => a.branch_id)?.branch_id ||
       (await getScrapAssetBranchId(id));
-    const branchAccess = await getApprovalBranchAccessForUser(req.user, scrapBranchId);
+    const branchAccess = await getApprovalBranchAccessForRequest(req, scrapBranchId);
 
     return res.status(200).json({ success: true, ...attachBranchAccess(detail, branchAccess) });
   } catch (error) {
@@ -188,9 +188,7 @@ const approveScrap = async (req, res) => {
     const { id } = req.params;
     const { note = null } = req.body || {};
 
-    const scrapActAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getScrapAssetBranchId(id)
+    const scrapActAccess = await getApprovalBranchAccessForRequest(req, await getScrapAssetBranchId(id)
     );
     if (!scrapActAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());
@@ -223,9 +221,7 @@ const rejectScrap = async (req, res) => {
     const { id } = req.params;
     const { reason = null } = req.body || {};
 
-    const scrapRejectAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getScrapAssetBranchId(id)
+    const scrapRejectAccess = await getApprovalBranchAccessForRequest(req, await getScrapAssetBranchId(id)
     );
     if (!scrapRejectAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());

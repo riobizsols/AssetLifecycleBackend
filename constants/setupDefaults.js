@@ -518,6 +518,33 @@ const DEFAULT_INSP_RES_TYPE_DET = [
   { id: "IRTD_QL_MULTI_006", name: "Qualitative", expected_value: null, option: "Not Applicable" },
 ];
 
+/**
+ * Attachment Document Type dropdown defaults (tblDocTypeObjects).
+ * Applied on every tenant create even when schema_db reference rows are missing.
+ * object_type values must match FE `/doc-type-objects/object-type/...` paths.
+ */
+const DEFAULT_DOC_TYPE_OBJECTS = [
+  { id: "DTO001", object_type: "*", doc_type: "OT", doc_type_text: "others" },
+  { id: "DTO002", object_type: "vendor", doc_type: "SL", doc_type_text: "SLA" },
+  { id: "DTO003", object_type: "vendor", doc_type: "CT", doc_type_text: "Contract" },
+  { id: "DTO004", object_type: "maintenance", doc_type: "BP", doc_type_text: "Before Photos" },
+  { id: "DTO005", object_type: "maintenance", doc_type: "AP", doc_type_text: "After Photos" },
+  { id: "DTO006", object_type: "maintenance", doc_type: "WO", doc_type_text: "Work Order" },
+  { id: "DTO007", object_type: "asset", doc_type: "PO", doc_type_text: "Purchase Order" },
+  { id: "DTO008", object_type: "asset", doc_type: "IN", doc_type_text: "Insurance" },
+  { id: "DTO009", object_type: "asset", doc_type: "INV", doc_type_text: "Invoice" },
+  { id: "DTO010", object_type: "asset", doc_type: "WA", doc_type_text: "Warranty" },
+  { id: "DTO011", object_type: "asset group", doc_type: "PO", doc_type_text: "Purchase Order" },
+  { id: "DTO012", object_type: "asset group", doc_type: "IN", doc_type_text: "Insurance" },
+  { id: "DTO013", object_type: "asset group", doc_type: "INV", doc_type_text: "Invoice" },
+  { id: "DTO014", object_type: "asset group", doc_type: "WA", doc_type_text: "Warranty" },
+  { id: "DTO015", object_type: "scrap sales", doc_type: "Out", doc_type_text: "Outpass" },
+  { id: "DTO016", object_type: "scrap sales", doc_type: "CC", doc_type_text: "Clearance Certificate" },
+  { id: "DTO017", object_type: "asset type", doc_type: "CC", doc_type_text: "Clearance Certificate" },
+  { id: "DTO018", object_type: "asset", doc_type: "TM", doc_type_text: "Technical Manual" },
+  { id: "DTO019", object_type: "inspection certificate", doc_type: "IC", doc_type_text: "Inspection Certificate" },
+];
+
 const DEFAULT_MAINT_STATUS = [
   { id: "MS001", name: "Pending" },
   { id: "MS002", name: "In-Progress" },
@@ -664,6 +691,7 @@ module.exports = {
   DEFAULT_MAINT_TYPES,
   DEFAULT_UOM,
   DEFAULT_INSP_RES_TYPE_DET,
+  DEFAULT_DOC_TYPE_OBJECTS,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,

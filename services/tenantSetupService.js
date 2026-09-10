@@ -1257,6 +1257,29 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.warn(`[TenantSetup] DEFAULT_INSP_RES_TYPE_DET ensure skipped: ${inspErr.message}`);
     }
 
+    // 15. Copy document type objects (Attachments Document Type dropdowns)
+    console.log(`[TenantSetup] Copying document type objects from reference database...`);
+    const docTypeResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblDocTypeObjects',
+      orgId,
+      { orgIdColumn: 'org_id' },
+    );
+    if (docTypeResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${docTypeResult.copied} document type rows`);
+    } else if (!docTypeResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No document types copied from reference (will apply DEFAULT_DOC_TYPE_OBJECTS next)`);
+    }
+
+    try {
+      const { ensureDefaultDocTypeObjects } = require('./tenantReferenceDataService');
+      const docTypeSeed = await ensureDefaultDocTypeObjects(tenantClient, orgId);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_DOC_TYPE_OBJECTS (${docTypeSeed.upserted} upserted)`);
+    } catch (docTypeErr) {
+      console.warn(`[TenantSetup] DEFAULT_DOC_TYPE_OBJECTS ensure skipped: ${docTypeErr.message}`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {

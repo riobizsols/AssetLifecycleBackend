@@ -169,15 +169,8 @@ class PropertiesModel {
   static async addPropertyValue(propId, value, orgId) {
     try {
       const dbPool = getDb();
-      // First, get the next aplv_id by finding the highest existing aplv_id for this prop_id
-      const maxIdQuery = `
-        SELECT COALESCE(MAX(CAST(SUBSTRING(aplv_id FROM 4) AS INTEGER)), 0) as max_id
-        FROM "tblAssetPropListValues"
-        WHERE prop_id = $1 AND org_id = $2
-      `;
-      const maxIdResult = await dbPool.query(maxIdQuery, [propId, orgId]);
-      const nextId = (maxIdResult.rows[0].max_id || 0) + 1;
-      const aplvId = `APL${nextId.toString().padStart(6, '0')}`;
+      // Global sequence — aplv_id PK is not org-scoped
+      const aplvId = await generateCustomId('aplv', 3);
 
       const query = `
         INSERT INTO "tblAssetPropListValues" (

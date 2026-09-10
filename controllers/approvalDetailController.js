@@ -22,7 +22,7 @@ const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch')
 const { userHasSystemAdminRole } = require('../utils/systemAdmin');
 const {
     getMaintenanceAssetBranchId,
-    getApprovalBranchAccessForUser,
+    getApprovalBranchAccessForRequest,
     attachBranchAccess,
     crossBranchForbiddenBody,
 } = require('../utils/approvalBranchAccess');
@@ -203,7 +203,7 @@ const getApprovalDetail = async (req, res) => {
 
     const maintBranchId = await getMaintenanceAssetBranchId(assetId);
     const branchAccess = applyWorkflowActAccess(
-      await getApprovalBranchAccessForUser(req.user, maintBranchId),
+      await getApprovalBranchAccessForRequest(req, maintBranchId),
       formattedDetail.headerStatus,
     );
 
@@ -332,9 +332,7 @@ const approveMaintenanceAction = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
-    const approveBranchAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getMaintenanceAssetBranchId(assetId)
+    const approveBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(assetId)
     );
     if (!approveBranchAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());
@@ -586,9 +584,7 @@ const rejectMaintenanceAction = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
-    const rejectBranchAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getMaintenanceAssetBranchId(assetId)
+    const rejectBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(assetId)
     );
     if (!rejectBranchAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());
@@ -1315,7 +1311,7 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
 
     const wfamshBranchId = await getMaintenanceAssetBranchId(wfamshId);
     const wfamshBranchAccess = applyWorkflowActAccess(
-      await getApprovalBranchAccessForUser(req.user, wfamshBranchId),
+      await getApprovalBranchAccessForRequest(req, wfamshBranchId),
       formattedDetail.headerStatus,
     );
 
@@ -1361,9 +1357,7 @@ const updateWorkflowHeaderAction = async (req, res) => {
       return res.status(400).json({ success: false, message: 'At least one field (vendorId, maintenanceDate or technicianId) must be provided' });
     }
 
-    const headerBranchAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getMaintenanceAssetBranchId(wfamshId)
+    const headerBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(wfamshId)
     );
     if (!headerBranchAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());

@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 const CronService = require('../services/cronService');
 const { backfillMissingWorkflowSequences } = require('../cron/wfAtSeqBackfillCron');
@@ -109,16 +110,7 @@ const getJobById = async (jobId) => {
   return result.rows[0] || null;
 };
 
-const nextHistoryId = async () => {
-  const dbPool = getDb();
-  const result = await dbPool.query(
-    `SELECT MAX(CAST(SUBSTRING(jh_id FROM '[0-9]+$') AS INTEGER)) AS max_num
-     FROM "tblJobHistory"
-     WHERE jh_id ~ '^[A-Z_]*[0-9]+$'`,
-  );
-  const next = (result.rows[0]?.max_num || 0) + 1;
-  return `JH_${String(next).padStart(4, '0')}`;
-};
+const nextHistoryId = async () => generateCustomId('job_history', 3);
 
 const addHistory = async ({ job_id, executed_by, duration_ms, is_error, output_json }) => {
   const dbPool = getDb();

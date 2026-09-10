@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
 
@@ -150,28 +151,9 @@ const deleteNavigationByJobRole = async (job_role_id, org_id) => {
 const insertNavigationForJobRole = async (job_role_id, org_id, navigationItems, created_by) => {
     const dbPool = getDb();
 
-    // Generate next job_role_nav_id
-    const getNextIdQuery = `
-        SELECT job_role_nav_id 
-        FROM "tblJobRoleNav" 
-        ORDER BY CAST(SUBSTRING(job_role_nav_id FROM 'JRN([0-9]+)') AS INTEGER) DESC 
-        LIMIT 1
-    `;
-    
-    const idResult = await dbPool.query(getNextIdQuery);
-    let nextIdNum = 1;
-    
-    if (idResult.rows.length > 0) {
-        const lastId = idResult.rows[0].job_role_nav_id;
-        const match = lastId.match(/JRN(\d+)/);
-        if (match) {
-            nextIdNum = parseInt(match[1]) + 1;
-        }
-    }
-
-    // Insert each navigation item
+    // Insert each navigation item with globally unique JRN ids
     const insertPromises = navigationItems.map(async (item, index) => {
-        const job_role_nav_id = `JRN${String(nextIdNum + index).padStart(3, '0')}`;
+        const job_role_nav_id = await generateCustomId('job_role_nav', 3);
         
         return dbPool.query(
             `INSERT INTO "tblJobRoleNav" 

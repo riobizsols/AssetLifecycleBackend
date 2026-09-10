@@ -116,7 +116,7 @@ async function checkRequiredMaster(ten) {
 async function compareMasterCounts(ref, ten) {
   const tables = [
     'tblApps', 'tblTextMessagesDefault', 'tblTextMessagesOtherLangs',
-    'tblStatusCodes', 'tblProps', 'tblAssetPropListValues', 'tblUom', 'tblEvents', 'tblMaintStatus', 'tblMaintTypes',
+    'tblStatusCodes', 'tblProps', 'tblAssetPropListValues', 'tblUom', 'tblDocTypeObjects', 'tblEvents', 'tblMaintStatus', 'tblMaintTypes',
     'tblJobs', 'tblAuditLogConfig', 'tblTechnicalLogConfig', 'tblTableFilterColumns',
     'tblOrgSettings', 'tblIDSequences',
   ];

@@ -8,42 +8,10 @@ const getDb = () => getDbFromContext();
 
 
 // Generate SSH ID (Scrap Sales Header ID)
-const generateSshId = async () => {
-    const query = `
-        SELECT COALESCE(MAX(CAST(SUBSTRING(ssh_id FROM 4) AS INTEGER)), 0) + 1 as next_seq
-        FROM "tblScrapSales_H"
-        WHERE ssh_id LIKE 'SSH%'
-    `;
-    
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query);
-    const nextSeq = result.rows[0].next_seq;
-    const sshId = `SSH${nextSeq.toString().padStart(4, '0')}`;
-    
-    console.log(`🔢 Generated SSH ID: ${sshId}`);
-    return sshId;
-};
+const generateSshId = async () => generateCustomId('scrap_sales_h', 4);
 
 // Generate SSD ID (Scrap Sales Detail ID)
-const generateSsdId = async () => {
-    const query = `
-        SELECT COALESCE(MAX(CAST(SUBSTRING(ssd_id FROM 4) AS INTEGER)), 0) + 1 as next_seq
-        FROM "tblScrapSales_D"
-        WHERE ssd_id LIKE 'SSD%'
-    `;
-    
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query);
-    const nextSeq = result.rows[0].next_seq;
-    const ssdId = `SSD${nextSeq.toString().padStart(4, '0')}`;
-    
-    console.log(`🔢 Generated SSD ID: ${ssdId}`);
-    return ssdId;
-};
+const generateSsdId = async () => generateCustomId('scrap_sales_d', 4);
 
 // Create scrap sales header
 const createScrapSalesHeader = async (client, headerData) => {

@@ -1,4 +1,5 @@
 const { getDb } = require('./dbContext');
+const { generateCustomId } = require('./idGenerator');
 
 const INHOUSE_VENDOR_NAME = 'In-House Maintenance';
 const INHOUSE_VENDOR_SETTING_KEY = 'inhouse_vendor_id';
@@ -25,13 +26,7 @@ async function getInhouseVendorId(orgId = 'ORG001') {
   );
   if (byName.rows.length) return byName.rows[0].vendor_id;
 
-  const maxRes = await db.query(`
-    SELECT MAX(CAST(SUBSTRING(vendor_id FROM 2) AS INTEGER)) as max_num
-    FROM "tblVendors"
-    WHERE vendor_id ~ '^V[0-9]+$'
-  `);
-  const nextNum = (maxRes.rows[0]?.max_num || 0) + 1;
-  const vendorId = `V${String(nextNum).padStart(3, '0')}`;
+  const vendorId = await generateCustomId('vendor', 3);
 
   await db.query(
     `INSERT INTO "tblVendors" (

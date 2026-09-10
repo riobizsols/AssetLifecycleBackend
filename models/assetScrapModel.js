@@ -1,4 +1,5 @@
 const db = require('../config/db');
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 
 // Helper function to get database connection (tenant pool or default)
@@ -71,20 +72,7 @@ const getScrapAssetById = async (asd_id) => {
 
 
 // Generate ASD ID
-const generateAsdId = async () => {
-  const query = `
-    SELECT COALESCE(MAX(CAST(SUBSTRING(asd_id FROM 4) AS INTEGER)), 0) + 1 as next_seq
-    FROM "tblAssetScrapDet"
-    WHERE asd_id LIKE 'ASD%'
-  `;
-  
-  const dbPool = getDb();
-
-  
-  const result = await dbPool.query(query);
-  const nextSeq = result.rows[0].next_seq;
-  return `ASD${nextSeq.toString().padStart(4, '0')}`;
-};
+const generateAsdId = async () => generateCustomId('asset_scrap_det', 4);
 
 // Add new scrap asset
 const addScrapAsset = async (scrapData) => {

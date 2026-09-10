@@ -51,28 +51,7 @@ const createDepartment = async (req, res) => {
         const parent_id = null;
         const changed_by = null;
 
-        // Generate next dept_id from numeric max for this org (then bump sequence)
-        const dbPool = req.db || require("../config/db");
-
-        const maxResult = await dbPool.query(
-            `SELECT COALESCE(MAX(
-                CAST(SUBSTRING(dept_id FROM 4) AS INTEGER)
-             ), 0) AS max_num
-             FROM "tblDepartments"
-             WHERE org_id = $1
-               AND dept_id ~ '^DPT[0-9]+$'`,
-            [org_id]
-        );
-        const maxNum = Number(maxResult.rows[0]?.max_num || 0);
-        const newDeptId = `DPT${String(maxNum + 1).padStart(3, "0")}`;
-
-        await dbPool.query(
-            `INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-             VALUES ('department', 'DPT', $1)
-             ON CONFLICT (table_key) DO UPDATE
-             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)`,
-            [maxNum + 1]
-        );
+        const newDeptId = await generateCustomId("department", 3);
 
         // 🔹 Create department (branch lives in tblBR_DEPT, not tblDepartments)
         const newDept = await DepartmentModel.createDepartment({
@@ -82,7 +61,8 @@ const createDepartment = async (req, res) => {
             text,
             parent_id,
             created_by,
-            changed_by
+            changed_by,
+            branch_id,
         });
 
         const mapping = await DepartmentModel.mapDepartmentToBranch({
@@ -96,39 +76,21 @@ const createDepartment = async (req, res) => {
         operationalCache.invalidateOrgCaches(org_id).catch(() => {});
     } catch (err) {
         console.error("Error creating department:", err);
+        if (err.code === '23505') {
+            return res.status(409).json({
+                error: 'Department ID conflict',
+                message: 'Could not allocate a unique department ID. Please try again.',
+            });
+        }
         res.status(500).json({ error: 'Failed to create department' });
     }
 };
 
 const getNextDepartmentId = async (req, res) => {
     try {
-        const org_id = req.user.org_id;
-        const dbPool = req.db || require("../config/db");
-
-        // Numeric max — lexicographic ORDER BY dept_id can mis-order once IDs exceed DPT999
-        const result = await dbPool.query(
-            `SELECT COALESCE(MAX(
-                CAST(SUBSTRING(dept_id FROM 4) AS INTEGER)
-             ), 0) AS max_num
-             FROM "tblDepartments"
-             WHERE org_id = $1
-               AND dept_id ~ '^DPT[0-9]+$'`,
-            [org_id]
-        );
-
-        const nextNum = Number(result.rows[0]?.max_num || 0) + 1;
-        const nextDeptId = `DPT${String(nextNum).padStart(3, "0")}`;
-
-        // Keep sequence table aligned so generateCustomId stays in sync
-        await dbPool.query(
-            `INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
-             VALUES ('department', 'DPT', $1)
-             ON CONFLICT (table_key) DO UPDATE
-             SET last_number = GREATEST("tblIDSequences".last_number, EXCLUDED.last_number)`,
-            [result.rows[0]?.max_num || 0]
-        );
-
-        console.log('Next department ID:', nextDeptId);
+        // Peek without consuming: global max + sequence
+        const { peekNextId } = require("../utils/idGenerator");
+        const nextDeptId = await peekNextId("DPT", '"tblDepartments"', "dept_id", 3, "department");
         res.status(200).json({ nextDeptId });
     } catch (err) {
         console.error('Error getting next dept_id:', err);

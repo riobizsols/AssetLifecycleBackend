@@ -1,3 +1,4 @@
+const { generateCustomId, generateCustomIdForClient } = require('../utils/idGenerator');
 const db = require("../config/db");
 const { getDbFromContext } = require("../utils/dbContext");
 const brHistModel = require("./assetMaintSchBrHistModel");
@@ -336,56 +337,14 @@ const getWorkflowJobRoles = async (wf_steps_id) => {
 
 // 8. Generate next WFAMSH_ID
 const getNextWFAMSHId = async (dbClient = null) => {
-  const query = `
-        SELECT "wfamsh_id" 
-        FROM "tblWFAssetMaintSch_H" 
-        ORDER BY CAST(SUBSTRING("wfamsh_id" FROM '[0-9]+$') AS INTEGER) DESC 
-        LIMIT 1
-    `;
-
-  const runner = dbClient || getDb();
-  const result = await runner.query(query);
-
-  if (result.rows.length === 0) {
-    return "WFAMSH_01";
-  }
-
-  const lastId = result.rows[0].wfamsh_id;
-  const match = lastId.match(/[0-9]+/g);
-  if (match) {
-    const lastPart = match[match.length - 1];
-    const nextNum = parseInt(lastPart) + 1;
-    return `WFAMSH_${String(nextNum).padStart(2, "0")}`;
-  }
-
-  return "WFAMSH_01";
+  if (dbClient) return generateCustomIdForClient(dbClient, 'wfamsh', 3);
+  return generateCustomId('wfamsh', 3);
 };
 
 // 9. Generate next WFAMSD_ID
 const getNextWFAMSDId = async (dbClient = null) => {
-  const query = `
-        SELECT wfamsd_id 
-        FROM "tblWFAssetMaintSch_D" 
-        ORDER BY CAST(SUBSTRING(wfamsd_id FROM '[0-9]+$') AS INTEGER) DESC 
-        LIMIT 1
-    `;
-
-  const runner = dbClient || getDb();
-  const result = await runner.query(query);
-
-  if (result.rows.length === 0) {
-    return "WFAMSD_01";
-  }
-
-  const lastId = result.rows[0].wfamsd_id;
-  const match = lastId.match(/[0-9]+/g);
-  if (match) {
-    const lastPart = match[match.length - 1];
-    const nextNum = parseInt(lastPart) + 1;
-    return `WFAMSD_${String(nextNum).padStart(2, "0")}`;
-  }
-
-  return "WFAMSD_01";
+  if (dbClient) return generateCustomIdForClient(dbClient, 'wfamsd', 3);
+  return generateCustomId('wfamsd', 3);
 };
 
 // 10. Insert workflow maintenance schedule header
@@ -1051,24 +1010,7 @@ const checkAssetTypeWorkflow = async (asset_type_id) => {
 };
 
 // Generate next AMS_ID for direct maintenance schedules
-const getNextAMSId = async () => {
-  const query = `
-        SELECT MAX(
-            CASE 
-                WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-                WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-                ELSE 0
-            END
-        ) as max_num 
-        FROM "tblAssetMaintSch"
-    `;
-
-  const dbPool = getDb();
-
-  const result = await dbPool.query(query);
-  const nextId = (result.rows[0].max_num || 0) + 1;
-  return `ams${nextId.toString().padStart(3, "0")}`;
-};
+const getNextAMSId = async () => generateCustomId('ams', 3);
 
 // Generate work order ID for maintenance schedule
 const generateWorkOrderId = (
@@ -1213,19 +1155,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
 
     // No workflow sequences: insert directly into tblAssetMaintSch (frequency from tblATMaintFreq)
     if (!hasWorkflow) {
-      const amsQuery = `
-                SELECT MAX(
-                    CASE 
-                        WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-                        WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-                        ELSE 0
-                    END
-                ) as max_num 
-                FROM "tblAssetMaintSch"
-            `;
-      const amsResult = await client.query(amsQuery);
-      const nextId = (amsResult.rows[0].max_num || 0) + 1;
-      const amsId = `ams${nextId.toString().padStart(3, "0")}`;
+      const amsId = await generateCustomIdForClient(client, 'ams', 3);
 
       const freqQuery = `
                 SELECT at_main_freq_id, maint_type_id
@@ -1343,15 +1273,15 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const checkQuery = `SELECT "wfamsh_id" FROM "tblWFAssetMaintSch_H" ORDER BY "wfamsh_id" DESC LIMIT 1`;
       const checkResult = await client.query(checkQuery);
       if (checkResult.rows.length === 0) {
-        wfamshId = "WFAMSH_01";
+        wfamshId = await getNextWFAMSHId(client);
       } else {
         const lastId = checkResult.rows[0].wfamsh_id;
         const match = lastId.match(/\d+/);
         if (match) {
           const nextNum = parseInt(match[0]) + 1;
-          wfamshId = `WFAMSH_${String(nextNum).padStart(2, "0")}`;
+          wfamshId = await getNextWFAMSHId(client);
         } else {
-          wfamshId = "WFAMSH_01";
+          wfamshId = await getNextWFAMSHId(client);
         }
       }
     } else {
@@ -1359,26 +1289,14 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const match = lastId.match(/\d+/);
       if (match) {
         const nextNum = parseInt(match[0]) + 1;
-        wfamshId = `WFAMSH_${String(nextNum).padStart(2, "0")}`;
+        wfamshId = await getNextWFAMSHId(client);
       } else {
-        wfamshId = "WFAMSH_01";
+        wfamshId = await getNextWFAMSHId(client);
       }
     }
 
     // Generate AMS ID
-    const amsQuery = `
-            SELECT MAX(
-                CASE 
-                    WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-                    WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-                    ELSE 0
-                END
-            ) as max_num 
-            FROM "tblAssetMaintSch"
-        `;
-    const amsResult = await client.query(amsQuery);
-    const nextId = (amsResult.rows[0].max_num || 0) + 1;
-    const amsId = `ams${nextId.toString().padStart(3, "0")}`;
+    const amsId = await generateCustomIdForClient(client, 'ams', 3);
 
     // Get maintenance type (default to MT002 - Scheduled Maintenance)
     const maintTypeId = "MT002";
@@ -1411,9 +1329,9 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         const match = wfamshId.match(/\d+/);
         if (match) {
           const nextNum = parseInt(match[0]) + 1;
-          wfamshId = `WFAMSH_${String(nextNum).padStart(2, "0")}`;
+          wfamshId = await getNextWFAMSHId(client);
         } else {
-          wfamshId = "WFAMSH_01";
+          wfamshId = await getNextWFAMSHId(client);
         }
         attempts++;
       }
@@ -1517,15 +1435,15 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         const wfamsdResult = await client.query(wfamsdQuery);
         let wfamsdId;
         if (wfamsdResult.rows.length === 0) {
-          wfamsdId = "WFAMSD_01";
+          wfamsdId = await getNextWFAMSDId(client);
         } else {
           const lastId = wfamsdResult.rows[0].wfamsd_id;
           const match = lastId.match(/\d+/);
           if (match) {
             const nextNum = parseInt(match[0]) + 1;
-            wfamsdId = `WFAMSD_${String(nextNum).padStart(2, "0")}`;
+            wfamsdId = await getNextWFAMSDId(client);
           } else {
-            wfamsdId = "WFAMSD_01";
+            wfamsdId = await getNextWFAMSDId(client);
           }
         }
 

@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
@@ -463,12 +464,8 @@ async function getNextWorkflowStep(orgId, wfaiishId, currentSequence) {
  */
 async function createWorkflowHistory(historyData) {
   try {
-    // Generate new ID based on max existing ID (similar to Asset Maintenance History)
-    // Extract number from WFAIHIS_XX
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfaiishis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAATInspHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfaihisId = `WFAIHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    // Global sequence — wfaiishis_id PK is not org-scoped
+    const wfaihisId = await generateCustomId('wfaiishis', 3);
     
     const query = `
       INSERT INTO "tblWFAATInspHist" (
@@ -621,10 +618,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     }
     
     // 2. Generate new AIS ID (e.g. AIS_001)
-    const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
-    const idResult = await getDb().query(idQuery);
-    const nextNum = (idResult.rows[0].max_num || 0) + 1;
-    const aisId = `AIS_${nextNum.toString().padStart(3, '0')}`;
+    const aisId = await generateCustomId('ais', 3);
     
     // 3. Insert into tblAAT_Insp_Sch
     const insertQuery = `

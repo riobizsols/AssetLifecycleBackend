@@ -8,9 +8,10 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const { Client } = require('pg');
-const { copyReferenceTableRows } = require('../services/tenantReferenceDataService');
+const { copyReferenceTableRows, ensureDefaultDocTypeObjects } = require('../services/tenantReferenceDataService');
 const { ensureBranchDeptMappingProvisioning } = require('../utils/ensureBranchDeptMappingProvisioning');
 const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
 
 function hospitalityUrl() {
   if (process.env.HOSPITALITY_DATABASE_URL) return process.env.HOSPITALITY_DATABASE_URL;
@@ -24,6 +25,7 @@ const HOSPITALITY_SOURCED_TABLES = new Set([
   'tblApps',
   'tblProps',
   'tblAssetPropListValues',
+  'tblDocTypeObjects',
 ]);
 
 /** Same tables tenant provisioning reads from schema_db. */
@@ -43,18 +45,20 @@ const PROVISIONING_TABLES = [
   { table: 'tblProps', pk: ['prop_id'] },
   { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
+  { table: 'tblDocTypeObjects', pk: ['dto_id'] },
+  { table: 'tblInspResTypeDet', pk: ['irtd_id'] },
 ];
 
 async function main() {
   const dryRun = process.argv.includes('--dry-run');
   const sourceUrl = process.env.GENERIC_URL;
-  const targetUrl = process.env.TENANT_SCHEMA_REFERENCE_URL;
+  const targetUrl = process.env.TENANT_SCHEMA_REFERENCE_URL || getReferenceUrl();
 
   if (!sourceUrl) {
     throw new Error('GENERIC_URL must be set (assetLifecycle source database)');
   }
   if (!targetUrl) {
-    throw new Error('TENANT_SCHEMA_REFERENCE_URL must be set (schema_db target database)');
+    throw new Error('TENANT_SCHEMA_REFERENCE_URL or TENANT_DATABASE_URL must resolve to schema_db');
   }
 
   const sourceClient = new Client({ connectionString: sourceUrl, ssl: false });
@@ -146,6 +150,13 @@ async function main() {
       `apps=${branchDept.apps}, nav=${branchDept.nav}, legacyRemoved=${branchDept.legacyNavRemoved}`,
   );
   await applyNavigationGroupModel(targetClient, 'SchemaDbSync');
+
+  if (!dryRun) {
+    const docTypeSeed = await ensureDefaultDocTypeObjects(targetClient, templateOrgId);
+    console.log(
+      `  tblDocTypeObjects defaults: upserted ${docTypeSeed.upserted} (org ${docTypeSeed.orgId})`,
+    );
+  }
 
   await sourceClient.end();
   await targetClient.end();
