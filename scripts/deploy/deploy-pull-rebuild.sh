@@ -60,6 +60,14 @@ PGBOUNCER_COMPOSE_FILE="${PGBOUNCER_COMPOSE_FILE:-docker-compose.pgbouncer.yml}"
 ENSURE_PGBOUNCER="${ENSURE_PGBOUNCER:-}"
 HEALTH_WAIT_SECS="${HEALTH_WAIT_SECS:-90}"
 STASH_MESSAGE_PREFIX="${STASH_MESSAGE_PREFIX:-auto-stash before deploy}"
+# Skip frontend docker rebuild when git HEAD is unchanged after pull (huge time saver).
+# Force with FORCE_FRONTEND_REBUILD=1
+SKIP_UNCHANGED_FRONTEND="${SKIP_UNCHANGED_FRONTEND:-1}"
+FORCE_FRONTEND_REBUILD="${FORCE_FRONTEND_REBUILD:-0}"
+
+# Speed up image builds (cache mounts in Dockerfiles need BuildKit).
+export DOCKER_BUILDKIT="${DOCKER_BUILDKIT:-1}"
+export COMPOSE_DOCKER_CLI_BUILD="${COMPOSE_DOCKER_CLI_BUILD:-1}"
 
 log() { printf '%s\n' "$*"; }
 
@@ -793,11 +801,28 @@ main() {
 
   if [[ "$BACKEND_ONLY" != "1" ]]; then
     [[ -d "$FRONTEND_DIR" ]] || die "Frontend directory missing: $FRONTEND_DIR"
+    local fe_head_before fe_head_after
+    fe_head_before="$(cd "$FRONTEND_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
     git_pull_with_stash "$FRONTEND_DIR" "frontend"
-    compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
-    remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
-    compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
-    verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    fe_head_after="$(cd "$FRONTEND_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
+
+    if [[ "$FORCE_FRONTEND_REBUILD" != "1" \
+      && "$SKIP_UNCHANGED_FRONTEND" == "1" \
+      && "$fe_head_before" == "$fe_head_after" \
+      && "$fe_head_after" != "unknown" \
+      && container_is_running "$FRONTEND_CONTAINER_NAME" ]]; then
+      log "[frontend] Git HEAD unchanged (${fe_head_after:0:10}) and ${FRONTEND_CONTAINER_NAME} already running — skipping rebuild"
+      log "[frontend] Tip: FORCE_FRONTEND_REBUILD=1 ./deploy-docker.sh --all to rebuild anyway"
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend" || true
+    else
+      if [[ "$fe_head_before" != "$fe_head_after" ]]; then
+        log "[frontend] Code changed ${fe_head_before:0:10} → ${fe_head_after:0:10} — rebuilding"
+      fi
+      compose_v1_remove_container_if_exists "$compose_cmd" "$FRONTEND_CONTAINER_NAME"
+      remove_named_container_if_exists "$FRONTEND_CONTAINER_NAME"
+      compose_up "$FRONTEND_DIR" "frontend" "alm-frontend"
+      verify_container_health "$FRONTEND_CONTAINER_NAME" "$FRONTEND_HOST_PORT" "frontend"
+    fi
   fi
 
   log "Deploy complete. Public URL: ensure nginx proxies /api → 127.0.0.1:${BACKEND_HOST_PORT}"
