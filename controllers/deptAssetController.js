@@ -104,16 +104,19 @@ const getAllAssetTypes = async (req, res) => {
             return res.status(400).json({ error: "Organization context missing" });
         }
 
-        // Employee assignment should scope to the selected department when provided
+        // When dept_id is provided (e.g. employee assignment), scope to types already
+        // mapped for that department. For Department–Asset Mapping picker (no dept_id),
+        // return the full org catalog — filtering by existing tblDeptAssetTypes would be
+        // circular and empty out the dropdown at branch/dept ACM levels.
         const listContext = dept_id
             ? { ...context, deptId: dept_id, deptIds: [dept_id], branchId: null, branchIds: [] }
-            : context;
+            : {};
 
         const cacheKey = assignmentCache.scopeKey(
             req,
             'assignment',
             'asset-types',
-            'all',
+            dept_id ? 'mapped' : 'org-catalog',
             assignment_type || 'any',
             dept_id || 'no-dept',
         );
