@@ -786,10 +786,12 @@ const getRequiredSpareCategories = async (req, res) => {
     const rows = await model.getChecklistRequiredSpareCategories(ams_id, org_id);
     return res.status(200).json({ success: true, data: rows || [] });
   } catch (error) {
+    // Non-fatal for the request screen — empty list is preferred over hard failure.
     console.error('Error fetching required spare categories:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Failed to fetch required spare categories',
+    return res.status(200).json({
+      success: true,
+      data: [],
+      warning: 'Failed to fetch required spare categories',
     });
   }
 };

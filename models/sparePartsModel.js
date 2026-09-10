@@ -209,8 +209,24 @@ const getSparePartMaintenanceList = async (
   return result.rows;
 };
 
+const ensureMaintChecklistSpareColumns = async (dbPool = getDb()) => {
+  await dbPool.query(`
+    ALTER TABLE "tblATMaintCheckList"
+    ADD COLUMN IF NOT EXISTS required_spare_part boolean NOT NULL DEFAULT false
+  `);
+  await dbPool.query(`
+    ALTER TABLE "tblATMaintCheckList"
+    ADD COLUMN IF NOT EXISTS spcatm_id character varying(20)
+  `);
+};
+
+/**
+ * Checklist lines marked required_spare_part with a mapped spcatm_id.
+ * Note: required_spare_part is boolean — never compare to integer 1 (PG error).
+ */
 const getChecklistRequiredSpareCategories = async (ams_id, org_id) => {
   const dbPool = getDb();
+  await ensureMaintChecklistSpareColumns(dbPool);
   const result = await dbPool.query(
     `
       SELECT DISTINCT
@@ -234,11 +250,7 @@ const getChecklistRequiredSpareCategories = async (ams_id, org_id) => {
        AND c.int_status = 1
       WHERE ams.ams_id = $1
         AND ams.org_id = $2
-        AND (
-          cl.required_spare_part IS TRUE
-          OR cl.required_spare_part = 1
-          OR LOWER(COALESCE(cl.required_spare_part::text, '')) IN ('true', 't', '1', 'yes')
-        )
+        AND COALESCE(cl.required_spare_part, false) IS TRUE
         AND NULLIF(BTRIM(cl.spcatm_id), '') IS NOT NULL
       ORDER BY c.text ASC
     `,
@@ -529,23 +541,8 @@ const createSpareIssueRequests = async ({
         throw err;
       }
 
-      const stock = await client.query(
-        `
-          SELECT COUNT(*)::int AS available_qty
-          FROM "tblSPIndDet"
-          WHERE org_id = $1
-            AND spc_id = $2
-            AND COALESCE(is_used, 0) = 0
-        `,
-        [org_id, spc_id]
-      );
-      const available = stock.rows[0]?.available_qty || 0;
-      if (available < qty) {
-        const err = new Error(`Insufficient stock. Available: ${available}, Requested: ${qty}`);
-        err.statusCode = 400;
-        throw err;
-      }
-
+      // Validate mapping before stock so unmapped categories get a clear error
+      // instead of a misleading "Insufficient stock. Available: 0".
       const mapping = await client.query(
         `
           SELECT 1
@@ -562,6 +559,23 @@ const createSpareIssueRequests = async ({
       );
       if (!mapping.rows.length) {
         const err = new Error(`Category ${spc_id} is not mapped to this asset type`);
+        err.statusCode = 400;
+        throw err;
+      }
+
+      const stock = await client.query(
+        `
+          SELECT COUNT(*)::int AS available_qty
+          FROM "tblSPIndDet"
+          WHERE org_id = $1
+            AND spc_id = $2
+            AND COALESCE(is_used, 0) = 0
+        `,
+        [org_id, spc_id]
+      );
+      const available = stock.rows[0]?.available_qty || 0;
+      if (available < qty) {
+        const err = new Error(`Insufficient stock. Available: ${available}, Requested: ${qty}`);
         err.statusCode = 400;
         throw err;
       }
