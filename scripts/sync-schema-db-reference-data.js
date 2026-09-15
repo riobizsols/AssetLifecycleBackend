@@ -8,7 +8,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 const { Client } = require('pg');
-const { copyReferenceTableRows, ensureDefaultDocTypeObjects } = require('../services/tenantReferenceDataService');
+const { copyReferenceTableRows, ensureDefaultDocTypeObjects, ensureDefaultSlaDesc } = require('../services/tenantReferenceDataService');
 const { ensureBranchDeptMappingProvisioning } = require('../utils/ensureBranchDeptMappingProvisioning');
 const { applyNavigationGroupModel } = require('../utils/navigationGroupUtils');
 const { getReferenceUrl } = require('../utils/tenantSchemaReference');
@@ -156,6 +156,8 @@ async function main() {
     console.log(
       `  tblDocTypeObjects defaults: upserted ${docTypeSeed.upserted} (org ${docTypeSeed.orgId})`,
     );
+    const slaSeed = await ensureDefaultSlaDesc(targetClient);
+    console.log(`  tblsla_desc defaults: upserted ${slaSeed.upserted}`);
   }
 
   await sourceClient.end();

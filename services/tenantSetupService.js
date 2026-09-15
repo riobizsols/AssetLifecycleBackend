@@ -1280,6 +1280,32 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.warn(`[TenantSetup] DEFAULT_DOC_TYPE_OBJECTS ensure skipped: ${docTypeErr.message}`);
     }
 
+    // 16. Vendor SLA master labels (Master Data → Vendors SLA dropdowns)
+    console.log(`[TenantSetup] Copying SLA descriptions from reference database...`);
+    try {
+      const slaCopy = await copyTableDataDynamically(
+        referenceClient,
+        tenantClient,
+        'tblsla_desc',
+        orgId,
+      );
+      if (slaCopy.copied > 0) {
+        console.log(`[TenantSetup] ✅ Copied ${slaCopy.copied} SLA description rows`);
+      } else if (!slaCopy.skipped) {
+        console.log(`[TenantSetup] ⚠️ No SLA descriptions copied from reference (will apply DEFAULT_SLA_DESC next)`);
+      }
+    } catch (slaCopyErr) {
+      console.warn(`[TenantSetup] SLA description copy skipped: ${slaCopyErr.message}`);
+    }
+
+    try {
+      const { ensureDefaultSlaDesc } = require('./tenantReferenceDataService');
+      const slaSeed = await ensureDefaultSlaDesc(tenantClient);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_SLA_DESC (${slaSeed.upserted} upserted)`);
+    } catch (slaErr) {
+      console.warn(`[TenantSetup] DEFAULT_SLA_DESC ensure skipped: ${slaErr.message}`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {

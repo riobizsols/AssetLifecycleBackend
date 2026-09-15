@@ -7,6 +7,7 @@ const {
   DEFAULT_UOM,
   DEFAULT_INSP_RES_TYPE_DET,
   DEFAULT_DOC_TYPE_OBJECTS,
+  DEFAULT_SLA_DESC,
 } = require('../constants/setupDefaults');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
@@ -370,6 +371,11 @@ async function seedRequiredMasterData(tenantClient, options = {}) {
     results.push(docTypeSeed);
     console.log(`[TenantReferenceData] tblDocTypeObjects defaults: upserted ${docTypeSeed.upserted}`);
 
+    // Always upsert vendor SLA master labels (Vendor screen dropdowns).
+    const slaSeed = await ensureDefaultSlaDesc(tenantClient);
+    results.push(slaSeed);
+    console.log(`[TenantReferenceData] tblsla_desc defaults: upserted ${slaSeed.upserted}`);
+
     return { results, referenceUrl: referenceUrl.replace(/:[^:@/]+@/, ':***@') };
   } finally {
     await referenceClient.end();
@@ -518,6 +524,52 @@ async function ensureDefaultDocTypeObjects(tenantClient, orgId) {
 }
 
 /**
+ * Upsert default vendor SLA labels into tblsla_desc for new tenants.
+ * Creates the table if missing (legacy DBs). Does not overwrite custom descriptions
+ * for an existing sla_id — only inserts missing IDs.
+ */
+async function ensureDefaultSlaDesc(tenantClient) {
+  const exists = await tableExists(tenantClient, 'tblsla_desc');
+  if (!exists) {
+    await tenantClient.query(`
+      CREATE TABLE IF NOT EXISTS tblsla_desc (
+        sla_id character varying(50) PRIMARY KEY,
+        description text
+      )
+    `);
+  }
+
+  let upserted = 0;
+  for (const row of DEFAULT_SLA_DESC) {
+    const result = await tenantClient.query(
+      `
+      INSERT INTO tblsla_desc (sla_id, description)
+      VALUES ($1, $2)
+      ON CONFLICT (sla_id) DO NOTHING
+      `,
+      [row.id, row.description],
+    );
+    upserted += result.rowCount || 0;
+  }
+
+  // If a default row exists but description is empty, fill from defaults.
+  for (const row of DEFAULT_SLA_DESC) {
+    const filled = await tenantClient.query(
+      `
+      UPDATE tblsla_desc
+      SET description = $2
+      WHERE sla_id = $1
+        AND (description IS NULL OR BTRIM(description) = '')
+      `,
+      [row.id, row.description],
+    );
+    upserted += filled.rowCount || 0;
+  }
+
+  return { table: 'tblsla_desc', upserted, source: 'DEFAULT_SLA_DESC' };
+}
+
+/**
  * Align tenant column definitions to match hospitality reference.
  */
 async function alignTenantColumnsFromReference(tenantClient, options = {}) {
@@ -635,6 +687,7 @@ module.exports = {
   ensureDefaultUom,
   ensureDefaultInspResTypeDet,
   ensureDefaultDocTypeObjects,
+  ensureDefaultSlaDesc,
   alignTenantColumnsFromReference,
   seedTenantDatabase,
   writeSeedReport,

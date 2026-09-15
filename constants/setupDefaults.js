@@ -681,6 +681,17 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN037", jobRoleId: "JR001", parentId: null, appId: "GROUPASSET", label: "Group Asset", sequence: 25, accessLevel: "A", isGroup: false },
 ];
 
+/**
+ * Vendor SLA master labels (tblsla_desc).
+ * Used on Master Data → Vendors SLA dropdowns. Seeded for every new tenant.
+ */
+const DEFAULT_SLA_DESC = [
+  { id: 'SLA-1', description: 'First response' },
+  { id: 'SLA-2', description: 'Site Visit' },
+  { id: 'SLA-3', description: 'Resolution' },
+  { id: 'SLA-4', description: 'Invoice Clearance and so on' },
+];
+
 module.exports = {
   DEFAULT_ASSET_TYPES,
   DEFAULT_PROD_SERVICES,
@@ -692,6 +703,7 @@ module.exports = {
   DEFAULT_UOM,
   DEFAULT_INSP_RES_TYPE_DET,
   DEFAULT_DOC_TYPE_OBJECTS,
+  DEFAULT_SLA_DESC,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,
