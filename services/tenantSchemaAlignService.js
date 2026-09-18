@@ -15,6 +15,8 @@ const PROTECTED_RUNTIME_TABLES = [
   'tblBR_DEPT',
   'tblJobs',
   'tblJobHistory',
+  'tblAuditType',
+  'tblAuditATMapping',
 ];
 
 function tenantUrl(dbName) {
@@ -575,6 +577,22 @@ async function ensureCriticalRuntimeSchema(client) {
   } catch (err) {
     console.warn('[TenantSchemaAlign] Could not ensure tblAAT_Insp_Rec.ais_id:', err.message);
     results.push({ object: 'tblAAT_Insp_Rec.ais_id', status: 'error', message: err.message });
+  }
+
+  try {
+    const { ensureAuditTablesSchema } = require('../utils/ensureAuditTablesSchema');
+    const audit = await ensureAuditTablesSchema(client);
+    results.push({
+      object: 'tblAuditType+tblAuditATMapping',
+      status: audit.created ? 'ensured' : 'skipped',
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure audit tables:', err.message);
+    results.push({
+      object: 'tblAuditType+tblAuditATMapping',
+      status: 'error',
+      message: err.message,
+    });
   }
 
   try {

@@ -55,8 +55,8 @@ const defaultPrefixes = {
     'sp_brand': 'SPB',
     'sp_model': 'SPBM',
     // Workflow / maintenance / inspection / scrap sales
-    'ams': 'ams',
-    'asset_maint_sch': 'ams',
+    'ams': 'AMS',
+    'asset_maint_sch': 'AMS',
     'wfamsh': 'WFAMSH_',
     'wfamsd': 'WFAMSD_',
     'wfamhis': 'WFAMHIS_',
@@ -70,6 +70,11 @@ const defaultPrefixes = {
     'job_history': 'JH_',
     'tblAssetBRDet': 'ABR',
     'asset_br_det': 'ABR',
+    // Audit type master + asset-type mapping
+    'audit_type': 'AUDTP',
+    'audtp': 'AUDTP',
+    'audit_at_mapping': 'AUDATM',
+    'audatm': 'AUDATM',
 };
 
 /**

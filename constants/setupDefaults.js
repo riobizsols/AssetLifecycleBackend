@@ -561,6 +561,8 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "employee", prefix: "EMP", lastNumber: 0 },
   { tableKey: "emp_int_id", prefix: "EMP_INT_", lastNumber: 0 },
   { tableKey: "amsbr", prefix: "AMSBR", lastNumber: 0 },
+  { tableKey: "ams", prefix: "AMS", lastNumber: 0 },
+  { tableKey: "asset_maint_sch", prefix: "AMS", lastNumber: 0 },
   { tableKey: "prod_serv", prefix: "PS", lastNumber: 0 },
   { tableKey: "jobrole", prefix: "JR", lastNumber: 0 },
   { tableKey: "jobrolenav", prefix: "JRN", lastNumber: 0 },
@@ -585,7 +587,11 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "spare_issue", prefix: "SI", lastNumber: 0 },
   { tableKey: "sp_issue", prefix: "SPI", lastNumber: 0 },
   { tableKey: "spare_store", prefix: "SS", lastNumber: 0 },
-  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 }
+  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 },
+  { tableKey: "audit_type", prefix: "AUDTP", lastNumber: 0 },
+  { tableKey: "audtp", prefix: "AUDTP", lastNumber: 0 },
+  { tableKey: "audit_at_mapping", prefix: "AUDATM", lastNumber: 0 },
+  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -638,6 +644,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN058", jobRoleId: "JR001", parentId: "JRN012", appId: "SLAREPORT", label: "SLA Reports", sequence: 7, accessLevel: "A", isGroup: false },
   { id: "JRN015", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCEHISTORY", label: "Maintenance History of Asset", sequence: 8, accessLevel: "A", isGroup: false },
   { id: "JRN059", jobRoleId: "JR001", parentId: "JRN012", appId: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report", sequence: 9, accessLevel: "A", isGroup: false },
+  { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },

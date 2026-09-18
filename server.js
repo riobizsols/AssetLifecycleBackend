@@ -74,6 +74,7 @@ const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const zohoAccessRequestRoutes = require("./routes/zohoAccessRequestRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
+const auditReportRoutes = require("./routes/auditReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
@@ -264,6 +265,7 @@ app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
+app.use("/api/audit-report", auditReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);
