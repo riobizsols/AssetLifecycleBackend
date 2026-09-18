@@ -1,11 +1,32 @@
 /**
  * Audit Reports — aggregate asset evidence for a chosen audit type + period.
  * Uses tblAuditType / tblAuditATMapping + existing maint / BR / docs / asset tables.
+ * Excludes rows tagged by scripts/seed-audit-report-demo-data.js ([Audit Demo] / audit-demo).
  */
 const { getDbFromContext } = require('../utils/dbContext');
 const { ensureAuditTablesSchema } = require('../utils/ensureAuditTablesSchema');
 
 const getDb = () => getDbFromContext();
+
+/** Seed markers from seed-audit-report-demo-data.js — never show these as audit evidence. */
+const DEMO_NOTE = '[Audit Demo]';
+const DEMO_DOC_PATH = '%audit-demo%';
+const DEMO_TECH = 'Demo Technician';
+const DEMO_ASSET_INV = /^INV-AUD-\d+$/i;
+const DEMO_MAINT_INV = /^MINV-/i;
+const DEMO_MAINT_PO = /^MPO-/i;
+
+function isDemoAssetInvoice(invoiceNo) {
+  return DEMO_ASSET_INV.test(String(invoiceNo || '').trim());
+}
+
+function isDemoMaintInvoice(invoiceNo) {
+  return DEMO_MAINT_INV.test(String(invoiceNo || '').trim());
+}
+
+function isDemoMaintPo(poNumber) {
+  return DEMO_MAINT_PO.test(String(poNumber || '').trim());
+}
 
 function resolvePeriodBounds(period, dateFrom, dateTo) {
   const now = new Date();
@@ -244,6 +265,8 @@ async function getAuditReportView(opts) {
           AND ams.asset_id = ANY($2::varchar[])
           AND ams.act_maint_st_date IS NOT NULL
           AND (ams.act_maint_st_date)::timestamp::date BETWEEN $3::date AND $4::date
+          AND COALESCE(ams.notes, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
+          AND COALESCE(ams.technician_name, '') <> ${`'${DEMO_TECH}'`}
         ORDER BY ams.act_maint_st_date DESC NULLS LAST, ams.ams_id
       `,
       histParams,
@@ -273,6 +296,7 @@ async function getAuditReportView(opts) {
         WHERE brd.org_id = $1
           AND brd.asset_id = ANY($2::varchar[])
           AND brd.created_on::date BETWEEN $3::date AND $4::date
+          AND COALESCE(brd.description, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
         ORDER BY brd.created_on DESC, brd.abr_id
       `,
       histParams,
@@ -299,6 +323,7 @@ async function getAuditReportView(opts) {
         WHERE ad.org_id = $1
           AND ad.asset_id = ANY($2::varchar[])
           AND COALESCE(ad.is_archived, false) = false
+          AND COALESCE(ad.doc_path, '') NOT ILIKE ${`'${DEMO_DOC_PATH}'`}
           AND (
             UPPER(COALESCE(dto.doc_type, '')) IN ('IC', 'WA', 'IN', 'CC', 'CT')
             OR LOWER(COALESCE(ad.doc_type_name, '')) ~ '(cert|warranty|insurance|inspection)'
@@ -313,9 +338,9 @@ async function getAuditReportView(opts) {
   if (include.invoices) {
     const invoiceRows = [];
 
-    // Asset-level invoice numbers
+    // Asset-level invoice numbers from tblAssets (skip seed INV-AUD-* placeholders)
     for (const a of assets) {
-      if (a.invoice_no) {
+      if (a.invoice_no && !isDemoAssetInvoice(a.invoice_no)) {
         invoiceRows.push({
           source: 'asset',
           asset_id: a.asset_id,
@@ -330,7 +355,7 @@ async function getAuditReportView(opts) {
       }
     }
 
-    // Maintenance invoices in period
+    // Maintenance invoices in period (tblAssetMaintSch.invoice)
     const { rows: maintInv } = await db.query(
       `
         SELECT
@@ -352,14 +377,19 @@ async function getAuditReportView(opts) {
           AND ams.invoice IS NOT NULL AND BTRIM(ams.invoice) <> ''
           AND ams.act_maint_st_date IS NOT NULL
           AND (ams.act_maint_st_date)::timestamp::date BETWEEN $3::date AND $4::date
+          AND COALESCE(ams.notes, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
+          AND COALESCE(ams.technician_name, '') <> ${`'${DEMO_TECH}'`}
+          AND ams.invoice !~* '^MINV-'
       `,
       histParams,
     );
     for (const r of maintInv) {
-      invoiceRows.push({ source: 'maintenance', ...r });
+      if (!isDemoMaintInvoice(r.invoice_no)) {
+        invoiceRows.push({ source: 'maintenance', ...r });
+      }
     }
 
-    // Invoice documents
+    // Invoice documents from tblAssetDocs (real uploads only)
     const { rows: invDocs } = await db.query(
       `
         SELECT
@@ -380,6 +410,7 @@ async function getAuditReportView(opts) {
         WHERE ad.org_id = $1
           AND ad.asset_id = ANY($2::varchar[])
           AND COALESCE(ad.is_archived, false) = false
+          AND COALESCE(ad.doc_path, '') NOT ILIKE ${`'${DEMO_DOC_PATH}'`}
           AND (
             UPPER(COALESCE(dto.doc_type, '')) = 'INV'
             OR LOWER(COALESCE(ad.doc_type_name, '')) LIKE '%invoice%'
@@ -417,11 +448,16 @@ async function getAuditReportView(opts) {
           AND ams.po_number IS NOT NULL AND BTRIM(ams.po_number) <> ''
           AND ams.act_maint_st_date IS NOT NULL
           AND (ams.act_maint_st_date)::timestamp::date BETWEEN $3::date AND $4::date
+          AND COALESCE(ams.notes, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
+          AND COALESCE(ams.technician_name, '') <> ${`'${DEMO_TECH}'`}
+          AND ams.po_number !~* '^MPO-'
       `,
       histParams,
     );
     for (const r of maintPo) {
-      poRows.push({ source: 'maintenance', ...r });
+      if (!isDemoMaintPo(r.po_number)) {
+        poRows.push({ source: 'maintenance', ...r });
+      }
     }
 
     const { rows: poDocs } = await db.query(
@@ -443,6 +479,7 @@ async function getAuditReportView(opts) {
         WHERE ad.org_id = $1
           AND ad.asset_id = ANY($2::varchar[])
           AND COALESCE(ad.is_archived, false) = false
+          AND COALESCE(ad.doc_path, '') NOT ILIKE ${`'${DEMO_DOC_PATH}'`}
           AND (
             UPPER(COALESCE(dto.doc_type, '')) = 'PO'
             OR LOWER(COALESCE(ad.doc_type_name, '')) LIKE '%purchase%order%'
