@@ -7,6 +7,24 @@ const brHistModel = require("./assetMaintSchBrHistModel");
 const getDb = () => getDbFromContext();
 const { ensureAssetTypeRequirementColumns } = require("./assetTypeModel");
 
+const ensureActualDowntimeColumn = async (dbPool = getDb()) => {
+  await dbPool.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    ADD COLUMN IF NOT EXISTS actual_downtime DECIMAL(10,2)
+  `);
+};
+
+const parseActualDowntime = (raw) => {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Actual downtime must be a valid number of hours (0 or greater)');
+  }
+  return value;
+};
+
 /** Normalize parsed text to tblAssetBRDet.abr_id (e.g. ABR001). */
 function normalizeAbrId(raw) {
   if (raw == null || raw === "") return null;
@@ -661,6 +679,7 @@ const getMaintenanceScheduleById = async (
   params.push(...scope.params);
 
   const dbPool = getDb();
+  await ensureActualDowntimeColumn(dbPool);
   const result = await dbPool.query(query, params);
 
   // If this is a group maintenance, fetch all assets in the group
@@ -726,6 +745,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     cost,
     hours_spent,
     maint_notes,
+    actual_downtime,
     changed_by,
     changed_on,
   } = updateData;
@@ -741,6 +761,8 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
   // Automatically set end date to current date when updating
   const currentDate = new Date().toISOString().split("T")[0];
   const dbPool = getDb();
+  await ensureActualDowntimeColumn(dbPool);
+  const actualDowntimeHours = parseActualDowntime(actual_downtime);
 
   // If technician fields are empty but emp_int_id exists, fill name/email/phone from employee
   let resolvedName = technician_name;
@@ -786,9 +808,10 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
             cost = COALESCE($10, cost),
             hours_spent = COALESCE($11, hours_spent),
             maint_notes = COALESCE($12, maint_notes),
-            changed_by = $13,
-            changed_on = $14
-        WHERE ams_id = $1 AND org_id = $15
+            actual_downtime = $13,
+            changed_by = $14,
+            changed_on = $15
+        WHERE ams_id = $1 AND org_id = $16
         RETURNING *
     `;
 
@@ -805,6 +828,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
     cost,
     hours_spent,
     maint_notes,
+    actualDowntimeHours,
     changed_by,
     changed_on,
     orgId,

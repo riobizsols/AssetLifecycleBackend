@@ -359,6 +359,20 @@ async function ensureCriticalRuntimeSchema(client) {
 
   try {
     await client.query(`
+      ALTER TABLE "tblATMaintFreq"
+      ADD COLUMN IF NOT EXISTS downtime DECIMAL(10,2)
+    `);
+    results.push({ object: 'tblATMaintFreq.downtime', status: 'ensured' });
+  } catch (err) {
+    if (err.code === '42P01') {
+      results.push({ object: 'tblATMaintFreq.downtime', status: 'table_missing' });
+    } else {
+      throw err;
+    }
+  }
+
+  try {
+    await client.query(`
       ALTER TABLE "tblAssetMaintSch"
       ADD COLUMN IF NOT EXISTS "hours_spent" DECIMAL(10,2)
     `);
@@ -366,7 +380,11 @@ async function ensureCriticalRuntimeSchema(client) {
       ALTER TABLE "tblAssetMaintSch"
       ADD COLUMN IF NOT EXISTS "maint_notes" TEXT
     `);
-    results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes', status: 'ensured' });
+    await client.query(`
+      ALTER TABLE "tblAssetMaintSch"
+      ADD COLUMN IF NOT EXISTS actual_downtime DECIMAL(10,2)
+    `);
+    results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes/actual_downtime', status: 'ensured' });
   } catch (err) {
     if (err.code !== '42P01') throw err;
     results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes', status: 'table_missing' });
