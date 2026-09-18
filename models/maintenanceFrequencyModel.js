@@ -15,6 +15,24 @@ const ensureMaintChecklistSpareColumns = async (dbPool = getDb()) => {
   `);
 };
 
+const ensureDowntimeColumn = async (dbPool = getDb()) => {
+  await dbPool.query(`
+    ALTER TABLE "tblATMaintFreq"
+    ADD COLUMN IF NOT EXISTS downtime DECIMAL(10,2)
+  `);
+};
+
+const parseDowntimeHours = (raw) => {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Downtime must be a valid number of hours (0 or greater)');
+  }
+  return value;
+};
+
 /** Stored values for on-demand rows. */
 const ON_DEMAND_FREQUENCY = null;
 const ON_DEMAND_UOM = null;
@@ -51,6 +69,7 @@ class MaintenanceFrequencyModel {
   static async getAllMaintenanceFrequencies(orgId) {
     try {
       const dbPool = getDb();
+      await ensureDowntimeColumn(dbPool);
       const query = `
         SELECT 
           mf.at_main_freq_id,
@@ -64,6 +83,7 @@ class MaintenanceFrequencyModel {
           mf.org_id,
           mf.is_recurring,
           mf.emp_int_id,
+          mf.downtime,
           at.text as asset_type_name,
           at.maint_lead_type,
           mt.text as maint_type_name
@@ -87,6 +107,7 @@ class MaintenanceFrequencyModel {
   static async getMaintenanceFrequenciesByAssetType(assetTypeId, orgId) {
     try {
       const dbPool = getDb();
+      await ensureDowntimeColumn(dbPool);
       const query = `
         SELECT 
           mf.at_main_freq_id,
@@ -100,7 +121,8 @@ class MaintenanceFrequencyModel {
           mf.int_status,
           mf.org_id,
           mf.is_recurring,
-          mf.emp_int_id
+          mf.emp_int_id,
+          mf.downtime
         FROM "tblATMaintFreq" mf
         LEFT JOIN "tblMaintTypes" mt
           ON mf.maint_type_id = mt.maint_type_id
@@ -122,6 +144,7 @@ class MaintenanceFrequencyModel {
   static async getMaintenanceFrequencyById(atMainFreqId, orgId) {
     try {
       const dbPool = getDb();
+      await ensureDowntimeColumn(dbPool);
       const query = `
         SELECT 
           mf.at_main_freq_id,
@@ -135,6 +158,7 @@ class MaintenanceFrequencyModel {
           mf.org_id,
           mf.is_recurring,
           mf.emp_int_id,
+          mf.downtime,
           at.text as asset_type_name,
           at.maint_lead_type,
           mt.text as maint_type_name
@@ -164,7 +188,8 @@ class MaintenanceFrequencyModel {
     orgId,
     isRecurring = true,
     leadTime = null,
-    empIntId = null
+    empIntId = null,
+    downtime = null
   ) {
     try {
       if (!isRecurring) {
@@ -179,8 +204,10 @@ class MaintenanceFrequencyModel {
       
       const atMainFreqId = await generateCustomId('atmf', 3);
       const dbPool = getDb();
+      await ensureDowntimeColumn(dbPool);
       
       const uomId = isRecurring ? await resolveUomId(dbPool, uom) : ON_DEMAND_UOM;
+      const downtimeHours = parseDowntimeHours(downtime);
       
       // Insert maintenance frequency
       const query = `
@@ -195,8 +222,9 @@ class MaintenanceFrequencyModel {
           int_status,
           org_id,
           is_recurring,
-          emp_int_id
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10)
+          emp_int_id,
+          downtime
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9, $10, $11)
         RETURNING *
       `;
       const params = [
@@ -209,7 +237,8 @@ class MaintenanceFrequencyModel {
         maintTypeId,
         orgId,
         isRecurring,
-        empIntId || null
+        empIntId || null,
+        downtimeHours
       ];
       const result = await dbPool.query(query, params);
       return result.rows[0];
@@ -229,7 +258,8 @@ class MaintenanceFrequencyModel {
     maintTypeId,
     orgId,
     isRecurring = true,
-    empIntId = null
+    empIntId = null,
+    downtime = null
   ) {
     try {
       if (!isRecurring) {
@@ -243,8 +273,10 @@ class MaintenanceFrequencyModel {
       }
       
       const dbPool = getDb();
+      await ensureDowntimeColumn(dbPool);
       
       const uomId = isRecurring ? await resolveUomId(dbPool, uom) : ON_DEMAND_UOM;
+      const downtimeHours = parseDowntimeHours(downtime);
       
       const query = `
         UPDATE "tblATMaintFreq"
@@ -255,8 +287,9 @@ class MaintenanceFrequencyModel {
           maintained_by = $4,
           maint_type_id = $5,
           is_recurring = $6,
-          emp_int_id = $7
-        WHERE at_main_freq_id = $8 AND org_id = $9
+          emp_int_id = $7,
+          downtime = $8
+        WHERE at_main_freq_id = $9 AND org_id = $10
         RETURNING *
       `;
       
@@ -268,6 +301,7 @@ class MaintenanceFrequencyModel {
         maintTypeId,
         isRecurring,
         empIntId || null,
+        downtimeHours,
         atMainFreqId,
         orgId
       ]);

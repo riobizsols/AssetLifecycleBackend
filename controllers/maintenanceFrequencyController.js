@@ -12,6 +12,19 @@ function getRequestOrgId(req) {
   }
 }
 
+const parseOptionalDowntime = (raw) => {
+  if (raw === undefined || raw === null || String(raw).trim() === '') {
+    return null;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    const err = new Error('Downtime must be a valid number of hours (0 or greater)');
+    err.statusCode = 400;
+    throw err;
+  }
+  return value;
+};
+
 class MaintenanceFrequencyController {
   // Get all maintenance frequencies
   static async getAllMaintenanceFrequencies(req, res) {
@@ -100,7 +113,7 @@ class MaintenanceFrequencyController {
   // Create maintenance frequency
   static async createMaintenanceFrequency(req, res) {
     try {
-      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type, is_recurring, emp_int_id } = req.body;
+      const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, maint_lead_type, is_recurring, emp_int_id, downtime } = req.body;
       // const { asset_type_id, frequency, uom, text, maintained_by, maint_type_id, is_recurring } = req.body;
       const orgId = getRequestOrgId(req);
       const changedBy = req.user.user_id;
@@ -151,6 +164,7 @@ class MaintenanceFrequencyController {
 
       // Create flow no longer captures technician; always persist emp_int_id as NULL.
       const empIntToSave = null;
+      const downtimeHours = parseOptionalDowntime(downtime);
 
       const newFrequency = await MaintenanceFrequencyModel.createMaintenanceFrequency(
         asset_type_id,
@@ -162,7 +176,8 @@ class MaintenanceFrequencyController {
         orgId,
         isRecurring,
         null,
-        empIntToSave
+        empIntToSave,
+        downtimeHours
       );
 
       try {
@@ -188,9 +203,10 @@ class MaintenanceFrequencyController {
       });
     } catch (error) {
       console.error('Error in createMaintenanceFrequency:', error);
-      res.status(500).json({
+      const status = error.statusCode || 500;
+      res.status(status).json({
         success: false,
-        message: 'Failed to create maintenance frequency',
+        message: error.message || 'Failed to create maintenance frequency',
         error: error.message
       });
     }
@@ -200,7 +216,7 @@ class MaintenanceFrequencyController {
   static async updateMaintenanceFrequency(req, res) {
     try {
       const { id } = req.params;
-      const { frequency, uom, text, maintained_by, maint_type_id, is_recurring, emp_int_id } = req.body;
+      const { frequency, uom, text, maintained_by, maint_type_id, is_recurring, emp_int_id, downtime } = req.body;
       const orgId = getRequestOrgId(req);
 
       // is_recurring defaults to true if not provided
@@ -248,6 +264,8 @@ class MaintenanceFrequencyController {
         empIntToSave = emp_int_id || null;
       }
 
+      const downtimeHours = parseOptionalDowntime(downtime);
+
       const updatedFrequency = await MaintenanceFrequencyModel.updateMaintenanceFrequency(
         id,
         isRecurring ? parseInt(frequency) : null,
@@ -257,7 +275,8 @@ class MaintenanceFrequencyController {
         maint_type_id,
         orgId,
         isRecurring,
-        empIntToSave
+        empIntToSave,
+        downtimeHours
       );
       
       if (!updatedFrequency) {
@@ -276,9 +295,10 @@ class MaintenanceFrequencyController {
       });
     } catch (error) {
       console.error('Error in updateMaintenanceFrequency:', error);
-      res.status(500).json({
+      const status = error.statusCode || 500;
+      res.status(status).json({
         success: false,
-        message: 'Failed to update maintenance frequency',
+        message: error.message || 'Failed to update maintenance frequency',
         error: error.message
       });
     }

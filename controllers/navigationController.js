@@ -1,6 +1,5 @@
 const { getUserNavigation, getNavigationByJobRole, getAllNavigationItems, createNavigationItem, updateNavigationItem, deleteNavigationItem } = require('../models/jobRoleNavModel');
 const { getUserJobRole, assignJobRoleToUser, updateUserJobRole, getAllUsersWithJobRoles } = require('../models/userJobRoleModel');
-const { ensureJobRoleNavigation } = require('../services/tenantSetupService');
 
 // Get user's navigation based on their job role
 const getUserNavigationData = async (req, res) => {
@@ -9,12 +8,6 @@ const getUserNavigationData = async (req, res) => {
         const platform = req.query.platform || 'D'; // Default to Desktop ('D'), can be 'M' for mobile
         
         console.log(`[NavigationController] Getting navigation for user_id: ${user_id}, platform: ${platform}`);
-        console.log(`[NavigationController] Using database: ${req.isTenant ? 'TENANT' : 'DEFAULT'}`);
-        console.log(`[NavigationController] req.db exists: ${!!req.db}`);
-        
-        if (req.isTenant && req.db && req.user?.org_id) {
-            await ensureJobRoleNavigation(req.db, req.user.org_id);
-        }
 
         const navigation = await getUserNavigation(user_id, platform);
         

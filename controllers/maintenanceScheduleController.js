@@ -1330,6 +1330,16 @@ const updateMaintenanceSchedule = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Status is required' });
         }
 
+        if (updateData.actual_downtime !== undefined && updateData.actual_downtime !== null && String(updateData.actual_downtime).trim() !== '') {
+            const actualDowntime = parseFloat(updateData.actual_downtime);
+            if (Number.isNaN(actualDowntime) || actualDowntime < 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Actual downtime must be a valid number of hours (0 or greater)'
+                });
+            }
+        }
+
         // Notes (maint_notes) required only when actual hours exceed the maintenance time limit
         if (context === 'SUPERVISORAPPROVAL' && updateData.hours_spent != null && updateData.hours_spent !== '') {
             const hoursSpent = parseFloat(updateData.hours_spent);

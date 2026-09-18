@@ -87,7 +87,6 @@ const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
 const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
-const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
@@ -97,9 +96,6 @@ const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
 app.use(urlEncodedParser);
-
-// Apply subdomain middleware early to extract subdomain from all requests
-app.use(subdomainMiddleware);
 
 // Configure query parser to handle array parameters
 const qs = require('qs');
