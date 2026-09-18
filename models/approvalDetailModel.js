@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDb } = require('../utils/dbContext');
 const { getChecklistByAssetId } = require('./checklistModel');
 const { getVendorById } = require('./vendorsModel');
@@ -12,6 +13,7 @@ const {
   resolveVendorIdForMaintRecord,
 } = require('../utils/inhouseVendorUtils');
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const { formatDateLocal, formatTimeLocal, parseDbTimestamp } = require('../utils/dateTimeFormat');
 const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
@@ -363,8 +365,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: new Date(firstRecord.maintenance_created_on).toLocaleDateString(),
-        time: new Date(firstRecord.maintenance_created_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(firstRecord.maintenance_created_on),
+        time: formatTimeLocal(firstRecord.maintenance_created_on),
         user: { id: 'system', name: 'System' }
       });
       
@@ -422,8 +424,8 @@ const getApprovalDetailByAssetId = async (assetId, orgId = 'ORG001') => {
           title: title,
           status: status,
           description: description,
-          date: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '',
-          time: (status === 'approved' || status === 'rejected') && detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: (status === 'approved' || status === 'rejected') && detail.changed_on ? formatDateLocal(detail.changed_on) : '',
+          time: (status === 'approved' || status === 'rejected') && detail.changed_on ? formatTimeLocal(detail.changed_on) : '',
           role: { id: detail.job_role_id, name: detail.job_role_name },
           notes: detail.notes || null,
           changed_by: detail.changed_by,
@@ -730,10 +732,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     );
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who approved
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    const wfamhisId = await generateCustomId('wfamhis', 3);
     
     await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
@@ -771,10 +770,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       console.log(`Updated next user ${nextUserStep.user_id} status to AP`);
       
       // Insert history record for next user status change
-      const nextHistoryIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-      const nextHistoryIdResult = await getDb().query(nextHistoryIdQuery);
-      const nextNextHistoryId = (nextHistoryIdResult.rows[0].max_num || 0) + 1;
-      const nextWfamhisId = `WFAMHIS_${nextNextHistoryId.toString().padStart(2, '0')}`;
+      const nextWfamhisId = await generateCustomId('wfamhis', 3);
       
       await getDb().query(
         `INSERT INTO "tblWFAssetMaintHist" (
@@ -890,10 +886,7 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
     console.log(`Updated workflow step ${currentUserStep.wfamsd_id} status to UR, rejected by user ${userId} (${empIntId}) - user_id remains NULL, tracked in history`);
     
     // Insert history record - ROLE-BASED: action_by stores the actual user who rejected
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfamhis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAssetMaintHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfamhisId = `WFAMHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    const wfamhisId = await generateCustomId('wfamhis', 3);
     
     await getDb().query(
       `INSERT INTO "tblWFAssetMaintHist" (
@@ -1087,7 +1080,7 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       
       return {
         id: record.wfamhis_id,
-        date: record.action_on ? new Date(record.action_on).toLocaleDateString() : '-',
+        date: formatDateLocal(record.action_on) || '-',
         action: actionText,
         actionCode: record.action, // Keep original code for reference
         actionColor: actionColor,
@@ -1367,7 +1360,15 @@ const checkAndUpdateWorkflowStatus = async (wfamshId, orgId = 'ORG001') => {
 
 // Supports super access users who can view all branches
 // tokenJobRoleId: JWT role when tblUserJobRoles is missing a row (keeps list in sync with login)
-const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCode, hasSuperAccess = false, tokenJobRoleId = null) => {
+const getMaintenanceApprovals = async (
+  empIntId,
+  orgId = 'ORG001',
+  userBranchCode,
+  hasSuperAccess = false,
+  tokenJobRoleId = null,
+  userBranchId = null,
+  allowedBranchIds = null,
+) => {
    try {
      console.log('=== getMaintenanceApprovals model (ROLE-BASED with branch_code) ===');
      console.log('empIntId:', empIntId);
@@ -1454,10 +1455,28 @@ const getMaintenanceApprovals = async (empIntId, orgId = 'ORG001', userBranchCod
            AND a.org_id = $1
      `;
      
-     // Branch: strict equality excluded rows when wfh.branch_code was NULL (org-wide workflow)
+     // Branch scope:
+     // - hasSuperAccess / ACM branch=* → all branches in org
+     // - explicit branch selected → that branch
+     // - org view with specific ACM branch grants → any of those branches
+     // Never fall back to "only null branch_id" (that emptied org view for normal assets).
+     const scopedBranchIds = Array.isArray(allowedBranchIds)
+       ? [...new Set(allowedBranchIds.map((id) => String(id || '').trim()).filter(Boolean))]
+       : [];
+
      if (!hasSuperAccess && userBranchCode) {
        query += ` AND (wfh.branch_code IS NULL OR wfh.branch_code = $${paramIndex})`;
        params.push(userBranchCode);
+       paramIndex++;
+     }
+
+     if (!hasSuperAccess && userBranchId) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${paramIndex})`;
+       params.push(userBranchId);
+       paramIndex++;
+     } else if (!hasSuperAccess && scopedBranchIds.length) {
+       query += ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = ANY($${paramIndex}::varchar[]))`;
+       params.push(scopedBranchIds);
        paramIndex++;
      }
      
@@ -1628,24 +1647,30 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
       const supervisorRoleId = orgSettingsResult.rows[0].value;
       console.log('Found supervisor role ID:', supervisorRoleId);
       
-      // Step 2: Get asset name for notification context
+      // Step 2: Get asset name and branch for notification context
       const assetQuery = `
-        SELECT text as asset_name 
+        SELECT text as asset_name, branch_id
         FROM "tblAssets" 
         WHERE asset_id = $1 AND org_id = $2
       `;
       const assetResult = await getDb().query(assetQuery, [assetId, orgId]);
       const assetName = assetResult.rows.length > 0 ? assetResult.rows[0].asset_name : 'Asset';
+      const assetBranchId = assetResult.rows.length > 0 ? assetResult.rows[0].branch_id : null;
       
-      // Step 3: Find all users with the supervisor job role
+      // Step 3: Find users with the supervisor job role in the same branch as the asset
       const usersQuery = `
         SELECT DISTINCT u.user_id, u.full_name, u.email, u.emp_int_id
         FROM "tblUserJobRoles" ujr
         INNER JOIN "tblUsers" u ON ujr.user_id = u.user_id
+        LEFT JOIN "tblEmployees" e ON u.emp_int_id = e.emp_int_id
         WHERE ujr.job_role_id = $1
         AND u.int_status = 1
+        ${assetBranchId ? `AND COALESCE(NULLIF(BTRIM(u.branch_id), ''), NULLIF(BTRIM(e.branch_id), '')) = $2` : ''}
       `;
-      const usersResult = await getDb().query(usersQuery, [supervisorRoleId]);
+      const usersResult = await getDb().query(
+        usersQuery,
+        assetBranchId ? [supervisorRoleId, assetBranchId] : [supervisorRoleId]
+      );
       
       console.log(`Query for supervisor role ${supervisorRoleId} returned ${usersResult.rows.length} users`);
       if (usersResult.rows.length > 0) {
@@ -2058,21 +2083,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
        }
        
        // Get the next ams_id
-       const maxIdQuery = `
-         SELECT MAX(
-           CASE 
-             WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-             WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-             ELSE 0
-           END
-         ) as max_num 
-         FROM "tblAssetMaintSch"
-       `;
-       const maxIdResult = await getDb().query(maxIdQuery);
-       const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-       const amsId = `ams${nextId.toString().padStart(3, '0')}`;
-       
-       console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
+       const amsId = await generateCustomId('ams', 3);
        
        // Create ONE maintenance record using the representative asset_id from workflow header
        // Notes field is left empty (null) for group maintenance
@@ -2504,21 +2515,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
      
       // Get the next auto-increment ID for ams_id
       // Get the latest ams_id and extract the numeric part
-      const maxIdQuery = `
-        SELECT MAX(
-          CASE 
-            WHEN ams_id ~ '^ams[0-9]+$' THEN CAST(SUBSTRING(ams_id FROM 4) AS INTEGER)
-            WHEN ams_id ~ '^[0-9]+$' THEN CAST(ams_id AS INTEGER)
-            ELSE 0
-          END
-        ) as max_num 
-        FROM "tblAssetMaintSch"
-      `;
-      const maxIdResult = await getDb().query(maxIdQuery);
-      const nextId = (maxIdResult.rows[0].max_num || 0) + 1;
-      const amsId = `ams${nextId.toString().padStart(3, '0')}`;
-      
-      console.log(`Latest ams_id number: ${maxIdResult.rows[0].max_num || 0}, Next ams_id: ${amsId}`);
+      const amsId = await generateCustomId('ams', 3);
      
            // Insert maintenance record
       const insertQuery = `
@@ -2747,8 +2744,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: new Date(header.maintenance_created_on).toLocaleDateString(),
-        time: new Date(header.maintenance_created_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(header.maintenance_created_on),
+        time: formatTimeLocal(header.maintenance_created_on),
         user: { id: 'system', name: 'System' }
       });
       
@@ -2762,8 +2759,8 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
           title: `Action pending by ${detail.user_name}`,
           status: stepStatus,
           description: `Action pending by ${detail.user_name}`,
-          date: detail.changed_on ? new Date(detail.changed_on).toLocaleDateString() : '-',
-          time: detail.changed_on ? new Date(detail.changed_on).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '-',
+          date: detail.changed_on ? formatDateLocal(detail.changed_on) : '-',
+          time: detail.changed_on ? formatTimeLocal(detail.changed_on) : '-',
           user: { 
             id: detail.user_id, 
             name: detail.user_name,
@@ -3072,14 +3069,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
       const workflowSteps = [];
       
       // Step 1: System (always first)
-      const createdOn = firstRecord.maintenance_created_on ? new Date(firstRecord.maintenance_created_on) : new Date();
+      const createdOn = parseDbTimestamp(firstRecord.maintenance_created_on) || new Date();
       workflowSteps.push({
         id: 'system',
         title: 'Approval Initiated',
         status: 'completed',
         description: 'Maintenance initiated by system',
-        date: createdOn.toLocaleDateString(),
-        time: createdOn.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        date: formatDateLocal(createdOn),
+        time: formatTimeLocal(createdOn),
         user: { id: 'system', name: 'System' }
       });
       
@@ -3153,14 +3150,14 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           stepDescription = 'Workflow stopped due to rejection at an earlier stage';
         }
         
-        const changedOn = detail.changed_on ? new Date(detail.changed_on) : null;
+        const changedOn = parseDbTimestamp(detail.changed_on);
         workflowSteps.push({
           id: `role-${detail.job_role_id}-${index + 1}`,
           title: stepTitle || `Step ${stepNumber}`,
           status: stepStatus,
           description: stepDescription,
-          date: changedOn ? changedOn.toLocaleDateString() : '',
-          time: changedOn ? changedOn.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '',
+          date: changedOn ? formatDateLocal(changedOn) : '',
+          time: changedOn ? formatTimeLocal(changedOn) : '',
           // ROLE-BASED: user.id contains job_role_id (not emp_int_id)
           // Frontend will check if current user has this role
           user: { 

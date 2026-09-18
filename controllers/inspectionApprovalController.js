@@ -1,7 +1,19 @@
 const inspectionApprovalModel = require('../models/inspectionApprovalModel');
 const workflowNotificationService = require('../services/workflowNotificationService');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
 const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/systemAdmin');
+const {
+  getInspectionAssetBranchId,
+  getApprovalBranchAccessForRequest,
+  attachBranchAccess,
+  crossBranchForbiddenBody,
+} = require('../utils/approvalBranchAccess');
+
+function resolveInspectionApprovalOrgId(req, fallback = 'ORG001') {
+  const acmCtx = getEffectiveListContext(req);
+  return acmCtx.orgId || req.user?.org_id || req.body?.orgId || req.query?.orgId || fallback;
+}
 
 /**
  * CHUNK 2.1 & 2.2: INSPECTION APPROVALS (CONTROLLER)
@@ -13,7 +25,7 @@ const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/syst
  */
 async function getPendingApprovals(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     let jobRoles = [];
 
@@ -40,7 +52,25 @@ async function getPendingApprovals(req, res) {
       req,
       'inspection-approval',
       operationalCache.hashQuery(jobRoles),
-      () => inspectionApprovalModel.getPendingInspectionApprovals(orgId, jobRoles),
+      () => {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const seeAll =
+          userHasSystemAdminRole(req.user) ||
+          Boolean(acmCtx?.hasSuperAccess) ||
+          Boolean(acmCtx?.allBranches) ||
+          Boolean(req.user?.acmAllBranches) ||
+          Boolean(req.user?.hasSuperAccess);
+        return inspectionApprovalModel.getPendingInspectionApprovals(
+          orgId,
+          jobRoles,
+          {
+            userBranchId: seeAll ? null : (acmCtx?.branchId || req.user?.branch_id || null),
+            isSystemAdmin: seeAll,
+            allowedBranchIds: seeAll ? [] : (acmCtx?.branchIds || req.user?.acmBranchIds || []),
+          }
+        );
+      },
     );
     
     return res.json({ success: true, count: approvals.length, data: approvals });
@@ -55,7 +85,7 @@ async function getPendingApprovals(req, res) {
  */
 async function getInspectionDetail(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     const { wfaiish_id } = req.params;
     
@@ -68,8 +98,11 @@ async function getInspectionDetail(req, res) {
       return res.status(404).json({ success: false, message: 'Inspection not found.' });
     }
     
+    const branchAccess = await getApprovalBranchAccessForRequest(req, detail.header?.asset_branch_id || detail.header?.branch_id || await getInspectionAssetBranchId(wfaiish_id)
+    );
+
     console.log('Successfully retrieved detail for ID:', wfaiish_id);
-    return res.json({ success: true, data: detail });
+    return res.json({ success: true, data: attachBranchAccess(detail, branchAccess) });
   } catch (error) {
     console.error('Error getting inspection detail for ID:', req.params?.wfaiish_id);
     console.error('Error details:', error.message);
@@ -83,7 +116,7 @@ async function getInspectionDetail(req, res) {
  */
 async function getInspectionHistory(req, res) {
   try {
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const branchCode = req.user?.branch_code || req.body?.branchCode || 'BR001';
     const { wfaiish_id } = req.params;
     
@@ -112,7 +145,7 @@ async function getInspectionHistory(req, res) {
 async function processApprovalAction(req, res) {
   try {
     // Extract user info (adapting to likely middleware structure)
-    const orgId = req.user?.org_id || req.body?.orgId || 'ORG001';
+    const orgId = resolveInspectionApprovalOrgId(req);
     const userId = req.user?.user_id || req.user?.emp_int_id || 'UNKNOWN_USER'; 
     // In a real scenario, use middleware-provided ID. Fallback for testing/dev.
     
@@ -163,7 +196,13 @@ async function processApprovalAction(req, res) {
         message: 'You do not have the required role to act on this approval step.',
       });
     }
-    
+
+    const inspBranchAccess = await getApprovalBranchAccessForRequest(req, await getInspectionAssetBranchId(step.wfaiish_id)
+    );
+    if (!inspBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
+
     const normalizedAction = action.toUpperCase();
     let nextStepMessage = '';
     

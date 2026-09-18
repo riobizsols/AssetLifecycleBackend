@@ -3236,7 +3236,10 @@ const getLotVendors = async (org_id, branch_id = null, hasSuperAccess = false) =
 };
 
 /**
- * Categories for lot entry: vendor mappings when present, otherwise all active categories.
+ * Categories for lot entry.
+ * Requires a vendor selection in the UI, but returns all active org categories
+ * so newly created master categories (e.g. PCB) are not hidden until someone
+ * adds a vendor spare-supply mapping in tblVSPMap.
  */
 const getLotCategoriesByVendor = async (
   org_id,
@@ -3244,22 +3247,22 @@ const getLotCategoriesByVendor = async (
   branch_id = null,
   hasSuperAccess = false
 ) => {
-  const dbPool = getDb();
   if (!vendor_id) {
     return [];
   }
 
+  const allCategories = await getCategories(
+    org_id,
+    branch_id,
+    hasSuperAccess,
+    true,
+    false
+  );
+
+  const dbPool = getDb();
   const params = [org_id, vendor_id];
-  let query = `
-    SELECT DISTINCT
-      c.spc_id,
-      c.text,
-      c.uom,
-      c.minimum_stock,
-      c.re_order_level,
-      c.int_status,
-      c.org_id,
-      c.branch_id
+  let mappedQuery = `
+    SELECT DISTINCT c.spc_id
     FROM "tblVSPMap" v
     INNER JOIN "tblSPCategory" c
       ON c.spc_id = v.spc_id
@@ -3269,16 +3272,30 @@ const getLotCategoriesByVendor = async (
       AND COALESCE(v.int_status, 1) = 1
       AND c.int_status = 1
   `;
-
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
-    query += ` AND (v.branch_id IS NULL OR v.branch_id = $${params.length})`;
-    query += ` AND (c.branch_id IS NULL OR c.branch_id = $${params.length})`;
+    mappedQuery += ` AND (v.branch_id IS NULL OR v.branch_id = $${params.length})`;
   }
 
-  query += ` ORDER BY c.text ASC`;
-  const result = await dbPool.query(query, params);
-  return result.rows;
+  let mappedIds = new Set();
+  try {
+    const mapped = await dbPool.query(mappedQuery, params);
+    mappedIds = new Set(mapped.rows.map((r) => r.spc_id).filter(Boolean));
+  } catch (error) {
+    console.warn('[spareParts] lot category vendor map lookup failed:', error.message);
+  }
+
+  if (!mappedIds.size) {
+    return allCategories;
+  }
+
+  const mapped = [];
+  const rest = [];
+  for (const row of allCategories) {
+    if (mappedIds.has(row.spc_id)) mapped.push(row);
+    else rest.push(row);
+  }
+  return [...mapped, ...rest];
 };
 
 /**
@@ -3358,7 +3375,9 @@ const getLotBrandsByCategory = async (
 };
 
 /**
- * Models for category + brand: from tblISPModCat when present, else model linked on tblSPCategory.
+ * Models for category + brand: ISP mappings plus category-linked / vendor-mapped models.
+ * Always merge master-category model so a stale tblISPModCat row cannot hide the
+ * real category model (e.g. PCB → PCB500 hidden by HP ProDesk 400).
  */
 const getLotModelsByCategoryAndBrand = async (
   org_id,
@@ -3371,6 +3390,17 @@ const getLotModelsByCategoryAndBrand = async (
   if (!spc_id || !brand_id) return [];
 
   const dbPool = getDb();
+  const byId = new Map();
+  const addRows = (rows = []) => {
+    for (const row of rows) {
+      const model_id = row?.model_id;
+      if (!model_id || byId.has(model_id)) continue;
+      byId.set(model_id, {
+        model_id,
+        model_name: row.model_name || model_id,
+      });
+    }
+  };
 
   const run = async (withOrg) => {
     const params = [brand_id];
@@ -3397,62 +3427,105 @@ const getLotModelsByCategoryAndBrand = async (
     return dbPool.query(query, params);
   };
 
-  let result = await run(true);
-  if (!result.rows.length) {
-    result = await run(false);
+  try {
+    let result = await run(true);
+    if (!result.rows.length) {
+      result = await run(false);
+    }
+    addRows(result.rows);
+  } catch (error) {
+    console.warn('[spareParts] ISP lot models lookup failed:', error.message);
   }
-  if (result.rows.length) {
-    return result.rows;
-  }
-
-  if (!spc_id) return [];
 
   await ensureSpBrandModelSchema(dbPool);
-  const fallback = await dbPool.query(
-    `
-      SELECT DISTINCT
-        COALESCE(im."spbmId", m.spbm_id) AS model_id,
-        COALESCE(im."modelName", m.text) AS model_name
-      FROM "tblSPCategory" c
-      INNER JOIN "tblSPBMod" m
-        ON m.spbm_id = c.spm_id
-       AND m.org_id = c.org_id
-      INNER JOIN "tblSPBrand" b
-        ON b.spb_id = c.spb_id
-       AND b.org_id = c.org_id
-      LEFT JOIN "tblISPBrand" ib
-        ON (
-          ib."spbId" = $2
-          OR (
-            ib.org_id = c.org_id
-            AND LOWER(BTRIM(ib."brandName")) = LOWER(BTRIM(b.text))
+
+  // Always include the model linked on the spare category master.
+  try {
+    const fallback = await dbPool.query(
+      `
+        SELECT DISTINCT
+          COALESCE(im."spbmId", m.spbm_id) AS model_id,
+          COALESCE(im."modelName", m.text) AS model_name
+        FROM "tblSPCategory" c
+        INNER JOIN "tblSPBMod" m
+          ON m.spbm_id = c.spm_id
+         AND m.org_id = c.org_id
+        INNER JOIN "tblSPBrand" b
+          ON b.spb_id = c.spb_id
+         AND b.org_id = c.org_id
+        LEFT JOIN "tblISPBrand" ib
+          ON (
+            ib."spbId" = $2
+            OR (
+              ib.org_id = c.org_id
+              AND LOWER(BTRIM(ib."brandName")) = LOWER(BTRIM(b.text))
+            )
           )
-        )
-       AND COALESCE(ib.int_status, 1) = 1
-      LEFT JOIN "tblISPModel" im
-        ON im.org_id = c.org_id
-       AND COALESCE(im.int_status, 1) = 1
-       AND LOWER(BTRIM(im."modelName")) = LOWER(BTRIM(m.text))
-       AND (
-         im."spbId" = ib."spbId"
-         OR im."spbId" = $2
-         OR im."spbId" = b.spb_id
-       )
-      WHERE c.spc_id = $1
-        AND c.org_id = $3
-        AND c.int_status = 1
-        AND c.spm_id IS NOT NULL
-        AND (
-          c.spb_id = $2
-          OR ib."spbId" = $2
-          OR b.spb_id = $2
-        )
-        AND COALESCE(m.int_status, 1) = 1
-      ORDER BY 2 ASC
-    `,
-    [spc_id, brand_id, org_id]
+         AND COALESCE(ib.int_status, 1) = 1
+        LEFT JOIN "tblISPModel" im
+          ON im.org_id = c.org_id
+         AND COALESCE(im.int_status, 1) = 1
+         AND LOWER(BTRIM(im."modelName")) = LOWER(BTRIM(m.text))
+         AND (
+           im."spbId" = ib."spbId"
+           OR im."spbId" = $2
+           OR im."spbId" = b.spb_id
+         )
+        WHERE c.spc_id = $1
+          AND c.org_id = $3
+          AND c.int_status = 1
+          AND c.spm_id IS NOT NULL
+          AND (
+            c.spb_id = $2
+            OR ib."spbId" = $2
+            OR b.spb_id = $2
+          )
+          AND COALESCE(m.int_status, 1) = 1
+        ORDER BY 2 ASC
+      `,
+      [spc_id, brand_id, org_id]
+    );
+    addRows(fallback.rows);
+  } catch (error) {
+    console.warn('[spareParts] category lot models fallback failed:', error.message);
+  }
+
+  // Also include models from vendor spare-supply mapping text (tblVSPMap).
+  if (vendor_id) {
+    try {
+      const vsp = await dbPool.query(
+        `
+          SELECT DISTINCT
+            COALESCE(im."spbmId", m.spbm_id) AS model_id,
+            COALESCE(im."modelName", m.text, v.model) AS model_name
+          FROM "tblVSPMap" v
+          LEFT JOIN "tblSPBMod" m
+            ON m.org_id = v.org_id
+           AND LOWER(BTRIM(m.text)) = LOWER(BTRIM(v.model))
+           AND m.spb_id = $3
+           AND COALESCE(m.int_status, 1) = 1
+          LEFT JOIN "tblISPModel" im
+            ON im.org_id = v.org_id
+           AND LOWER(BTRIM(im."modelName")) = LOWER(BTRIM(v.model))
+           AND im."spbId" = $3
+           AND COALESCE(im.int_status, 1) = 1
+          WHERE v.org_id = $1
+            AND v.vendor_id = $2
+            AND v.spc_id = $4
+            AND COALESCE(v.int_status, 1) = 1
+            AND NULLIF(BTRIM(v.model), '') IS NOT NULL
+        `,
+        [org_id, vendor_id, brand_id, spc_id]
+      );
+      addRows(vsp.rows.filter((r) => r.model_id));
+    } catch (error) {
+      console.warn('[spareParts] vendor-map lot models lookup failed:', error.message);
+    }
+  }
+
+  return [...byId.values()].sort((a, b) =>
+    String(a.model_name || '').localeCompare(String(b.model_name || ''))
   );
-  return fallback.rows;
 };
 
 /**

@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDb } = require('../utils/dbContext');
 
 /**
@@ -70,36 +71,10 @@ const createVendorRenewalTable = async () => {
  * Generate next VR_ID (Vendor Renewal ID)
  */
 const getNextVRId = async () => {
-  const dbPool = getDb();
-  
-  const query = `
-    SELECT vr_id 
-    FROM "tblVendorRenewal" 
-    ORDER BY CAST(SUBSTRING(vr_id FROM 'VR([0-9]+)') AS INTEGER) DESC 
-    LIMIT 1
-  `;
-  
   try {
-    const result = await dbPool.query(query);
-    
-    if (result.rows.length === 0) {
-      return 'VR001';
-    }
-    
-    const lastId = result.rows[0].vr_id;
-    const match = lastId.match(/VR(\d+)/);
-    
-    if (match) {
-      const nextNum = parseInt(match[1]) + 1;
-      return `VR${String(nextNum).padStart(3, '0')}`;
-    }
-    
-    return 'VR001';
+    return await generateCustomId('vendor_renewal', 3);
   } catch (error) {
-    // If table doesn't exist yet, return first ID
-    if (error.code === '42P01') {
-      return 'VR001';
-    }
+    if (error.code === '42P01') return 'VR001';
     throw error;
   }
 };

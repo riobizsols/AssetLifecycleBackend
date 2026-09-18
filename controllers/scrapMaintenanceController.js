@@ -2,6 +2,12 @@ const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 const scrapApprovalCache = require('../utils/scrapApprovalCache');
 const assetsDashboardCache = require('../utils/assetsDashboardCache');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
+const {
+  getScrapAssetBranchId,
+  getApprovalBranchAccessForRequest,
+  attachBranchAccess,
+  crossBranchForbiddenBody,
+} = require('../utils/approvalBranchAccess');
 
 function bustScrapCaches(req, orgId) {
   const oid = orgId || req.user?.org_id;
@@ -9,10 +15,20 @@ function bustScrapCaches(req, orgId) {
   assetsDashboardCache.invalidateOrgApiCache(oid).catch(() => {});
 }
 
+function getRequestOrgId(req) {
+  try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const context = getEffectiveListContext(req);
+    return context.orgId || req.user?.org_id;
+  } catch {
+    return req.user?.org_id;
+  }
+}
+
 // POST /api/scrap-maintenance/create
 const createScrapRequest = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const userId = req.user?.user_id;
     const branchId = req.user?.branch_id;
 
@@ -47,7 +63,7 @@ const createScrapRequest = async (req, res) => {
 // POST /api/scrap-maintenance/create-from-group-selection
 const createScrapRequestFromGroupSelection = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const userId = req.user?.user_id;
     const branchId = req.user?.branch_id;
 
@@ -92,7 +108,7 @@ function collectUserRoleIds(user) {
 const getScrapMaintenanceApprovals = async (req, res) => {
   try {
     const userId = req.user?.user_id;
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     let userBranchCode = req.user?.branch_code || req.user?.branchCode || null;
     const branchId = req.user?.branch_id;
     const roleIds = collectUserRoleIds(req.user);
@@ -122,6 +138,7 @@ const getScrapMaintenanceApprovals = async (req, res) => {
           userId,
           roleIds,
           userBranchCode,
+          userBranchId: branchId,
           hasSuperAccess,
         });
       },
@@ -137,7 +154,7 @@ const getScrapMaintenanceApprovals = async (req, res) => {
 // GET /api/scrap-maintenance/workflow/:id
 const getScrapApprovalDetail = async (req, res) => {
   try {
-    const orgId = req.user?.org_id;
+    const orgId = getRequestOrgId(req);
     const { id } = req.params;
 
     const cacheKey = scrapApprovalCache.scopeKey(req, 'scrap-approval', 'detail', id);
@@ -151,7 +168,12 @@ const getScrapApprovalDetail = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Scrap workflow not found' });
     }
 
-    return res.status(200).json({ success: true, ...detail });
+    const scrapBranchId =
+      detail.assets?.find((a) => a.branch_id)?.branch_id ||
+      (await getScrapAssetBranchId(id));
+    const branchAccess = await getApprovalBranchAccessForRequest(req, scrapBranchId);
+
+    return res.status(200).json({ success: true, ...attachBranchAccess(detail, branchAccess) });
   } catch (error) {
     console.error('Error in getScrapApprovalDetail:', error);
     return res.status(500).json({ success: false, message: 'Failed to fetch scrap workflow detail', error: error.message });
@@ -165,6 +187,12 @@ const approveScrap = async (req, res) => {
     const empIntId = req.user?.emp_int_id;
     const { id } = req.params;
     const { note = null } = req.body || {};
+
+    const scrapActAccess = await getApprovalBranchAccessForRequest(req, await getScrapAssetBranchId(id)
+    );
+    if (!scrapActAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
 
     const result = await scrapMaintenanceModel.approveScrapWorkflow({
       wfscrap_h_id: id,
@@ -192,6 +220,12 @@ const rejectScrap = async (req, res) => {
     const empIntId = req.user?.emp_int_id;
     const { id } = req.params;
     const { reason = null } = req.body || {};
+
+    const scrapRejectAccess = await getApprovalBranchAccessForRequest(req, await getScrapAssetBranchId(id)
+    );
+    if (!scrapRejectAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
 
     const result = await scrapMaintenanceModel.rejectScrapWorkflow({
       wfscrap_h_id: id,

@@ -67,53 +67,139 @@ const getMappedChecklistsByAssetTypeAndAsset = async (assetTypeId, assetId, orgI
     return result.rows;
 };
 
+/**
+ * Persist mapping rows without wipe-deleting aatic_ids that still have
+ * inspection frequencies / workflow schedules attached.
+ * tblAAT_Insp_Freq ON DELETE CASCADE from checklist, but tblWFAATInspSch_H.aatif_id
+ * has no ON DELETE SET NULL — a full DELETE of mappings fails when schedules exist.
+ */
 const saveMapping = async (assetTypeId, assetId, overrideData, orgId, userId) => {
     const dbPool = getDb();
-    
-    // Start a transaction
     const client = await dbPool.connect();
+    const normalizedAssetId = assetId ? String(assetId).trim() : null;
+    const rows = Array.isArray(overrideData) ? overrideData : [];
+
     try {
         await client.query('BEGIN');
-        
-        // 1. Delete existing mappings for this asset type/asset combo
-        let deleteQuery = `DELETE FROM "tblAATInspCheckList" WHERE at_id = $1 AND org_id = $2`;
-        let deleteParams = [assetTypeId, orgId];
-        
-        if (assetId) {
-            deleteQuery += ` AND asset_id = $3`;
-            deleteParams.push(assetId);
+
+        let existingQuery = `
+            SELECT aatic_id, insp_check_id, asset_id
+            FROM "tblAATInspCheckList"
+            WHERE at_id = $1 AND org_id = $2
+        `;
+        const existingParams = [assetTypeId, orgId];
+        if (normalizedAssetId) {
+            existingQuery += ` AND asset_id = $3`;
+            existingParams.push(normalizedAssetId);
         } else {
-            deleteQuery += ` AND (asset_id IS NULL OR asset_id = '')`;
+            existingQuery += ` AND (asset_id IS NULL OR asset_id = '')`;
         }
-        
-        await client.query(deleteQuery, deleteParams);
-        
-        // 2. Insert new mappings
-        if (overrideData && overrideData.length > 0) {
-            for (const item of overrideData) {
-                // Generate a custom ID for each mapping record
-                const aaticId = await generateCustomId('aat_insp_checklist');
-                
+
+        const existing = await client.query(existingQuery, existingParams);
+        const existingByCheck = new Map(
+            existing.rows.map((r) => [String(r.insp_check_id), r])
+        );
+
+        const incoming = [];
+        const incomingCheckIds = new Set();
+        for (const item of rows) {
+            const checkId = item.insp_check_id || item.Insp_check_id;
+            if (!checkId) continue;
+            const key = String(checkId);
+            if (incomingCheckIds.has(key)) continue;
+            incomingCheckIds.add(key);
+            incoming.push({
+                insp_check_id: key,
+                expected_value: item.expected_value || item.Expected_Value || null,
+                min_range:
+                    item.min_range === '' || item.min_range === null || item.min_range === undefined
+                        ? null
+                        : item.min_range,
+                max_range:
+                    item.max_range === '' || item.max_range === null || item.max_range === undefined
+                        ? null
+                        : item.max_range,
+                trigger_maintenance: !!item.trigger_maintenance,
+            });
+        }
+
+        const toRemoveIds = existing.rows
+            .filter((r) => !incomingCheckIds.has(String(r.insp_check_id)))
+            .map((r) => r.aatic_id);
+
+        if (toRemoveIds.length) {
+            // Clear workflow schedule refs that block CASCADE delete of frequencies.
+            await client.query(
+                `
+                UPDATE "tblWFAATInspSch_H"
+                SET aatif_id = NULL,
+                    changed_by = $2,
+                    changed_on = NOW()
+                WHERE aatif_id IN (
+                    SELECT f.aatif_id
+                    FROM "tblAAT_Insp_Freq" f
+                    WHERE f.aatic_id = ANY($1::varchar[])
+                )
+                `,
+                [toRemoveIds, userId || 'SYSTEM']
+            );
+
+            await client.query(
+                `DELETE FROM "tblAATInspCheckList" WHERE aatic_id = ANY($1::varchar[])`,
+                [toRemoveIds]
+            );
+        }
+
+        for (const item of incoming) {
+            const existingRow = existingByCheck.get(item.insp_check_id);
+            if (existingRow) {
                 await client.query(
-                    `INSERT INTO "tblAATInspCheckList" 
-                     (aatic_id, org_id, at_id, asset_id, insp_check_id, expected_value, min_range, max_range, trigger_maintenance, created_by, created_on)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())`,
+                    `
+                    UPDATE "tblAATInspCheckList"
+                    SET expected_value = $1,
+                        min_range = $2,
+                        max_range = $3,
+                        trigger_maintenance = $4,
+                        asset_id = $5,
+                        changed_by = $6,
+                        changed_on = NOW()
+                    WHERE aatic_id = $7
+                    `,
+                    [
+                        item.expected_value,
+                        item.min_range,
+                        item.max_range,
+                        item.trigger_maintenance,
+                        normalizedAssetId,
+                        userId || 'SYSTEM',
+                        existingRow.aatic_id,
+                    ]
+                );
+            } else {
+                const aaticId = await generateCustomId('aat_insp_checklist');
+                await client.query(
+                    `
+                    INSERT INTO "tblAATInspCheckList"
+                      (aatic_id, org_id, at_id, asset_id, insp_check_id, expected_value,
+                       min_range, max_range, trigger_maintenance, created_by, created_on)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
+                    `,
                     [
                         aaticId,
-                        orgId, 
-                        assetTypeId, 
-                        assetId || null, 
-                        item.insp_check_id || item.Insp_check_id, 
-                        item.expected_value || item.Expected_Value, 
-                        (item.min_range === "" || item.min_range === null || item.min_range === undefined) ? null : item.min_range, 
-                        (item.max_range === "" || item.max_range === null || item.max_range === undefined) ? null : item.max_range, 
-                        !!item.trigger_maintenance, 
-                        userId
+                        orgId,
+                        assetTypeId,
+                        normalizedAssetId,
+                        item.insp_check_id,
+                        item.expected_value,
+                        item.min_range,
+                        item.max_range,
+                        item.trigger_maintenance,
+                        userId || 'SYSTEM',
                     ]
                 );
             }
         }
-        
+
         await client.query('COMMIT');
         return { success: true };
     } catch (error) {
@@ -126,19 +212,55 @@ const saveMapping = async (assetTypeId, assetId, overrideData, orgId, userId) =>
 
 const deleteMappingGroup = async (assetTypeId, assetId, orgId) => {
     const dbPool = getDb();
-    
-    let query = `DELETE FROM "tblAATInspCheckList" WHERE at_id = $1 AND org_id = $2`;
-    let params = [assetTypeId, orgId];
-    
-    if (assetId) {
-        query += ` AND asset_id = $3`;
-        params.push(assetId);
-    } else {
-        query += ` AND (asset_id IS NULL OR asset_id = '')`;
+    const client = await dbPool.connect();
+    const normalizedAssetId = assetId ? String(assetId).trim() : null;
+
+    try {
+        await client.query('BEGIN');
+
+        let selectQuery = `
+            SELECT aatic_id FROM "tblAATInspCheckList"
+            WHERE at_id = $1 AND org_id = $2
+        `;
+        const params = [assetTypeId, orgId];
+        if (normalizedAssetId) {
+            selectQuery += ` AND asset_id = $3`;
+            params.push(normalizedAssetId);
+        } else {
+            selectQuery += ` AND (asset_id IS NULL OR asset_id = '')`;
+        }
+
+        const existing = await client.query(selectQuery, params);
+        const ids = existing.rows.map((r) => r.aatic_id);
+        if (!ids.length) {
+            await client.query('COMMIT');
+            return false;
+        }
+
+        await client.query(
+            `
+            UPDATE "tblWFAATInspSch_H"
+            SET aatif_id = NULL, changed_on = NOW()
+            WHERE aatif_id IN (
+                SELECT f.aatif_id FROM "tblAAT_Insp_Freq" f WHERE f.aatic_id = ANY($1::varchar[])
+            )
+            `,
+            [ids]
+        );
+
+        const result = await client.query(
+            `DELETE FROM "tblAATInspCheckList" WHERE aatic_id = ANY($1::varchar[])`,
+            [ids]
+        );
+
+        await client.query('COMMIT');
+        return result.rowCount > 0;
+    } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+    } finally {
+        client.release();
     }
-    
-    const result = await dbPool.query(query, params);
-    return result.rowCount > 0;
 };
 
 module.exports = {

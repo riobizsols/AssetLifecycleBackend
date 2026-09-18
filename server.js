@@ -68,9 +68,9 @@ const fcmRoutes = require("./routes/fcmRoutes");
 const CronService = require("./services/cronService");
 const { connectRedis, quitRedis } = require("./config/redis");
 const setupWizardRoutes = require("./routes/setupWizardRoutes");
-const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
+const auditReportRoutes = require("./routes/auditReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
@@ -83,7 +83,6 @@ const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
 const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
-const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
@@ -93,9 +92,6 @@ const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
 app.use(urlEncodedParser);
-
-// Apply subdomain middleware early to extract subdomain from all requests
-app.use(subdomainMiddleware);
 
 // Configure query parser to handle array parameters
 const qs = require('qs');
@@ -187,7 +183,6 @@ app.use(
 
 app.use("/api/auth", authRoutes);
 app.use("/api/setup", setupWizardRoutes);
-app.use("/api/tenant-setup", tenantSetupRoutes);
 app.use("/api/maint-types", maintTypeRoutes); // Public maintenance types API
 app.use("/api/maintenance-schedules", maintenanceScheduleRoutes);
 app.use("/api/job-roles", jobRoleRoutes);
@@ -256,6 +251,7 @@ app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
+app.use("/api/audit-report", auditReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);

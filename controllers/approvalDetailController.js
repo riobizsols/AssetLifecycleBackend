@@ -1,7 +1,31 @@
 const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintenance, rejectMaintenance, getWorkflowHistory, getWorkflowHistoryByWfamshId, getMaintenanceApprovals, getVendorRenewalApprovals, getAllMaintenanceWorkflowsByAssetId, updateWorkflowHeader } = require('../models/approvalDetailModel');
 const operationalCache = require('../utils/operationalCache');
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+function resolveApprovalScope(req) {
+  const acmCtx = getEffectiveListContext(req);
+  return {
+    acmCtx,
+    orgId: acmCtx.orgId || req.user?.org_id || 'ORG001',
+  };
+}
+
+function applyWorkflowActAccess(branchAccess, headerStatus) {
+  const terminal = new Set(['CO', 'CA', 'CF', 'UR']);
+  if (terminal.has(String(headerStatus || '').trim().toUpperCase())) {
+    return { ...branchAccess, canAct: false };
+  }
+  return branchAccess;
+}
 const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch');
+const { userHasSystemAdminRole } = require('../utils/systemAdmin');
+const {
+    getMaintenanceAssetBranchId,
+    getApprovalBranchAccessForRequest,
+    attachBranchAccess,
+    crossBranchForbiddenBody,
+} = require('../utils/approvalBranchAccess');
 const {
     // Generic helpers
     logApiCall,
@@ -43,7 +67,7 @@ const getApprovalDetail = async (req, res) => {
   
   try {
     const { assetId } = req.params; // can be asset_id or wfamsh_id
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Log API called (context-aware)
@@ -177,10 +201,16 @@ const getApprovalDetail = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
+    const maintBranchId = await getMaintenanceAssetBranchId(assetId);
+    const branchAccess = applyWorkflowActAccess(
+      await getApprovalBranchAccessForRequest(req, maintBranchId),
+      formattedDetail.headerStatus,
+    );
+
     res.json({
       success: true,
       message: 'Approval detail retrieved successfully',
-      data: formattedDetail,
+      data: attachBranchAccess(formattedDetail, branchAccess),
       timestamp: new Date().toISOString()
     });
 
@@ -223,7 +253,7 @@ const approveMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
     const { empIntId, note, vendorId, maintenanceDate, technicianId } = req.body;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Step 1: Log API called with full request data (context-aware)
@@ -302,6 +332,12 @@ const approveMaintenanceAction = async (req, res) => {
       }).catch(err => console.error('Logging error:', err));
     }
 
+    const approveBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(assetId)
+    );
+    if (!approveBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
+
     // Step 5: Execute approval
     const result = await approveMaintenance(assetId, empIntId, note, orgId, vendorId, maintenanceDate, userId, technicianId);
 
@@ -333,6 +369,14 @@ const approveMaintenanceAction = async (req, res) => {
         message: result.message,
         vendorStatus: result.vendorStatus
       });
+    }
+
+    // Bust list caches so Maintenance List / Work Order show new AMS rows immediately
+    try {
+      const oid = orgId || req.user?.org_id;
+      await operationalCache.invalidateOrgCaches(oid);
+    } catch (cacheErr) {
+      console.warn('Cache invalidation after approval failed:', cacheErr?.message || cacheErr);
     }
 
     // Step 6: Log success (context-aware)
@@ -451,7 +495,7 @@ const rejectMaintenanceAction = async (req, res) => {
   try {
     const { assetId } = req.params;
     const { empIntId, reason } = req.body;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
     const { context } = req.query; // SUPERVISORAPPROVAL or default to MAINTENANCEAPPROVAL
 
     // Step 1: Log API called with full request data (context-aware)
@@ -538,6 +582,12 @@ const rejectMaintenanceAction = async (req, res) => {
         reason: reason.trim(),
         userId
       }).catch(err => console.error('Logging error:', err));
+    }
+
+    const rejectBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(assetId)
+    );
+    if (!rejectBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
     }
 
     // Step 5: Execute rejection
@@ -654,7 +704,7 @@ const getWorkflowHistoryController = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
 
     // Log API called
     await logApiCall({
@@ -739,16 +789,37 @@ const getMaintenanceApprovalsController = async (req, res) => {
   
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
-    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    const { orgId, acmCtx } = resolveApprovalScope(req);
     const userBranchCode = branchCodeFromReq(req);
     const userBranchId = branchIdFromReq(req);
+    // Org-level ACM with branch=* must be treated as super for list filtering.
+    // Otherwise branchId is cleared and the model wrongly keeps only null-branch assets.
+    const hasSuperAccess =
+      userHasSystemAdminRole(req.user) ||
+      Boolean(acmCtx?.hasSuperAccess) ||
+      Boolean(acmCtx?.allBranches) ||
+      Boolean(req.user?.hasSuperAccess) ||
+      Boolean(req.user?.acmAllBranches);
+    const allowedBranchIds = hasSuperAccess
+      ? []
+      : (Array.isArray(acmCtx?.branchIds) && acmCtx.branchIds.length
+          ? acmCtx.branchIds
+          : Array.isArray(req.user?.acmBranchIds)
+            ? req.user.acmBranchIds
+            : []);
 
     // Log API called
     await logApiCall({
       operation: 'Get Maintenance Approvals',
       method: req.method,
       url: req.originalUrl,
-      requestData: { emp_int_id: empIntId, org_id: orgId, branch_code: userBranchCode },
+      requestData: {
+        emp_int_id: empIntId,
+        org_id: orgId,
+        branch_code: userBranchCode,
+        hasSuperAccess,
+        allowedBranchIds,
+      },
       userId
     });
 
@@ -772,14 +843,16 @@ const getMaintenanceApprovalsController = async (req, res) => {
     const { data: formattedData } = await operationalCache.cachedList(
       req,
       'maintenance-approval',
-      empIntId || 'none',
+      `${empIntId || 'none'}:super:${hasSuperAccess ? 1 : 0}:br:${userBranchId || 'all'}`,
       async () => {
         const maintenanceApprovals = await getMaintenanceApprovals(
           empIntId,
           orgId,
           userBranchCode,
-          req.user?.hasSuperAccess || false,
-          req.user?.job_role_id || null
+          hasSuperAccess,
+          req.user?.job_role_id || null,
+          userBranchId,
+          allowedBranchIds,
         );
 
         return maintenanceApprovals.map(record => ({
@@ -855,7 +928,7 @@ const getVendorRenewalApprovalsController = async (req, res) => {
   
   try {
     const empIntId = req.user.emp_int_id; // Get from auth middleware
-    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
     const userBranchCode = branchCodeFromReq(req);
     const userBranchId = branchIdFromReq(req);
 
@@ -885,7 +958,7 @@ const getVendorRenewalApprovalsController = async (req, res) => {
       });
     }
 
-    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, req.user?.hasSuperAccess || false);
+    const vendorRenewalApprovals = await getVendorRenewalApprovals(empIntId, orgId, userBranchCode, userHasSystemAdminRole(req.user));
 
     // Format the data for frontend
     const formattedData = vendorRenewalApprovals.map(record => ({
@@ -990,7 +1063,7 @@ const getAllMaintenanceWorkflows = async (req, res) => {
   
   try {
     const { assetId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
 
     // Log API called
     await logApiCall({
@@ -1074,7 +1147,7 @@ const getWorkflowHistoryByWfamshIdController = async (req, res) => {
   
   try {
     const { wfamshId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
 
     // Log API called
     await logApiCall({
@@ -1144,7 +1217,7 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
   
   try {
     const { wfamshId } = req.params;
-    const orgId = req.query.orgId || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
 
     // Log API called
     await logApiCall({
@@ -1251,9 +1324,15 @@ const getApprovalDetailByWfamshIdController = async (req, res) => {
       userId
     });
 
+    const wfamshBranchId = await getMaintenanceAssetBranchId(wfamshId);
+    const wfamshBranchAccess = applyWorkflowActAccess(
+      await getApprovalBranchAccessForRequest(req, wfamshBranchId),
+      formattedDetail.headerStatus,
+    );
+
     res.json({
       success: true,
-      data: formattedDetail,
+      data: attachBranchAccess(formattedDetail, wfamshBranchAccess),
       message: 'Approval detail fetched successfully'
     });
 
@@ -1283,7 +1362,7 @@ const updateWorkflowHeaderAction = async (req, res) => {
     const { wfamshId } = req.params;
     const { vendorId, maintenanceDate, technicianId } = req.body;
     const userId = req.user?.user_id;
-    const orgId = req.query.orgId || req.user?.org_id || 'ORG001';
+    const { orgId } = resolveApprovalScope(req);
     
     if (!wfamshId) {
       return res.status(400).json({ success: false, message: 'Workflow ID is required' });
@@ -1292,6 +1371,13 @@ const updateWorkflowHeaderAction = async (req, res) => {
     if (vendorId === undefined && maintenanceDate === undefined && technicianId === undefined) {
       return res.status(400).json({ success: false, message: 'At least one field (vendorId, maintenanceDate or technicianId) must be provided' });
     }
+
+    const headerBranchAccess = await getApprovalBranchAccessForRequest(req, await getMaintenanceAssetBranchId(wfamshId)
+    );
+    if (!headerBranchAccess.canAct) {
+      return res.status(403).json(crossBranchForbiddenBody());
+    }
+
     const result = await updateWorkflowHeader(wfamshId, vendorId, maintenanceDate, technicianId, userId, orgId);
     
     if (result.success) {

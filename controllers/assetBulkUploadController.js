@@ -1,5 +1,6 @@
 const model = require("../models/assetModel");
 const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
+const { validateEntityId } = require("../constants/tableIdConventions");
 
 // Check existing asset IDs for bulk upload validation
 const checkExistingAssets = async (req, res) => {
@@ -55,6 +56,26 @@ const validateBulkUploadAssets = async (req, res) => {
             // Required field validation
             if (!row.asset_id) rowErrors.push('asset_id is required');
             if (!row.text) rowErrors.push('text is required');
+
+            if (row.asset_id) {
+                const idCheck = validateEntityId(row.asset_id, { tableKey: 'asset' });
+                if (!idCheck.ok) {
+                    rowErrors.push(`asset_id: ${idCheck.error}${idCheck.example ? ` (e.g. ${idCheck.example})` : ''}`);
+                }
+            }
+            if (row.asset_type_id) {
+                const typeCheck = validateEntityId(row.asset_type_id, { tableKey: 'asset_type' });
+                if (!typeCheck.ok) {
+                    rowErrors.push(`asset_type_id: ${typeCheck.error}${typeCheck.example ? ` (e.g. ${typeCheck.example})` : ''}`);
+                }
+            }
+            if (row.vendor_id || row.purchase_vendor_id) {
+                const vendorId = row.purchase_vendor_id || row.vendor_id;
+                const vendorCheck = validateEntityId(vendorId, { tableKey: 'vendor' });
+                if (!vendorCheck.ok) {
+                    rowErrors.push(`vendor_id: ${vendorCheck.error}${vendorCheck.example ? ` (e.g. ${vendorCheck.example})` : ''}`);
+                }
+            }
 
             if (row.purchased_cost && isNaN(parseFloat(row.purchased_cost))) {
                 rowErrors.push('purchased_cost must be a number');
@@ -259,6 +280,31 @@ const commitBulkUploadAssets = async (req, res) => {
             return res.status(401).json({ error: "User not authenticated" });
         }
 
+        // Enforce ID naming conventions before commit
+        const formatErrors = [];
+        for (let i = 0; i < csvData.length; i++) {
+            const row = csvData[i];
+            const rowNumber = i + 2;
+            if (row.asset_id) {
+                const idCheck = validateEntityId(row.asset_id, { tableKey: 'asset' });
+                if (!idCheck.ok) {
+                    formatErrors.push(`Row ${rowNumber} asset_id: ${idCheck.error}`);
+                }
+            }
+            if (row.asset_type_id) {
+                const typeCheck = validateEntityId(row.asset_type_id, { tableKey: 'asset_type' });
+                if (!typeCheck.ok) {
+                    formatErrors.push(`Row ${rowNumber} asset_type_id: ${typeCheck.error}`);
+                }
+            }
+        }
+        if (formatErrors.length) {
+            return res.status(400).json({
+                error: 'ID format validation failed',
+                details: formatErrors.slice(0, 50),
+            });
+        }
+
         const created_by = req.user.user_id;
         const results = await model.bulkUpsertAssets(
           csvData,
@@ -273,7 +319,8 @@ const commitBulkUploadAssets = async (req, res) => {
                 totalProcessed: results.totalProcessed,
                 inserted: results.inserted,
                 updated: results.updated,
-                errors: results.errors
+                errors: results.errors,
+                errorDetails: results.errorDetails || [],
             }
         });
     } catch (error) {

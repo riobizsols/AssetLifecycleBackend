@@ -17,50 +17,8 @@ function buildAuthCacheKey(decoded) {
 }
 
 async function resolveDatabasePool(decoded, req) {
+    // Root AssetLifecycleBackend is single-DB — always use DATABASE_URL.
     const db = require('../config/db');
-    const { getOrgIdFromSubdomain, extractTenantSubdomain } = require('../utils/subdomainUtils');
-    const { getTenantPool, checkTenantExists } = require('../services/tenantService');
-
-    const hostname = req.get('host') || req.get('x-forwarded-host') || req.hostname || req.headers.host;
-    const subdomain = extractTenantSubdomain(hostname);
-
-    // Subdomain takes precedence over use_default_db (multi-tenant routing)
-    if (subdomain) {
-        try {
-            const tenantOrgId = await getOrgIdFromSubdomain(subdomain);
-            if (tenantOrgId) {
-                const tenantExists = await checkTenantExists(tenantOrgId);
-                if (tenantExists) {
-                    logger.log(`[AuthMiddleware] Subdomain ${subdomain} -> tenant DB org_id: ${tenantOrgId}`);
-                    return { dbPool: await getTenantPool(tenantOrgId), isTenant: true };
-                }
-                logger.warn(`[AuthMiddleware] Subdomain ${subdomain} tenant not active, using default DB`);
-            } else {
-                logger.warn(`[AuthMiddleware] Subdomain ${subdomain} has no org_id, using default DB`);
-            }
-        } catch (subdomainError) {
-            logger.error(`[AuthMiddleware] Error processing subdomain ${subdomain}:`, subdomainError);
-        }
-        return { dbPool: db, isTenant: false };
-    }
-
-    if (decoded.use_default_db === true) {
-        logger.log(`[AuthMiddleware] Normal login (use_default_db=true) -> default DATABASE_URL`);
-        return { dbPool: db, isTenant: false };
-    }
-
-    // Tenant token without subdomain: route by org_id from JWT
-    if (decoded.org_id) {
-        try {
-            const tenantExists = await checkTenantExists(decoded.org_id);
-            if (tenantExists) {
-                return { dbPool: await getTenantPool(decoded.org_id), isTenant: true };
-            }
-        } catch (tenantError) {
-            console.warn(`[AuthMiddleware] Tenant lookup failed for org_id ${decoded.org_id}:`, tenantError.message);
-        }
-    }
-
     return { dbPool: db, isTenant: false };
 }
 

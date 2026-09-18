@@ -1,6 +1,7 @@
 const model = require('../models/employeeModel');
 const { generateCustomId } = require('../utils/idGenerator');
 const { validateCsvOrgBranch } = require('../utils/validateCsvOrgBranch');
+const { validateEntityId } = require('../constants/tableIdConventions');
 
 // Check existing employees in database
 const checkExistingEmployees = async (req, res) => {
@@ -86,6 +87,13 @@ const trialUploadEmployees = async (req, res) => {
         // Basic validation
         if (!row.employee_id) {
           validationErrors.push(`Employee missing employee_id`);
+          errors++;
+          continue;
+        }
+
+        const empIdCheck = validateEntityId(row.employee_id, { tableKey: 'employee' });
+        if (!empIdCheck.ok) {
+          validationErrors.push(`Employee ${row.employee_id}: ${empIdCheck.error}`);
           errors++;
           continue;
         }
@@ -182,11 +190,16 @@ const commitBulkUploadEmployees = async (req, res) => {
     }
 
     const created_by = req.user.user_id;
-
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const { orgId, branchId } = getEffectiveListContext(req);
+    const org_id = orgId || req.user.org_id;
+    const userBranchId = branchId || null;
+    
     console.log('=== Employee Bulk Upload Debug ===');
-    console.log('Using org_id / branch_id from each CSV row');
-
-    const results = await model.bulkUpsertEmployees(csvData, created_by);
+    console.log('ACM org_id:', org_id);
+    console.log('ACM branch_id:', userBranchId);
+    
+    const results = await model.bulkUpsertEmployees(csvData, created_by, org_id, userBranchId);
     
     res.json({
       success: true,

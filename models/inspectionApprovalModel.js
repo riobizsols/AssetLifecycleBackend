@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
@@ -46,7 +47,7 @@ const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
  * @param {string|string[]} jobRoles - Job role ID or array of IDs (e.g., 'JR001' or ['JR001', 'JR002'])
  * @returns {Array} List of pending approvals
  */
-async function getPendingInspectionApprovals(orgId, jobRoles) {
+async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false, allowedBranchIds = null } = {}) {
   // Ensure jobRoles is an array
   const roles = Array.isArray(jobRoles) ? jobRoles : [jobRoles];
   
@@ -54,6 +55,25 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
 
   const includeAllRoles = roleIdsIncludeSystemAdmin(roles);
   const roleFilter = includeAllRoles ? '' : 'AND d.job_role_id = ANY($2::text[])';
+  const seeAllBranches = isSystemAdmin || includeAllRoles;
+  let branchFilter = '';
+  const values = seeAllBranches && includeAllRoles ? [orgId] : includeAllRoles ? [orgId] : [orgId, roles];
+
+  if (!seeAllBranches) {
+    const scopedBranchIds = Array.isArray(allowedBranchIds)
+      ? [...new Set(allowedBranchIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
+    if (userBranchId) {
+      const branchParam = values.length + 1;
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${branchParam})`;
+      values.push(userBranchId);
+    } else if (scopedBranchIds.length) {
+      const branchParam = values.length + 1;
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = ANY($${branchParam}::varchar[]))`;
+      values.push(scopedBranchIds);
+    }
+    // Org view with ACM all-branches should pass isSystemAdmin/seeAllBranches; never force null-only branches.
+  }
 
   const query = `
     SELECT 
@@ -90,14 +110,12 @@ async function getPendingInspectionApprovals(orgId, jobRoles) {
     
     WHERE d.org_id = $1
       ${roleFilter}
+      ${branchFilter}
       AND UPPER(d.status) = 'AP'
       AND h.org_id = $1
     
     ORDER BY h.pl_sch_date ASC, d.sequence ASC;
   `;
-  
-  const values = includeAllRoles ? [orgId] : [orgId, roles];
-  
   try {
     const result = await getDb().query(query, values);
     return result.rows;
@@ -134,6 +152,7 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       a.purchased_on,
       a.purchase_vendor_id,
       a.service_vendor_id,
+      a.branch_id as asset_branch_id,
       h.vendor_id,
       
       ast.text as asset_type_name,
@@ -451,12 +470,8 @@ async function getNextWorkflowStep(orgId, wfaiishId, currentSequence) {
  */
 async function createWorkflowHistory(historyData) {
   try {
-    // Generate new ID based on max existing ID (similar to Asset Maintenance History)
-    // Extract number from WFAIHIS_XX
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfaiishis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAATInspHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfaihisId = `WFAIHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    // Global sequence — wfaiishis_id PK is not org-scoped
+    const wfaihisId = await generateCustomId('wfaiishis', 3);
     
     const query = `
       INSERT INTO "tblWFAATInspHist" (
@@ -609,10 +624,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     }
     
     // 2. Generate new AIS ID (e.g. AIS_001)
-    const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
-    const idResult = await getDb().query(idQuery);
-    const nextNum = (idResult.rows[0].max_num || 0) + 1;
-    const aisId = `AIS_${nextNum.toString().padStart(3, '0')}`;
+    const aisId = await generateCustomId('ais', 3);
     
     // 3. Insert into tblAAT_Insp_Sch
     const insertQuery = `
@@ -635,7 +647,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
         branch_code
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7,
-        'IN', $8, NOW(), 
+        'IN', $8, NULL,
         $9, NOW(), $10, NOW(), $11, $12
       )
       RETURNING *
@@ -649,7 +661,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.aatif_id,
       finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
       empIntToSave, // emp_int_id - do not store for vendor-maintained inspections
-      header.pl_sch_date || new Date(), // act_insp_st_date
+      new Date(), // act_insp_st_date — execution starts when workflow is approved
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
       orgId,

@@ -2,19 +2,15 @@ const fs = require('fs');
 const path = require('path');
 const { Client } = require('pg');
 const { isLegacyGroupMenuAppId } = require('../utils/navigationGroupUtils');
-const { DEFAULT_UOM, DEFAULT_INSP_RES_TYPE_DET } = require('../constants/setupDefaults');
+const { getReferenceUrl } = require('../utils/tenantSchemaReference');
+const {
+  DEFAULT_UOM,
+  DEFAULT_INSP_RES_TYPE_DET,
+  DEFAULT_DOC_TYPE_OBJECTS,
+  DEFAULT_SLA_DESC,
+} = require('../constants/setupDefaults');
 
 const REPORT_DIR = path.join(__dirname, '..', 'scripts', 'reports');
-
-/** Main (non-tenant) app — resolve reference DB from env, no tenantSchemaReference util. */
-function getReferenceUrl() {
-  return (
-    process.env.TENANT_SCHEMA_REFERENCE_URL ||
-    process.env.DATABASE_URL ||
-    process.env.HOSPITALITY_DATABASE_URL ||
-    null
-  );
-}
 
 /** Tables that must be seeded from schema_db reference on every new tenant. */
 const REQUIRED_MASTER_TABLES = [
@@ -24,6 +20,7 @@ const REQUIRED_MASTER_TABLES = [
   { table: 'tblProps', pk: ['prop_id'] },
   { table: 'tblAssetPropListValues', pk: ['aplv_id'] },
   { table: 'tblUom', pk: ['uom_id'] },
+  { table: 'tblDocTypeObjects', pk: ['dto_id'], orgIdColumn: 'org_id' },
   { table: 'tblInspResTypeDet', pk: ['irtd_id'], orgIdColumn: 'org_id' },
   { table: 'tblApps', pk: ['app_id'], orgIdColumn: 'org_id', missingOnly: true },
 ];
@@ -369,6 +366,16 @@ async function seedRequiredMasterData(tenantClient, options = {}) {
     results.push(inspResSeed);
     console.log(`[TenantReferenceData] tblInspResTypeDet defaults: upserted ${inspResSeed.upserted}`);
 
+    // Always upsert attachment Document Types even when schema_db has 0 rows.
+    const docTypeSeed = await ensureDefaultDocTypeObjects(tenantClient, options.orgId);
+    results.push(docTypeSeed);
+    console.log(`[TenantReferenceData] tblDocTypeObjects defaults: upserted ${docTypeSeed.upserted}`);
+
+    // Always upsert vendor SLA master labels (Vendor screen dropdowns).
+    const slaSeed = await ensureDefaultSlaDesc(tenantClient);
+    results.push(slaSeed);
+    console.log(`[TenantReferenceData] tblsla_desc defaults: upserted ${slaSeed.upserted}`);
+
     return { results, referenceUrl: referenceUrl.replace(/:[^:@/]+@/, ':***@') };
   } finally {
     await referenceClient.end();
@@ -435,6 +442,131 @@ async function ensureDefaultInspResTypeDet(tenantClient, orgId) {
   }
 
   return { table: 'tblInspResTypeDet', upserted, source: 'DEFAULT_INSP_RES_TYPE_DET', orgId: resolvedOrgId };
+}
+
+/**
+ * Upsert attachment Document Type rows into tblDocTypeObjects for new tenants.
+ * Widens object_type when needed so "inspection certificate" fits.
+ * Never overwrites an existing dto_id that already belongs to a different type/org.
+ */
+async function ensureDefaultDocTypeObjects(tenantClient, orgId) {
+  if (!(await tableExists(tenantClient, 'tblDocTypeObjects'))) {
+    return { table: 'tblDocTypeObjects', upserted: 0, skipped: true, reason: 'table_missing' };
+  }
+
+  // "inspection certificate" is 22 chars; legacy column is varchar(20).
+  await tenantClient.query(`
+    ALTER TABLE "tblDocTypeObjects"
+    ALTER COLUMN object_type TYPE character varying(50)
+  `).catch(() => {});
+
+  let resolvedOrgId = orgId ? String(orgId).trim() : null;
+  if (!resolvedOrgId) {
+    const orgRes = await tenantClient.query(`SELECT org_id FROM "tblOrgs" ORDER BY org_id LIMIT 1`);
+    resolvedOrgId = orgRes.rows[0]?.org_id || 'ORG001';
+  }
+
+  async function nextDtoId() {
+    const maxRes = await tenantClient.query(`
+      SELECT COALESCE(MAX(CAST(SUBSTRING(dto_id FROM 4) AS INTEGER)), 0) AS m
+      FROM "tblDocTypeObjects"
+      WHERE dto_id ~ '^DTO[0-9]+$'
+    `);
+    return `DTO${String(Number(maxRes.rows[0].m) + 1).padStart(3, '0')}`;
+  }
+
+  let upserted = 0;
+  for (const row of DEFAULT_DOC_TYPE_OBJECTS) {
+    const existing = await tenantClient.query(
+      `
+      SELECT dto_id
+      FROM "tblDocTypeObjects"
+      WHERE org_id = $1
+        AND LOWER(BTRIM(object_type)) = LOWER(BTRIM($2))
+        AND doc_type = $3
+      LIMIT 1
+      `,
+      [resolvedOrgId, row.object_type, row.doc_type],
+    );
+
+    if (existing.rows.length) {
+      await tenantClient.query(
+        `UPDATE "tblDocTypeObjects" SET doc_type_text = $1 WHERE dto_id = $2`,
+        [row.doc_type_text, existing.rows[0].dto_id],
+      );
+      upserted += 1;
+      continue;
+    }
+
+    const idTaken = await tenantClient.query(
+      `SELECT dto_id FROM "tblDocTypeObjects" WHERE dto_id = $1 LIMIT 1`,
+      [row.id],
+    );
+    const dtoId = idTaken.rows.length ? await nextDtoId() : row.id;
+
+    await tenantClient.query(
+      `
+      INSERT INTO "tblDocTypeObjects" (
+        dto_id, object_type, doc_type, doc_type_text, org_id
+      ) VALUES ($1, $2, $3, $4, $5)
+      `,
+      [dtoId, row.object_type, row.doc_type, row.doc_type_text, resolvedOrgId],
+    );
+    upserted += 1;
+  }
+
+  return {
+    table: 'tblDocTypeObjects',
+    upserted,
+    source: 'DEFAULT_DOC_TYPE_OBJECTS',
+    orgId: resolvedOrgId,
+  };
+}
+
+/**
+ * Upsert default vendor SLA labels into tblsla_desc for new tenants.
+ * Creates the table if missing (legacy DBs). Does not overwrite custom descriptions
+ * for an existing sla_id — only inserts missing IDs.
+ */
+async function ensureDefaultSlaDesc(tenantClient) {
+  const exists = await tableExists(tenantClient, 'tblsla_desc');
+  if (!exists) {
+    await tenantClient.query(`
+      CREATE TABLE IF NOT EXISTS tblsla_desc (
+        sla_id character varying(50) PRIMARY KEY,
+        description text
+      )
+    `);
+  }
+
+  let upserted = 0;
+  for (const row of DEFAULT_SLA_DESC) {
+    const result = await tenantClient.query(
+      `
+      INSERT INTO tblsla_desc (sla_id, description)
+      VALUES ($1, $2)
+      ON CONFLICT (sla_id) DO NOTHING
+      `,
+      [row.id, row.description],
+    );
+    upserted += result.rowCount || 0;
+  }
+
+  // If a default row exists but description is empty, fill from defaults.
+  for (const row of DEFAULT_SLA_DESC) {
+    const filled = await tenantClient.query(
+      `
+      UPDATE tblsla_desc
+      SET description = $2
+      WHERE sla_id = $1
+        AND (description IS NULL OR BTRIM(description) = '')
+      `,
+      [row.id, row.description],
+    );
+    upserted += filled.rowCount || 0;
+  }
+
+  return { table: 'tblsla_desc', upserted, source: 'DEFAULT_SLA_DESC' };
 }
 
 /**
@@ -554,6 +686,8 @@ module.exports = {
   seedRequiredMasterData,
   ensureDefaultUom,
   ensureDefaultInspResTypeDet,
+  ensureDefaultDocTypeObjects,
+  ensureDefaultSlaDesc,
   alignTenantColumnsFromReference,
   seedTenantDatabase,
   writeSeedReport,
