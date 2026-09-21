@@ -197,6 +197,78 @@ const DEFAULT_ASSET_TYPES = [
     serialFormat: 1,
     depreciationType: "SL",
     description: "Security surveillance equipment."
+  },
+  {
+    id: "AT018",
+    name: "Electrical",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Electrical panels, switchgear, transformers, lighting and power distribution."
+  },
+  {
+    id: "AT019",
+    name: "Plumbing",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Water supply, drainage, pumps and plumbing fixtures."
+  },
+  {
+    id: "AT020",
+    name: "HVAC",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Heating, ventilation, air handling units, chillers and campus climate systems."
+  },
+  {
+    id: "AT021",
+    name: "Civil",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Buildings, structures, roads, drainage works and civil fabric."
+  },
+  {
+    id: "AT022",
+    name: "Fire Systems",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Fire alarms, extinguishers, hydrants, sprinklers and life-safety systems."
+  },
+  {
+    id: "AT023",
+    name: "Campus Infrastructure",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Common physical facilities and systems that support the entire campus rather than a specific piece of equipment."
   }
 ];
 
@@ -380,6 +452,60 @@ const DEFAULT_PROD_SERVICES = [
     psType: "Product",
     status: 1,
     description: "Fixed dome camera."
+  },
+  {
+    id: "PS021",
+    assetTypeId: "AT018",
+    brand: "Generic",
+    model: "Electrical System",
+    psType: "Product",
+    status: 1,
+    description: "Campus electrical distribution equipment."
+  },
+  {
+    id: "PS022",
+    assetTypeId: "AT019",
+    brand: "Generic",
+    model: "Plumbing System",
+    psType: "Product",
+    status: 1,
+    description: "Campus plumbing and water systems."
+  },
+  {
+    id: "PS023",
+    assetTypeId: "AT020",
+    brand: "Generic",
+    model: "HVAC System",
+    psType: "Product",
+    status: 1,
+    description: "Campus HVAC plant and air handling."
+  },
+  {
+    id: "PS024",
+    assetTypeId: "AT021",
+    brand: "Generic",
+    model: "Civil Work",
+    psType: "Product",
+    status: 1,
+    description: "Campus civil and structural assets."
+  },
+  {
+    id: "PS025",
+    assetTypeId: "AT022",
+    brand: "Generic",
+    model: "Fire System",
+    psType: "Product",
+    status: 1,
+    description: "Campus fire detection and suppression."
+  },
+  {
+    id: "PS026",
+    assetTypeId: "AT023",
+    brand: "Generic",
+    model: "Campus Infrastructure",
+    psType: "Product",
+    status: 1,
+    description: "Shared campus facilities and supporting systems."
   }
 ];
 
@@ -646,6 +772,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN059", jobRoleId: "JR001", parentId: "JRN012", appId: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report", sequence: 9, accessLevel: "A", isGroup: false },
   { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN063", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register", sequence: 11, accessLevel: "A", isGroup: false },
+  { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report", sequence: 12, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },

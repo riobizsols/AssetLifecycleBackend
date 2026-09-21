@@ -76,6 +76,7 @@ const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
 const auditReportRoutes = require("./routes/auditReportRoutes");
 const consolidatedAssetRegisterRoutes = require("./routes/consolidatedAssetRegisterRoutes");
+const maintenanceStatusReportRoutes = require("./routes/maintenanceStatusReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
@@ -264,6 +265,7 @@ app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
 app.use("/api/audit-report", auditReportRoutes);
 app.use("/api/consolidated-asset-register", consolidatedAssetRegisterRoutes);
+app.use("/api/maintenance-status-report", maintenanceStatusReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);
