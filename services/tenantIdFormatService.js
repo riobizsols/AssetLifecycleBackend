@@ -28,11 +28,12 @@ async function tableExists(client, tableName) {
 }
 
 async function checkIdFormat(client, dbLabel, rule) {
-  const { table, column, pattern, example } = rule;
+  const { table, column, pattern, auditPattern, example } = rule;
   const result = {
     table,
     column,
-    expectedPattern: pattern.toString(),
+    expectedPattern: (auditPattern || pattern).toString(),
+    preferredPattern: pattern?.toString?.() || null,
     example,
     db: dbLabel,
     totalRows: 0,
@@ -44,6 +45,18 @@ async function checkIdFormat(client, dbLabel, rule) {
 
   if (!(await tableExists(client, table))) {
     result.status = 'TABLE_MISSING';
+    return result;
+  }
+
+  const colExists = await client.query(
+    `
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema='public' AND table_name=$1 AND column_name=$2
+    `,
+    [table, column]
+  );
+  if (!colExists.rows.length) {
+    result.status = 'COLUMN_MISSING';
     return result;
   }
 
@@ -59,16 +72,17 @@ async function checkIdFormat(client, dbLabel, rule) {
   );
   result.nullIds = nulls.rows[0].c;
 
+  const checkPattern = auditPattern || pattern;
   const invalid = await client.query(
     `SELECT "${column}" AS id FROM "${table}"
      WHERE "${column}" IS NOT NULL AND "${column}" !~ $1
      LIMIT 10`,
-    [pattern.source]
+    [checkPattern.source]
   );
   const invalidCount = await client.query(
     `SELECT COUNT(*)::int AS c FROM "${table}"
      WHERE "${column}" IS NOT NULL AND "${column}" !~ $1`,
-    [pattern.source]
+    [checkPattern.source]
   );
   result.invalidRows = invalidCount.rows[0].c;
   result.invalidSamples = invalid.rows.map((r) => r.id);

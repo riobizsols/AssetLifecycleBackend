@@ -207,7 +207,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "Latitude 7440",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "High-end business ultrabook."
   },
   {
@@ -216,7 +216,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "HP",
     model: "EliteBook 845",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Enterprise-class laptop."
   },
   {
@@ -225,7 +225,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Lenovo",
     model: "ThinkPad X1 Carbon",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Flagship ultra portable."
   },
   {
@@ -234,7 +234,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "ProSupport Plus",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Laptop AMC support."
   },
   {
@@ -243,7 +243,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Microsoft",
     model: "365 E3",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Productivity suite subscription."
   },
   {
@@ -252,7 +252,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Adobe",
     model: "Creative Cloud",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Creative suite licenses."
   },
   {
@@ -261,7 +261,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Kirloskar",
     model: "Green 10kVA",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Diesel generator."
   },
   {
@@ -270,7 +270,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Apple",
     model: "iPhone 15",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Executive smartphone."
   },
   {
@@ -279,7 +279,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Samsung",
     model: "Galaxy S24",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Corporate Android device."
   },
   {
@@ -288,7 +288,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Dell",
     model: "UltraSharp 27",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Professional monitor."
   },
   {
@@ -297,7 +297,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Epson",
     model: "EB-S41",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Meeting room projector."
   },
   {
@@ -306,7 +306,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Otis",
     model: "Gen2",
     psType: "Service",
-    status: "active",
+    status: 1,
     description: "Lift AMC package."
   },
   {
@@ -315,7 +315,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Toyota",
     model: "Innova Hycross",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Corporate fleet car."
   },
   {
@@ -324,7 +324,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Tata",
     model: "407",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Logistics truck."
   },
   {
@@ -333,7 +333,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Ashok Leyland",
     model: "Viking",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Employee transport bus."
   },
   {
@@ -342,7 +342,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "APC",
     model: "Smart-UPS 5kVA",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Data center UPS."
   },
   {
@@ -351,7 +351,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Daikin",
     model: "VRV S",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "HVAC unit."
   },
   {
@@ -360,7 +360,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Havells",
     model: "Stealth Air",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Ceiling fan."
   },
   {
@@ -369,7 +369,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Urban Ladder",
     model: "Nova Desk",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Workstation table."
   },
   {
@@ -378,7 +378,7 @@ const DEFAULT_PROD_SERVICES = [
     brand: "Hikvision",
     model: "DS-2CD2143",
     psType: "Product",
-    status: "active",
+    status: 1,
     description: "Fixed dome camera."
   }
 ];
@@ -492,7 +492,8 @@ const DEFAULT_MAINT_TYPES = [
   { id: "MT001", name: "Subscription Renewal" },
   { id: "MT002", name: "Regular Maintenance" },
   { id: "MT003", name: "Others" },
-  { id: "MT004", name: "Break Down" }
+  { id: "MT004", name: "Break Down" },
+  { id: "MT017", name: "Calibration" },
 ];
 
 const DEFAULT_UOM = [
@@ -500,7 +501,52 @@ const DEFAULT_UOM = [
   { id: "UOM002", name: "Weeks" },
   { id: "UOM003", name: "Months" },
   { id: "UOM004", name: "Years" },
-  { id: "UOM005", name: "KMS" }
+  { id: "UOM005", name: "KMS" },
+  // Spare-parts / quantity UOMs (required for spare part category create)
+  { id: "UOM006", name: "Piece" },
+];
+
+/** Inspection checklist response types (Qualitative / Quantitative). */
+const DEFAULT_INSP_RES_TYPE_DET = [
+  { id: "IRTD_QN_001", name: "Quantitative", expected_value: null, option: null },
+  { id: "IRTD_QL_YES_NO_001", name: "Qualitative", expected_value: "Yes", option: "Yes" },
+  { id: "IRTD_QL_YES_NO_002", name: "Qualitative", expected_value: "No", option: "No" },
+  { id: "IRTD_QL_MULTI_001", name: "Qualitative", expected_value: null, option: "Good" },
+  { id: "IRTD_QL_MULTI_002", name: "Qualitative", expected_value: null, option: "Excellent" },
+  { id: "IRTD_QL_MULTI_003", name: "Qualitative", expected_value: null, option: "Fair" },
+  { id: "IRTD_QL_MULTI_004", name: "Qualitative", expected_value: null, option: "Poor" },
+  { id: "IRTD_QL_MULTI_005", name: "Qualitative", expected_value: null, option: "Maybe" },
+  { id: "IRTD_QL_MULTI_006", name: "Qualitative", expected_value: null, option: "Not Applicable" },
+];
+
+/**
+ * Attachment Document Type dropdown defaults (tblDocTypeObjects).
+ * Applied on every tenant create even when schema_db reference rows are missing.
+ * object_type values must match FE `/doc-type-objects/object-type/...` paths.
+ */
+const DEFAULT_DOC_TYPE_OBJECTS = [
+  { id: "DTO001", object_type: "*", doc_type: "OT", doc_type_text: "others" },
+  { id: "DTO002", object_type: "vendor", doc_type: "SL", doc_type_text: "SLA" },
+  { id: "DTO003", object_type: "vendor", doc_type: "CT", doc_type_text: "Contract" },
+  { id: "DTO004", object_type: "maintenance", doc_type: "BP", doc_type_text: "Before Photos" },
+  { id: "DTO005", object_type: "maintenance", doc_type: "AP", doc_type_text: "After Photos" },
+  { id: "DTO006", object_type: "maintenance", doc_type: "WO", doc_type_text: "Work Order" },
+  { id: "DTO007", object_type: "asset", doc_type: "PO", doc_type_text: "Purchase Order" },
+  { id: "DTO008", object_type: "asset", doc_type: "IN", doc_type_text: "Insurance" },
+  { id: "DTO009", object_type: "asset", doc_type: "INV", doc_type_text: "Invoice" },
+  { id: "DTO010", object_type: "asset", doc_type: "WA", doc_type_text: "Warranty" },
+  { id: "DTO011", object_type: "asset group", doc_type: "PO", doc_type_text: "Purchase Order" },
+  { id: "DTO012", object_type: "asset group", doc_type: "IN", doc_type_text: "Insurance" },
+  { id: "DTO013", object_type: "asset group", doc_type: "INV", doc_type_text: "Invoice" },
+  { id: "DTO014", object_type: "asset group", doc_type: "WA", doc_type_text: "Warranty" },
+  { id: "DTO015", object_type: "scrap sales", doc_type: "Out", doc_type_text: "Outpass" },
+  { id: "DTO016", object_type: "scrap sales", doc_type: "CC", doc_type_text: "Clearance Certificate" },
+  { id: "DTO017", object_type: "asset type", doc_type: "CC", doc_type_text: "Clearance Certificate" },
+  { id: "DTO018", object_type: "asset", doc_type: "TM", doc_type_text: "Technical Manual" },
+  { id: "DTO019", object_type: "inspection certificate", doc_type: "IC", doc_type_text: "Inspection Certificate" },
+  { id: "DTO020", object_type: "asset", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO021", object_type: "asset group", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO044", object_type: "maintenance", doc_type: "CL", doc_type_text: "Calibration Certificate" },
 ];
 
 const DEFAULT_MAINT_STATUS = [
@@ -519,6 +565,8 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "employee", prefix: "EMP", lastNumber: 0 },
   { tableKey: "emp_int_id", prefix: "EMP_INT_", lastNumber: 0 },
   { tableKey: "amsbr", prefix: "AMSBR", lastNumber: 0 },
+  { tableKey: "ams", prefix: "AMS", lastNumber: 0 },
+  { tableKey: "asset_maint_sch", prefix: "AMS", lastNumber: 0 },
   { tableKey: "prod_serv", prefix: "PS", lastNumber: 0 },
   { tableKey: "jobrole", prefix: "JR", lastNumber: 0 },
   { tableKey: "jobrolenav", prefix: "JRN", lastNumber: 0 },
@@ -543,7 +591,11 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "spare_issue", prefix: "SI", lastNumber: 0 },
   { tableKey: "sp_issue", prefix: "SPI", lastNumber: 0 },
   { tableKey: "spare_store", prefix: "SS", lastNumber: 0 },
-  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 }
+  { tableKey: "sp_store", prefix: "SS", lastNumber: 0 },
+  { tableKey: "audit_type", prefix: "AUDTP", lastNumber: 0 },
+  { tableKey: "audtp", prefix: "AUDTP", lastNumber: 0 },
+  { tableKey: "audit_at_mapping", prefix: "AUDATM", lastNumber: 0 },
+  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 }
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -596,6 +648,9 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN058", jobRoleId: "JR001", parentId: "JRN012", appId: "SLAREPORT", label: "SLA Reports", sequence: 7, accessLevel: "A", isGroup: false },
   { id: "JRN015", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCEHISTORY", label: "Maintenance History of Asset", sequence: 8, accessLevel: "A", isGroup: false },
   { id: "JRN059", jobRoleId: "JR001", parentId: "JRN012", appId: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report", sequence: 9, accessLevel: "A", isGroup: false },
+  { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
+  { id: "JRN063", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register", sequence: 11, accessLevel: "A", isGroup: false },
+  { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Workforce", sequence: 12, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
@@ -639,6 +694,17 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN037", jobRoleId: "JR001", parentId: null, appId: "GROUPASSET", label: "Group Asset", sequence: 25, accessLevel: "A", isGroup: false },
 ];
 
+/**
+ * Vendor SLA master labels (tblsla_desc).
+ * Used on Master Data → Vendors SLA dropdowns. Seeded for every new tenant.
+ */
+const DEFAULT_SLA_DESC = [
+  { id: 'SLA-1', description: 'First response' },
+  { id: 'SLA-2', description: 'Site Visit' },
+  { id: 'SLA-3', description: 'Resolution' },
+  { id: 'SLA-4', description: 'Invoice Clearance and so on' },
+];
+
 module.exports = {
   DEFAULT_ASSET_TYPES,
   DEFAULT_PROD_SERVICES,
@@ -648,6 +714,9 @@ module.exports = {
   DEFAULT_AUDIT_EVENTS,
   DEFAULT_MAINT_TYPES,
   DEFAULT_UOM,
+  DEFAULT_INSP_RES_TYPE_DET,
+  DEFAULT_DOC_TYPE_OBJECTS,
+  DEFAULT_SLA_DESC,
   DEFAULT_MAINT_STATUS,
   DEFAULT_ID_SEQUENCES,
   DEFAULT_JOB_ROLES,

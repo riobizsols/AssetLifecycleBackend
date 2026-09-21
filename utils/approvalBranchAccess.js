@@ -4,14 +4,32 @@ const { userHasSystemAdminRole } = require('./systemAdmin');
 const CROSS_BRANCH_VIEW_ONLY_MESSAGE =
   'This approval belongs to another branch. You can view it but cannot approve or reject it.';
 
-function evaluateApprovalBranchAccess({ isSystemAdmin, userBranchId, assetBranchId }) {
+function evaluateApprovalBranchAccess({
+  isSystemAdmin,
+  userBranchId,
+  assetBranchId,
+  acmAllBranches = false,
+  acmBranchIds = [],
+}) {
   if (isSystemAdmin) {
     return { canAct: true, viewOnly: false, reason: 'system_admin' };
+  }
+
+  // Same rule as maintenance-approval list: ACM branch=* / hasSuperAccess can act org-wide.
+  if (acmAllBranches) {
+    return { canAct: true, viewOnly: false, reason: 'acm_all_branches' };
   }
 
   const assetBranch = String(assetBranchId || '').trim();
   if (!assetBranch) {
     return { canAct: true, viewOnly: false, reason: 'no_asset_branch' };
+  }
+
+  const allowedBranches = (Array.isArray(acmBranchIds) ? acmBranchIds : [])
+    .map((id) => String(id || '').trim())
+    .filter(Boolean);
+  if (allowedBranches.length && allowedBranches.includes(assetBranch)) {
+    return { canAct: true, viewOnly: false, reason: 'acm_branch_grant' };
   }
 
   const userBranch = String(userBranchId || '').trim();
@@ -99,23 +117,63 @@ async function getScrapAssetBranchId(wfscrapHId, db = getDbFromContext()) {
   return result.rows[0]?.branch_id || null;
 }
 
-async function getApprovalBranchAccessForUser(user, assetBranchId, db = getDbFromContext()) {
+/**
+ * @param {object} user
+ * @param {string|null} assetBranchId
+ * @param {object} [db]
+ * @param {object|null} [acmCtx] from getEffectiveListContext(req) — must match list API rules
+ */
+async function getApprovalBranchAccessForUser(user, assetBranchId, db = getDbFromContext(), acmCtx = null) {
   const isSystemAdmin = userHasSystemAdminRole(user);
-  let userBranchId = user?.branch_id || null;
+  const acmAllBranches = Boolean(
+    acmCtx?.allBranches ||
+      acmCtx?.hasSuperAccess ||
+      user?.acmAllBranches ||
+      user?.hasSuperAccess
+  );
+  const acmBranchIds =
+    Array.isArray(acmCtx?.branchIds) && acmCtx.branchIds.length
+      ? acmCtx.branchIds
+      : Array.isArray(user?.acmBranchIds)
+        ? user.acmBranchIds
+        : [];
+
+  let userBranchId =
+    (acmCtx && Object.prototype.hasOwnProperty.call(acmCtx, 'branchId')
+      ? acmCtx.branchId
+      : null) ||
+    user?.branch_id ||
+    null;
   if (!userBranchId && user?.user_id) {
     userBranchId = await resolveUserBranchId(user.user_id, db);
   }
+
   const access = evaluateApprovalBranchAccess({
     isSystemAdmin,
     userBranchId,
     assetBranchId,
+    acmAllBranches,
+    acmBranchIds,
   });
   return {
     ...access,
     isSystemAdmin,
     userBranchId: userBranchId || null,
     assetBranchId: assetBranchId || null,
+    acmAllBranches,
   };
+}
+
+/** Convenience: same ACM scope as maintenance-approval list. */
+async function getApprovalBranchAccessForRequest(req, assetBranchId, db = getDbFromContext()) {
+  let acmCtx = null;
+  try {
+    const { getEffectiveListContext } = require('./acmAccess');
+    acmCtx = getEffectiveListContext(req);
+  } catch (_) {
+    acmCtx = null;
+  }
+  return getApprovalBranchAccessForUser(req.user, assetBranchId, db, acmCtx);
 }
 
 function attachBranchAccess(payload, access) {
@@ -130,6 +188,7 @@ function attachBranchAccess(payload, access) {
       isSystemAdmin: access.isSystemAdmin,
       userBranchId: access.userBranchId,
       assetBranchId: access.assetBranchId,
+      acmAllBranches: Boolean(access.acmAllBranches),
     },
   };
 }
@@ -151,6 +210,7 @@ module.exports = {
   getInspectionAssetBranchId,
   getScrapAssetBranchId,
   getApprovalBranchAccessForUser,
+  getApprovalBranchAccessForRequest,
   attachBranchAccess,
   crossBranchForbiddenBody,
 };

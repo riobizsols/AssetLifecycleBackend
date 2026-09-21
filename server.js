@@ -74,6 +74,9 @@ const tenantSetupRoutes = require("./routes/tenantSetupRoutes");
 const zohoAccessRequestRoutes = require("./routes/zohoAccessRequestRoutes");
 const slaRoutes = require("./routes/slaRoutes");
 const slaReportRoutes = require("./routes/slaReportRoutes");
+const auditReportRoutes = require("./routes/auditReportRoutes");
+const consolidatedAssetRegisterRoutes = require("./routes/consolidatedAssetRegisterRoutes");
+const workforceReportRoutes = require("./routes/workforceReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
@@ -86,7 +89,6 @@ const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
 const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
 
-const { subdomainMiddleware } = require('./middlewares/subdomainMiddleware');
 const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
@@ -96,9 +98,6 @@ const jsonParser = express.json({ limit: "10mb" });
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
 app.use(urlEncodedParser);
-
-// Apply subdomain middleware early to extract subdomain from all requests
-app.use(subdomainMiddleware);
 
 // Configure query parser to handle array parameters
 const qs = require('qs');
@@ -264,6 +263,9 @@ app.use("/api/maintenance-history", maintenanceHistoryRoutes);
 app.use("/api/asset-workflow-history", assetWorkflowHistoryRoutes);
 app.use("/api/breakdown-history", breakdownHistoryRoutes);
 app.use("/api/sla-report", slaReportRoutes);
+app.use("/api/audit-report", auditReportRoutes);
+app.use("/api/consolidated-asset-register", consolidatedAssetRegisterRoutes);
+app.use("/api/workforce-report", workforceReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);

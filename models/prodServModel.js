@@ -41,7 +41,7 @@ async function addProdserv(data) {
         AND LOWER(BTRIM(brand)) = LOWER($3)
         AND LOWER(BTRIM(model)) = LOWER($4)
         AND COALESCE(ps_type, '') = COALESCE($5, '')
-        AND CAST(status AS TEXT) IN ('1', 'true')
+        AND status = 1
       LIMIT 1
     `,
     [org_id, asset_type_id, brandName, modelName, ps_type || null]

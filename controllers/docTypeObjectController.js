@@ -1,5 +1,4 @@
 const model = require("../models/docTypeObjectModel");
-const operationalCache = require('../utils/operationalCache');
 
 // GET /api/doc-type-objects - Get all document type objects
 const getAllDocTypeObjects = async (req, res) => {
@@ -77,13 +76,12 @@ const getDocTypeObjectsByObjectType = async (req, res) => {
         
         // Get org_id from authenticated user if available, otherwise null
         const org_id = req.user ? req.user.org_id : null;
-        
-        const { data: rows } = await operationalCache.cachedList(
-            req,
-            'doc-type-objects',
-            `object-type:${object_type}`,
-            () => model.getDocTypeObjectsByObjectType(object_type, org_id).then((result) => result.rows),
-        );
+
+        // Do not cache this list: empty results were previously cached after a cold
+        // tenant seed miss, which kept Attachments Document Type dropdowns blank
+        // until TTL expiry. The table is small master data.
+        const result = await model.getDocTypeObjectsByObjectType(object_type, org_id);
+        const rows = result.rows || [];
         
         res.status(200).json({
             success: true,

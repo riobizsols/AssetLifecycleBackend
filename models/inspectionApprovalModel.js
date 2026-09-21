@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
@@ -46,7 +47,7 @@ const qId = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
  * @param {string|string[]} jobRoles - Job role ID or array of IDs (e.g., 'JR001' or ['JR001', 'JR002'])
  * @returns {Array} List of pending approvals
  */
-async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false } = {}) {
+async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = null, isSystemAdmin = false, allowedBranchIds = null } = {}) {
   // Ensure jobRoles is an array
   const roles = Array.isArray(jobRoles) ? jobRoles : [jobRoles];
   
@@ -59,13 +60,19 @@ async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = n
   const values = seeAllBranches && includeAllRoles ? [orgId] : includeAllRoles ? [orgId] : [orgId, roles];
 
   if (!seeAllBranches) {
-    const branchParam = values.length + 1;
+    const scopedBranchIds = Array.isArray(allowedBranchIds)
+      ? [...new Set(allowedBranchIds.map((id) => String(id || '').trim()).filter(Boolean))]
+      : [];
     if (userBranchId) {
+      const branchParam = values.length + 1;
       branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = $${branchParam})`;
       values.push(userBranchId);
-    } else {
-      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '')`;
+    } else if (scopedBranchIds.length) {
+      const branchParam = values.length + 1;
+      branchFilter = ` AND (a.branch_id IS NULL OR BTRIM(a.branch_id) = '' OR a.branch_id = ANY($${branchParam}::varchar[]))`;
+      values.push(scopedBranchIds);
     }
+    // Org view with ACM all-branches should pass isSystemAdmin/seeAllBranches; never force null-only branches.
   }
 
   const query = `
@@ -463,12 +470,8 @@ async function getNextWorkflowStep(orgId, wfaiishId, currentSequence) {
  */
 async function createWorkflowHistory(historyData) {
   try {
-    // Generate new ID based on max existing ID (similar to Asset Maintenance History)
-    // Extract number from WFAIHIS_XX
-    const historyIdQuery = `SELECT MAX(CAST(SUBSTRING(wfaiishis_id FROM 9) AS INTEGER)) as max_num FROM "tblWFAATInspHist"`;
-    const historyIdResult = await getDb().query(historyIdQuery);
-    const nextHistoryId = (historyIdResult.rows[0].max_num || 0) + 1;
-    const wfaihisId = `WFAIHIS_${nextHistoryId.toString().padStart(2, '0')}`;
+    // Global sequence — wfaiishis_id PK is not org-scoped
+    const wfaihisId = await generateCustomId('wfaiishis', 3);
     
     const query = `
       INSERT INTO "tblWFAATInspHist" (
@@ -621,10 +624,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
     }
     
     // 2. Generate new AIS ID (e.g. AIS_001)
-    const idQuery = `SELECT MAX(CAST(SUBSTRING(ais_id FROM 5) AS INTEGER)) as max_num FROM "tblAAT_Insp_Sch"`;
-    const idResult = await getDb().query(idQuery);
-    const nextNum = (idResult.rows[0].max_num || 0) + 1;
-    const aisId = `AIS_${nextNum.toString().padStart(3, '0')}`;
+    const aisId = await generateCustomId('ais', 3);
     
     // 3. Insert into tblAAT_Insp_Sch
     const insertQuery = `

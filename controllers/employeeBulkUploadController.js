@@ -1,6 +1,7 @@
 const model = require('../models/employeeModel');
 const { generateCustomId } = require('../utils/idGenerator');
 const { validateCsvOrgBranch } = require('../utils/validateCsvOrgBranch');
+const { validateEntityId } = require('../constants/tableIdConventions');
 
 // Check existing employees in database
 const checkExistingEmployees = async (req, res) => {
@@ -86,6 +87,13 @@ const trialUploadEmployees = async (req, res) => {
         // Basic validation
         if (!row.employee_id) {
           validationErrors.push(`Employee missing employee_id`);
+          errors++;
+          continue;
+        }
+
+        const empIdCheck = validateEntityId(row.employee_id, { tableKey: 'employee' });
+        if (!empIdCheck.ok) {
+          validationErrors.push(`Employee ${row.employee_id}: ${empIdCheck.error}`);
           errors++;
           continue;
         }

@@ -202,6 +202,16 @@ async function getTenantRegistryRowBySubdomain(subdomain) {
   return result.rows[0] || null;
 }
 
+async function getTenantRegistryRowByDbName(dbName) {
+  const pool = initTenantRegistryPool();
+  await ensureTenantsSchema(pool).catch(() => {});
+  const result = await pool.query(
+    `SELECT grouped_org_id AS org_id, org_name, db_name, subdomain, is_active, email FROM "tenants" WHERE db_name = $1`,
+    [String(dbName || '').trim()],
+  );
+  return result.rows[0] || null;
+}
+
 /** Derive a short org_code for tblOrgs from the subdomain (user no longer enters org ID). */
 function deriveOrgCodeFromSubdomain(subdomain) {
   const normalized = String(subdomain || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -1206,6 +1216,96 @@ async function copyDataFromReferenceDatabase(tenantClient, orgId) {
       console.log(`[TenantSetup] ⚠️ No translated text messages copied (table may be empty or columns don't match)`);
     }
 
+    // 13. Copy UOM master (maintenance + spare-parts units)
+    console.log(`[TenantSetup] Copying UOM from reference database...`);
+    const uomResult = await copyTableDataDynamically(referenceClient, tenantClient, 'tblUom', orgId);
+    if (uomResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${uomResult.copied} UOM rows`);
+    } else if (!uomResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No UOM rows copied from reference (will apply DEFAULT_UOM next)`);
+    }
+
+    // Always upsert canonical defaults (ensures Piece exists for spare parts even if schema_db is stale)
+    try {
+      const { ensureDefaultUom } = require('./tenantReferenceDataService');
+      const uomSeed = await ensureDefaultUom(tenantClient);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_UOM (${uomSeed.upserted} upserted)`);
+    } catch (uomErr) {
+      console.warn(`[TenantSetup] DEFAULT_UOM ensure skipped: ${uomErr.message}`);
+    }
+
+    // 14. Copy inspection response types from reference (Qualitative / Quantitative)
+    console.log(`[TenantSetup] Copying inspection response types from reference database...`);
+    const inspResResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblInspResTypeDet',
+      orgId,
+      { orgIdColumn: 'org_id' },
+    );
+    if (inspResResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${inspResResult.copied} inspection response type rows`);
+    } else if (!inspResResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No inspection response types copied from reference (will apply defaults next)`);
+    }
+
+    try {
+      const { ensureDefaultInspResTypeDet } = require('./tenantReferenceDataService');
+      const inspResSeed = await ensureDefaultInspResTypeDet(tenantClient, orgId);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_INSP_RES_TYPE_DET (${inspResSeed.upserted} upserted)`);
+    } catch (inspErr) {
+      console.warn(`[TenantSetup] DEFAULT_INSP_RES_TYPE_DET ensure skipped: ${inspErr.message}`);
+    }
+
+    // 15. Copy document type objects (Attachments Document Type dropdowns)
+    console.log(`[TenantSetup] Copying document type objects from reference database...`);
+    const docTypeResult = await copyTableDataDynamically(
+      referenceClient,
+      tenantClient,
+      'tblDocTypeObjects',
+      orgId,
+      { orgIdColumn: 'org_id' },
+    );
+    if (docTypeResult.copied > 0) {
+      console.log(`[TenantSetup] ✅ Copied ${docTypeResult.copied} document type rows`);
+    } else if (!docTypeResult.skipped) {
+      console.log(`[TenantSetup] ⚠️ No document types copied from reference (will apply DEFAULT_DOC_TYPE_OBJECTS next)`);
+    }
+
+    try {
+      const { ensureDefaultDocTypeObjects } = require('./tenantReferenceDataService');
+      const docTypeSeed = await ensureDefaultDocTypeObjects(tenantClient, orgId);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_DOC_TYPE_OBJECTS (${docTypeSeed.upserted} upserted)`);
+    } catch (docTypeErr) {
+      console.warn(`[TenantSetup] DEFAULT_DOC_TYPE_OBJECTS ensure skipped: ${docTypeErr.message}`);
+    }
+
+    // 16. Vendor SLA master labels (Master Data → Vendors SLA dropdowns)
+    console.log(`[TenantSetup] Copying SLA descriptions from reference database...`);
+    try {
+      const slaCopy = await copyTableDataDynamically(
+        referenceClient,
+        tenantClient,
+        'tblsla_desc',
+        orgId,
+      );
+      if (slaCopy.copied > 0) {
+        console.log(`[TenantSetup] ✅ Copied ${slaCopy.copied} SLA description rows`);
+      } else if (!slaCopy.skipped) {
+        console.log(`[TenantSetup] ⚠️ No SLA descriptions copied from reference (will apply DEFAULT_SLA_DESC next)`);
+      }
+    } catch (slaCopyErr) {
+      console.warn(`[TenantSetup] SLA description copy skipped: ${slaCopyErr.message}`);
+    }
+
+    try {
+      const { ensureDefaultSlaDesc } = require('./tenantReferenceDataService');
+      const slaSeed = await ensureDefaultSlaDesc(tenantClient);
+      console.log(`[TenantSetup] ✅ Ensured DEFAULT_SLA_DESC (${slaSeed.upserted} upserted)`);
+    } catch (slaErr) {
+      console.warn(`[TenantSetup] DEFAULT_SLA_DESC ensure skipped: ${slaErr.message}`);
+    }
+
     console.log(`[TenantSetup] ✅ Reference data copy process completed`);
     
   } catch (error) {
@@ -1717,23 +1817,53 @@ async function createTenant(tenantData) {
 
   // Internally generated registry PK (ORG###) — also used as tblOrgs.org_id
   let groupedOrgId = null;
+  // Only roll back DROP DATABASE for DBs this request created (never wipe a concurrent create).
+  let createdDbInThisRequest = false;
 
   try {
     await adminClient.connect();
 
-    // Check if database already exists
+    // Check if database already exists (common after gateway 504 — first request succeeded server-side)
     const dbCheckResult = await adminClient.query(
       `SELECT 1 FROM pg_database WHERE datname = $1`,
       [dbName]
     );
 
     if (dbCheckResult.rows.length > 0) {
-      throw new Error(`Database ${dbName} already exists`);
-    }
+      const existingBySubdomain = await tryResolveExistingTenant(
+        orgCodeUpper,
+        subdomain,
+        adminUser,
+        orgName,
+        orgCity,
+      );
+      if (existingBySubdomain) {
+        console.log(`[TenantSetup] Database ${dbName} already provisioned for subdomain ${subdomain}; returning existing tenant`);
+        return existingBySubdomain;
+      }
 
-    // Create the database
-    await adminClient.query(`CREATE DATABASE "${dbName}"`);
-    console.log(`[TenantSetup] Created database: ${dbName}`);
+      const existingByDb = await getTenantRegistryRowByDbName(dbName);
+      if (existingByDb && existingByDb.is_active !== false) {
+        const resolved = await tryResolveExistingTenant(
+          orgCodeUpper,
+          existingByDb.subdomain || subdomain,
+          adminUser,
+          orgName,
+          orgCity,
+        );
+        if (resolved) {
+          console.log(`[TenantSetup] Database ${dbName} already registered; returning existing tenant`);
+          return resolved;
+        }
+      }
+
+      // Orphan DB (created but registry row missing) — resume provisioning instead of failing.
+      console.warn(`[TenantSetup] Database ${dbName} exists without a resolvable registry row; resuming setup`);
+    } else {
+      await adminClient.query(`CREATE DATABASE "${dbName}"`);
+      createdDbInThisRequest = true;
+      console.log(`[TenantSetup] Created database: ${dbName}`);
+    }
 
     // Register tenant in registry (includes admin email on tenants.email for org management).
     const adminEmail = adminUser?.email ? String(adminUser.email).trim().toLowerCase() : null;
@@ -1741,18 +1871,27 @@ async function createTenant(tenantData) {
       throw new Error('Admin user email is required');
     }
 
-    groupedOrgId = await generateNextGroupedOrgId();
-    await registerTenant(groupedOrgId, {
-      host: dbConfig.host,
-      port: dbConfig.port,
-      database: dbName,
-      user: dbConfig.user,
-      password: dbConfig.password,
-      subdomain: subdomain,
-      email: adminEmail,
-      orgName: String(orgName).trim(),
-    });
-    console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
+    const existingRegistry =
+      (await getTenantRegistryRowBySubdomain(subdomain)) ||
+      (await getTenantRegistryRowByDbName(dbName));
+
+    if (existingRegistry && existingRegistry.is_active !== false) {
+      groupedOrgId = existingRegistry.org_id;
+      console.log(`[TenantSetup] Reusing existing registry row grouped_org_id=${groupedOrgId} for resume`);
+    } else {
+      groupedOrgId = await generateNextGroupedOrgId();
+      await registerTenant(groupedOrgId, {
+        host: dbConfig.host,
+        port: dbConfig.port,
+        database: dbName,
+        user: dbConfig.user,
+        password: dbConfig.password,
+        subdomain: subdomain,
+        email: adminEmail,
+        orgName: String(orgName).trim(),
+      });
+      console.log(`[TenantSetup] Registered tenants.grouped_org_id=${groupedOrgId}, org_name=${orgName}, email=${adminEmail}`);
+    }
 
     const tenantClient = new Client(pgClientOpts(getPostgresDirectClientOpts(tenantDatabaseUrl, dbName)));
 
@@ -2201,13 +2340,20 @@ async function createTenant(tenantData) {
   } catch (error) {
     console.error('[TenantSetup] Error creating tenant:', error);
 
-    try {
-      await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
-      if (groupedOrgId) {
-        await deactivateTenant(groupedOrgId);
+    // Never DROP a database we did not create in this request (504 retries / concurrent creates).
+    if (createdDbInThisRequest) {
+      try {
+        await adminClient.query(`DROP DATABASE IF EXISTS "${dbName}"`);
+        if (groupedOrgId) {
+          await deactivateTenant(groupedOrgId);
+        }
+      } catch (dropError) {
+        console.error('[TenantSetup] Error rolling back tenant:', dropError);
       }
-    } catch (dropError) {
-      console.error('[TenantSetup] Error rolling back tenant:', dropError);
+    } else {
+      console.warn(
+        `[TenantSetup] Skipping DROP DATABASE for ${dbName} (not created in this request; left intact for retry/idempotent complete)`,
+      );
     }
 
     throw error;

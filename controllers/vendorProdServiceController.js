@@ -3,18 +3,7 @@ const { generateCustomId } = require("../utils/idGenerator");
 const { getDbFromContext } = require("../utils/dbContext");
 
 // Generate vendor product service ID
-const generateVendorProdServiceId = async () => {
-    const dbPool = getDbFromContext();
-    const result = await dbPool.query(`SELECT ven_prod_serv_id FROM "tblVendorProdService" ORDER BY ven_prod_serv_id DESC LIMIT 1`);
-    const lastId = result.rows[0]?.ven_prod_serv_id;
-    
-    let newNumber = 1; // starting number
-    if (lastId && /^VPS\d+$/.test(lastId)) {
-        newNumber = parseInt(lastId.replace('VPS', '')) + 1;
-    }
-    
-    return `VPS${String(newNumber).padStart(3, '0')}`;
-};
+const generateVendorProdServiceId = async () => generateCustomId('vendor_prod_serv', 3);
 
 // GET /api/vendor-prod-services - Get all vendor product services
 const getAllVendorProdServices = async (req, res) => {

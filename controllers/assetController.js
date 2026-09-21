@@ -1,3 +1,4 @@
+const { generateCustomId } = require('../utils/idGenerator');
 const model = require("../models/assetModel");
 const assetsDashboardCache = require("../utils/assetsDashboardCache");
 const operationalCache = require("../utils/operationalCache");
@@ -1923,21 +1924,7 @@ const createAsset = async (req, res) => {
             if (existingVendorProdService.rows.length === 0) {
                 console.log('📝 Creating new vendor product service record...');
                 
-                // Generate continuous ven_prod_serv_id
-                const venProdServResult = await dbPool.query(
-                    `SELECT ven_prod_serv_id FROM "tblVendorProdService" 
-                     ORDER BY ven_prod_serv_id DESC LIMIT 1`
-                );
-                
-                let newNumber = 1;
-                if (venProdServResult.rows.length > 0) {
-                    const lastId = venProdServResult.rows[0].ven_prod_serv_id;
-                    if (/^VPS\d+$/.test(lastId)) {
-                        newNumber = parseInt(lastId.replace('VPS', '')) + 1;
-                    }
-                }
-                
-                const ven_prod_serv_id = `VPS${String(newNumber).padStart(3, '0')}`;
+                const ven_prod_serv_id = await generateCustomId('vendor_prod_serv', 3);
                 
                 // Insert new vendor product service record
                 await dbPool.query(

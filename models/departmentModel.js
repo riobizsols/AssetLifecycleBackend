@@ -107,7 +107,7 @@ const deleteDepartment = async (org_id, dept_id) => {
     }
 };
 
-// ✅ Create a department (no branch_id on tblDepartments)
+// ✅ Create a department
 const createDepartment = async (dept) => {
     const {
         org_id,
@@ -116,17 +116,18 @@ const createDepartment = async (dept) => {
         text,
         parent_id = null,
         created_by,
-        changed_by = null
+        changed_by = null,
+        branch_id = null,
     } = dept;
 
     const dbPool = getDb();
     const result = await dbPool.query(
         `INSERT INTO "tblDepartments" (
       org_id, dept_id, int_status, text, parent_id,
-      created_on, changed_on, created_by, changed_by
+      created_on, changed_on, created_by, changed_by, branch_id
     ) VALUES (
       $1, $2, $3, $4, $5,
-      CURRENT_DATE, CURRENT_DATE, $6, $7
+      CURRENT_DATE, CURRENT_DATE, $6, $7, $8
     ) RETURNING *`,
         [
             org_id,
@@ -135,7 +136,8 @@ const createDepartment = async (dept) => {
             text,
             parent_id,
             created_by,
-            changed_by
+            changed_by,
+            branch_id,
         ]
     );
 

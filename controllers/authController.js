@@ -820,7 +820,7 @@ const changePassword = async (req, res) => {
     }
 };
 
-// 🔑 Multi-Tenant Login (requires org_id)
+// 🔑 Multi-Tenant Login — not supported on this single-DB backend (use ALM-tenant)
 const tenantLogin = async (req, res) => {
     const startTime = Date.now();
     const { org_id, email, password } = req.body;

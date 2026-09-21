@@ -5,7 +5,7 @@ const { getEffectiveListContext } = require('../utils/acmAccess');
 const { collectUserJobRoleIds, userHasSystemAdminRole } = require('../utils/systemAdmin');
 const {
   getInspectionAssetBranchId,
-  getApprovalBranchAccessForUser,
+  getApprovalBranchAccessForRequest,
   attachBranchAccess,
   crossBranchForbiddenBody,
 } = require('../utils/approvalBranchAccess');
@@ -52,14 +52,25 @@ async function getPendingApprovals(req, res) {
       req,
       'inspection-approval',
       operationalCache.hashQuery(jobRoles),
-      () => inspectionApprovalModel.getPendingInspectionApprovals(
-        orgId,
-        jobRoles,
-        {
-          userBranchId: req.user?.branch_id || null,
-          isSystemAdmin: userHasSystemAdminRole(req.user),
-        }
-      ),
+      () => {
+        const { getEffectiveListContext } = require('../utils/acmAccess');
+        const acmCtx = getEffectiveListContext(req);
+        const seeAll =
+          userHasSystemAdminRole(req.user) ||
+          Boolean(acmCtx?.hasSuperAccess) ||
+          Boolean(acmCtx?.allBranches) ||
+          Boolean(req.user?.acmAllBranches) ||
+          Boolean(req.user?.hasSuperAccess);
+        return inspectionApprovalModel.getPendingInspectionApprovals(
+          orgId,
+          jobRoles,
+          {
+            userBranchId: seeAll ? null : (acmCtx?.branchId || req.user?.branch_id || null),
+            isSystemAdmin: seeAll,
+            allowedBranchIds: seeAll ? [] : (acmCtx?.branchIds || req.user?.acmBranchIds || []),
+          }
+        );
+      },
     );
     
     return res.json({ success: true, count: approvals.length, data: approvals });
@@ -87,9 +98,7 @@ async function getInspectionDetail(req, res) {
       return res.status(404).json({ success: false, message: 'Inspection not found.' });
     }
     
-    const branchAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      detail.header?.asset_branch_id || detail.header?.branch_id || await getInspectionAssetBranchId(wfaiish_id)
+    const branchAccess = await getApprovalBranchAccessForRequest(req, detail.header?.asset_branch_id || detail.header?.branch_id || await getInspectionAssetBranchId(wfaiish_id)
     );
 
     console.log('Successfully retrieved detail for ID:', wfaiish_id);
@@ -188,9 +197,7 @@ async function processApprovalAction(req, res) {
       });
     }
 
-    const inspBranchAccess = await getApprovalBranchAccessForUser(
-      req.user,
-      await getInspectionAssetBranchId(step.wfaiish_id)
+    const inspBranchAccess = await getApprovalBranchAccessForRequest(req, await getInspectionAssetBranchId(step.wfaiish_id)
     );
     if (!inspBranchAccess.canAct) {
       return res.status(403).json(crossBranchForbiddenBody());

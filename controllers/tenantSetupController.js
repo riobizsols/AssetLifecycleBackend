@@ -7,9 +7,14 @@ const tenantSetupService = require('../services/tenantSetupService');
 const createTenant = async (req, res) => {
   try {
     const result = await tenantSetupService.createTenant(req.body);
+    const alreadyExists = !!result?.alreadyExists;
     return res.json({
       success: true,
-      message: 'Tenant created successfully',
+      message:
+        result?.message ||
+        (alreadyExists
+          ? 'Tenant already exists. You can sign in with your credentials.'
+          : 'Tenant created successfully'),
       data: result,
     });
   } catch (error) {

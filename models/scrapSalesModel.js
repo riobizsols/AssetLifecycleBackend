@@ -8,42 +8,10 @@ const getDb = () => getDbFromContext();
 
 
 // Generate SSH ID (Scrap Sales Header ID)
-const generateSshId = async () => {
-    const query = `
-        SELECT COALESCE(MAX(CAST(SUBSTRING(ssh_id FROM 4) AS INTEGER)), 0) + 1 as next_seq
-        FROM "tblScrapSales_H"
-        WHERE ssh_id LIKE 'SSH%'
-    `;
-    
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query);
-    const nextSeq = result.rows[0].next_seq;
-    const sshId = `SSH${nextSeq.toString().padStart(4, '0')}`;
-    
-    console.log(`🔢 Generated SSH ID: ${sshId}`);
-    return sshId;
-};
+const generateSshId = async () => generateCustomId('scrap_sales_h', 4);
 
 // Generate SSD ID (Scrap Sales Detail ID)
-const generateSsdId = async () => {
-    const query = `
-        SELECT COALESCE(MAX(CAST(SUBSTRING(ssd_id FROM 4) AS INTEGER)), 0) + 1 as next_seq
-        FROM "tblScrapSales_D"
-        WHERE ssd_id LIKE 'SSD%'
-    `;
-    
-    const dbPool = getDb();
-
-    
-    const result = await dbPool.query(query);
-    const nextSeq = result.rows[0].next_seq;
-    const ssdId = `SSD${nextSeq.toString().padStart(4, '0')}`;
-    
-    console.log(`🔢 Generated SSD ID: ${ssdId}`);
-    return ssdId;
-};
+const generateSsdId = async () => generateCustomId('scrap_sales_d', 4);
 
 // Create scrap sales header
 const createScrapSalesHeader = async (client, headerData) => {
@@ -544,10 +512,11 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
 
     const getScrapSequences = async (assetTypeId, orgId) => {
         const r = await dbPool.query(
-            `SELECT id, asset_type_id, wf_steps_id, seq_no, org_id
+            `SELECT DISTINCT ON (seq_no, wf_steps_id)
+                id, asset_type_id, wf_steps_id, seq_no, org_id
              FROM "tblWFScrapSeq"
              WHERE asset_type_id = $1 AND org_id = $2
-             ORDER BY seq_no ASC`,
+             ORDER BY seq_no ASC, wf_steps_id ASC, id ASC`,
             [assetTypeId, orgId]
         );
         return r.rows;
@@ -584,14 +553,28 @@ const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
             return { created: 0 };
         }
 
-        const minSeq = Math.min(...sequences.map((s) => Number(s.seq_no)));
+        // Deduplicate sequences / roles so approval chevrons are not triplicated
+        const seenSeq = new Set();
+        const uniqueSequences = [];
+        for (const seq of sequences) {
+            const key = `${Number(seq.seq_no)}|${seq.wf_steps_id}`;
+            if (seenSeq.has(key)) continue;
+            seenSeq.add(key);
+            uniqueSequences.push(seq);
+        }
+
+        const minSeq = Math.min(...uniqueSequences.map((s) => Number(s.seq_no)));
         let created = 0;
 
-        for (const seq of sequences) {
+        for (const seq of uniqueSequences) {
             const jobRoles = await getWorkflowJobRoles(seq.wf_steps_id);
             if (!jobRoles || jobRoles.length === 0) continue;
 
+            const seenRoles = new Set();
             for (const jr of jobRoles) {
+                if (!jr?.job_role_id || seenRoles.has(jr.job_role_id)) continue;
+                seenRoles.add(jr.job_role_id);
+
                 const id = await generateCustomId('wfscrap_d', 3);
                 const statusCode = Number(seq.seq_no) === minSeq ? 'AP' : 'IN';
                 const notes = statusCode === 'AP' ? (initialNotes || null) : null;

@@ -30,7 +30,17 @@ const getChecklistByAssetType = async (req, res) => {
       });
     }
 
-    const checklistItems = await getChecklistByAssetTypeModel(assetTypeId, orgId);
+    const atMainFreqId =
+      req.query.at_main_freq_id ||
+      req.query.atMainFreqId ||
+      req.query.freqId ||
+      null;
+
+    const checklistItems = await getChecklistByAssetTypeModel(
+      assetTypeId,
+      orgId,
+      atMainFreqId,
+    );
 
     // Format the response for frontend
     const formattedChecklist = checklistItems.map(item => ({
