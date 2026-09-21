@@ -5,13 +5,17 @@ const auditReportController = require('../controllers/auditReportController');
 
 router.use(protect);
 
-// GET /api/audit-report/audit-types
+// Audit types
 router.get('/audit-types', auditReportController.getAuditTypes);
+router.post('/audit-types', auditReportController.createAuditType);
+router.put('/audit-types/:audtpId', auditReportController.updateAuditType);
 
-// GET /api/audit-report/asset-types/:audtpId
+// Asset types + mappings
+router.get('/all-asset-types', auditReportController.getAllAssetTypes);
 router.get('/asset-types/:audtpId', auditReportController.getMappedAssetTypes);
+router.put('/mappings/:audtpId', auditReportController.saveMappings);
 
-// GET|POST /api/audit-report/view
+// Report view
 router.get('/view', auditReportController.viewAuditReport);
 router.post('/view', auditReportController.viewAuditReport);
 

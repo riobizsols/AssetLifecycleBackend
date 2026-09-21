@@ -38,6 +38,48 @@ const getAuditTypes = async (req, res) => {
   }
 };
 
+const createAuditType = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const data = await auditReportModel.createAuditType(
+      orgId,
+      {
+        description: req.body?.description,
+        isInternal: req.body?.is_internal ?? req.body?.isInternal ?? true,
+      },
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.status(201).json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] createAuditType:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to create audit type' });
+  }
+};
+
+const updateAuditType = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const audtpId = req.params.audtpId;
+    if (!audtpId) return res.status(400).json({ error: 'audtp_id is required' });
+    const data = await auditReportModel.updateAuditType(
+      orgId,
+      audtpId,
+      {
+        description: req.body?.description,
+        isInternal: req.body?.is_internal ?? req.body?.isInternal,
+        intStatus: req.body?.int_status ?? req.body?.intStatus,
+      },
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] updateAuditType:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to update audit type' });
+  }
+};
+
 const getMappedAssetTypes = async (req, res) => {
   try {
     const orgId = req.user?.org_id;
@@ -49,6 +91,40 @@ const getMappedAssetTypes = async (req, res) => {
   } catch (err) {
     console.error('[AuditReport] getMappedAssetTypes:', err);
     return res.status(500).json({ error: err.message || 'Failed to load mapped asset types' });
+  }
+};
+
+const getAllAssetTypes = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const data = await auditReportModel.listAllAssetTypes(orgId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] getAllAssetTypes:', err);
+    return res.status(500).json({ error: err.message || 'Failed to load asset types' });
+  }
+};
+
+const saveMappings = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const audtpId = req.params.audtpId || req.body?.audtp_id;
+    if (!audtpId) return res.status(400).json({ error: 'audtp_id is required' });
+    const assetTypeIds = parseAssetTypeIds(
+      req.body?.asset_type_ids || req.body?.assetTypeIds || [],
+    );
+    const data = await auditReportModel.saveAuditTypeMappings(
+      orgId,
+      audtpId,
+      assetTypeIds,
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] saveMappings:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to save mappings' });
   }
 };
 
@@ -85,6 +161,10 @@ const viewAuditReport = async (req, res) => {
 
 module.exports = {
   getAuditTypes,
+  createAuditType,
+  updateAuditType,
   getMappedAssetTypes,
+  getAllAssetTypes,
+  saveMappings,
   viewAuditReport,
 };
