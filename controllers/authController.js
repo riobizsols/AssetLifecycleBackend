@@ -169,10 +169,17 @@ const login = async (req, res) => {
             } catch (brDeptErr) {
                 console.warn(`[AuthController] tblBR_DEPT ensure on login failed: ${brDeptErr.message}`);
             }
-            try {
-                await ensureJobRoleNavigation(dbPool, orgId);
-            } catch (navErr) {
-                console.warn(`[AuthController] Navigation sync on login failed: ${navErr.message}`);
+            // CI/e2e: skip nav sync — it can take 30s+ and is unrelated to auth success.
+            const skipNavSync =
+                String(process.env.SKIP_LOGIN_NAV_SYNC || '').toLowerCase() === 'true';
+            if (!skipNavSync) {
+                try {
+                    await ensureJobRoleNavigation(dbPool, orgId);
+                } catch (navErr) {
+                    console.warn(`[AuthController] Navigation sync on login failed: ${navErr.message}`);
+                }
+            } else {
+                logger.log('[AuthController] SKIP_LOGIN_NAV_SYNC=true — skipping ensureJobRoleNavigation');
             }
         }
 
