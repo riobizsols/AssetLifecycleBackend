@@ -1185,12 +1185,13 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                 SELECT at_main_freq_id, maint_type_id
                 FROM "tblATMaintFreq"
                 WHERE asset_type_id = $1 AND org_id = $2
+                  AND COALESCE(int_status, 1) = 1
                 ORDER BY at_main_freq_id ASC
                 LIMIT 1
             `;
       const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
       if (freqResult.rows.length === 0) {
-        throw new Error("No maintenance frequency configured for this asset type");
+        throw new Error("No active maintenance frequency configured for this asset type");
       }
       const atMainFreqId = freqResult.rows[0].at_main_freq_id;
       const maintTypeId = freqResult.rows[0].maint_type_id || "MT002";
@@ -1322,20 +1323,20 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     // Generate AMS ID
     const amsId = await generateCustomIdForClient(client, 'ams', 3);
 
-    // Get maintenance type (default to MT002 - Scheduled Maintenance)
-    const maintTypeId = "MT002";
-
-    // Get at_main_freq_id (use first frequency if available, or null)
+    // Prefer active frequency (and its maint type) — inactive soft-deleted rows must not win.
     const freqQuery = `
-            SELECT at_main_freq_id
+            SELECT at_main_freq_id, maint_type_id
             FROM "tblATMaintFreq"
             WHERE asset_type_id = $1 AND org_id = $2
+              AND COALESCE(int_status, 1) = 1
             ORDER BY at_main_freq_id ASC
             LIMIT 1
         `;
     const freqResult = await client.query(freqQuery, [asset_type_id, org_id]);
     const atMainFreqId =
       freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
+    const maintTypeId =
+      (freqResult.rows.length > 0 && freqResult.rows[0].maint_type_id) || "MT002";
 
     // Determine maintained_by
     const maintainedBy = asset.service_vendor_id ? "Vendor" : "Inhouse";
@@ -1453,7 +1454,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         const wfamsdQuery = `
                     SELECT wfamsd_id 
                     FROM "tblWFAssetMaintSch_D" 
-                    ORDER BY CAST(SUBSTRING(wfamsd_id FROM '\\d+$') AS INTEGER) DESC 
+                    ORDER BY CAST(SUBSTRING(wfamsd_id FROM '\\d+$') AS BIGINT) DESC 
                     LIMIT 1
                 `;
         const wfamsdResult = await client.query(wfamsdQuery);

@@ -1,8 +1,9 @@
 const { getDb } = require('../utils/dbContext');
 
-const getChecklistByAssetType = async (assetTypeId, orgId = 'ORG001') => {
+const getChecklistByAssetType = async (assetTypeId, orgId = 'ORG001', atMainFreqId = null) => {
   try {
-    const query = `
+    const params = [assetTypeId, orgId];
+    let query = `
       SELECT 
         at_main_checklist_id,
         org_id,
@@ -12,10 +13,16 @@ const getChecklistByAssetType = async (assetTypeId, orgId = 'ORG001') => {
       FROM "tblATMaintCheckList"
       WHERE asset_type_id = $1 
         AND org_id = $2
-      ORDER BY at_main_checklist_id ASC
     `;
 
-    const result = await getDb().query(query, [assetTypeId, orgId]);
+    if (atMainFreqId) {
+      params.push(atMainFreqId);
+      query += ` AND at_main_freq_id = $${params.length}`;
+    }
+
+    query += ` ORDER BY at_main_checklist_id ASC`;
+
+    const result = await getDb().query(query, params);
     return result.rows || [];
   } catch (error) {
     console.error('Error in getChecklistByAssetType:', error);

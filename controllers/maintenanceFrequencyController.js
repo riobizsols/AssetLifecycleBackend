@@ -194,7 +194,12 @@ class MaintenanceFrequencyController {
       
       console.log(`Successfully created maintenance frequency:`, newFrequency);
 
-      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+      // Await so the list API cannot return a stale cached bundle after create.
+      try {
+        await operationalCache.invalidateOrgCaches(orgId);
+      } catch (cacheErr) {
+        console.warn('Failed to invalidate caches after frequency create:', cacheErr?.message || cacheErr);
+      }
 
       res.status(201).json({
         success: true,
@@ -286,7 +291,11 @@ class MaintenanceFrequencyController {
         });
       }
 
-      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+      try {
+        await operationalCache.invalidateOrgCaches(orgId);
+      } catch (cacheErr) {
+        console.warn('Failed to invalidate caches after frequency update:', cacheErr?.message || cacheErr);
+      }
 
       res.json({
         success: true,
@@ -321,7 +330,11 @@ class MaintenanceFrequencyController {
         });
       }
 
-      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+      try {
+        await operationalCache.invalidateOrgCaches(orgId);
+      } catch (cacheErr) {
+        console.warn('Failed to invalidate caches after frequency delete:', cacheErr?.message || cacheErr);
+      }
 
       res.json({
         success: true,

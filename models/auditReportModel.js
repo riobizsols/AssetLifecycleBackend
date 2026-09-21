@@ -28,6 +28,28 @@ function isDemoMaintPo(poNumber) {
   return DEMO_MAINT_PO.test(String(poNumber || '').trim());
 }
 
+const REOPEN_MARKER = '[Reopened:';
+
+/** Ensure downtime columns used by audit breakdown enrichment exist. */
+async function ensureBreakdownReportColumns(db) {
+  await db.query(`
+    ALTER TABLE "tblATMaintFreq"
+    ADD COLUMN IF NOT EXISTS downtime DECIMAL(10,2)
+  `);
+  await db.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    ADD COLUMN IF NOT EXISTS actual_downtime DECIMAL(10,2)
+  `);
+  await db.query(`
+    ALTER TABLE "tblAssetBRDet"
+    ADD COLUMN IF NOT EXISTS dept_id character varying(50)
+  `);
+  await db.query(`
+    ALTER TABLE "tblAssetBRDet"
+    ADD COLUMN IF NOT EXISTS reopen_notes text
+  `);
+}
+
 function resolvePeriodBounds(period, dateFrom, dateTo) {
   const now = new Date();
   const y = now.getFullYear();
@@ -154,6 +176,8 @@ async function getAuditReportView(opts) {
 
   const bounds = resolvePeriodBounds(period || 'current_year', dateFrom, dateTo);
 
+  await ensureBreakdownReportColumns(db);
+
   const include = {
     assetDetails: sections.assetDetails !== false,
     maintenance: sections.maintenance !== false,
@@ -189,7 +213,24 @@ async function getAuditReportView(opts) {
         b.text AS branch_name,
         d.text AS department_name,
         pv.vendor_name AS purchase_vendor_name,
-        sv.vendor_name AS service_vendor_name
+        sv.vendor_name AS service_vendor_name,
+        (
+          SELECT mf.downtime
+          FROM "tblATMaintFreq" mf
+          WHERE mf.asset_type_id = a.asset_type_id
+            AND mf.org_id = a.org_id
+            AND COALESCE(mf.int_status, 1) = 1
+            AND mf.downtime IS NOT NULL
+          ORDER BY
+            CASE WHEN mf.maint_type_id = 'MT004' THEN 0 ELSE 1 END,
+            CASE
+              WHEN LOWER(COALESCE(mf.text, '')) LIKE '%on demand%' THEN 0
+              WHEN LOWER(COALESCE(mf.text, '')) LIKE '%breakdown%' THEN 0
+              ELSE 1
+            END,
+            mf.downtime DESC NULLS LAST
+          LIMIT 1
+        ) AS expected_downtime_hours
       FROM "tblAssets" a
       INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
       LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
@@ -246,6 +287,7 @@ async function getAuditReportView(opts) {
           ams.asset_id,
           a.serial_number,
           at.text AS asset_type_name,
+          ams.maint_type_id,
           mt.text AS maintenance_type_name,
           ams.act_maint_st_date,
           ams.act_main_end_date,
@@ -275,6 +317,7 @@ async function getAuditReportView(opts) {
   }
 
   if (include.breakdown) {
+    const reopenMarkerLen = REOPEN_MARKER.length;
     const { rows } = await db.query(
       `
         SELECT
@@ -284,24 +327,84 @@ async function getAuditReportView(opts) {
           at.text AS asset_type_name,
           brd.status AS breakdown_status,
           brd.description AS breakdown_description,
+          brd.atbrrc_id,
           brc.text AS breakdown_reason,
           brd.created_on AS breakdown_date,
           u.full_name AS reported_by_name,
-          brd.decision_code
+          brd.decision_code,
+          COALESCE(brd.dept_id, a.dept_id) AS affected_department_id,
+          COALESCE(brd_dept.text, asset_dept.text) AS affected_department_name,
+          (
+            SELECT mf.downtime
+            FROM "tblATMaintFreq" mf
+            WHERE mf.asset_type_id = a.asset_type_id
+              AND mf.org_id = brd.org_id
+              AND COALESCE(mf.int_status, 1) = 1
+              AND mf.downtime IS NOT NULL
+            ORDER BY
+              CASE WHEN mf.maint_type_id = 'MT004' THEN 0 ELSE 1 END,
+              CASE
+                WHEN LOWER(COALESCE(mf.text, '')) LIKE '%on demand%' THEN 0
+                WHEN LOWER(COALESCE(mf.text, '')) LIKE '%breakdown%' THEN 0
+                ELSE 1
+              END,
+              mf.downtime DESC NULLS LAST
+            LIMIT 1
+          ) AS expected_downtime_hours,
+          (
+            SELECT ams.actual_downtime
+            FROM "tblAssetMaintSch" ams
+            WHERE ams.org_id = brd.org_id
+              AND ams.asset_id = brd.asset_id
+              AND ams.actual_downtime IS NOT NULL
+              AND (
+                (ams.wo_id IS NOT NULL AND ams.wo_id ILIKE '%' || brd.abr_id || '%')
+                OR (ams.notes IS NOT NULL AND ams.notes ILIKE '%' || brd.abr_id || '%')
+              )
+            ORDER BY ams.act_main_end_date DESC NULLS LAST, ams.ams_id DESC
+            LIMIT 1
+          ) AS actual_downtime_hours,
+          (
+            (LENGTH(COALESCE(brd.description, ''))
+              - LENGTH(REPLACE(COALESCE(brd.description, ''), $5, '')))
+            / NULLIF($6, 0)
+          )::int AS reopen_count,
+          (
+            SELECT COUNT(*)::int
+            FROM "tblAssetBRDet" br2
+            WHERE br2.org_id = brd.org_id
+              AND br2.asset_id = brd.asset_id
+              AND br2.atbrrc_id IS NOT NULL
+              AND brd.atbrrc_id IS NOT NULL
+              AND br2.atbrrc_id = brd.atbrrc_id
+              AND br2.created_on::date BETWEEN $3::date AND $4::date
+              AND COALESCE(br2.description, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
+          ) AS same_cause_count_in_period
         FROM "tblAssetBRDet" brd
         INNER JOIN "tblAssets" a ON a.asset_id = brd.asset_id
         INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
         LEFT JOIN "tblATBRReasonCodes" brc ON brc.atbrrc_id = brd.atbrrc_id
         LEFT JOIN "tblUsers" u ON u.user_id = brd.reported_by
+        LEFT JOIN "tblDepartments" brd_dept ON brd_dept.dept_id = brd.dept_id
+        LEFT JOIN "tblDepartments" asset_dept ON asset_dept.dept_id = a.dept_id
         WHERE brd.org_id = $1
           AND brd.asset_id = ANY($2::varchar[])
           AND brd.created_on::date BETWEEN $3::date AND $4::date
           AND COALESCE(brd.description, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
         ORDER BY brd.created_on DESC, brd.abr_id
       `,
-      histParams,
+      [...histParams, REOPEN_MARKER, reopenMarkerLen],
     );
-    empty.sections.breakdown = rows;
+    empty.sections.breakdown = rows.map((row) => {
+      const reopenCount = Number(row.reopen_count) || 0;
+      const sameCauseCount = Number(row.same_cause_count_in_period) || 0;
+      return {
+        ...row,
+        reopen_count: reopenCount,
+        same_cause_count_in_period: sameCauseCount,
+        is_repeat_problem: reopenCount > 0 || sameCauseCount > 1,
+      };
+    });
   }
 
   if (include.certifications) {
@@ -325,8 +428,8 @@ async function getAuditReportView(opts) {
           AND COALESCE(ad.is_archived, false) = false
           AND COALESCE(ad.doc_path, '') NOT ILIKE ${`'${DEMO_DOC_PATH}'`}
           AND (
-            UPPER(COALESCE(dto.doc_type, '')) IN ('IC', 'WA', 'IN', 'CC', 'CT')
-            OR LOWER(COALESCE(ad.doc_type_name, '')) ~ '(cert|warranty|insurance|inspection)'
+            UPPER(COALESCE(dto.doc_type, '')) IN ('IC', 'WA', 'IN', 'CC', 'CT', 'CL')
+            OR LOWER(COALESCE(ad.doc_type_name, '')) ~ '(cert|warranty|insurance|inspection|calibrat)'
           )
         ORDER BY a.asset_id, ad.a_d_id
       `,
@@ -498,9 +601,333 @@ async function getAuditReportView(opts) {
   return empty;
 }
 
+/**
+ * Preventive maintenance compliance for the audit period / asset types.
+ * PM Compliance % = PMs completed on time ÷ PMs due × 100
+ * Due = scheduled PM in period (act_maint_st_date), not cancelled.
+ * On time = status CO and act_main_end_date::date <= act_maint_st_date::date.
+ */
+async function getPmCompliance(opts) {
+  const db = getDb();
+  const {
+    orgId,
+    audtpId,
+    assetTypeIds = [],
+    period,
+    dateFrom = null,
+    dateTo = null,
+    branchId = null,
+    hasSuperAccess = false,
+  } = opts;
+
+  if (!audtpId) {
+    const err = new Error('audtp_id is required');
+    err.status = 400;
+    throw err;
+  }
+  if (!Array.isArray(assetTypeIds) || assetTypeIds.length === 0) {
+    const err = new Error('At least one asset type is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const auditType = await getAuditType(orgId, audtpId);
+  if (!auditType) {
+    const err = new Error('Audit type not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const mapped = await listMappedAssetTypes(orgId, audtpId);
+  const mappedSet = new Set(mapped.map((r) => r.asset_type_id));
+  const selectedTypes = [...new Set(assetTypeIds)].filter((id) => mappedSet.has(id));
+  if (selectedTypes.length === 0) {
+    const err = new Error('Selected asset types are not mapped to this audit type');
+    err.status = 400;
+    throw err;
+  }
+
+  const bounds = resolvePeriodBounds(period || 'current_year', dateFrom, dateTo);
+
+  const params = [orgId, selectedTypes, bounds.from, bounds.to];
+  let branchSql = '';
+  if (branchId && !hasSuperAccess) {
+    params.push(branchId);
+    branchSql = ` AND a.branch_id = $${params.length}`;
+  }
+
+  const pmTypeSql = `
+    (
+      ams.maint_type_id = 'MT006'
+      OR LOWER(COALESCE(mt.text, '')) LIKE '%prevent%'
+    )
+  `;
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        a.branch_id,
+        COALESCE(b.text, a.branch_id, 'Unassigned') AS branch_name,
+        a.dept_id,
+        COALESCE(d.text, a.dept_id, 'Unassigned') AS department_name,
+        COUNT(*)::int AS pms_due,
+        COUNT(*) FILTER (
+          WHERE UPPER(COALESCE(ams.status, '')) = 'CO'
+            AND ams.act_main_end_date IS NOT NULL
+            AND (ams.act_main_end_date)::timestamp::date
+              <= (ams.act_maint_st_date)::timestamp::date
+        )::int AS pms_on_time,
+        COUNT(*) FILTER (
+          WHERE UPPER(COALESCE(ams.status, '')) = 'CO'
+            AND (
+              ams.act_main_end_date IS NULL
+              OR (ams.act_main_end_date)::timestamp::date
+                > (ams.act_maint_st_date)::timestamp::date
+            )
+        )::int AS pms_late,
+        COUNT(*) FILTER (
+          WHERE UPPER(COALESCE(ams.status, '')) NOT IN ('CO', 'CA')
+        )::int AS pms_open
+      FROM "tblAssetMaintSch" ams
+      INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id AND a.org_id = ams.org_id
+      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = ams.maint_type_id
+      LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
+      LEFT JOIN "tblDepartments" d ON d.dept_id = a.dept_id
+      WHERE ams.org_id = $1
+        AND a.asset_type_id = ANY($2::varchar[])
+        AND ams.act_maint_st_date IS NOT NULL
+        AND (ams.act_maint_st_date)::timestamp::date BETWEEN $3::date AND $4::date
+        AND UPPER(COALESCE(ams.status, '')) <> 'CA'
+        AND ${pmTypeSql}
+        AND COALESCE(ams.notes, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
+        AND COALESCE(ams.technician_name, '') <> ${`'${DEMO_TECH}'`}
+        ${branchSql}
+      GROUP BY a.branch_id, b.text, a.dept_id, d.text
+      ORDER BY 2 ASC, 4 ASC
+    `,
+    params,
+  );
+
+  const byInstitutionDepartment = rows.map((r) => {
+    const due = Number(r.pms_due) || 0;
+    const onTime = Number(r.pms_on_time) || 0;
+    return {
+      branch_id: r.branch_id,
+      branch_name: r.branch_name,
+      dept_id: r.dept_id,
+      department_name: r.department_name,
+      pms_due: due,
+      pms_on_time: onTime,
+      pms_late: Number(r.pms_late) || 0,
+      pms_open: Number(r.pms_open) || 0,
+      pm_compliance_pct: due > 0 ? Math.round((onTime / due) * 1000) / 10 : null,
+    };
+  });
+
+  const totals = byInstitutionDepartment.reduce(
+    (acc, row) => {
+      acc.pms_due += row.pms_due;
+      acc.pms_on_time += row.pms_on_time;
+      acc.pms_late += row.pms_late;
+      acc.pms_open += row.pms_open;
+      return acc;
+    },
+    { pms_due: 0, pms_on_time: 0, pms_late: 0, pms_open: 0 },
+  );
+  totals.pm_compliance_pct =
+    totals.pms_due > 0
+      ? Math.round((totals.pms_on_time / totals.pms_due) * 1000) / 10
+      : null;
+
+  return {
+    auditType,
+    period: {
+      type: period || 'current_year',
+      from: bounds.from,
+      to: bounds.to,
+      label: bounds.label,
+    },
+    definition: {
+      formula: 'PM Compliance % = PMs completed on time ÷ PMs due × 100',
+      due: 'Preventive maintenance work orders scheduled in the period (not cancelled)',
+      on_time:
+        'Completed (CO) with end date on or before the scheduled date',
+    },
+    totals,
+    by_institution_department: byInstitutionDepartment,
+  };
+}
+
+/**
+ * Calibration maintenance detail for Audit Reports:
+ * checklist for this schedule's frequency + calibration certificate documents.
+ */
+async function getCalibrationDetail({ orgId, amsId }) {
+  const db = getDb();
+  if (!amsId) {
+    const err = new Error('ams_id is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows: schedules } = await db.query(
+    `
+      SELECT
+        ams.ams_id,
+        ams.wo_id,
+        ams.asset_id,
+        ams.org_id,
+        ams.status,
+        ams.notes,
+        ams.maint_type_id,
+        ams.at_main_freq_id,
+        ams.wfamsh_id,
+        ams.act_maint_st_date,
+        ams.act_main_end_date,
+        ams.technician_name,
+        mt.text AS maintenance_type_name,
+        a.serial_number,
+        a.text AS asset_name,
+        at.asset_type_id,
+        at.text AS asset_type_name,
+        v.vendor_name,
+        wfh.at_main_freq_id AS header_freq_id
+      FROM "tblAssetMaintSch" ams
+      INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
+      INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = ams.maint_type_id
+      LEFT JOIN "tblVendors" v ON v.vendor_id = ams.vendor_id
+      LEFT JOIN "tblWFAssetMaintSch_H" wfh
+        ON wfh.wfamsh_id = ams.wfamsh_id AND wfh.org_id = ams.org_id
+      WHERE ams.org_id = $1
+        AND ams.ams_id = $2
+      LIMIT 1
+    `,
+    [orgId, amsId],
+  );
+
+  const schedule = schedules[0];
+  if (!schedule) {
+    const err = new Error('Maintenance schedule not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const isCalibration =
+    String(schedule.maint_type_id || '').toUpperCase() === 'MT017' ||
+    /calibrat/i.test(String(schedule.maintenance_type_name || ''));
+  if (!isCalibration) {
+    const err = new Error('Selected maintenance is not a Calibration work order');
+    err.status = 400;
+    throw err;
+  }
+
+  const freqId = schedule.at_main_freq_id || schedule.header_freq_id || null;
+
+  let checklist = [];
+  if (freqId) {
+    const { rows } = await db.query(
+      `
+        SELECT
+          cl.at_main_checklist_id,
+          cl.text,
+          cl.at_main_freq_id
+        FROM "tblATMaintCheckList" cl
+        WHERE cl.org_id = $1
+          AND cl.asset_type_id = $2
+          AND cl.at_main_freq_id = $3
+        ORDER BY cl.at_main_checklist_id ASC
+      `,
+      [orgId, schedule.asset_type_id, freqId],
+    );
+    checklist = rows;
+  }
+
+  const { rows: maintDocs } = await db.query(
+    `
+      SELECT
+        amd.amd_id AS doc_id,
+        'maintenance' AS source,
+        amd.asset_id,
+        amd.dto_id,
+        amd.doc_type_name,
+        amd.doc_path,
+        amd.is_archived,
+        dto.doc_type,
+        COALESCE(dto.doc_type_text, amd.doc_type_name, dto.doc_type) AS document_type
+      FROM "tblAssetMaintDocs" amd
+      LEFT JOIN "tblDocTypeObjects" dto ON dto.dto_id = amd.dto_id
+      WHERE amd.org_id = $1
+        AND amd.asset_id = $2
+        AND COALESCE(amd.is_archived, false) = false
+        AND (
+          UPPER(COALESCE(dto.doc_type, '')) = 'CL'
+          OR LOWER(COALESCE(dto.doc_type_text, amd.doc_type_name, '')) LIKE '%calibrat%'
+        )
+      ORDER BY amd.amd_id DESC
+    `,
+    [orgId, schedule.asset_id],
+  );
+
+  const { rows: assetDocs } = await db.query(
+    `
+      SELECT
+        ad.a_d_id AS doc_id,
+        'asset' AS source,
+        ad.asset_id,
+        ad.dto_id,
+        ad.doc_type_name,
+        ad.doc_path,
+        ad.is_archived,
+        dto.doc_type,
+        COALESCE(dto.doc_type_text, ad.doc_type_name, dto.doc_type) AS document_type
+      FROM "tblAssetDocs" ad
+      LEFT JOIN "tblDocTypeObjects" dto ON dto.dto_id = ad.dto_id
+      WHERE ad.org_id = $1
+        AND ad.asset_id = $2
+        AND COALESCE(ad.is_archived, false) = false
+        AND (
+          UPPER(COALESCE(dto.doc_type, '')) = 'CL'
+          OR LOWER(COALESCE(ad.doc_type_name, dto.doc_type_text, '')) LIKE '%calibrat%'
+        )
+      ORDER BY ad.a_d_id DESC
+    `,
+    [orgId, schedule.asset_id],
+  );
+
+  return {
+    schedule: {
+      ams_id: schedule.ams_id,
+      wo_id: schedule.wo_id,
+      asset_id: schedule.asset_id,
+      asset_name: schedule.asset_name,
+      serial_number: schedule.serial_number,
+      asset_type_id: schedule.asset_type_id,
+      asset_type_name: schedule.asset_type_name,
+      maint_type_id: schedule.maint_type_id,
+      maintenance_type_name: schedule.maintenance_type_name,
+      status: schedule.status,
+      notes: schedule.notes,
+      at_main_freq_id: freqId,
+      act_maint_st_date: schedule.act_maint_st_date,
+      act_main_end_date: schedule.act_main_end_date,
+      technician_name: schedule.technician_name,
+      vendor_name: schedule.vendor_name,
+    },
+    checklist: checklist.map((item) => ({
+      id: item.at_main_checklist_id,
+      text: item.text,
+      at_main_freq_id: item.at_main_freq_id,
+    })),
+    documents: [...maintDocs, ...assetDocs],
+  };
+}
+
 module.exports = {
   listAuditTypes,
   listMappedAssetTypes,
   getAuditReportView,
+  getPmCompliance,
+  getCalibrationDetail,
   resolvePeriodBounds,
 };
