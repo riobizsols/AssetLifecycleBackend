@@ -1,4 +1,5 @@
 const auditReportModel = require('../models/auditReportModel');
+const coverageExpiryReportModel = require('../models/coverageExpiryReportModel');
 
 function parseBoolSections(bodyOrQuery) {
   const src = bodyOrQuery?.sections || bodyOrQuery || {};
@@ -83,8 +84,63 @@ const viewAuditReport = async (req, res) => {
   }
 };
 
+const parseListParam = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+};
+
+const viewCoverageExpiryReport = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const src = req.method === 'GET' ? req.query : req.body || {};
+    const data = await coverageExpiryReportModel.getCoverageExpiryReport({
+      orgId,
+      coverageTypes: parseListParam(src.coverage_types || src.coverageTypes),
+      statuses: parseListParam(src.statuses || src.status),
+      expiringDays: src.expiring_days || src.expiringDays || 30,
+      assetId: src.asset_id || src.assetId || null,
+      branchId: req.user?.branch_id || null,
+      hasSuperAccess: Boolean(req.user?.hasSuperAccess || req.user?.is_super_admin),
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] viewCoverageExpiryReport:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load coverage report' });
+  }
+};
+
+const viewAssetVendorRenewals = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const assetId = req.params.assetId || req.query.asset_id || req.body?.asset_id;
+    const data = await coverageExpiryReportModel.getAssetVendorRenewals({
+      orgId,
+      assetId,
+      expiringDays: req.query.expiring_days || req.body?.expiring_days || 30,
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] viewAssetVendorRenewals:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load vendor renewals' });
+  }
+};
+
 module.exports = {
   getAuditTypes,
   getMappedAssetTypes,
   viewAuditReport,
+  viewCoverageExpiryReport,
+  viewAssetVendorRenewals,
 };

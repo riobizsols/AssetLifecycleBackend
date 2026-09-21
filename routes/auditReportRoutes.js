@@ -15,4 +15,11 @@ router.get('/asset-types/:audtpId', auditReportController.getMappedAssetTypes);
 router.get('/view', auditReportController.viewAuditReport);
 router.post('/view', auditReportController.viewAuditReport);
 
+// GET|POST /api/audit-report/coverage — AMC / CMC / warranty expiry
+router.get('/coverage', auditReportController.viewCoverageExpiryReport);
+router.post('/coverage', auditReportController.viewCoverageExpiryReport);
+
+// GET /api/audit-report/asset/:assetId/vendor-renewals
+router.get('/asset/:assetId/vendor-renewals', auditReportController.viewAssetVendorRenewals);
+
 module.exports = router;
