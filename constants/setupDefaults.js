@@ -427,6 +427,8 @@ const DEFAULT_APPS = [
   { id: "BRANCHES", label: "Branches" },
   { id: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping" },
   { id: "AUDITATMAPPING", label: "Audit Type – Asset Type Mapping" },
+  { id: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance" },
+  { id: "WORKFORCEREPORT", label: "Workforce" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
   { id: "SPAREPARTS", label: "Spare Part Lot" },
@@ -493,7 +495,8 @@ const DEFAULT_MAINT_TYPES = [
   { id: "MT001", name: "Subscription Renewal" },
   { id: "MT002", name: "Regular Maintenance" },
   { id: "MT003", name: "Others" },
-  { id: "MT004", name: "Break Down" }
+  { id: "MT004", name: "Break Down" },
+  { id: "MT017", name: "Calibration" },
 ];
 
 const DEFAULT_UOM = [
@@ -544,6 +547,9 @@ const DEFAULT_DOC_TYPE_OBJECTS = [
   { id: "DTO017", object_type: "asset type", doc_type: "CC", doc_type_text: "Clearance Certificate" },
   { id: "DTO018", object_type: "asset", doc_type: "TM", doc_type_text: "Technical Manual" },
   { id: "DTO019", object_type: "inspection certificate", doc_type: "IC", doc_type_text: "Inspection Certificate" },
+  { id: "DTO020", object_type: "asset", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO021", object_type: "asset group", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO044", object_type: "maintenance", doc_type: "CL", doc_type_text: "Calibration Certificate" },
 ];
 
 const DEFAULT_MAINT_STATUS = [
@@ -648,6 +654,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN063", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register", sequence: 11, accessLevel: "A", isGroup: false },
   { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance", sequence: 12, accessLevel: "A", isGroup: false },
+  { id: "JRN065", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Workforce", sequence: 13, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },

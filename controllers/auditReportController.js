@@ -159,6 +159,47 @@ const viewAuditReport = async (req, res) => {
   }
 };
 
+const getPmCompliance = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const src = req.method === 'GET' ? req.query : req.body || {};
+    const data = await auditReportModel.getPmCompliance({
+      orgId,
+      audtpId: src.audtp_id || src.audtpId,
+      assetTypeIds: parseAssetTypeIds(src.asset_type_ids || src.assetTypeIds),
+      period: src.period || 'current_year',
+      dateFrom: src.date_from || src.dateFrom || null,
+      dateTo: src.date_to || src.dateTo || null,
+      branchId: req.user?.branch_id || null,
+      hasSuperAccess: Boolean(req.user?.hasSuperAccess || req.user?.is_super_admin),
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] getPmCompliance:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load PM compliance' });
+  }
+};
+
+const getCalibrationDetail = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const src = req.method === 'GET' ? req.query : req.body || {};
+    const amsId = src.ams_id || src.amsId || req.params.amsId;
+    const data = await auditReportModel.getCalibrationDetail({ orgId, amsId });
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] getCalibrationDetail:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load calibration detail' });
+  }
+};
+
 module.exports = {
   getAuditTypes,
   createAuditType,
@@ -167,4 +208,6 @@ module.exports = {
   getAllAssetTypes,
   saveMappings,
   viewAuditReport,
+  getPmCompliance,
+  getCalibrationDetail,
 };
