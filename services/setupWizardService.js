@@ -1463,6 +1463,12 @@ const seedAssetTypes = async (client, orgId, selectedIds = [], logs) => {
       ]
     );
     insertedIds.push(asset.id);
+    if (asset.maintRequired) {
+      await client.query(
+        `UPDATE "tblAssetTypes" SET required_maint = true WHERE asset_type_id = $1 AND org_id = $2`,
+        [asset.id, orgId]
+      );
+    }
   }
   logs.push({ message: `${insertedIds.length} asset types created`, scope: "master-data" });
   return insertedIds;
