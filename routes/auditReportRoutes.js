@@ -19,13 +19,16 @@ router.put('/mappings/:audtpId', auditReportController.saveMappings);
 router.get('/view', auditReportController.viewAuditReport);
 router.post('/view', auditReportController.viewAuditReport);
 
-// GET|POST /api/audit-report/pm-compliance
+// PM compliance + calibration (Niranjan)
 router.get('/pm-compliance', auditReportController.getPmCompliance);
 router.post('/pm-compliance', auditReportController.getPmCompliance);
-
-// GET|POST /api/audit-report/calibration-detail
 router.get('/calibration-detail', auditReportController.getCalibrationDetail);
 router.post('/calibration-detail', auditReportController.getCalibrationDetail);
 router.get('/calibration-detail/:amsId', auditReportController.getCalibrationDetail);
+
+// Coverage expiry — AMC / CMC / warranty (Sanjana)
+router.get('/coverage', auditReportController.viewCoverageExpiryReport);
+router.post('/coverage', auditReportController.viewCoverageExpiryReport);
+router.get('/asset/:assetId/vendor-renewals', auditReportController.viewAssetVendorRenewals);
 
 module.exports = router;

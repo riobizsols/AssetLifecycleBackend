@@ -2,8 +2,16 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/mini
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const { insertAssetDoc, listAssetDocs, getAssetDocById, updateAssetDocArchiveStatus } = require('../models/assetDocsModel');
 const { generateCustomId } = require('../utils/idGenerator');
+const {
+  uploadBuffer,
+  getPresignedDownloadUrl,
+  getObjectStream,
+  resolveLocalPath,
+  LOCAL_PREFIX,
+} = require('../utils/documentStorage');
 const { 
     logDocumentUploadApiCalled,
     logUploadingToMinIO,
@@ -43,8 +51,6 @@ const uploadAssetDoc = [
       if (!asset_id) return res.status(400).json({ message: 'asset_id is required' });
       if (!org_id) return res.status(400).json({ message: 'org_id is required' });
 
-      await ensureBucketExists(MINIO_BUCKET);
-
       const ext = path.extname(req.file.originalname);
       const hash = crypto.randomBytes(8).toString('hex');
       const objectName = `${org_id}/ASSET DOCUMENT/${asset_id}/${Date.now()}_${hash}${ext}`;
@@ -57,8 +63,10 @@ const uploadAssetDoc = [
         userId
       });
 
-      await minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
-        'Content-Type': req.file.mimetype
+      const doc_path = await uploadBuffer({
+        buffer: req.file.buffer,
+        objectName,
+        contentType: req.file.mimetype,
       });
 
       // Step 3: Log file uploaded to MinIO
@@ -69,8 +77,6 @@ const uploadAssetDoc = [
         fileSize: req.file.size,
         userId
       });
-
-      const doc_path = `${MINIO_BUCKET}/${objectName}`;
 
       const a_d_id = await generateCustomId('asset_doc', 3);
       
@@ -140,20 +146,84 @@ const getDownloadUrl = async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
 
     const doc = result.rows[0];
-    const [bucket, ...keyParts] = doc.doc_path.split('/');
-    const objectName = keyParts.join('/');
+    const fileName = path.basename(doc.doc_path || 'document');
+
+    // Local fallback uploads: client must fetch via authenticated /file stream.
+    if (doc.doc_path?.startsWith(`${LOCAL_PREFIX}/`) || resolveLocalPath(doc.doc_path)) {
+      return res.json({
+        stream: true,
+        fileName,
+        path: `/asset-docs/${a_d_id}/file?mode=${mode}`,
+      });
+    }
 
     const respHeaders = {};
     if (mode === 'download') {
-      respHeaders['response-content-disposition'] = `attachment; filename="${path.basename(objectName)}"`;
+      respHeaders['response-content-disposition'] = `attachment; filename="${fileName}"`;
     } else if (mode === 'view') {
       respHeaders['response-content-disposition'] = 'inline';
     }
 
-    const url = await minioClient.presignedGetObject(bucket, objectName, 60 * 60, respHeaders);
-    return res.json({ url });
+    try {
+      const url = await getPresignedDownloadUrl(doc.doc_path, 60 * 60, respHeaders);
+      if (url) return res.json({ url, fileName });
+    } catch (presignErr) {
+      console.warn('[AssetDocs] Presign failed, using API stream:', presignErr.message);
+    }
+
+    // Browser cannot reach MinIO — tell client to stream through API.
+    return res.json({
+      stream: true,
+      fileName,
+      path: `/asset-docs/${a_d_id}/file?mode=${mode}`,
+    });
   } catch (err) {
     return res.status(500).json({ message: 'Failed to get download url', error: err.message });
+  }
+};
+
+const streamAssetDocFile = async (req, res) => {
+  try {
+    const { a_d_id } = req.params;
+    const mode = (req.query && req.query.mode) ? String(req.query.mode).toLowerCase() : 'view';
+    const result = await getAssetDocById(a_d_id);
+    if (result.rows.length === 0) return res.status(404).json({ message: 'Not found' });
+
+    const doc = result.rows[0];
+    if (!doc.doc_path) return res.status(404).json({ message: 'No file path' });
+
+    const fileName = path.basename(doc.doc_path);
+    const disposition =
+      mode === 'download'
+        ? `attachment; filename="${fileName}"`
+        : 'inline';
+
+    const localPath = resolveLocalPath(doc.doc_path);
+    if (localPath) {
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({ message: 'Document file is missing in storage' });
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', disposition);
+      return res.sendFile(localPath);
+    }
+
+    const stream = await getObjectStream(doc.doc_path);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', disposition);
+    stream.on('error', (streamErr) => {
+      console.error('[AssetDocs] Stream error:', streamErr);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Failed to stream document', error: streamErr.message });
+      }
+    });
+    return stream.pipe(res);
+  } catch (err) {
+    console.error('[AssetDocs] streamAssetDocFile:', err);
+    return res.status(500).json({
+      message: 'Failed to stream document',
+      error: err.message,
+    });
   }
 };
 
@@ -250,6 +320,12 @@ const updateDocArchiveStatus = async (req, res) => {
   }
 };
 
-module.exports = { uploadAssetDoc, listDocs, getDownloadUrl, updateDocArchiveStatus };
+module.exports = {
+  uploadAssetDoc,
+  listDocs,
+  getDownloadUrl,
+  streamAssetDocFile,
+  updateDocArchiveStatus,
+};
 
 
