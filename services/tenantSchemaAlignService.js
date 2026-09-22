@@ -17,6 +17,12 @@ const PROTECTED_RUNTIME_TABLES = [
   'tblJobHistory',
   'tblAuditType',
   'tblAuditATMapping',
+  'tblUtility_H',
+  'tblUTConsumType',
+  'tblUtilFreq',
+  'tblUtility_D',
+  'tblATUtilityMap',
+  'tblUtilConsumption',
 ];
 
 function tenantUrl(dbName) {
@@ -686,6 +692,22 @@ async function ensureCriticalRuntimeSchema(client) {
     console.warn('[TenantSchemaAlign] Could not ensure audit tables:', err.message);
     results.push({
       object: 'tblAuditType+tblAuditATMapping',
+      status: 'error',
+      message: err.message,
+    });
+  }
+
+  try {
+    const { ensureUtilityHSchema } = require('../utils/ensureUtilityHSchema');
+    const utility = await ensureUtilityHSchema(client);
+    results.push({
+      object: 'tblUtility_*+tblATUtilityMap',
+      status: utility.created ? 'ensured' : 'skipped',
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure utility tables:', err.message);
+    results.push({
+      object: 'tblUtility_*+tblATUtilityMap',
       status: 'error',
       message: err.message,
     });

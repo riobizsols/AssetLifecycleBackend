@@ -28,6 +28,7 @@ const { seedTextMessages } = require("../utils/seedTextMessages");
 const { finalizeTenantForeignKeys } = require("./tenantForeignKeyService");
 const { seedDefaultJobRoleNav } = require("../utils/seedDefaultJobRoleNav");
 const { ensureDefaultScreenApps } = require("../utils/ensureDefaultScreenApps");
+const { ensureMissingReportNav } = require("../utils/ensureMissingReportNav");
 const { generateCustomIdForClient } = require("../utils/idGenerator");
 
 const DUMP_FILE_PATH = path.join(
@@ -229,7 +230,18 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
     logs.push({ message: navMessage, scope: 'schema' });
   }
 
-  const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns)";
+  try {
+    const { ensureUtilityHSchema } = require('../utils/ensureUtilityHSchema');
+    await ensureUtilityHSchema(client);
+    const utilMessage =
+      'Utility tables ensured (H/D/ConsumType/Freq/ATMap/Consumption; lookups seeded)';
+    console.log(`[SetupWizard] ✅ ${utilMessage}`);
+    logs.push({ message: utilMessage, scope: 'schema' });
+  } catch (utilErr) {
+    console.warn('[SetupWizard] Utility tables ensure skipped:', utilErr.message);
+  }
+
+  const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns; tblUtility_H)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {
     logs.push({ message, scope: "schema" });
@@ -776,6 +788,63 @@ const CORE_TABLE_DDL = [
       text character varying(50) NOT NULL,
       int_status integer NOT NULL DEFAULT 1,
       hours_required decimal(10,2)
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblUtility_H" (
+      util_id character varying(20) PRIMARY KEY,
+      utility_name character varying(100) NOT NULL,
+      org_id character varying(20) NOT NULL,
+      uom_id character varying(20)
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblUTConsumType" (
+      utctp_id character varying(20) PRIMARY KEY,
+      consumption_type character varying(50) NOT NULL
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblUtilFreq" (
+      utfq_id character varying(20) PRIMARY KEY,
+      freq integer NOT NULL,
+      description character varying(50) NOT NULL
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblUtility_D" (
+      utild_id character varying(20) PRIMARY KEY,
+      utility_sh character varying(100) NOT NULL,
+      utctp_id character varying(20) NOT NULL,
+      org_id character varying(20) NOT NULL,
+      uom_id character varying(20),
+      util_id character varying(20) NOT NULL,
+      utfq_id character varying(20) NOT NULL,
+      meter_max integer
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblATUtilityMap" (
+      atum_id character varying(20) PRIMARY KEY,
+      utild_id character varying(20) NOT NULL,
+      assettype_id character varying(20) NOT NULL,
+      created_by character varying(50),
+      created_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      changed_by character varying(50),
+      changed_on timestamp without time zone
+    );
+  `,
+  `
+    CREATE TABLE IF NOT EXISTS "tblUtilConsumption" (
+      utcv_id character varying(20) PRIMARY KEY,
+      utild_id character varying(20) NOT NULL,
+      reading numeric(18,4),
+      quantity_consumed numeric(18,4),
+      consumption_date date NOT NULL,
+      created_on timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+      created_by character varying(50),
+      rolled_over boolean NOT NULL DEFAULT false,
+      org_id character varying(20)
     );
   `,
   `
@@ -1415,6 +1484,8 @@ const seedJobRolesAndNavigation = async (client, orgId, logs) => {
   }
 
   await insertDefaultJobRoleNav(client, orgId);
+  await ensureDefaultScreenApps(client, orgId, "SetupWizard");
+  await ensureMissingReportNav(client, orgId, "SetupWizard");
 
   await applyNavigationGroupModel(client, "SetupWizard");
 
@@ -1823,6 +1894,8 @@ const seedEmployeeAndUser = async (client, orgId, adminUser, mappings, logs, exi
 
   // Ensure JR001 navigation matches the current System Administrator sidebar template
   await insertDefaultJobRoleNav(client, orgId);
+  await ensureDefaultScreenApps(client, orgId, "SetupWizard");
+  await ensureMissingReportNav(client, orgId, "SetupWizard");
 
   await applyNavigationGroupModel(client, "SetupWizard");
 

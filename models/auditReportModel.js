@@ -950,16 +950,28 @@ async function createAuditType(orgId, { description, isInternal = true }, userId
     throw err;
   }
   const { generateCustomId } = require('../utils/idGenerator');
-  const audtpId = await generateCustomId('audit_type');
-  await db.query(
-    `
-      INSERT INTO "tblAuditType"
-        (audtp_id, description, is_internal, created_by, created_on, org_id, int_status)
-      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
-    `,
-    [audtpId, desc, Boolean(isInternal), userId || null, orgId],
-  );
-  return getAuditType(orgId, audtpId);
+
+  let lastErr = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const audtpId = await generateCustomId('audit_type');
+    try {
+      await db.query(
+        `
+          INSERT INTO "tblAuditType"
+            (audtp_id, description, is_internal, created_by, created_on, org_id, int_status)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
+        `,
+        [audtpId, desc, Boolean(isInternal), userId || null, orgId],
+      );
+      return getAuditType(orgId, audtpId);
+    } catch (err) {
+      lastErr = err;
+      // Sequence lag / concurrent insert — retry with a freshly allocated id
+      if (err.code === '23505') continue;
+      throw err;
+    }
+  }
+  throw lastErr || new Error('Failed to create audit type');
 }
 
 async function updateAuditType(orgId, audtpId, { description, isInternal, intStatus }, userId) {
@@ -1082,17 +1094,31 @@ async function saveAuditTypeMappings(orgId, audtpId, assetTypeIds, userId) {
         `,
         [existing[0].audatm_id, userId || null],
       );
-    } else {
-      const mapId = await generateCustomId('audit_at_mapping');
-      await db.query(
-        `
-          INSERT INTO "tblAuditATMapping"
-            (audatm_id, assettype_id, audtp_id, created_by, created_on, org_id, int_status)
-          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
-        `,
-        [mapId, atId, audtpId, userId || null, orgId],
-      );
+      continue;
     }
+
+    let inserted = false;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const mapId = await generateCustomId('audit_at_mapping');
+      try {
+        await db.query(
+          `
+            INSERT INTO "tblAuditATMapping"
+              (audatm_id, assettype_id, audtp_id, created_by, created_on, org_id, int_status)
+            VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
+          `,
+          [mapId, atId, audtpId, userId || null, orgId],
+        );
+        inserted = true;
+        break;
+      } catch (err) {
+        lastErr = err;
+        if (err.code === '23505') continue;
+        throw err;
+      }
+    }
+    if (!inserted) throw lastErr || new Error('Failed to create audit mapping');
   }
 
   return listMappedAssetTypes(orgId, audtpId);

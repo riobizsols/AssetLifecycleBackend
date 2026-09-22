@@ -69,6 +69,12 @@ const TABLE_ID_CONVENTIONS = [
   { table: 'tblUom', column: 'uom_id', tableKey: 'uom', prefix: 'UOM', pad: 3 },
   { table: 'tblAuditType', column: 'audtp_id', tableKey: 'audit_type', prefix: 'AUDTP', pad: 3 },
   { table: 'tblAuditATMapping', column: 'audatm_id', tableKey: 'audit_at_mapping', prefix: 'AUDATM', pad: 3 },
+  { table: 'tblUtility_H', column: 'util_id', tableKey: 'utility_h', prefix: 'UTIL', pad: 3 },
+  { table: 'tblUTConsumType', column: 'utctp_id', tableKey: 'ut_consum_type', prefix: 'UTCTP', pad: 3 },
+  { table: 'tblUtilFreq', column: 'utfq_id', tableKey: 'util_freq', prefix: 'uf', pad: 3 },
+  { table: 'tblUtility_D', column: 'utild_id', tableKey: 'utility_d', prefix: 'utild', pad: 3 },
+  { table: 'tblATUtilityMap', column: 'atum_id', tableKey: 'at_utility_map', prefix: 'ATUM', pad: 3 },
+  { table: 'tblUtilConsumption', column: 'utcv_id', tableKey: 'util_consumption', prefix: 'utcv', pad: 3 },
   // Semantic IDs — do not enforce PREFIX### shape
   { table: 'tblApps', column: 'app_id', tableKey: 'app', prefix: null, enforceFormat: false },
   { table: 'tblEvents', column: 'event_id', tableKey: 'event', prefix: 'Eve', enforceFormat: false },

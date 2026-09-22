@@ -553,9 +553,24 @@ const DEFAULT_APPS = [
   { id: "BRANCHES", label: "Branches" },
   { id: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping" },
   { id: "AUDITATMAPPING", label: "Audit Type – Asset Type Mapping" },
+  { id: "UTILITYMASTER", label: "Utility Master" },
+  { id: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping" },
+  { id: "UTILITYCONSUMPTION", label: "Record Utility Consumption" },
+  { id: "ASSETLIFECYCLEREPORT", label: "Asset Lifecycle Report" },
+  { id: "ASSETREPORT", label: "Asset Report" },
+  { id: "QAAUDITREPORT", label: "QA Audit Report" },
+  { id: "ASSETVALUATION", label: "Asset Valuation" },
+  { id: "ASSETWORKFLOWHISTORY", label: "Asset Workflow History" },
+  { id: "BREAKDOWNHISTORY", label: "Breakdown History" },
+  { id: "SLAREPORT", label: "SLA Reports" },
+  { id: "MAINTENANCEHISTORY", label: "Maintenance History of Asset" },
+  { id: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report" },
+  { id: "AUDITREPORT", label: "Audit Reports" },
+  { id: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register" },
   { id: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance" },
   { id: "WORKFORCEREPORT", label: "Workforce" },
   { id: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report" },
+  { id: "REOPENEDBREAKDOWNS", label: "Reopened Breakdowns" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
   { id: "SPAREPARTS", label: "Spare Part Lot" },
@@ -634,6 +649,13 @@ const DEFAULT_UOM = [
   { id: "UOM005", name: "KMS" },
   // Spare-parts / quantity UOMs (required for spare part category create)
   { id: "UOM006", name: "Piece" },
+  // Utility consumption UOMs (tblUtility_H.uom_id)
+  { id: "UOM007", name: "kWh" },
+  { id: "UOM008", name: "Litre" },
+  { id: "UOM009", name: "Cubic Metre" },
+  { id: "UOM010", name: "kg" },
+  { id: "UOM011", name: "Cylinder" },
+  { id: "UOM012", name: "Unit" },
 ];
 
 /** Inspection checklist response types (Qualitative / Quantitative). */
@@ -725,7 +747,13 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "audit_type", prefix: "AUDTP", lastNumber: 0 },
   { tableKey: "audtp", prefix: "AUDTP", lastNumber: 0 },
   { tableKey: "audit_at_mapping", prefix: "AUDATM", lastNumber: 0 },
-  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 }
+  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 },
+  { tableKey: "utility_h", prefix: "UTIL", lastNumber: 0 },
+  { tableKey: "ut_consum_type", prefix: "UTCTP", lastNumber: 2 },
+  { tableKey: "util_freq", prefix: "uf", lastNumber: 5 },
+  { tableKey: "utility_d", prefix: "utild", lastNumber: 0 },
+  { tableKey: "at_utility_map", prefix: "ATUM", lastNumber: 0 },
+  { tableKey: "util_consumption", prefix: "utcv", lastNumber: 0 },
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -788,6 +816,11 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN035", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPASSETS", label: "Scrap Assets", sequence: 2, accessLevel: "A", isGroup: false },
   { id: "JRN061", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPMAINTENANCEAPPROVAL", label: "Scrap Approval", sequence: 3, accessLevel: "A", isGroup: false },
+
+  { id: "JRN070", jobRoleId: "JR001", parentId: null, appId: null, label: "Utilities", sequence: 12, accessLevel: "A", isGroup: true },
+  { id: "JRN071", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYMASTER", label: "Utility Master", sequence: 1, accessLevel: "A", isGroup: false },
+  { id: "JRN072", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping", sequence: 2, accessLevel: "A", isGroup: false },
+  { id: "JRN073", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYCONSUMPTION", label: "Record Consumption", sequence: 3, accessLevel: "A", isGroup: false },
 
   { id: "JRN008", jobRoleId: "JR001", parentId: null, appId: null, label: "Admin Settings", sequence: 8, accessLevel: "A", isGroup: true },
   { id: "JRN023", jobRoleId: "JR001", parentId: "JRN008", appId: "AUDITLOGS", label: "Audit Logs", sequence: 1, accessLevel: "A", isGroup: false },
