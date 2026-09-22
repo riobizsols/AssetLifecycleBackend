@@ -12,6 +12,12 @@ const CATEGORY_ORDER = [
   'IT',
   'Electrical',
   'HVAC',
+  'Plumbing',
+  'Civil',
+  'Lifts',
+  'Generators',
+  'Fire Systems',
+  'Campus Infrastructure',
   'Furniture',
   'Teaching equipment',
   'Vehicles',
@@ -27,10 +33,22 @@ const CATEGORY_SQL = `
       THEN 'Laboratory'
     WHEN LOWER(COALESCE(at.text, '')) ~ '(laptop|desktop|tablet|printer|network switch|workstation|doc camera|billing printer|accounting desktop|cad workstation|compression machine|pharmacology drug|student tablet)'
       THEN 'IT'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(electrical|ups|generator|transformer|switchgear)'
-      THEN 'Electrical'
     WHEN LOWER(COALESCE(at.text, '')) ~ '(hvac|air.?cond|chiller|ahu)'
       THEN 'HVAC'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(lifts?|elevators?)'
+      THEN 'Lifts'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(generators?|dg\\s*set)'
+      THEN 'Generators'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(fire|extinguish|sprinkler|hydrant|smoke detector)'
+      THEN 'Fire Systems'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(plumbing|water supply|drainage pump)'
+      THEN 'Plumbing'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(^civil$|civil work|civil infra)'
+      THEN 'Civil'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(campus\\s*infra|campus infrastructure)'
+      THEN 'Campus Infrastructure'
+    WHEN LOWER(COALESCE(at.text, '')) ~ '(electrical|ups|generator|transformer|switchgear)'
+      THEN 'Electrical'
     WHEN LOWER(COALESCE(at.text, '')) ~ '(furniture|chair|desk|cabinet|sofa)'
       THEN 'Furniture'
     WHEN LOWER(COALESCE(at.text, '')) ~ '(projector|whiteboard|smart classroom|teaching|classroom|clicker|play equipment|sensory|physical education|pe sports|pa system|education kit)'

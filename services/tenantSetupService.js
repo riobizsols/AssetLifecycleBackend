@@ -20,6 +20,7 @@ const {
 } = require('../utils/navigationGroupUtils');
 const { seedDefaultJobRoleNav } = require('../utils/seedDefaultJobRoleNav');
 const { ensureDefaultScreenApps } = require('../utils/ensureDefaultScreenApps');
+const { ensureMissingReportNav } = require('../utils/ensureMissingReportNav');
 const { ensureBranchDeptMappingProvisioning } = require('../utils/ensureBranchDeptMappingProvisioning');
 const { syncIdSequencesFromData } = require('./tenantIdFormatService');
 const { seedTextMessages } = require('../utils/seedTextMessages');
@@ -1626,6 +1627,12 @@ async function ensureJobRoleNavigation(client, orgId) {
   const lastNavNumber = await syncJobRoleNavIdSequence(client);
   if (lastNavNumber > 0) {
     console.log(`[TenantSetup] jobrolenav sequence synced to last_number=${lastNavNumber}`);
+  }
+
+  try {
+    await ensureMissingReportNav(client, orgId, 'TenantSetup');
+  } catch (reportNavErr) {
+    console.warn(`[TenantSetup] Missing report nav ensure failed: ${reportNavErr.message}`);
   }
 
   return navResult;

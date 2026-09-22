@@ -5,23 +5,30 @@ const auditReportController = require('../controllers/auditReportController');
 
 router.use(protect);
 
-// GET /api/audit-report/audit-types
+// Audit types
 router.get('/audit-types', auditReportController.getAuditTypes);
+router.post('/audit-types', auditReportController.createAuditType);
+router.put('/audit-types/:audtpId', auditReportController.updateAuditType);
 
-// GET /api/audit-report/asset-types/:audtpId
+// Asset types + mappings
+router.get('/all-asset-types', auditReportController.getAllAssetTypes);
 router.get('/asset-types/:audtpId', auditReportController.getMappedAssetTypes);
+router.put('/mappings/:audtpId', auditReportController.saveMappings);
 
-// GET|POST /api/audit-report/view
+// Report view
 router.get('/view', auditReportController.viewAuditReport);
 router.post('/view', auditReportController.viewAuditReport);
 
-// GET|POST /api/audit-report/pm-compliance
+// PM compliance + calibration (Niranjan)
 router.get('/pm-compliance', auditReportController.getPmCompliance);
 router.post('/pm-compliance', auditReportController.getPmCompliance);
-
-// GET|POST /api/audit-report/calibration-detail
 router.get('/calibration-detail', auditReportController.getCalibrationDetail);
 router.post('/calibration-detail', auditReportController.getCalibrationDetail);
 router.get('/calibration-detail/:amsId', auditReportController.getCalibrationDetail);
+
+// Coverage expiry — AMC / CMC / warranty (Sanjana)
+router.get('/coverage', auditReportController.viewCoverageExpiryReport);
+router.post('/coverage', auditReportController.viewCoverageExpiryReport);
+router.get('/asset/:assetId/vendor-renewals', auditReportController.viewAssetVendorRenewals);
 
 module.exports = router;

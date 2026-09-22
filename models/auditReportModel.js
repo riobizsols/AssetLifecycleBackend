@@ -923,9 +923,188 @@ async function getCalibrationDetail({ orgId, amsId }) {
   };
 }
 
+async function listAllAssetTypes(orgId) {
+  const db = getDb();
+  const { rows } = await db.query(
+    `
+      SELECT
+        at.asset_type_id,
+        COALESCE(at.text, at.asset_type_id) AS asset_type_name
+      FROM "tblAssetTypes" at
+      WHERE COALESCE(at.int_status, 1) = 1
+        AND (at.org_id IS NULL OR at.org_id = $1)
+      ORDER BY 2 ASC, 1 ASC
+    `,
+    [orgId],
+  );
+  return rows;
+}
+
+async function createAuditType(orgId, { description, isInternal = true }, userId) {
+  const db = getDb();
+  await ensureAuditTablesSchema(db);
+  const desc = String(description || '').trim();
+  if (!desc) {
+    const err = new Error('description is required');
+    err.status = 400;
+    throw err;
+  }
+  const { generateCustomId } = require('../utils/idGenerator');
+  const audtpId = await generateCustomId('audit_type');
+  await db.query(
+    `
+      INSERT INTO "tblAuditType"
+        (audtp_id, description, is_internal, created_by, created_on, org_id, int_status)
+      VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
+    `,
+    [audtpId, desc, Boolean(isInternal), userId || null, orgId],
+  );
+  return getAuditType(orgId, audtpId);
+}
+
+async function updateAuditType(orgId, audtpId, { description, isInternal, intStatus }, userId) {
+  const db = getDb();
+  await ensureAuditTablesSchema(db);
+  const existing = await getAuditType(orgId, audtpId);
+  if (!existing) {
+    const err = new Error('Audit type not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const nextDesc =
+    description !== undefined ? String(description || '').trim() : existing.description;
+  if (!nextDesc) {
+    const err = new Error('description is required');
+    err.status = 400;
+    throw err;
+  }
+  const nextInternal =
+    isInternal !== undefined ? Boolean(isInternal) : Boolean(existing.is_internal);
+  const nextStatus = intStatus !== undefined ? Number(intStatus) : 1;
+
+  await db.query(
+    `
+      UPDATE "tblAuditType"
+      SET description = $2,
+          is_internal = $3,
+          int_status = $4,
+          changed_by = $5,
+          changed_on = CURRENT_TIMESTAMP
+      WHERE audtp_id = $1
+        AND (org_id IS NULL OR org_id = $6)
+    `,
+    [audtpId, nextDesc, nextInternal, nextStatus, userId || null, orgId],
+  );
+
+  if (nextStatus !== 1) return { audtp_id: audtpId, int_status: nextStatus };
+  return getAuditType(orgId, audtpId);
+}
+
+/**
+ * Replace active asset-type mappings for an audit type (org-scoped).
+ */
+async function saveAuditTypeMappings(orgId, audtpId, assetTypeIds, userId) {
+  const db = getDb();
+  await ensureAuditTablesSchema(db);
+
+  const auditType = await getAuditType(orgId, audtpId);
+  if (!auditType) {
+    const err = new Error('Audit type not found');
+    err.status = 404;
+    throw err;
+  }
+
+  const ids = [
+    ...new Set(
+      (Array.isArray(assetTypeIds) ? assetTypeIds : [])
+        .map((id) => String(id || '').trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (ids.length) {
+    const { rows: valid } = await db.query(
+      `
+        SELECT asset_type_id
+        FROM "tblAssetTypes"
+        WHERE asset_type_id = ANY($1::varchar[])
+          AND COALESCE(int_status, 1) = 1
+          AND (org_id IS NULL OR org_id = $2)
+      `,
+      [ids, orgId],
+    );
+    const validSet = new Set(valid.map((r) => r.asset_type_id));
+    const invalid = ids.filter((id) => !validSet.has(id));
+    if (invalid.length) {
+      const err = new Error(`Invalid asset type(s): ${invalid.join(', ')}`);
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  await db.query(
+    `
+      UPDATE "tblAuditATMapping"
+      SET int_status = 0,
+          changed_by = $3,
+          changed_on = CURRENT_TIMESTAMP
+      WHERE audtp_id = $1
+        AND COALESCE(int_status, 1) = 1
+        AND (org_id IS NULL OR org_id = $2)
+    `,
+    [audtpId, orgId, userId || null],
+  );
+
+  const { generateCustomId } = require('../utils/idGenerator');
+
+  for (const atId of ids) {
+    const { rows: existing } = await db.query(
+      `
+        SELECT audatm_id
+        FROM "tblAuditATMapping"
+        WHERE audtp_id = $1
+          AND assettype_id = $2
+          AND org_id = $3
+        LIMIT 1
+      `,
+      [audtpId, atId, orgId],
+    );
+
+    if (existing[0]) {
+      await db.query(
+        `
+          UPDATE "tblAuditATMapping"
+          SET int_status = 1,
+              changed_by = $2,
+              changed_on = CURRENT_TIMESTAMP
+          WHERE audatm_id = $1
+        `,
+        [existing[0].audatm_id, userId || null],
+      );
+    } else {
+      const mapId = await generateCustomId('audit_at_mapping');
+      await db.query(
+        `
+          INSERT INTO "tblAuditATMapping"
+            (audatm_id, assettype_id, audtp_id, created_by, created_on, org_id, int_status)
+          VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, 1)
+        `,
+        [mapId, atId, audtpId, userId || null, orgId],
+      );
+    }
+  }
+
+  return listMappedAssetTypes(orgId, audtpId);
+}
+
 module.exports = {
   listAuditTypes,
   listMappedAssetTypes,
+  listAllAssetTypes,
+  createAuditType,
+  updateAuditType,
+  saveAuditTypeMappings,
   getAuditReportView,
   getPmCompliance,
   getCalibrationDetail,

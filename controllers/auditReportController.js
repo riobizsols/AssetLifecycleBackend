@@ -1,4 +1,5 @@
 const auditReportModel = require('../models/auditReportModel');
+const coverageExpiryReportModel = require('../models/coverageExpiryReportModel');
 
 function parseBoolSections(bodyOrQuery) {
   const src = bodyOrQuery?.sections || bodyOrQuery || {};
@@ -26,6 +27,15 @@ function parseAssetTypeIds(value) {
     .filter(Boolean);
 }
 
+function parseListParam(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return String(value)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
 const getAuditTypes = async (req, res) => {
   try {
     const orgId = req.user?.org_id;
@@ -35,6 +45,48 @@ const getAuditTypes = async (req, res) => {
   } catch (err) {
     console.error('[AuditReport] getAuditTypes:', err);
     return res.status(500).json({ error: err.message || 'Failed to load audit types' });
+  }
+};
+
+const createAuditType = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const data = await auditReportModel.createAuditType(
+      orgId,
+      {
+        description: req.body?.description,
+        isInternal: req.body?.is_internal ?? req.body?.isInternal ?? true,
+      },
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.status(201).json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] createAuditType:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to create audit type' });
+  }
+};
+
+const updateAuditType = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const audtpId = req.params.audtpId;
+    if (!audtpId) return res.status(400).json({ error: 'audtp_id is required' });
+    const data = await auditReportModel.updateAuditType(
+      orgId,
+      audtpId,
+      {
+        description: req.body?.description,
+        isInternal: req.body?.is_internal ?? req.body?.isInternal,
+        intStatus: req.body?.int_status ?? req.body?.intStatus,
+      },
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] updateAuditType:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to update audit type' });
   }
 };
 
@@ -49,6 +101,40 @@ const getMappedAssetTypes = async (req, res) => {
   } catch (err) {
     console.error('[AuditReport] getMappedAssetTypes:', err);
     return res.status(500).json({ error: err.message || 'Failed to load mapped asset types' });
+  }
+};
+
+const getAllAssetTypes = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const data = await auditReportModel.listAllAssetTypes(orgId);
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] getAllAssetTypes:', err);
+    return res.status(500).json({ error: err.message || 'Failed to load asset types' });
+  }
+};
+
+const saveMappings = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+    const audtpId = req.params.audtpId || req.body?.audtp_id;
+    if (!audtpId) return res.status(400).json({ error: 'audtp_id is required' });
+    const assetTypeIds = parseAssetTypeIds(
+      req.body?.asset_type_ids || req.body?.assetTypeIds || [],
+    );
+    const data = await auditReportModel.saveAuditTypeMappings(
+      orgId,
+      audtpId,
+      assetTypeIds,
+      req.user?.user_id || req.user?.id || null,
+    );
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] saveMappings:', err);
+    return res.status(err.status || 500).json({ error: err.message || 'Failed to save mappings' });
   }
 };
 
@@ -124,10 +210,60 @@ const getCalibrationDetail = async (req, res) => {
   }
 };
 
+const viewCoverageExpiryReport = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const src = req.method === 'GET' ? req.query : req.body || {};
+    const data = await coverageExpiryReportModel.getCoverageExpiryReport({
+      orgId,
+      coverageTypes: parseListParam(src.coverage_types || src.coverageTypes),
+      statuses: parseListParam(src.statuses || src.status),
+      expiringDays: src.expiring_days || src.expiringDays || 30,
+      assetId: src.asset_id || src.assetId || null,
+      branchId: req.user?.branch_id || null,
+      hasSuperAccess: Boolean(req.user?.hasSuperAccess || req.user?.is_super_admin),
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] viewCoverageExpiryReport:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load coverage report' });
+  }
+};
+
+const viewAssetVendorRenewals = async (req, res) => {
+  try {
+    const orgId = req.user?.org_id;
+    if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
+
+    const assetId = req.params.assetId || req.query.asset_id || req.body?.asset_id;
+    const data = await coverageExpiryReportModel.getAssetVendorRenewals({
+      orgId,
+      assetId,
+      expiringDays: req.query.expiring_days || req.body?.expiring_days || 30,
+    });
+
+    return res.json({ success: true, data });
+  } catch (err) {
+    console.error('[AuditReport] viewAssetVendorRenewals:', err);
+    const status = err.status || 500;
+    return res.status(status).json({ error: err.message || 'Failed to load vendor renewals' });
+  }
+};
+
 module.exports = {
   getAuditTypes,
+  createAuditType,
+  updateAuditType,
   getMappedAssetTypes,
+  getAllAssetTypes,
+  saveMappings,
   viewAuditReport,
   getPmCompliance,
   getCalibrationDetail,
+  viewCoverageExpiryReport,
+  viewAssetVendorRenewals,
 };

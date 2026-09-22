@@ -4,6 +4,7 @@ const {
     applyFullAccessToNavigationTree,
     SYSTEM_ADMIN_JOB_ROLE_ID,
 } = require('../utils/systemAdmin');
+const { ensureMissingReportNav } = require('../utils/ensureMissingReportNav');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -202,6 +203,21 @@ const getUserNavigation = async (user_id, platform = 'D') => {
         
         const job_role_ids = userJobRoleQuery.rows.map(row => row.job_role_id);
         console.log(`[JobRoleNavModel] Job role IDs: ${job_role_ids.join(', ')}`);
+
+        try {
+            const orgRes = await dbPool.query(
+                `SELECT org_id FROM "tblJobRoleNav"
+                 WHERE job_role_id = ANY($1::text[]) AND org_id IS NOT NULL
+                 LIMIT 1`,
+                [job_role_ids],
+            );
+            const orgId = orgRes.rows[0]?.org_id;
+            if (orgId) {
+                await ensureMissingReportNav(dbPool, orgId, 'JobRoleNav');
+            }
+        } catch (reportNavErr) {
+            console.warn(`[JobRoleNavModel] Missing report nav ensure failed: ${reportNavErr.message}`);
+        }
         
         // Get navigation for all roles and combine permissions
         let navigation = await getCombinedNavigationStructure(job_role_ids, platform);
