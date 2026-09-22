@@ -20,7 +20,7 @@ async function main() {
     await client.query(
       `
         INSERT INTO "tblApps" (app_id, text, int_status, org_id)
-        VALUES ('WORKFORCEREPORT', 'Workforce', true, $1)
+        VALUES ('WORKFORCEREPORT', 'Engineering Team Productivity Report', true, $1)
         ON CONFLICT (app_id) DO UPDATE
         SET text = EXCLUDED.text, int_status = true, org_id = EXCLUDED.org_id
       `,
@@ -72,7 +72,7 @@ async function main() {
         `
           INSERT INTO "tblJobRoleNav"
             (job_role_nav_id, job_role_id, parent_id, app_id, label, sequence, access_level, is_group, org_id, int_status, mob_desk)
-          VALUES ($1, 'JR001', $2, 'WORKFORCEREPORT', 'Workforce', $3, 'A', false, $4, 1, 'D')
+          VALUES ($1, 'JR001', $2, 'WORKFORCEREPORT', 'Engineering Team Productivity Report', $3, 'A', false, $4, 1, 'D')
         `,
         [jrnId, parentId, seq, primaryOrg],
       );
