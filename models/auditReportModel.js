@@ -306,10 +306,14 @@ async function getAuditReportView(opts) {
         WHERE ams.org_id = $1
           AND ams.asset_id = ANY($2::varchar[])
           AND ams.act_maint_st_date IS NOT NULL
-          AND (ams.act_maint_st_date)::timestamp::date BETWEEN $3::date AND $4::date
+          AND (ams.act_maint_st_date)::timestamp::date <= $4::date
+          AND COALESCE(
+            (ams.act_main_end_date)::timestamp::date,
+            (ams.act_maint_st_date)::timestamp::date
+          ) >= $3::date
           AND COALESCE(ams.notes, '') NOT ILIKE ${`'%${DEMO_NOTE}%'`}
           AND COALESCE(ams.technician_name, '') <> ${`'${DEMO_TECH}'`}
-        ORDER BY ams.act_maint_st_date DESC NULLS LAST, ams.ams_id
+        ORDER BY COALESCE(ams.act_main_end_date, ams.act_maint_st_date) DESC NULLS LAST, ams.ams_id
       `,
       histParams,
     );
@@ -925,11 +929,28 @@ async function getCalibrationDetail({ orgId, amsId }) {
 
 async function listAllAssetTypes(orgId) {
   const db = getDb();
+  await ensureAuditTablesSchema(db);
   const { rows } = await db.query(
     `
       SELECT
         at.asset_type_id,
-        COALESCE(at.text, at.asset_type_id) AS asset_type_name
+        COALESCE(at.text, at.asset_type_id) AS asset_type_name,
+        COALESCE((
+          SELECT json_agg(
+            json_build_object(
+              'audtp_id', t.audtp_id,
+              'description', COALESCE(t.description, t.audtp_id)
+            )
+            ORDER BY COALESCE(t.description, t.audtp_id)
+          )
+          FROM "tblAuditATMapping" m
+          INNER JOIN "tblAuditType" t ON t.audtp_id = m.audtp_id
+          WHERE m.assettype_id = at.asset_type_id
+            AND COALESCE(m.int_status, 1) = 1
+            AND (m.org_id IS NULL OR m.org_id = $1)
+            AND COALESCE(t.int_status, 1) = 1
+            AND (t.org_id IS NULL OR t.org_id = $1)
+        ), '[]'::json) AS mapped_audit_types
       FROM "tblAssetTypes" at
       WHERE COALESCE(at.int_status, 1) = 1
         AND (at.org_id IS NULL OR at.org_id = $1)
@@ -937,7 +958,10 @@ async function listAllAssetTypes(orgId) {
     `,
     [orgId],
   );
-  return rows;
+  return rows.map((r) => ({
+    ...r,
+    mapped_audit_types: Array.isArray(r.mapped_audit_types) ? r.mapped_audit_types : [],
+  }));
 }
 
 async function createAuditType(orgId, { description, isInternal = true }, userId) {

@@ -754,6 +754,9 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "utility_d", prefix: "utild", lastNumber: 0 },
   { tableKey: "at_utility_map", prefix: "ATUM", lastNumber: 0 },
   { tableKey: "util_consumption", prefix: "utcv", lastNumber: 0 },
+  { tableKey: "tcert", prefix: "TCERT", lastNumber: 0 },
+  { tableKey: "tech_cert", prefix: "TCERT", lastNumber: 0 },
+  { tableKey: "etc", prefix: "ETC", lastNumber: 0 },
 ];
 
 const DEFAULT_JOB_ROLES = [

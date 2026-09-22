@@ -74,7 +74,7 @@ function buildFilters(req) {
     branchIds: parseListParam(q.branchIds || q.branch_ids),
     deptIds: parseListParam(q.deptIds || q.dept_ids),
     statuses: parseListParam(q.statuses || q.status),
-    categories: parseListParam(q.categories || q.category),
+    assetTypeIds: parseListParam(q.assetTypeIds || q.asset_type_ids || q.assetTypes),
     search: q.search ? String(q.search).trim() : null,
     page: q.page,
     pageSize: q.pageSize || q.page_size,

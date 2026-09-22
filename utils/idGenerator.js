@@ -43,6 +43,8 @@ const defaultPrefixes = {
     // Existing scrap details table (legacy, used by reports/UI)
     'asset_scrap_det': 'ASD',
     'etc': 'ETC',
+    'tcert': 'TCERT',
+    'tech_cert': 'TCERT',
     // Spare parts
     'sp_category': 'SPC',
     'sp_lot_det': 'SPLD',
@@ -218,6 +220,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'audatm': 'tblAuditATMapping',
         'asset_scrap_det': 'tblAssetScrapDet',
         'etc': 'tblEmpTechCert',
+        'tcert': 'tblTechCert',
+        'tech_cert': 'tblTechCert',
         'sp_category': 'tblSPCategory',
         'sp_brand': 'tblSPBrand',
         'sp_model': 'tblSPBMod',
@@ -306,6 +310,8 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'audatm': 'audatm_id',
         'asset_scrap_det': 'asd_id',
         'etc': 'etc_id',
+        'tcert': 'tc_id',
+        'tech_cert': 'tc_id',
         'sp_category': 'spc_id',
         'sp_brand': 'spb_id',
         'sp_model': 'spbm_id',
@@ -375,7 +381,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
                   SET last_number = GREATEST(
                     s.last_number,
                     COALESCE((
-                      SELECT MAX(CAST(SUBSTRING(t.${columnName} FROM $3) AS INTEGER))
+                      SELECT MAX(CAST(SUBSTR(t.${columnName}, $3) AS INTEGER))
                       FROM "${targetTable}" t
                       WHERE t.${columnName} ~ ('^' || $2 || '[0-9]+$')
                     ), 0)

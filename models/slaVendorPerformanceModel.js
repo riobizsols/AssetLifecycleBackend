@@ -134,7 +134,19 @@ function sqlParseHours(expr) {
 }
 
 function buildScope(filters = {}) {
-  const conditions = [`ams.org_id = $1`];
+  const conditions = [
+    `ams.org_id = $1`,
+    // Vendor-only report: exclude unassigned + in-house maintenance
+    `ams.vendor_id IS NOT NULL`,
+    `NOT EXISTS (
+      SELECT 1 FROM "tblVendors" iv
+      WHERE iv.vendor_id = ams.vendor_id
+        AND (
+          LOWER(REPLACE(REPLACE(COALESCE(iv.vendor_name, ''), '-', ''), ' ', '')) LIKE '%inhouse%'
+          OR LOWER(TRIM(COALESCE(iv.vendor_name, ''))) = 'in-house maintenance'
+        )
+    )`,
+  ];
   const params = [filters.orgId];
   let i = 1;
 
@@ -227,7 +239,7 @@ function factCteSql(scope, { includeSlaRecs = vendorSlaRecsAvailable === true } 
         at.asset_type_id,
         COALESCE(at.text, '—') AS asset_type_name,
         ams.vendor_id,
-        COALESCE(v.vendor_name, 'Unassigned') AS vendor_name,
+        COALESCE(v.vendor_name, ams.vendor_id) AS vendor_name,
         ams.maint_type_id,
         COALESCE(mt.text, ams.maint_type_id, '—') AS service_type_name,
         COALESCE(a.branch_id) AS branch_id,
@@ -364,7 +376,10 @@ async function getFilterOptions(filters = {}) {
       `
         SELECT DISTINCT v.vendor_id AS id, v.vendor_name AS label
         FROM "tblVendors" v
-        WHERE v.org_id = $1 AND COALESCE(v.int_status, 1) = 1
+        WHERE v.org_id = $1
+          AND COALESCE(v.int_status, 1) = 1
+          AND LOWER(REPLACE(REPLACE(COALESCE(v.vendor_name, ''), '-', ''), ' ', '')) NOT LIKE '%inhouse%'
+          AND LOWER(TRIM(COALESCE(v.vendor_name, ''))) <> 'in-house maintenance'
         ORDER BY 2
       `,
       [orgId],
@@ -1021,7 +1036,7 @@ async function getDetails(filters = {}) {
   const scope = buildScope({ ...filters, dateFrom: bounds.from, dateTo: bounds.to });
   const statusFilter = applySlaStatusFilter(filters);
   const page = Math.max(1, parseInt(filters.page, 10) || 1);
-  const pageSize = Math.min(200, Math.max(1, parseInt(filters.pageSize, 10) || 25));
+  const pageSize = Math.min(2000, Math.max(1, parseInt(filters.pageSize, 10) || 25));
   const offset = (page - 1) * pageSize;
   let searchSql = '';
   const params = [...scope.params];

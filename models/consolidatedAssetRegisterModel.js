@@ -1,63 +1,10 @@
 /**
- * Consolidated Asset Register — KPIs, org/campus/dept distribution,
- * fixed category mix, and paginated register (no custodian).
+ * Consolidated Asset Register — KPIs, org/campus/dept/asset-type distribution,
+ * and paginated register (no custodian).
  */
 const { getDbFromContext } = require('../utils/dbContext');
 
 const getDb = () => getDbFromContext();
-
-const CATEGORY_ORDER = [
-  'Biomedical',
-  'Laboratory',
-  'IT',
-  'Electrical',
-  'HVAC',
-  'Plumbing',
-  'Civil',
-  'Lifts',
-  'Generators',
-  'Fire Systems',
-  'Campus Infrastructure',
-  'Furniture',
-  'Teaching equipment',
-  'Vehicles',
-  'Other',
-];
-
-/** Keyword classification from asset type name (no category enum in schema). */
-const CATEGORY_SQL = `
-  CASE
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(biomed|patient monitor|infusion|defibril|hospital bed|wheelchair|pulse oximeter|bp apparatus|ultrasound therapy|physio|goniometer|reflex hammer|manikin|nursing|wound care|capsule counting|therapy parallel|paediatric therapy|therapy tool)'
-      THEN 'Biomedical'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(lab microscope|analytical balance|lab tablet|science lab|programming lab|cs lab|cse programming|vernier|lab balance|microscope)'
-      THEN 'Laboratory'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(laptop|desktop|tablet|printer|network switch|workstation|doc camera|billing printer|accounting desktop|cad workstation|compression machine|pharmacology drug|student tablet)'
-      THEN 'IT'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(hvac|air.?cond|chiller|ahu)'
-      THEN 'HVAC'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(lifts?|elevators?)'
-      THEN 'Lifts'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(generators?|dg\\s*set)'
-      THEN 'Generators'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(fire|extinguish|sprinkler|hydrant|smoke detector)'
-      THEN 'Fire Systems'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(plumbing|water supply|drainage pump)'
-      THEN 'Plumbing'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(^civil$|civil work|civil infra)'
-      THEN 'Civil'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(campus\\s*infra|campus infrastructure)'
-      THEN 'Campus Infrastructure'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(electrical|ups|generator|transformer|switchgear)'
-      THEN 'Electrical'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(furniture|chair|desk|cabinet|sofa)'
-      THEN 'Furniture'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(projector|whiteboard|smart classroom|teaching|classroom|clicker|play equipment|sensory|physical education|pe sports|pa system|education kit)'
-      THEN 'Teaching equipment'
-    WHEN LOWER(COALESCE(at.text, '')) ~ '(vehicle|bus|van|car|truck|ambulance)'
-      THEN 'Vehicles'
-    ELSE 'Other'
-  END
-`;
 
 const ACQUISITION_SQL = `COALESCE(CAST(a.purchased_cost AS NUMERIC), 0)`;
 const DEPRECIATION_SQL = `COALESCE(CAST(a.accumulated_depreciation AS NUMERIC), 0)`;
@@ -72,6 +19,10 @@ const BOOK_VALUE_SQL = `
 
 const DEPT_NAME_SQL = `
   COALESCE(NULLIF(TRIM(d_assign.text), ''), NULLIF(TRIM(d_asset.text), ''), 'Unassigned')
+`;
+
+const ASSET_TYPE_NAME_SQL = `
+  COALESCE(NULLIF(TRIM(at.text), ''), NULLIF(TRIM(a.asset_type_id), ''), 'Unassigned')
 `;
 
 const BASE_JOINS = `
@@ -97,7 +48,7 @@ function parseList(value) {
 }
 
 /**
- * Resolve org / branch / status filters.
+ * Resolve org / branch / status / asset-type filters.
  * Multi-org: ACM orgIds (or all orgs when ACM grants all / super) + optional UI orgIds intersect.
  */
 function buildAssetScope(filters = {}) {
@@ -111,7 +62,7 @@ function buildAssetScope(filters = {}) {
   const requestedBranchIds = parseList(filters.branchIds);
   const requestedDeptIds = parseList(filters.deptIds);
   const statuses = parseList(filters.statuses);
-  const categories = parseList(filters.categories).filter((c) => CATEGORY_ORDER.includes(c));
+  const assetTypeIds = parseList(filters.assetTypeIds || filters.asset_type_ids);
 
   let allowedOrgIds = null; // null = all orgs in tenant DB
   if (acm.allOrgs) {
@@ -172,10 +123,10 @@ function buildAssetScope(filters = {}) {
     params.push(statuses);
   }
 
-  if (categories.length) {
+  if (assetTypeIds.length) {
     i += 1;
-    conditions.push(`(${CATEGORY_SQL}) = ANY($${i}::text[])`);
-    params.push(categories);
+    conditions.push(`a.asset_type_id = ANY($${i}::text[])`);
+    params.push(assetTypeIds);
   }
 
   if (filters.search) {
@@ -209,12 +160,12 @@ async function getFilterOptions(filters = {}) {
     branchIds: [],
     deptIds: [],
     statuses: [],
-    categories: [],
+    assetTypeIds: [],
     search: null,
   });
   const where = whereSql(scope);
 
-  const [orgs, campuses, departments, statuses] = await Promise.all([
+  const [orgs, campuses, departments, statuses, assetTypes] = await Promise.all([
     db.query(
       `
         SELECT DISTINCT a.org_id AS id, COALESCE(o.text, a.org_id) AS label
@@ -263,6 +214,18 @@ async function getFilterOptions(filters = {}) {
       `,
       scope.params,
     ),
+    db.query(
+      `
+        SELECT DISTINCT
+          a.asset_type_id AS id,
+          ${ASSET_TYPE_NAME_SQL} AS label
+        ${BASE_JOINS}
+        ${where}
+        AND a.asset_type_id IS NOT NULL
+        ORDER BY 2 ASC
+      `,
+      scope.params,
+    ),
   ]);
 
   return {
@@ -270,7 +233,7 @@ async function getFilterOptions(filters = {}) {
     campuses: campuses.rows,
     departments: departments.rows,
     statuses: statuses.rows,
-    categories: CATEGORY_ORDER.map((c) => ({ id: c, label: c })),
+    assetTypes: assetTypes.rows,
   };
 }
 
@@ -344,63 +307,45 @@ async function getSummary(filters = {}) {
     scope.params,
   );
 
-  const categoryQ = db.query(
+  const assetTypeQ = db.query(
     `
-      WITH classified AS (
+      WITH typed AS (
         SELECT
-          ${CATEGORY_SQL} AS category,
+          a.asset_type_id,
+          ${ASSET_TYPE_NAME_SQL} AS asset_type,
           ${ACQUISITION_SQL} AS acquisition_value,
           ${BOOK_VALUE_SQL} AS book_value
         ${BASE_JOINS}
         ${where}
       ),
-      buckets AS (
-        SELECT * FROM (VALUES
-          ('Biomedical'),
-          ('Laboratory'),
-          ('IT'),
-          ('Electrical'),
-          ('HVAC'),
-          ('Furniture'),
-          ('Teaching equipment'),
-          ('Vehicles'),
-          ('Other')
-        ) AS v(category)
-      ),
       totals AS (
-        SELECT COUNT(*)::float8 AS total_count FROM classified
+        SELECT COUNT(*)::float8 AS total_count FROM typed
       )
       SELECT
-        b.category,
-        COALESCE(COUNT(c.category), 0)::int AS asset_count,
-        COALESCE(SUM(c.acquisition_value), 0)::float8 AS acquisition_value,
-        COALESCE(SUM(c.book_value), 0)::float8 AS book_value,
+        t.asset_type_id,
+        t.asset_type,
+        COUNT(*)::int AS asset_count,
+        COALESCE(SUM(t.acquisition_value), 0)::float8 AS acquisition_value,
+        COALESCE(SUM(t.book_value), 0)::float8 AS book_value,
         CASE
-          WHEN t.total_count > 0
-            THEN ROUND((COALESCE(COUNT(c.category), 0)::numeric / t.total_count::numeric) * 100, 1)
+          WHEN tot.total_count > 0
+            THEN ROUND((COUNT(*)::numeric / tot.total_count::numeric) * 100, 1)
           ELSE 0
         END::float8 AS share_pct
-      FROM buckets b
-      CROSS JOIN totals t
-      LEFT JOIN classified c ON c.category = b.category
-      GROUP BY b.category, t.total_count
-      ORDER BY ARRAY_POSITION(
-        ARRAY[
-          'Biomedical','Laboratory','IT','Electrical','HVAC',
-          'Furniture','Teaching equipment','Vehicles','Other'
-        ]::text[],
-        b.category
-      )
+      FROM typed t
+      CROSS JOIN totals tot
+      GROUP BY t.asset_type_id, t.asset_type, tot.total_count
+      ORDER BY asset_count DESC, asset_type ASC
     `,
     scope.params,
   );
 
-  const [consolidatedR, institutionsR, campusR, deptR, categoryR] = await Promise.all([
+  const [consolidatedR, institutionsR, campusR, deptR, assetTypeR] = await Promise.all([
     consolidatedQ,
     institutionsQ,
     campusQ,
     deptQ,
-    categoryQ,
+    assetTypeQ,
   ]);
 
   const consolidated = consolidatedR.rows[0] || {
@@ -453,8 +398,9 @@ async function getSummary(filters = {}) {
       book_value: num(r.book_value),
     })),
     byDepartment,
-    categoryDistribution: categoryR.rows.map((r) => ({
-      category: r.category,
+    assetTypeDistribution: assetTypeR.rows.map((r) => ({
+      asset_type_id: r.asset_type_id,
+      asset_type: r.asset_type,
       asset_count: num(r.asset_count),
       acquisition_value: num(r.acquisition_value),
       book_value: num(r.book_value),
@@ -501,7 +447,7 @@ async function getRegister(filters = {}) {
           a.asset_id,
           COALESCE(NULLIF(TRIM(a.serial_number), ''), '—') AS serial_number,
           COALESCE(at.text, a.asset_type_id, '—') AS asset_type,
-          ${CATEGORY_SQL} AS category,
+          a.asset_type_id,
           COALESCE(a.current_status, '—') AS status,
           ${ACQUISITION_SQL}::float8 AS acquisition_value,
           ${BOOK_VALUE_SQL}::float8 AS book_value
@@ -526,7 +472,7 @@ async function getRegister(filters = {}) {
       asset_id: r.asset_id,
       serial_number: r.serial_number,
       asset_type: r.asset_type,
-      category: r.category,
+      asset_type_id: r.asset_type_id,
       status: r.status,
       acquisition_value: num(r.acquisition_value),
       book_value: num(r.book_value),
@@ -544,7 +490,6 @@ async function getRegisterExport(filters = {}, maxRows = 5000) {
 }
 
 module.exports = {
-  CATEGORY_ORDER,
   parseList,
   getFilterOptions,
   getSummary,
