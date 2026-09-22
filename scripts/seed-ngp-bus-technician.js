@@ -16,7 +16,7 @@ const BUS_TYPES = ['AT067', 'AT068'];
 const CERT_NAME = 'Bus Maintenance Certificate';
 const CERT_NO = 'BUS-MAINT-001';
 const TECH_NAME = 'Bus Field Technician';
-const TECH_EMAIL = 'ngp.bus.technician@ngp';
+const TECH_EMAIL = 'ngp.bus.technician@ngp.com';
 
 function tenantUrl(dbName) {
   const base = process.env.TENANT_DATABASE_URL || process.env.DATABASE_URL;
@@ -102,9 +102,10 @@ function nextId(prefix, maxId) {
        WHERE org_id = $1 AND (
          LOWER(TRIM(full_name)) = LOWER($2)
          OR LOWER(TRIM(email_id)) = LOWER($3)
+         OR LOWER(TRIM(email_id)) = LOWER($4)
        )
        LIMIT 1`,
-      [ORG, TECH_NAME, TECH_EMAIL],
+      [ORG, TECH_NAME, TECH_EMAIL, 'ngp.bus.technician@ngp'],
     );
     let empIntId = emp.rows[0]?.emp_int_id;
     if (!empIntId) {
@@ -143,7 +144,8 @@ function nextId(prefix, maxId) {
        LIMIT 1`,
       [empIntId, tcId],
     );
-    if (existingEtc.rows[0]) {
+    let etcId = existingEtc.rows[0]?.etc_id;
+    if (etcId) {
       await client.query(
         `UPDATE "tblEmpTechCert"
          SET status = 'Approved',
@@ -151,14 +153,14 @@ function nextId(prefix, maxId) {
              certificate_expiry = COALESCE(certificate_expiry, (CURRENT_DATE + INTERVAL '3 years')::date::text),
              org_id = COALESCE(org_id, $1)
          WHERE etc_id = $2`,
-        [ORG, existingEtc.rows[0].etc_id],
+        [ORG, etcId],
       );
-      console.log('Updated emp cert', existingEtc.rows[0].etc_id, '→ Approved');
+      console.log('Updated emp cert', etcId, '→ Approved');
     } else {
       const maxEtc = await client.query(
         `SELECT MAX(etc_id) AS m FROM "tblEmpTechCert" WHERE etc_id ~ '^ETC[0-9]+$'`,
       );
-      const etcId = nextId('ETC', maxEtc.rows[0].m);
+      etcId = nextId('ETC', maxEtc.rows[0].m);
       await client.query(
         `INSERT INTO "tblEmpTechCert" (
            etc_id, emp_int_id, tc_id, certificate_date, certificate_expiry,
@@ -171,6 +173,10 @@ function nextId(prefix, maxId) {
       );
       console.log('Created emp cert', etcId);
     }
+
+    console.log(
+      'NOTE: Seed does not attach a PDF. Run: node scripts/upload-bus-tech-cert-via-api.js',
+    );
 
     await client.query('COMMIT');
 
