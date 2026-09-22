@@ -650,7 +650,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN059", jobRoleId: "JR001", parentId: "JRN012", appId: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report", sequence: 9, accessLevel: "A", isGroup: false },
   { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN063", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register", sequence: 11, accessLevel: "A", isGroup: false },
-  { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Workforce", sequence: 12, accessLevel: "A", isGroup: false },
+  { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Engineering Team Productivity Report", sequence: 12, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },

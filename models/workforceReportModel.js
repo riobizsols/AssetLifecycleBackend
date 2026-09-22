@@ -27,11 +27,21 @@ function resolvePeriodBounds(period, dateFrom, dateTo) {
 }
 
 function techKey(row) {
+  const empName = String(row.employee_full_name || '').trim();
+  if (empName) return empName;
   const name = String(row.technician_name || '').trim();
   if (name) return name;
-  const maintained = String(row.maintained_by || '').trim();
-  if (maintained) return maintained;
+  if (row.emp_int_id) return String(row.emp_int_id);
   return 'Unassigned';
+}
+
+function isInhouseRow(row) {
+  const maint = String(row.maintained_by || '')
+    .toLowerCase()
+    .replace(/\s|-/g, '');
+  if (maint.includes('vendor')) return false;
+  // Require a real employee id for workforce reporting
+  return Boolean(row.emp_int_id);
 }
 
 function pct(n, d) {
@@ -57,8 +67,8 @@ function mapRow(r, isOverdue = false) {
     maintenance_type_name: r.maintenance_type_name,
     technician_name: techKey(r),
     emp_int_id: r.emp_int_id || null,
-    technician_email: r.technician_email || null,
-    technician_phno: r.technician_phno || null,
+    technician_email: r.technician_email || r.employee_email || null,
+    technician_phno: r.technician_phno || r.employee_phone || null,
     status: r.status,
     act_maint_st_date: r.act_maint_st_date,
     act_main_end_date: r.act_main_end_date,
@@ -66,6 +76,7 @@ function mapRow(r, isOverdue = false) {
     department_name: r.department_name,
     notes: r.notes,
     is_overdue: Boolean(isOverdue),
+    is_inhouse: true,
   };
 }
 
@@ -103,10 +114,10 @@ async function getWorkforceReport(opts = {}) {
         ams.maint_type_id,
         ams.status,
         ams.technician_name,
-        ams.technician_email,
-        ams.technician_phno,
+        COALESCE(ams.technician_email, e.email_id) AS technician_email,
+        COALESCE(ams.technician_phno, e.phone_number) AS technician_phno,
         ams.maintained_by,
-        ams.emp_int_id,
+        COALESCE(ams.emp_int_id, wfh.emp_int_id) AS emp_int_id,
         ams.act_maint_st_date,
         ams.act_main_end_date,
         ams.notes,
@@ -116,14 +127,33 @@ async function getWorkforceReport(opts = {}) {
         at.text AS asset_type_name,
         mt.text AS maintenance_type_name,
         b.text AS branch_name,
-        d.text AS department_name
+        d.text AS department_name,
+        COALESCE(
+          NULLIF(BTRIM(e.full_name), ''),
+          NULLIF(BTRIM(e.name), ''),
+          NULLIF(BTRIM(ams.technician_name), '')
+        ) AS employee_full_name,
+        e.email_id AS employee_email,
+        e.phone_number AS employee_phone
       FROM "tblAssetMaintSch" ams
       INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id AND a.org_id = ams.org_id
+      LEFT JOIN "tblWFAssetMaintSch_H" wfh
+        ON wfh.wfamsh_id = ams.wfamsh_id AND wfh.org_id = ams.org_id
+      LEFT JOIN "tblEmployees" e
+        ON e.emp_int_id = COALESCE(ams.emp_int_id, wfh.emp_int_id)
+       AND e.org_id = ams.org_id
       LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
       LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = ams.maint_type_id
       LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
       LEFT JOIN "tblDepartments" d ON d.dept_id = a.dept_id
       WHERE ams.org_id = $1
+        AND COALESCE(ams.emp_int_id, wfh.emp_int_id) IS NOT NULL
+        AND BTRIM(COALESCE(ams.emp_int_id, wfh.emp_int_id)::text) <> ''
+        AND (
+          ams.maintained_by IS NULL
+          OR LOWER(REPLACE(REPLACE(COALESCE(ams.maintained_by, ''), ' ', ''), '-', ''))
+             NOT LIKE '%vendor%'
+        )
         AND (
           (
             ams.act_maint_st_date IS NOT NULL
@@ -142,9 +172,12 @@ async function getWorkforceReport(opts = {}) {
   const periodEnd = new Date(`${bounds.to}T23:59:59`);
 
   const byTech = new Map();
-  const ensure = (name) => {
-    if (!byTech.has(name)) {
-      byTech.set(name, {
+  const ensure = (row) => {
+    const empId = row.emp_int_id || null;
+    const name = techKey(row);
+    const key = empId ? `emp:${empId}` : `name:${name}`;
+    if (!byTech.has(key)) {
+      byTech.set(key, {
         technician_name: name,
         empIdCounts: new Map(),
         emails: new Map(),
@@ -161,7 +194,7 @@ async function getWorkforceReport(opts = {}) {
         turnaround_count: 0,
       });
     }
-    return byTech.get(name);
+    return byTech.get(key);
   };
 
   const trackIdentity = (bucket, row) => {
@@ -210,8 +243,12 @@ async function getWorkforceReport(opts = {}) {
   let totalSlaLate = 0;
 
   for (const row of rows) {
+    if (!isInhouseRow(row)) continue;
     const name = techKey(row);
-    const bucket = ensure(name);
+    const bucket = ensure(row);
+    if (name && (!bucket.technician_name || bucket.technician_name === row.emp_int_id)) {
+      bucket.technician_name = name;
+    }
     trackIdentity(bucket, row);
     const status = String(row.status || '').toUpperCase();
     const startDate = row.act_maint_st_date ? new Date(row.act_maint_st_date) : null;

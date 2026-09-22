@@ -685,6 +685,87 @@ const getMaintenanceScheduleById = async (
   // If this is a group maintenance, fetch all assets in the group
   if (result.rows.length > 0) {
     const record = result.rows[0];
+
+    // Prefer schedule emp_int_id; fall back to workflow header technician for in-house work
+    let headerEmp = null;
+    if (record.wfamsh_id) {
+      try {
+        const headerRes = await dbPool.query(
+          `SELECT emp_int_id
+           FROM "tblWFAssetMaintSch_H"
+           WHERE wfamsh_id = $1 AND org_id = $2
+           LIMIT 1`,
+          [record.wfamsh_id, orgId],
+        );
+        headerEmp = headerRes.rows[0] || null;
+      } catch (_) {
+        /* optional */
+      }
+    }
+
+    const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
+    const maintainedBy = record.maintained_by || null;
+    // Treat as in-house when maintained_by says so, OR when a header technician is assigned
+    // without an explicit vendor-maintained flag.
+    const isInhouse =
+      isInhouseMaintainedBy(maintainedBy) ||
+      (!String(maintainedBy || '').toLowerCase().includes('vendor') &&
+        Boolean(headerEmp?.emp_int_id || record.emp_int_id));
+    const resolvedEmpId =
+      record.emp_int_id ||
+      (isInhouse ? headerEmp?.emp_int_id : null) ||
+      null;
+
+    record.is_inhouse = isInhouse;
+    record.header_emp_int_id = headerEmp?.emp_int_id || null;
+
+    if (isInhouse && resolvedEmpId) {
+      const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+      const tech = await resolveTechnicianFromEmp(resolvedEmpId, dbPool);
+      record.emp_int_id = resolvedEmpId;
+      record.technician_autofilled = true;
+      if (!record.technician_name || String(record.technician_name).trim() === '') {
+        record.technician_name = tech.technician_name || record.technician_name;
+      } else if (tech.technician_name) {
+        // Prefer live employee name for in-house technicians
+        record.technician_name = tech.technician_name;
+      }
+      if (!record.technician_email || String(record.technician_email).trim() === '') {
+        record.technician_email = tech.technician_email || record.technician_email;
+      } else if (tech.technician_email) {
+        record.technician_email = tech.technician_email;
+      }
+      if (!record.technician_phno || String(record.technician_phno).trim() === '') {
+        record.technician_phno = tech.technician_phno || record.technician_phno;
+      } else if (tech.technician_phno) {
+        record.technician_phno = tech.technician_phno;
+      }
+
+      // Persist so workforce report and future loads see proper emp + contact fields
+      try {
+        await dbPool.query(
+          `UPDATE "tblAssetMaintSch"
+           SET emp_int_id = COALESCE(emp_int_id, $1),
+               technician_name = COALESCE(NULLIF(BTRIM($2), ''), technician_name),
+               technician_email = COALESCE(NULLIF(BTRIM($3), ''), technician_email),
+               technician_phno = COALESCE(NULLIF(BTRIM($4), ''), technician_phno)
+           WHERE ams_id = $5 AND org_id = $6`,
+          [
+            resolvedEmpId,
+            record.technician_name,
+            record.technician_email,
+            record.technician_phno,
+            amsId,
+            orgId,
+          ],
+        );
+      } catch (persistErr) {
+        console.warn('Could not persist in-house technician onto schedule:', persistErr.message);
+      }
+    } else {
+      record.technician_autofilled = false;
+    }
+
     const groupId = record.group_id;
 
     // Check if this is a group maintenance by checking group_id from workflow header
@@ -708,8 +789,6 @@ const getMaintenanceScheduleById = async (
                 WHERE a.group_id = $1 AND a.org_id = $2
                 ORDER BY a.text ASC
             `;
-
-      const dbPool = getDb();
 
       const groupAssetsResult = await dbPool.query(groupAssetsQuery, [
         groupId,
