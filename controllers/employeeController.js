@@ -140,6 +140,58 @@ const updateEmployeeStatus = async (req, res) => {
     }
 };
 
+// PUT /api/employees/:emp_int_id - Update employee profile fields
+const updateEmployee = async (req, res) => {
+    try {
+        const { emp_int_id } = req.params;
+        const changed_by = req.user?.user_id || 'SYSTEM';
+        const fields = req.body || {};
+
+        if (!emp_int_id) {
+            return res.status(400).json({
+                success: false,
+                error: 'Employee ID is required',
+            });
+        }
+
+        const updated = await model.updateEmployee(emp_int_id, fields, changed_by);
+        if (!updated) {
+            return res.status(404).json({
+                success: false,
+                error: 'Employee not found or nothing to update',
+            });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Employee updated successfully',
+            data: updated,
+        });
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
+    } catch (err) {
+        console.error('Error updating employee:', err);
+        if (err.code === 'EMAIL_MUST_BE_DOT_COM') {
+            return res.status(400).json({
+                success: false,
+                error: err.message,
+                code: err.code,
+            });
+        }
+        if (err.code === 'EMAIL_ALREADY_EXISTS') {
+            return res.status(409).json({
+                success: false,
+                error: err.message,
+                code: err.code,
+            });
+        }
+        res.status(500).json({
+            success: false,
+            error: 'Failed to update employee',
+            details: err.message,
+        });
+    }
+};
+
 // PUT /api/employees/:emp_int_id - Assign role to employee
 const assignRoleToEmployee = async (req, res) => {
     try {
@@ -435,6 +487,16 @@ const createEmployee = async (req, res) => {
             });
         }
 
+        const emailId = String(employeeData.email_id).trim();
+        if (!/^[^\s@]+@[^\s@]+\.com$/i.test(emailId)) {
+            return res.status(400).json({
+                success: false,
+                error: "Email must be in the format name@domain.com",
+                code: "EMAIL_MUST_BE_DOT_COM",
+            });
+        }
+        employeeData.email_id = emailId;
+
         const existingByEmail = await model.findEmployeeByEmail(
             employeeData.email_id,
             org_id,
@@ -525,6 +587,7 @@ module.exports = {
     getEmployeesByDepartment,
     getAllEmployeesWithJobRoles,
     updateEmployeeStatus,
+    updateEmployee,
     assignRoleToEmployee,
     getUserRoles,
     deleteUserRole,

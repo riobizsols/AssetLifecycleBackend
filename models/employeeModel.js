@@ -216,6 +216,144 @@ const updateEmployeeStatus = async (emp_int_id, int_status, changed_by) => {
   }
 };
 
+/**
+ * Update employee profile fields and sync linked tblUsers rows.
+ */
+const updateEmployee = async (emp_int_id, fields = {}, changed_by) => {
+  const allowed = [
+    'name',
+    'first_name',
+    'last_name',
+    'middle_name',
+    'full_name',
+    'email_id',
+    'phone_number',
+    'dept_id',
+    'branch_id',
+    'employee_type',
+    'language_code',
+    'joining_date',
+  ];
+  const keys = Object.keys(fields || {}).filter(
+    (k) => allowed.includes(k) && fields[k] !== undefined,
+  );
+  if (!keys.length) return null;
+
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query(
+      `SELECT * FROM "tblEmployees" WHERE emp_int_id = $1 LIMIT 1`,
+      [emp_int_id],
+    );
+    if (!existing.rows[0]) {
+      await client.query('ROLLBACK');
+      return null;
+    }
+    const orgId = existing.rows[0].org_id;
+    const previousEmail = existing.rows[0].email_id;
+
+    if (fields.email_id) {
+      const emailId = String(fields.email_id).trim();
+      if (!/^[^\s@]+@[^\s@]+\.com$/i.test(emailId)) {
+        const err = new Error('Email must be in the format name@domain.com');
+        err.code = 'EMAIL_MUST_BE_DOT_COM';
+        throw err;
+      }
+      fields.email_id = emailId;
+      const clash = await findEmployeeByEmail(emailId, orgId, {
+        excludeEmployeeId: existing.rows[0].employee_id,
+      });
+      if (clash) {
+        const err = new Error(
+          `Email "${emailId}" is already used by employee ${clash.employee_id}`,
+        );
+        err.code = 'EMAIL_ALREADY_EXISTS';
+        throw err;
+      }
+    }
+
+    const setClause = keys.map((key, idx) => `"${key}" = $${idx + 2}`).join(', ');
+    const values = [emp_int_id, ...keys.map((k) => fields[k])];
+    const empRes = await client.query(
+      `
+      UPDATE "tblEmployees"
+         SET ${setClause},
+             changed_by = $${keys.length + 2},
+             changed_on = CURRENT_TIMESTAMP
+       WHERE emp_int_id = $1
+       RETURNING *
+      `,
+      [...values, changed_by || 'SYSTEM'],
+    );
+    const updated = empRes.rows[0];
+
+    // Sync linked login users
+    const userSets = [];
+    const userVals = [emp_int_id];
+    if (fields.full_name !== undefined) {
+      userVals.push(fields.full_name);
+      userSets.push(`full_name = $${userVals.length}`);
+    }
+    if (fields.email_id !== undefined) {
+      userVals.push(fields.email_id);
+      userSets.push(`email = $${userVals.length}`);
+    }
+    if (fields.phone_number !== undefined) {
+      userVals.push(fields.phone_number);
+      userSets.push(`phone = $${userVals.length}`);
+    }
+    if (fields.dept_id !== undefined) {
+      userVals.push(fields.dept_id);
+      userSets.push(`dept_id = $${userVals.length}`);
+    }
+    if (fields.branch_id !== undefined) {
+      userVals.push(fields.branch_id);
+      userSets.push(`branch_id = $${userVals.length}`);
+    }
+    if (userSets.length) {
+      userVals.push(changed_by || 'SYSTEM');
+      await client.query(
+        `
+        UPDATE "tblUsers"
+           SET ${userSets.join(', ')},
+               changed_by = $${userVals.length},
+               changed_on = CURRENT_TIMESTAMP
+         WHERE emp_int_id = $1
+        `,
+        userVals,
+      );
+    }
+
+    await client.query('COMMIT');
+
+    if (updated?.email_id && previousEmail !== updated.email_id) {
+      try {
+        const { unregisterTenantEmail } = require('../services/tenantEmailRegistryService');
+        if (previousEmail) await unregisterTenantEmail(previousEmail).catch(() => {});
+        await registerFromRequestContext({
+          email: updated.email_id,
+          employeeId: updated.emp_int_id,
+          source: 'update_employee',
+        });
+      } catch (_) {
+        /* registry optional */
+      }
+    }
+
+    return updated;
+  } catch (error) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (_) {}
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
 // Check existing employee IDs
 const checkExistingEmployeeIds = async (employeeIds) => {
   if (!employeeIds || employeeIds.length === 0) return [];
@@ -554,6 +692,7 @@ module.exports = {
   getEmployeesByDepartment,
   getAllEmployeesWithJobRoles,
   updateEmployeeStatus,
+  updateEmployee,
   checkExistingEmployeeIds,
   bulkUpsertEmployees,
   validateAndFormatDate,
