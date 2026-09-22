@@ -19,6 +19,9 @@ router.get("/with-roles", controller.getAllEmployeesWithJobRoles);
 // PUT /api/employees/:emp_int_id/status - Update employee status (block/unblock)
 router.put("/:emp_int_id/status", controller.updateEmployeeStatus);
 
+// PUT /api/employees/:emp_int_id - Update employee profile
+router.put("/:emp_int_id", controller.updateEmployee);
+
 // GET /api/employees/department/:dept_id - Get employees by department
 router.get("/department/:dept_id", controller.getEmployeesByDepartment); 
 

@@ -342,12 +342,24 @@ const updateUser = async (user_id, fieldsToUpdate = {}) => {
 
     const dbPool = getDb();
     let previousEmail = null;
-    if (fieldsToUpdate.email) {
+    let empIntId = null;
+    if (fieldsToUpdate.email || fieldsToUpdate.phone || fieldsToUpdate.dept_id || fieldsToUpdate.full_name) {
         const prev = await dbPool.query(
-            `SELECT email FROM "tblUsers" WHERE user_id = $1`,
+            `SELECT email, phone, dept_id, full_name, emp_int_id FROM "tblUsers" WHERE user_id = $1`,
             [user_id],
         );
         previousEmail = prev.rows[0]?.email || null;
+        empIntId = prev.rows[0]?.emp_int_id || null;
+    }
+
+    if (fieldsToUpdate.email) {
+        const email = String(fieldsToUpdate.email).trim();
+        if (!/^[^\s@]+@[^\s@]+\.com$/i.test(email)) {
+            const err = new Error('Email must be in the format name@domain.com');
+            err.code = 'EMAIL_MUST_BE_DOT_COM';
+            throw err;
+        }
+        fieldsToUpdate.email = email;
     }
 
     const setClause = keys.map((key, idx) => `${key} = $${idx + 2}`).join(", ");
@@ -359,6 +371,43 @@ const updateUser = async (user_id, fieldsToUpdate = {}) => {
     );
 
     const updated = result.rows[0];
+
+    // Keep linked employee in sync
+    if (updated?.emp_int_id || empIntId) {
+        const linkedEmp = updated?.emp_int_id || empIntId;
+        const empSets = [];
+        const empVals = [linkedEmp];
+        if (fieldsToUpdate.full_name !== undefined) {
+            empVals.push(fieldsToUpdate.full_name);
+            empSets.push(`full_name = $${empVals.length}`);
+            empVals.push(fieldsToUpdate.full_name);
+            empSets.push(`name = $${empVals.length}`);
+        }
+        if (fieldsToUpdate.email !== undefined) {
+            empVals.push(fieldsToUpdate.email);
+            empSets.push(`email_id = $${empVals.length}`);
+        }
+        if (fieldsToUpdate.phone !== undefined) {
+            empVals.push(fieldsToUpdate.phone);
+            empSets.push(`phone_number = $${empVals.length}`);
+        }
+        if (fieldsToUpdate.dept_id !== undefined) {
+            empVals.push(fieldsToUpdate.dept_id);
+            empSets.push(`dept_id = $${empVals.length}`);
+        }
+        if (empSets.length) {
+            await dbPool.query(
+                `
+                UPDATE "tblEmployees"
+                   SET ${empSets.join(', ')},
+                       changed_on = CURRENT_TIMESTAMP
+                 WHERE emp_int_id = $1
+                `,
+                empVals,
+            );
+        }
+    }
+
     if (updated?.email) {
         if (previousEmail && previousEmail !== updated.email) {
             await unregisterTenantEmail(previousEmail).catch(() => {});
