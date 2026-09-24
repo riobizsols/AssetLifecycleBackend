@@ -95,14 +95,14 @@ const exportReport = async (req, res) => {
       'Upcoming PM': row.upcoming_pm_demand,
       'Open WOs': row.open_wo_count,
       'Avg usage 90d': row.avg_usage_90d,
-      'Recommended qty': row.recommended_qty,
+      'Minimum qty': row.recommended_qty ?? row.minimum_stock ?? '',
       'Earliest demand': formatDate(row.earliest_demand_date),
     }));
 
     const summaryRows = [
       { Metric: 'Parts to buy', Value: data.summary?.totals?.parts_to_buy || 0 },
       { Metric: 'Out of stock', Value: data.summary?.totals?.out_of_stock || 0 },
-      { Metric: 'Total recommended qty', Value: data.summary?.totals?.total_recommended_qty || 0 },
+      { Metric: 'Total minimum qty', Value: data.summary?.totals?.total_recommended_qty || 0 },
       { Metric: 'With WO impact', Value: data.summary?.totals?.with_wo_impact || 0 },
       { Metric: 'With upcoming PM', Value: data.summary?.totals?.with_upcoming_pm || 0 },
       { Metric: 'Planning horizon (days)', Value: data.summary?.horizon_days || filters.horizonDays },

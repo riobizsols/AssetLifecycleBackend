@@ -236,20 +236,7 @@ async function getPurchaseRequirementReport({
       COALESCE(w.uncovered_wo_demand, 0) AS uncovered_wo_demand,
       COALESCE(u.issued_qty_90d, 0) AS avg_usage_90d,
       q.earliest_request_date,
-      w.earliest_required_date,
-      GREATEST(
-        COALESCE(q.requested_qty, 0)
-          + COALESCE(w.upcoming_pm_demand, 0)
-          + COALESCE(c.minimum_stock, 0)
-          - COALESCE(s.available_qty, 0),
-        0
-      )::int AS net_requirement_base,
-      CASE
-        WHEN c.re_order_level IS NOT NULL
-          AND COALESCE(s.available_qty, 0) < c.re_order_level
-        THEN GREATEST(c.re_order_level - COALESCE(s.available_qty, 0), 0)::int
-        ELSE 0
-      END AS reorder_gap
+      w.earliest_required_date
     FROM "tblSPCategory" c
     LEFT JOIN "tblBranches" b ON b.branch_id = c.branch_id AND b.org_id = c.org_id
     LEFT JOIN stock s ON s.spc_id = c.spc_id
@@ -268,12 +255,14 @@ async function getPurchaseRequirementReport({
     const requested = Number(row.requested) || 0;
     const reserved = Number(row.reserved) || 0;
     const upcomingPm = Number(row.upcoming_pm_demand) || 0;
-    const minStock = row.minimum_stock == null ? 0 : Number(row.minimum_stock) || 0;
-    const reorderLevel = row.re_order_level == null ? null : Number(row.re_order_level);
-    const reorderGap = Number(row.reorder_gap) || 0;
+    const minStock =
+      row.minimum_stock == null || row.minimum_stock === ''
+        ? null
+        : Number(row.minimum_stock);
 
-    const netFromDemand = Math.max(0, requested + upcomingPm + minStock - available);
-    const recommendedQty = Math.max(netFromDemand, reorderGap);
+    const isOutOfStock = available <= 0;
+    const needsPurchase =
+      minStock != null && !Number.isNaN(minStock) && minStock > 0 && available < minStock && available > 0;
 
     const earliestCandidates = [row.earliest_request_date, row.earliest_required_date].filter(Boolean);
     let earliestDemandDate = null;
@@ -284,6 +273,8 @@ async function getPurchaseRequirementReport({
         earliestDemandDate = d;
       }
     }
+
+    const minimumQty = minStock == null || Number.isNaN(minStock) ? null : minStock;
 
     return {
       part_code: row.part_code,
@@ -300,34 +291,41 @@ async function getPurchaseRequirementReport({
       upcoming_pm_demand: upcomingPm,
       open_wo_count: Number(row.open_wo_count) || 0,
       avg_usage_90d: Number(row.avg_usage_90d) || 0,
-      net_requirement: recommendedQty,
-      recommended_qty: recommendedQty,
+      // Minimum qty column = category minimum_stock only
+      recommended_qty: minimumQty,
+      net_requirement: minimumQty,
       earliest_demand_date: earliestDemandDate,
-      is_out_of_stock: available <= 0,
-      needs_purchase: recommendedQty > 0,
+      is_out_of_stock: isOutOfStock,
+      // Below minimum (but not zero) → Needs purchase; zero → Out of stock only
+      needs_purchase: needsPurchase,
     };
   });
 
-  // Include buy recommendations and zero-available (out of stock) parts
-  rows = rows.filter((r) => r.needs_purchase || r.is_out_of_stock);
+  // Out of stock (available 0) OR below minimum stock
+  rows = rows.filter((r) => {
+    const min =
+      r.minimum_stock == null || r.minimum_stock === '' ? null : Number(r.minimum_stock);
+    const belowMin = min != null && !Number.isNaN(min) && min > 0 && r.available < min;
+    return r.is_out_of_stock || belowMin;
+  });
 
   const focusKey = String(focus || demandSource || 'all').toLowerCase();
   if (focusKey === 'out_of_stock') {
     rows = rows.filter((r) => r.is_out_of_stock);
   } else if (focusKey === 'needs_purchase' || focusKey === 'purchase') {
-    rows = rows.filter((r) => r.needs_purchase);
+    rows = rows.filter((r) => r.needs_purchase || r.is_out_of_stock);
   }
 
   rows.sort(
     (a, b) =>
-      Number(b.recommended_qty) - Number(a.recommended_qty) ||
       Number(a.available) - Number(b.available) ||
+      Number(b.recommended_qty || 0) - Number(a.recommended_qty || 0) ||
       String(a.description || '').localeCompare(String(b.description || '')),
   );
 
   const summary = {
     totals: {
-      parts_to_buy: rows.filter((r) => r.needs_purchase).length,
+      parts_to_buy: rows.filter((r) => r.needs_purchase || r.is_out_of_stock).length,
       out_of_stock: rows.filter((r) => r.is_out_of_stock).length,
       total_recommended_qty: rows.reduce((sum, r) => sum + (Number(r.recommended_qty) || 0), 0),
       with_wo_impact: rows.filter((r) => Number(r.open_wo_count) > 0).length,

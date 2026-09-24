@@ -61,7 +61,7 @@ function tenantUrl(dbName) {
       await client.query(
         `
         UPDATE "tblSPCategory"
-           SET text = 'Drive belts (demo low stock)',
+           SET text = 'Drive belts',
                uom = 'PCS',
                minimum_stock = 5,
                re_order_level = 10,
@@ -80,7 +80,7 @@ function tenantUrl(dbName) {
           spc_id, text, uom, minimum_stock, re_order_level, int_status,
           org_id, branch_id, created_on, changed_on
         ) VALUES (
-          $1, 'Drive belts (demo low stock)', 'PCS', 5, 10, 1,
+          $1, 'Drive belts', 'PCS', 5, 10, 1,
           'ORG003', $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         `,
