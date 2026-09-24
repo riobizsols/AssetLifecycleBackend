@@ -27,4 +27,9 @@ router.get('/consumptions', ctrl.listConsumptions);
 router.post('/consumptions/preview', ctrl.previewConsumption);
 router.post('/consumptions', ctrl.createConsumption);
 
+// Mobile — assigned-asset utility readings (bus km / meter start–end)
+router.get('/mobile/my-assets', ctrl.listMyAssignedUtilityAssets);
+router.get('/mobile/assets/:assetId/consumptions', ctrl.listMyAssetConsumptions);
+router.post('/mobile/consumptions', ctrl.createAssetConsumption);
+
 module.exports = router;

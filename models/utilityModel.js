@@ -362,28 +362,36 @@ async function listConsumptions({ orgId, utildId, limit = 100 } = {}) {
   return rows;
 }
 
-async function getPreviousReading(utildId, beforeDate) {
+async function getPreviousReading(utildId, beforeDate, assetId = null) {
   const { rows } = await getDb().query(
     `
-      SELECT reading, quantity_consumed, consumption_date, utcv_id
+      SELECT reading, start_reading, quantity_consumed, consumption_date, utcv_id, asset_id
       FROM "tblUtilConsumption"
       WHERE utild_id = $1
         AND reading IS NOT NULL
         AND ($2::date IS NULL OR consumption_date <= $2::date)
+        AND (
+          $3::text IS NULL
+          OR asset_id = $3
+          OR ($3::text IS NOT NULL AND asset_id IS NULL AND NOT EXISTS (
+            SELECT 1 FROM "tblUtilConsumption" x
+            WHERE x.utild_id = $1 AND x.asset_id = $3 AND x.reading IS NOT NULL
+          ))
+        )
       ORDER BY consumption_date DESC, created_on DESC
       LIMIT 1
     `,
-    [utildId, beforeDate || null],
+    [utildId, beforeDate || null, assetId || null],
   );
   return rows[0] || null;
 }
 
-async function previewConsumption({ utild_id, reading, quantity_consumed, consumption_date }) {
+async function previewConsumption({ utild_id, reading, quantity_consumed, consumption_date, asset_id }) {
   await ensureSchema();
   const detail = await getDetail(utild_id);
   if (!detail) throw new Error('Utility detail not found');
 
-  const previous = await getPreviousReading(utild_id, consumption_date);
+  const previous = await getPreviousReading(utild_id, consumption_date, asset_id || null);
   const built = buildConsumptionRecord(detail, {
     reading,
     quantityConsumed: quantity_consumed,
@@ -399,38 +407,220 @@ async function previewConsumption({ utild_id, reading, quantity_consumed, consum
   };
 }
 
-async function createConsumption(payload, userId) {
+async function isAssetAssignedToEmployee(assetId, employeeIntId, orgId, deptId = null) {
+  const { rows } = await getDb().query(
+    `
+      SELECT 1
+      FROM "tblAssetAssignments" aa
+      INNER JOIN "tblAssets" a ON aa.asset_id = a.asset_id
+      WHERE aa.asset_id = $1
+        AND aa.action = 'A'
+        AND aa.latest_assignment_flag = true
+        AND a.org_id = $3
+        AND COALESCE(a.current_status, '') <> 'SCRAPPED'
+        AND (
+          aa.employee_int_id = $2
+          OR ($4::text IS NOT NULL AND aa.dept_id = $4)
+        )
+      LIMIT 1
+    `,
+    [assetId, employeeIntId, orgId, deptId || null],
+  );
+  return rows.length > 0;
+}
+
+function classifyReadingKind({ utility_name, utility_sh, uom_name, consumption_type }) {
+  const blob = [
+    utility_name,
+    utility_sh,
+    uom_name,
+    consumption_type,
+  ]
+    .map((v) => String(v || '').toLowerCase())
+    .join(' ');
+  if (
+    /\b(km|kilometre|kilometer|odometer|odo|bus|vehicle|fleet|travel)\b/.test(blob)
+  ) {
+    return 'odometer';
+  }
+  return 'meter';
+}
+
+async function listMyAssignedUtilityAssets({ orgId, employeeIntId, deptId = null }) {
   await ensureSchema();
-  const detail = await getDetail(payload.utild_id);
-  if (!detail) throw new Error('Utility detail not found');
+  if (!orgId || !employeeIntId) {
+    throw new Error('Organization and employee are required');
+  }
+
+  const { rows } = await getDb().query(
+    `
+      SELECT DISTINCT ON (a.asset_id, d.utild_id)
+        a.asset_id,
+        a.asset_type_id,
+        COALESCE(NULLIF(BTRIM(a.description), ''), NULLIF(BTRIM(a.text), ''), a.asset_id) AS asset_name,
+        a.serial_number,
+        at.text AS asset_type_name,
+        d.utild_id,
+        d.utility_sh,
+        d.utctp_id,
+        d.meter_max,
+        d.uom_id,
+        ct.consumption_type,
+        h.util_id,
+        h.utility_name,
+        COALESCE(u.uom, uh.uom) AS uom_name,
+        aa.action_on AS assigned_on,
+        CASE
+          WHEN aa.employee_int_id = $2 THEN 'USER'
+          WHEN $3::text IS NOT NULL AND aa.dept_id = $3 THEN 'DEPARTMENT'
+          ELSE 'UNKNOWN'
+        END AS assignment_scope
+      FROM "tblAssetAssignments" aa
+      INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+      INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      INNER JOIN "tblATUtilityMap" m
+        ON m.assettype_id = a.asset_type_id
+      INNER JOIN "tblUtility_D" d ON d.utild_id = m.utild_id
+      INNER JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
+      LEFT JOIN "tblUom" u ON u.uom_id = d.uom_id
+      LEFT JOIN "tblUom" uh ON uh.uom_id = h.uom_id
+      WHERE aa.action = 'A'
+        AND aa.latest_assignment_flag = true
+        AND a.org_id = $1
+        AND COALESCE(a.current_status, '') <> 'SCRAPPED'
+        AND ($1::text IS NULL OR COALESCE(d.org_id, h.org_id) = $1)
+        AND (
+          aa.employee_int_id = $2
+          OR ($3::text IS NOT NULL AND aa.dept_id = $3)
+        )
+      ORDER BY a.asset_id, d.utild_id,
+        CASE WHEN aa.employee_int_id = $2 THEN 0 ELSE 1 END
+    `,
+    [orgId, employeeIntId, deptId || null],
+  );
+
+  return rows.map((row) => {
+    const reading_kind = classifyReadingKind(row);
+    return {
+      ...row,
+      reading_kind,
+      start_label: reading_kind === 'odometer' ? 'Start km' : 'Start reading',
+      end_label: reading_kind === 'odometer' ? 'End km' : 'End reading',
+      consumed_label: reading_kind === 'odometer' ? 'Distance (km)' : 'Consumed',
+    };
+  });
+}
+
+async function listAssetConsumptions({ orgId, assetId, utildId, limit = 30 }) {
+  await ensureSchema();
+  const { rows } = await getDb().query(
+    `
+      SELECT c.*,
+             d.utility_sh,
+             d.utctp_id,
+             d.meter_max,
+             ct.consumption_type,
+             h.utility_name,
+             COALESCE(u.uom, uh.uom) AS uom_name
+      FROM "tblUtilConsumption" c
+      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
+      JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
+      LEFT JOIN "tblUom" u ON u.uom_id = d.uom_id
+      LEFT JOIN "tblUom" uh ON uh.uom_id = h.uom_id
+      WHERE c.asset_id = $1
+        AND ($2::text IS NULL OR c.utild_id = $2)
+        AND ($3::text IS NULL OR COALESCE(c.org_id, d.org_id) = $3)
+      ORDER BY c.consumption_date DESC, c.created_on DESC
+      LIMIT $4
+    `,
+    [assetId, utildId || null, orgId || null, Math.min(Number(limit) || 30, 100)],
+  );
+  return rows;
+}
+
+async function createAssetConsumption(payload, { userId, orgId, employeeIntId, deptId }) {
+  await ensureSchema();
+  const assetId = payload.asset_id;
+  const utildId = payload.utild_id;
+  if (!assetId) throw new Error('asset_id is required');
+  if (!utildId) throw new Error('utild_id is required');
   if (!payload.consumption_date) throw new Error('consumption_date is required');
 
-  const previous = await getPreviousReading(payload.utild_id, payload.consumption_date);
-  const built = buildConsumptionRecord(detail, {
-    reading: payload.reading,
-    quantityConsumed: payload.quantity_consumed,
-    previousReading: previous?.reading,
-    consumptionDate: payload.consumption_date,
-    firstReadingMode: payload.first_reading_mode || 'baseline',
-  });
+  const allowed = await isAssetAssignedToEmployee(assetId, employeeIntId, orgId, deptId);
+  if (!allowed) {
+    const err = new Error('You can only record readings for assets assigned to you');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  const detail = await getDetail(utildId);
+  if (!detail) throw new Error('Utility detail not found');
+
+  // Ensure asset type is mapped to this utility detail
+  const mapCheck = await getDb().query(
+    `
+      SELECT 1
+      FROM "tblATUtilityMap" m
+      INNER JOIN "tblAssets" a ON a.asset_type_id = m.assettype_id
+      WHERE a.asset_id = $1
+        AND m.utild_id = $2
+      LIMIT 1
+    `,
+    [assetId, utildId],
+  );
+  if (!mapCheck.rows.length) {
+    throw new Error('This utility is not mapped to the selected asset type');
+  }
+
+  const startRaw = payload.start_reading;
+  const endRaw = payload.end_reading ?? payload.reading;
+  if (startRaw === '' || startRaw == null) throw new Error('start_reading is required');
+  if (endRaw === '' || endRaw == null) throw new Error('end_reading is required');
+
+  const start = Number(startRaw);
+  const end = Number(endRaw);
+  if (!Number.isFinite(start) || start < 0) throw new Error('start_reading must be a non-negative number');
+  if (!Number.isFinite(end) || end < 0) throw new Error('end_reading must be a non-negative number');
+
+  let quantity_consumed;
+  let rolled_over = false;
+  const utctp = String(detail.utctp_id || '').toUpperCase();
+
+  if (utctp === CONSUMPTION_TYPE.METER) {
+    const calc = calculateMeterConsumption({
+      previousReading: start,
+      currentReading: end,
+      meterMax: detail.meter_max || 9999,
+      firstReadingMode: 'from_zero',
+    });
+    quantity_consumed = calc.quantityConsumed;
+    rolled_over = calc.rolledOver;
+  } else {
+    if (end < start) throw new Error('End value cannot be less than start value');
+    quantity_consumed = end - start;
+  }
 
   const utcv_id = await generateCustomId('util_consumption', 3);
   await getDb().query(
     `
       INSERT INTO "tblUtilConsumption"
-        (utcv_id, utild_id, reading, quantity_consumed, consumption_date,
-         created_on, created_by, rolled_over, org_id)
-      VALUES ($1,$2,$3,$4,$5, CURRENT_TIMESTAMP, $6, $7, $8)
+        (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
+         created_on, created_by, rolled_over, org_id, asset_id)
+      VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
     `,
     [
       utcv_id,
-      built.utild_id,
-      built.reading,
-      built.quantity_consumed,
-      built.consumption_date,
+      utildId,
+      end,
+      start,
+      quantity_consumed,
+      payload.consumption_date,
       userId || null,
-      Boolean(built.rolled_over),
-      detail.org_id,
+      Boolean(rolled_over),
+      detail.org_id || orgId,
+      assetId,
     ],
   );
 
@@ -446,6 +636,198 @@ async function createConsumption(payload, userId) {
     [utcv_id],
   );
   return rows[0];
+}
+
+async function createConsumption(payload, userId) {
+  await ensureSchema();
+  const detail = await getDetail(payload.utild_id);
+  if (!detail) throw new Error('Utility detail not found');
+  if (!payload.consumption_date) throw new Error('consumption_date is required');
+
+  const previous = await getPreviousReading(
+    payload.utild_id,
+    payload.consumption_date,
+    payload.asset_id || null,
+  );
+  const built = buildConsumptionRecord(detail, {
+    reading: payload.reading,
+    quantityConsumed: payload.quantity_consumed,
+    previousReading: previous?.reading,
+    consumptionDate: payload.consumption_date,
+    firstReadingMode: payload.first_reading_mode || 'baseline',
+  });
+
+  const utcv_id = await generateCustomId('util_consumption', 3);
+  await getDb().query(
+    `
+      INSERT INTO "tblUtilConsumption"
+        (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
+         created_on, created_by, rolled_over, org_id, asset_id)
+      VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
+    `,
+    [
+      utcv_id,
+      built.utild_id,
+      built.reading,
+      payload.start_reading ?? previous?.reading ?? null,
+      built.quantity_consumed,
+      built.consumption_date,
+      userId || null,
+      Boolean(built.rolled_over),
+      detail.org_id,
+      payload.asset_id || null,
+    ],
+  );
+
+  const { rows } = await getDb().query(
+    `
+      SELECT c.*, d.utility_sh, d.meter_max, ct.consumption_type, h.utility_name
+      FROM "tblUtilConsumption" c
+      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
+      JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
+      WHERE c.utcv_id = $1
+    `,
+    [utcv_id],
+  );
+  return rows[0];
+}
+
+/**
+ * Missed consumption alerts for the employee currently assigned to the asset.
+ * Frequency rules (tblUtilFreq.freq):
+ *   0  = OnActualUsage → skip alerts
+ *   1  = Daily → due if no consumption with consumption_date = today (IST-ish UTC date)
+ *   N  = Weekly/Monthly/Halfyearly → due if last consumption_date + N days < today
+ *        (also due if never recorded)
+ */
+async function getConsumptionMissNotificationsByUser({
+  empIntId,
+  orgId = null,
+  branchId = null,
+} = {}) {
+  await ensureSchema();
+  if (!empIntId) return [];
+
+  const today = new Date();
+  const todayStr = today.toISOString().slice(0, 10);
+
+  const { rows } = await getDb().query(
+    `
+      SELECT
+        a.asset_id,
+        a.org_id,
+        a.branch_id,
+        COALESCE(NULLIF(BTRIM(a.description), ''), NULLIF(BTRIM(a.text), ''), a.asset_id) AS asset_name,
+        at.text AS asset_type_name,
+        d.utild_id,
+        d.utility_sh,
+        d.utfq_id,
+        f.freq AS frequency_days,
+        f.description AS frequency_label,
+        h.util_id,
+        h.utility_name,
+        aa.employee_int_id,
+        (
+          SELECT MAX(c.consumption_date)::date
+          FROM "tblUtilConsumption" c
+          WHERE c.utild_id = d.utild_id
+            AND c.asset_id = a.asset_id
+        ) AS last_consumption_date
+      FROM "tblAssetAssignments" aa
+      INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
+      INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      INNER JOIN "tblATUtilityMap" m ON m.assettype_id = a.asset_type_id
+      INNER JOIN "tblUtility_D" d ON d.utild_id = m.utild_id
+      INNER JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      INNER JOIN "tblUtilFreq" f ON f.utfq_id = d.utfq_id
+      WHERE aa.action = 'A'
+        AND aa.latest_assignment_flag = true
+        AND aa.employee_int_id = $1
+        AND COALESCE(a.current_status, '') <> 'SCRAPPED'
+        AND ($2::text IS NULL OR a.org_id = $2)
+        AND ($3::text IS NULL OR a.branch_id = $3 OR a.branch_id IS NULL)
+        AND COALESCE(f.freq, 0) > 0
+      ORDER BY a.asset_id, d.utild_id
+    `,
+    [empIntId, orgId || null, branchId || null],
+  );
+
+  const alerts = [];
+  for (const row of rows) {
+    const freqDays = Number(row.frequency_days) || 0;
+    if (freqDays <= 0) continue;
+
+    const last = row.last_consumption_date
+      ? String(row.last_consumption_date).slice(0, 10)
+      : null;
+
+    let isMissed = false;
+    let dueDate = todayStr;
+
+    if (freqDays === 1) {
+      // Daily: missed if no reading for today
+      isMissed = last !== todayStr;
+      dueDate = todayStr;
+    } else if (!last) {
+      isMissed = true;
+      dueDate = todayStr;
+    } else {
+      const lastDate = new Date(`${last}T00:00:00Z`);
+      const nextDue = new Date(lastDate);
+      nextDue.setUTCDate(nextDue.getUTCDate() + freqDays);
+      const nextDueStr = nextDue.toISOString().slice(0, 10);
+      isMissed = nextDueStr <= todayStr;
+      dueDate = nextDueStr;
+    }
+
+    if (!isMissed) continue;
+
+    const utilityLabel = row.utility_sh || row.utility_name || 'Utility';
+    const freqLabel = row.frequency_label || `${freqDays} day(s)`;
+    const params = new URLSearchParams({
+      utilId: row.util_id,
+      utildId: row.utild_id,
+      assetId: row.asset_id,
+      date: dueDate,
+    });
+    alerts.push({
+      id: `CONSMISS-${row.asset_id}-${row.utild_id}`,
+      wfamshId: null,
+      workflowId: `CONSMISS-${row.asset_id}-${row.utild_id}`,
+      workflowType: 'CONSUMPTION_MISS',
+      route: `/utilities/consumption?${params.toString()}`,
+      dueDate,
+      cutoffDate: dueDate,
+      daysUntilCutoff: 0,
+      isUrgent: true,
+      isOverdue: true,
+      maintenanceType: 'Consumption Miss Alert',
+      assetId: row.asset_id,
+      assetTypeName: row.asset_type_name || utilityLabel,
+      categoryName: utilityLabel,
+      maintenanceId: row.utild_id,
+      quantityIssued: null,
+      isGroupMaintenance: false,
+      groupId: null,
+      groupName: null,
+      groupAssetCount: null,
+      title: 'Consumption Miss Alert',
+      body: `${utilityLabel} reading missed for ${row.asset_name || row.asset_id} (${freqLabel})`,
+      userName: null,
+      statusLabel: 'Missed',
+      notifyId: null,
+      notificationStatus: 'NEW',
+      utildId: row.utild_id,
+      utilId: row.util_id,
+      utilityName: row.utility_name,
+      utilitySh: row.utility_sh,
+      frequencyLabel: freqLabel,
+      lastConsumptionDate: last,
+    });
+  }
+
+  return alerts;
 }
 
 module.exports = {
@@ -468,6 +850,11 @@ module.exports = {
   getPreviousReading,
   previewConsumption,
   createConsumption,
+  listMyAssignedUtilityAssets,
+  listAssetConsumptions,
+  createAssetConsumption,
+  isAssetAssignedToEmployee,
+  getConsumptionMissNotificationsByUser,
   calculateMeterConsumption,
   CONSUMPTION_TYPE,
 };

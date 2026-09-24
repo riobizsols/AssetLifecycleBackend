@@ -12,7 +12,7 @@
  *   tblUtilFreq      — utfq_id, freq, description (NO UI; seeded)
  *   tblUtility_D     — measurement details
  *   tblATUtilityMap  — asset-type mapping
- *   tblUtilConsumption — consumption records
+ *   tblUtilConsumption — consumption records (optional asset_id + start_reading for mobile)
  */
 const UTILITY_UOM_DEFAULTS = [
   { id: 'UOM007', name: 'kWh' },
@@ -433,6 +433,8 @@ async function runEnsureUtilityHSchema(dbPool) {
       ['created_by', 'character varying(50)'],
       ['rolled_over', 'boolean NOT NULL DEFAULT false'],
       ['org_id', 'character varying(20)'],
+      ['asset_id', 'character varying(50)'],
+      ['start_reading', 'numeric(18,4)'],
     ];
     for (const [col, ddl] of consAlters) {
       await safeQuery(
@@ -467,6 +469,20 @@ async function runEnsureUtilityHSchema(dbPool) {
       `
     CREATE INDEX IF NOT EXISTS idx_tblUtilConsumption_org_id
       ON "tblUtilConsumption" (org_id)
+  `,
+    );
+    await safeQuery(
+      dbPool,
+      `
+    CREATE INDEX IF NOT EXISTS idx_tblUtilConsumption_asset_id
+      ON "tblUtilConsumption" (asset_id)
+  `,
+    );
+    await safeQuery(
+      dbPool,
+      `
+    CREATE INDEX IF NOT EXISTS idx_tblUtilConsumption_asset_utild_date
+      ON "tblUtilConsumption" (asset_id, utild_id, consumption_date DESC)
   `,
     );
 

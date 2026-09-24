@@ -6,6 +6,7 @@ const UTILITY_NAV_ITEMS = [
   { app_id: 'UTILITYMASTER', label: 'Utility Master', sequence: 1 },
   { app_id: 'UTILITYATMAPPING', label: 'Utility – Asset Type Mapping', sequence: 2 },
   { app_id: 'UTILITYCONSUMPTION', label: 'Record Consumption', sequence: 3 },
+  { app_id: 'UTILITYREADING', label: 'Asset Utility Reading', sequence: 4 },
 ];
 
 const UTILITY_APP_IDS = UTILITY_NAV_ITEMS.map((item) => item.app_id);
@@ -40,6 +41,7 @@ async function findTargetRoles(client) {
         AND (
           job_role_id = 'JR001'
           OR app_id = ANY($1::text[])
+          OR app_id IN ('EMPASSIGNMENT', 'ASSETASSIGNMENT', 'DEPTASSIGNMENT')
           OR LOWER(TRIM(label)) IN ('master data', 'admin settings')
           OR app_id IN ('ASSETTYPES', 'ASSETTYPE', 'USERS', 'AUDITLOGS', 'ORGANIZATIONS')
         )
@@ -185,6 +187,58 @@ async function ensureUtilityNav(client, orgId, logLabel = 'UtilityNav') {
       /* sequence table may be missing on some tenants */
     }
     console.log(`[${logLabel}] Inserted ${inserted} utility nav item(s) for ${orgId}`);
+  }
+
+  // Ensure mobile (M) entry for Asset Utility Reading for field roles
+  const mobileRoles = await client.query(
+    `
+      SELECT DISTINCT job_role_id
+      FROM "tblJobRoleNav"
+      WHERE COALESCE(int_status, 1) = 1
+        AND (
+          job_role_id = 'JR001'
+          OR app_id IN ('EMPASSIGNMENT', 'ASSETASSIGNMENT', 'UTILITYREADING', 'UTILITYCONSUMPTION')
+        )
+    `,
+  );
+  for (const role of mobileRoles.rows) {
+    const exists = await client.query(
+      `
+        SELECT 1 FROM "tblJobRoleNav"
+        WHERE job_role_id = $1
+          AND app_id = 'UTILITYREADING'
+          AND COALESCE(mob_desk, 'D') = 'M'
+          AND COALESCE(int_status, 1) = 1
+        LIMIT 1
+      `,
+      [role.job_role_id],
+    );
+    if (exists.rows.length) continue;
+    try {
+      const jrnId = await generateCustomIdForClient(client, 'job_role_nav', 3);
+      const maxSeq = await client.query(
+        `
+          SELECT COALESCE(MAX(sequence), 0)::int AS s
+          FROM "tblJobRoleNav"
+          WHERE job_role_id = $1 AND parent_id IS NULL AND COALESCE(mob_desk, 'D') = 'M'
+        `,
+        [role.job_role_id],
+      );
+      await client.query(
+        `
+          INSERT INTO "tblJobRoleNav"
+            (job_role_nav_id, job_role_id, parent_id, app_id, label, sequence,
+             access_level, is_group, org_id, int_status, mob_desk)
+          VALUES ($1, $2, NULL, 'UTILITYREADING', 'Asset Utility Reading', $3, 'A', false, $4, 1, 'M')
+        `,
+        [jrnId, role.job_role_id, (maxSeq.rows[0]?.s || 0) + 1, orgId],
+      );
+      inserted += 1;
+    } catch (err) {
+      console.warn(
+        `[${logLabel}] Could not insert mobile UTILITYREADING for ${role.job_role_id}: ${err.message}`,
+      );
+    }
   }
 
   return { inserted, skipped: false };

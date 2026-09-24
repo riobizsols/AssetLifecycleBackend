@@ -162,3 +162,76 @@ exports.createConsumption = async (req, res) => {
     fail(res, err);
   }
 };
+
+exports.listMyAssignedUtilityAssets = async (req, res) => {
+  try {
+    const orgId = orgFrom(req);
+    const employeeIntId = req.user?.emp_int_id;
+    const deptId = req.user?.dept_id || null;
+    if (!orgId || !employeeIntId) {
+      return fail(res, new Error('User is not linked to an employee or organization'), 400);
+    }
+    ok(
+      res,
+      await utilityModel.listMyAssignedUtilityAssets({
+        orgId,
+        employeeIntId,
+        deptId,
+      }),
+    );
+  } catch (err) {
+    fail(res, err, 500);
+  }
+};
+
+exports.listMyAssetConsumptions = async (req, res) => {
+  try {
+    const orgId = orgFrom(req);
+    const employeeIntId = req.user?.emp_int_id;
+    const deptId = req.user?.dept_id || null;
+    const assetId = req.params.assetId;
+    if (!orgId || !employeeIntId) {
+      return fail(res, new Error('User is not linked to an employee or organization'), 400);
+    }
+    const allowed = await utilityModel.isAssetAssignedToEmployee(
+      assetId,
+      employeeIntId,
+      orgId,
+      deptId,
+    );
+    if (!allowed) {
+      return fail(res, new Error('You can only view readings for assets assigned to you'), 403);
+    }
+    ok(
+      res,
+      await utilityModel.listAssetConsumptions({
+        orgId,
+        assetId,
+        utildId: req.query.utild_id,
+        limit: req.query.limit,
+      }),
+    );
+  } catch (err) {
+    fail(res, err, 500);
+  }
+};
+
+exports.createAssetConsumption = async (req, res) => {
+  try {
+    const orgId = orgFrom(req);
+    const employeeIntId = req.user?.emp_int_id;
+    const deptId = req.user?.dept_id || null;
+    if (!orgId || !employeeIntId) {
+      return fail(res, new Error('User is not linked to an employee or organization'), 400);
+    }
+    const row = await utilityModel.createAssetConsumption(req.body, {
+      userId: userFrom(req),
+      orgId,
+      employeeIntId,
+      deptId,
+    });
+    ok(res, row);
+  } catch (err) {
+    fail(res, err, err.statusCode || 400);
+  }
+};
