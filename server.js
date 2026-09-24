@@ -79,6 +79,8 @@ const consolidatedAssetRegisterRoutes = require("./routes/consolidatedAssetRegis
 const slaVendorPerformanceRoutes = require("./routes/slaVendorPerformanceRoutes");
 const workforceReportRoutes = require("./routes/workforceReportRoutes");
 const maintenanceStatusReportRoutes = require("./routes/maintenanceStatusReportRoutes");
+const outOfStockReportRoutes = require("./routes/outOfStockReportRoutes");
+const purchaseRequirementReportRoutes = require("./routes/purchaseRequirementReportRoutes");
 const utilityRoutes = require("./routes/utilityRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
@@ -271,6 +273,8 @@ app.use("/api/consolidated-asset-register", consolidatedAssetRegisterRoutes);
 app.use("/api/sla-vendor-performance", slaVendorPerformanceRoutes);
 app.use("/api/workforce-report", workforceReportRoutes);
 app.use("/api/maintenance-status-report", maintenanceStatusReportRoutes);
+app.use("/api/out-of-stock-report", outOfStockReportRoutes);
+app.use("/api/purchase-requirement-report", purchaseRequirementReportRoutes);
 app.use("/api/utilities", utilityRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 
