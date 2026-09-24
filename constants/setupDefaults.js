@@ -570,6 +570,8 @@ const DEFAULT_APPS = [
   { id: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance" },
   { id: "WORKFORCEREPORT", label: "Workforce" },
   { id: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report" },
+  { id: "OUTOFSTOCKREPORT", label: "Stock & Purchase" },
+  { id: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase" },
   { id: "REOPENEDBREAKDOWNS", label: "Reopened Breakdowns" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
@@ -814,6 +816,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance", sequence: 12, accessLevel: "A", isGroup: false },
   { id: "JRN065", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Engineering Team Productivity Report", sequence: 13, accessLevel: "A", isGroup: false },
   { id: "JRN066", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report", sequence: 14, accessLevel: "A", isGroup: false },
+  { id: "JRN068", jobRoleId: "JR001", parentId: "JRN012", appId: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase", sequence: 15, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
