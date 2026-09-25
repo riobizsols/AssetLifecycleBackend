@@ -27,6 +27,7 @@ const {
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
+  getIssueRequestDetails,
   getRequiredSpareCategories,
   getCategoriesByAssetType,
   createIssueRequests,
@@ -93,6 +94,7 @@ router.put('/master/:partNumber', updateSparePartMaster);
 router.get('/maintenance-list', getMaintenanceList);
 // Checklist-linked categories via spcatm_id (tenant FE expects checklist_item fields)
 router.get('/maintenance-list/:ams_id/required-categories', getRequiredSpareCategories);
+router.get('/maintenance-list/:ams_id/request-details', getIssueRequestDetails);
 router.get('/maintenance-list/:ams_id', getMaintenanceDetail);
 
 router.post('/issue-requests', createIssueRequests);

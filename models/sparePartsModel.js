@@ -419,6 +419,163 @@ const getSparePartMaintenanceDetail = async (
   return detail;
 };
 
+const userDisplayNameSql = (alias) =>
+  `COALESCE(NULLIF(BTRIM(${alias}.full_name), ''), NULLIF(BTRIM(${alias}.email), ''))`;
+
+/**
+ * Spare requests for one maintenance schedule, including who asked,
+ * who approved, and the spare part name.
+ */
+const getSpareIssueRequestDetails = async (
+  ams_id,
+  org_id,
+  branch_id = null,
+  hasSuperAccess = false
+) => {
+  const dbPool = getDb();
+  const params = [ams_id, org_id];
+  const provider = maintenanceProviderExpression();
+  const inhouseOnly = inhouseMaintenancePredicate();
+  let headerQuery = `
+    SELECT
+      ams.ams_id,
+      a.serial_number,
+      a.description AS asset_description,
+      at.text AS asset_type_name,
+      mt.text AS maintenance_type_name,
+      v.vendor_name,
+      ${provider} AS maintenance_provider
+    FROM "tblAssetMaintSch" ams
+    INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+    INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
+    LEFT JOIN "tblATMaintFreq" mf
+      ON mf.at_main_freq_id = ams.at_main_freq_id
+     AND mf.org_id = ams.org_id
+    LEFT JOIN "tblVendors" v ON ams.vendor_id = v.vendor_id
+    WHERE ams.ams_id = $1
+      AND ams.org_id = $2
+      AND a.org_id = $2
+      AND ${inhouseOnly}
+  `;
+  if (!hasSuperAccess && branch_id) {
+    params.push(branch_id);
+    headerQuery += ` AND a.branch_id = $${params.length}`;
+  }
+  const headerResult = await dbPool.query(headerQuery, params);
+  const header = headerResult.rows[0];
+  if (!header) return null;
+
+  const issues = await dbPool.query(
+    `
+      SELECT
+        si.si_id,
+        si.status,
+        si.quantity_issued,
+        si.remarks,
+        si.created_on,
+        si.changed_on,
+        si.spid_id,
+        ${userDisplayNameSql('requester')} AS requested_by_name,
+        ${userDisplayNameSql('approver')} AS approved_by_name,
+        approval.created_on AS approved_on,
+        ${userDisplayNameSql('issuer')} AS issued_by_name,
+        CASE WHEN si.status = 'IE' THEN si.changed_on ELSE NULL END AS issued_on,
+        ind.spc_id AS issued_spc_id
+      FROM "tblSpareIssue" si
+      LEFT JOIN "tblUsers" requester ON requester.user_id = si.created_by
+      LEFT JOIN LATERAL (
+        SELECT h.created_by, h.created_on
+        FROM "tblSpareHistory" h
+        WHERE h.si_id = si.si_id
+          AND h.status = 'IS'
+          AND (h.org_id = si.org_id OR h.org_id IS NULL)
+        ORDER BY h.created_on ASC
+        LIMIT 1
+      ) approval ON TRUE
+      LEFT JOIN "tblUsers" approver
+        ON approver.user_id = COALESCE(
+          approval.created_by,
+          CASE WHEN si.status = 'IS' THEN si.issued_by ELSE NULL END
+        )
+      LEFT JOIN "tblUsers" issuer
+        ON issuer.user_id = CASE WHEN si.status = 'IE' THEN si.issued_by ELSE NULL END
+      LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
+      WHERE si.assetmaintsch_id = $1
+        AND si.org_id = $2
+        AND si.status IN ('RQ', 'IS', 'IE')
+      ORDER BY si.created_on ASC, si.si_id ASC
+    `,
+    [ams_id, org_id]
+  );
+
+  const rows = issues.rows || [];
+  const spcIds = [
+    ...new Set(rows.map((row) => row.issued_spc_id || resolveIssueSpcId(row)).filter(Boolean)),
+  ];
+
+  let categoryMap = {};
+  if (spcIds.length) {
+    const cats = await dbPool.query(
+      `
+        SELECT spc_id, text AS spare_part_name, uom
+        FROM "tblSPCategory"
+        WHERE org_id = $1
+          AND spc_id = ANY($2::text[])
+      `,
+      [org_id, spcIds]
+    );
+    categoryMap = Object.fromEntries(cats.rows.map((row) => [row.spc_id, row]));
+  }
+
+  const brandModelCache = new Map();
+  const items = [];
+  for (const row of rows) {
+    const spc_id = row.issued_spc_id || resolveIssueSpcId(row);
+    const category = spc_id ? categoryMap[spc_id] : null;
+    const remarks = parseIssueRemarks(row.remarks);
+    let brand_name = null;
+    let model_name = null;
+    if (spc_id) {
+      if (!brandModelCache.has(spc_id)) {
+        try {
+          brandModelCache.set(spc_id, await resolveCategoryBrandModel(dbPool, org_id, spc_id));
+        } catch (error) {
+          console.warn('[spareParts] brand/model lookup failed:', error.message);
+          brandModelCache.set(spc_id, { brand_name: null, model_name: null });
+        }
+      }
+      const resolved = brandModelCache.get(spc_id) || {};
+      brand_name = resolved.brand_name || null;
+      model_name = resolved.model_name || null;
+    }
+
+    const isPending = row.status === SPARE_ISSUE_STATUS.REQUESTED;
+    const isIssued = row.status === SPARE_ISSUE_STATUS.ISSUED;
+    items.push({
+      si_id: row.si_id,
+      status: row.status,
+      quantity: row.quantity_issued,
+      uom: category?.uom || null,
+      spare_part_name: category?.spare_part_name || null,
+      spc_id: spc_id || null,
+      brand_name,
+      model_name,
+      requested_by_name: row.requested_by_name || null,
+      requested_on: row.created_on || null,
+      approved_by_name: isPending ? null : row.approved_by_name || null,
+      approved_on: isPending
+        ? null
+        : row.approved_on || (row.status === SPARE_ISSUE_STATUS.RESERVED ? row.changed_on : null),
+      issued_by_name: isIssued ? row.issued_by_name || null : null,
+      issued_on: isIssued ? row.issued_on || null : null,
+      note: remarks.note || null,
+    });
+  }
+
+  return { ...header, items };
+};
+
 const assertInhouseMaintenance = async (client, amsId, orgId) => {
   const result = await client.query(
     `
@@ -1690,6 +1847,16 @@ const ensureSpBrandModelSchema = async (client) => {
     console.warn('[spareParts] Could not make re_order_level nullable:', error.message);
   }
 
+  // 0 = no expiry; otherwise an ISO date (YYYY-MM-DD)
+  try {
+    await client.query(`
+      ALTER TABLE "tblSPCategory"
+        ADD COLUMN IF NOT EXISTS expiry character varying(20)
+    `);
+  } catch (error) {
+    console.warn('[spareParts] Could not add expiry column:', error.message);
+  }
+
   try {
     await client.query(`
       INSERT INTO "tblSPBrand" (
@@ -1779,6 +1946,7 @@ const getCategories = async (
       c.uom,
       c.minimum_stock,
       c.re_order_level,
+      c.expiry,
       c.int_status,
       c.org_id,
       c.branch_id,
@@ -1815,6 +1983,29 @@ const getCategoryById = async (spc_id, org_id) => {
   return rows.find((row) => String(row.spc_id) === String(spc_id)) || null;
 };
 
+const parseCategoryExpiry = (value) => {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    const err = new Error('Expiry is required. Enter 0 for no expiry, or an expiry date');
+    err.statusCode = 400;
+    throw err;
+  }
+  const raw = String(value).trim();
+  if (raw === '0') return '0';
+  const iso = raw.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    const err = new Error('Expiry must be 0 or a valid date');
+    err.statusCode = 400;
+    throw err;
+  }
+  const parsed = new Date(`${iso}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== iso) {
+    const err = new Error('Expiry must be 0 or a valid date');
+    err.statusCode = 400;
+    throw err;
+  }
+  return iso;
+};
+
 const createCategory = async ({
   org_id,
   branch_id,
@@ -1822,6 +2013,7 @@ const createCategory = async ({
   uom,
   minimum_stock,
   re_order_level,
+  expiry,
   spb_id,
   spm_id,
   created_by,
@@ -1893,6 +2085,7 @@ const createCategory = async ({
     };
     const minStock = parseOptionalNonNegative(minimum_stock, 'Minimum stock');
     const reorder = parseOptionalNonNegative(re_order_level, 'Reorder level');
+    const expiryValue = parseCategoryExpiry(expiry);
 
     const dup = await client.query(
       `
@@ -1914,13 +2107,13 @@ const createCategory = async ({
     const result = await client.query(
       `
         INSERT INTO "tblSPCategory" (
-          spc_id, text, uom, minimum_stock, re_order_level, int_status,
+          spc_id, text, uom, minimum_stock, re_order_level, expiry, int_status,
           org_id, branch_id, created_by, created_on, changed_by, changed_on,
           spb_id, spm_id
         ) VALUES (
-          $1, $2, $3, $4, $5, 1,
-          $6, $7, $8, CURRENT_TIMESTAMP, $8, CURRENT_TIMESTAMP,
-          $9, $10
+          $1, $2, $3, $4, $5, $6, 1,
+          $7, $8, $9, CURRENT_TIMESTAMP, $9, CURRENT_TIMESTAMP,
+          $10, $11
         )
         RETURNING *
       `,
@@ -1930,6 +2123,7 @@ const createCategory = async ({
         String(uom).trim(),
         minStock,
         reorder,
+        expiryValue,
         org_id,
         branch_id || null,
         created_by || null,
@@ -1959,6 +2153,7 @@ const updateCategory = async ({
   uom,
   minimum_stock,
   re_order_level,
+  expiry,
   spb_id,
   spm_id,
   changed_by,
@@ -2044,6 +2239,7 @@ const updateCategory = async ({
     };
     const minStock = parseOptionalNonNegative(minimum_stock, 'Minimum stock');
     const reorder = parseOptionalNonNegative(re_order_level, 'Reorder level');
+    const expiryValue = parseCategoryExpiry(expiry);
 
     const dup = await client.query(
       `
@@ -2071,6 +2267,10 @@ const updateCategory = async ({
       'changed_on = CURRENT_TIMESTAMP',
     ];
     const params = [spc_id, org_id, name, String(uom).trim(), minStock, reorder, changed_by || null];
+    if (colSet.has('expiry')) {
+      params.push(expiryValue);
+      sets.push(`expiry = $${params.length}`);
+    }
     if (colSet.has('spb_id')) {
       params.push(spb_id);
       sets.push(`spb_id = $${params.length}`);
@@ -5471,6 +5671,7 @@ module.exports = {
   getChecklistRequiredSpareCategories,
   getSparePartMaintenanceList,
   getSparePartMaintenanceDetail,
+  getSpareIssueRequestDetails,
   getRequiredSpareCategoriesForAms,
   createSpareIssueRequests,
   getSpareIssueApprovals,

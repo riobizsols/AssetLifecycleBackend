@@ -34,7 +34,7 @@ const createCategory = async (req, res) => {
     const created_by = req.user.user_id;
     const branch_id = req.user.branch_id || null;
 
-    const { text, category, uom, minimum_stock, re_order_level, reorder_level, spb_id, brand_id, spm_id, model_id } = req.body;
+    const { text, category, uom, minimum_stock, re_order_level, reorder_level, expiry, spb_id, brand_id, spm_id, model_id } = req.body;
     const categoryName = text ?? category;
     const reorder = re_order_level ?? reorder_level;
     const brandId = spb_id || brand_id;
@@ -60,6 +60,7 @@ const createCategory = async (req, res) => {
       uom,
       minimum_stock,
       re_order_level: reorder,
+      expiry,
       spb_id: brandId,
       spm_id: modelId,
       created_by,
@@ -102,7 +103,7 @@ const updateCategory = async (req, res) => {
     const org_id = req.user.org_id;
     const changed_by = req.user.user_id;
     const { spc_id } = req.params;
-    const { text, category, uom, minimum_stock, re_order_level, reorder_level, spb_id, brand_id, spm_id, model_id } = req.body;
+    const { text, category, uom, minimum_stock, re_order_level, reorder_level, expiry, spb_id, brand_id, spm_id, model_id } = req.body;
     const categoryName = text ?? category;
     const reorder = re_order_level ?? reorder_level;
     const brandId = spb_id || brand_id;
@@ -128,6 +129,7 @@ const updateCategory = async (req, res) => {
       uom,
       minimum_stock,
       re_order_level: reorder,
+      expiry,
       spb_id: brandId,
       spm_id: modelId,
       changed_by,
@@ -770,6 +772,38 @@ const getMaintenanceDetail = async (req, res) => {
   }
 };
 
+const getIssueRequestDetails = async (req, res) => {
+  try {
+    let org_id = req.user.org_id;
+    try {
+      const { getEffectiveListContext } = require('../utils/acmAccess');
+      org_id = getEffectiveListContext(req).orgId || org_id;
+    } catch (_) {
+      /* keep req.user.org_id */
+    }
+    const branch_id = req.user.branch_id || null;
+    const hasSuperAccess = Boolean(req.user?.hasSuperAccess);
+    const { ams_id } = req.params;
+
+    const row = await model.getSpareIssueRequestDetails(
+      ams_id,
+      org_id,
+      branch_id,
+      hasSuperAccess
+    );
+    if (!row) {
+      return res.status(404).json({ success: false, error: 'Maintenance record not found' });
+    }
+    return res.status(200).json({ success: true, data: row });
+  } catch (error) {
+    console.error('Error fetching spare issue request details:', error);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to fetch spare request details',
+    });
+  }
+};
+
 const getRequiredSpareCategories = async (req, res) => {
   try {
     let org_id = req.user.org_id;
@@ -1289,6 +1323,7 @@ module.exports = {
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
+  getIssueRequestDetails,
   getRequiredSpareCategories,
   getCategoriesByAssetType,
   getRequiredCategories,
