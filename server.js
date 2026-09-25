@@ -78,6 +78,7 @@ const auditReportRoutes = require("./routes/auditReportRoutes");
 const consolidatedAssetRegisterRoutes = require("./routes/consolidatedAssetRegisterRoutes");
 const maintenanceStatusReportRoutes = require("./routes/maintenanceStatusReportRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
+const sparePartsReportRoutes = require("./routes/sparePartsReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
 const inspectionChecklistRoutes = require("./routes/inspectionChecklistRoutes");
@@ -267,6 +268,7 @@ app.use("/api/audit-report", auditReportRoutes);
 app.use("/api/consolidated-asset-register", consolidatedAssetRegisterRoutes);
 app.use("/api/maintenance-status-report", maintenanceStatusReportRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
+app.use("/api/spare-parts-report", sparePartsReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);
 app.use("/api/inspection-frequencies", inspectionFrequencyRoutes);
