@@ -23,6 +23,12 @@ const {
 const {
   getConsumptionMissNotificationsByUser,
 } = require('../models/utilityModel');
+const {
+  getStockStatusNotificationsByUser,
+  ensureStockStatusNotificationsForOrg,
+  markStockNotificationOpen,
+  discardStockNotification,
+} = require('../models/stockStatusNotifyModel');
 const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 
 // Get all maintenance notifications for an organization
@@ -154,6 +160,27 @@ const getUserNotifications = async (req, res) => {
     } catch (missErr) {
       console.warn(
         `🐛 [getUserNotifications] Consumption miss notifications skipped: ${missErr.message}`
+      );
+    }
+
+    // Ensure stock alerts exist (creates for PCB / Drive belts etc.) then load inbox rows
+    try {
+      await ensureStockStatusNotificationsForOrg({ orgId });
+    } catch (ensureErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Stock ensure skipped: ${ensureErr.message}`
+      );
+    }
+    let stockStatusNotifications = [];
+    try {
+      stockStatusNotifications = await getStockStatusNotificationsByUser({
+        empIntId: userId,
+        orgId,
+        hasSuperAccess: req.user?.hasSuperAccess || false,
+      });
+    } catch (stockErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Stock status notifications skipped: ${stockErr.message}`
       );
     }
     
@@ -396,6 +423,47 @@ const getUserNotifications = async (req, res) => {
       }),
     );
 
+    const formattedStockStatusNotifications = (stockStatusNotifications || []).map(
+      (notification) => {
+        const isOut = String(notification.alert_status || '').toUpperCase() === 'OUT_OF_STOCK';
+        const workflowType = isOut ? 'STOCK_OUT_OF_STOCK' : 'STOCK_NEEDS_PURCHASE';
+        const maintenanceType = isOut ? 'Out of stock' : 'Needs purchase';
+        const status = String(notification.status || 'NEW').toUpperCase();
+        return {
+          id: notification.notify_id,
+          wfamshId: null,
+          workflowId: notification.notify_id,
+          workflowType,
+          route: '/reports/purchase-requirement',
+          userId,
+          userName: 'Stock Alert',
+          userEmail: null,
+          status,
+          dueDate: notification.created_on,
+          cutoffDate: notification.created_on,
+          daysUntilDue: 0,
+          daysUntilCutoff: 999,
+          isUrgent: false,
+          isOverdue: false,
+          maintenanceType,
+          assetId: null,
+          assetTypeName: notification.part_name || notification.spc_id || 'Part',
+          categoryName: notification.part_name || notification.spc_id || '-',
+          spcId: notification.spc_id || null,
+          isGroupMaintenance: false,
+          groupId: null,
+          groupName: null,
+          groupAssetCount: null,
+          notifyId: notification.notify_id,
+          notificationStatus: status,
+          title: notification.title || maintenanceType,
+          body: notification.body || '',
+          availableQty: notification.available_qty,
+          minimumStock: notification.minimum_stock,
+        };
+      },
+    );
+
     console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);
     console.log('🐛 [getUserNotifications] First 3 formatted notifications:', formattedNotifications.slice(0, 3));
 
@@ -408,13 +476,15 @@ const getUserNotifications = async (req, res) => {
         ...formattedExpiryNotifications,
         ...formattedSpareIssuedNotifications,
         ...formattedConsumptionMissNotifications,
+        ...formattedStockStatusNotifications,
       ],
       count:
         formattedNotifications.length +
         formattedWarrantyNotifications.length +
         formattedExpiryNotifications.length +
         formattedSpareIssuedNotifications.length +
-        formattedConsumptionMissNotifications.length,
+        formattedConsumptionMissNotifications.length +
+        formattedStockStatusNotifications.length,
       userId: userId,
       timestamp: new Date().toISOString()
     });
@@ -702,6 +772,30 @@ const getFilteredNotifications = async (req, res) => {
   }
 };
 
+const openStockNotification = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const empIntId = req.user?.emp_int_id || null;
+    await markStockNotificationOpen(notifyId, empIntId);
+    return res.json({ success: true, message: 'Stock notification opened' });
+  } catch (error) {
+    console.error('Error opening stock notification:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+const discardStockNotificationAction = async (req, res) => {
+  try {
+    const { notifyId } = req.params;
+    const empIntId = req.user?.emp_int_id || null;
+    await discardStockNotification(notifyId, empIntId);
+    return res.json({ success: true, message: 'Stock notification discarded' });
+  } catch (error) {
+    console.error('Error discarding stock notification:', error);
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getAllNotifications,
   getUserNotifications,
@@ -714,4 +808,6 @@ module.exports = {
   openExpiryNotification,
   discardExpiryNotificationAction,
   snoozeExpiryNotificationAction,
+  openStockNotification,
+  discardStockNotificationAction,
 }; 

@@ -12,6 +12,8 @@ const {
   openExpiryNotification,
   discardExpiryNotificationAction,
   snoozeExpiryNotificationAction,
+  openStockNotification,
+  discardStockNotificationAction,
 } = require('../controllers/notificationController');
 const { protect } = require('../middlewares/authMiddleware');
 
@@ -42,6 +44,9 @@ router.put('/warranty/:notifyId/scrap', scrapFromWarrantyNotification);
 router.put('/expiry/:notifyId/open', openExpiryNotification);
 router.put('/expiry/:notifyId/discard', discardExpiryNotificationAction);
 router.put('/expiry/:notifyId/snooze', snoozeExpiryNotificationAction);
+
+router.put('/stock/:notifyId/open', openStockNotification);
+router.put('/stock/:notifyId/discard', discardStockNotificationAction);
 
 
 module.exports = router;

@@ -1,8 +1,11 @@
 /**
- * Purchase Requirement report — MVP (existing tables only)
+ * Stock & Purchase report (existing tables only)
  *
- * net = max(0, reserved_RQ + upcoming_pm_demand + COALESCE(minimum_stock,0) - available)
- * Also include parts where available < re_order_level (reorder demand).
+ * Minimum qty = category.minimum_stock only.
+ * Status:
+ *   - available === 0            → Out of stock
+ *   - 0 < available <= min stock → Needs purchase
+ *   - available > min stock      → excluded
  */
 const { getDb } = require('../utils/dbContext');
 
@@ -259,10 +262,11 @@ async function getPurchaseRequirementReport({
       row.minimum_stock == null || row.minimum_stock === ''
         ? null
         : Number(row.minimum_stock);
+    const hasMin = minStock != null && !Number.isNaN(minStock) && minStock > 0;
 
+    // 0 → Out of stock; at or below min (and not 0) → Needs purchase
     const isOutOfStock = available <= 0;
-    const needsPurchase =
-      minStock != null && !Number.isNaN(minStock) && minStock > 0 && available < minStock && available > 0;
+    const needsPurchase = hasMin && available > 0 && available <= minStock;
 
     const earliestCandidates = [row.earliest_request_date, row.earliest_required_date].filter(Boolean);
     let earliestDemandDate = null;
@@ -274,7 +278,7 @@ async function getPurchaseRequirementReport({
       }
     }
 
-    const minimumQty = minStock == null || Number.isNaN(minStock) ? null : minStock;
+    const minimumQty = hasMin ? minStock : null;
 
     return {
       part_code: row.part_code,
@@ -284,7 +288,7 @@ async function getPurchaseRequirementReport({
       branch_name: row.branch_name,
       available,
       on_hand: Number(row.on_hand) || 0,
-      minimum_stock: row.minimum_stock,
+      minimum_stock: minimumQty,
       re_order_level: row.re_order_level,
       reserved,
       requested,
@@ -296,18 +300,12 @@ async function getPurchaseRequirementReport({
       net_requirement: minimumQty,
       earliest_demand_date: earliestDemandDate,
       is_out_of_stock: isOutOfStock,
-      // Below minimum (but not zero) → Needs purchase; zero → Out of stock only
       needs_purchase: needsPurchase,
     };
   });
 
-  // Out of stock (available 0) OR below minimum stock
-  rows = rows.filter((r) => {
-    const min =
-      r.minimum_stock == null || r.minimum_stock === '' ? null : Number(r.minimum_stock);
-    const belowMin = min != null && !Number.isNaN(min) && min > 0 && r.available < min;
-    return r.is_out_of_stock || belowMin;
-  });
+  // Keep only out-of-stock or at/below minimum stock
+  rows = rows.filter((r) => r.is_out_of_stock || r.needs_purchase);
 
   const focusKey = String(focus || demandSource || 'all').toLowerCase();
   if (focusKey === 'out_of_stock') {

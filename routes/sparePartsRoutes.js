@@ -27,6 +27,7 @@ const {
   createVendorSpareMappings,
   getMaintenanceList,
   getMaintenanceDetail,
+  getIssueRequestDetails,
   getRequiredSpareCategories,
   getCategoriesByAssetType,
   createIssueRequests,
@@ -53,6 +54,10 @@ const {
   getEquipmentWise,
   getHoldDuration,
 } = require('../controllers/sparePartManagementController');
+const {
+  getSparePartsReportFilterOptions,
+  getSparePartsReport,
+} = require('../controllers/sparePartsReportController');
 
 router.use(protect);
 
@@ -100,6 +105,7 @@ router.put('/master/:partNumber', updateSparePartMaster);
 router.get('/maintenance-list', getMaintenanceList);
 // Checklist-linked categories via spcatm_id (tenant FE expects checklist_item fields)
 router.get('/maintenance-list/:ams_id/required-categories', getRequiredSpareCategories);
+router.get('/maintenance-list/:ams_id/request-details', getIssueRequestDetails);
 router.get('/maintenance-list/:ams_id', getMaintenanceDetail);
 
 router.post('/issue-requests', createIssueRequests);
@@ -114,5 +120,8 @@ router.get('/management/slow-non-moving', getSlowNonMoving);
 router.get('/management/consumption', getSparePartConsumption);
 router.get('/management/equipment-wise', getEquipmentWise);
 router.get('/management/hold-duration', getHoldDuration);
+
+router.get('/report/filter-options', getSparePartsReportFilterOptions);
+router.get('/report', getSparePartsReport);
 
 module.exports = router;

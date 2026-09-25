@@ -16,6 +16,9 @@ const {
 const {
     ensureExpiryNotificationsForWindowAllOrgs,
 } = require('../models/assetExpiryNotifyModel');
+const {
+    ensureStockStatusNotificationsForAllOrgs,
+} = require('../models/stockStatusNotifyModel');
 
 class CronService {
     constructor() {
@@ -81,6 +84,10 @@ class CronService {
         setTimeout(() => {
             this.scheduleMissedConsumptionNotificationTrigger();
         }, 105000);
+
+        setTimeout(() => {
+            this.scheduleStockStatusNotificationTrigger();
+        }, 120000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -199,6 +206,30 @@ class CronService {
             console.log('   → Notifies assigned users when utility consumption is overdue by frequency');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule missed consumption notification trigger:', error.message);
+        }
+    }
+
+    // Schedule stock out-of-stock / needs-purchase notifications
+    scheduleStockStatusNotificationTrigger() {
+        try {
+            cron.schedule('0 8 * * *', async () => {
+                const startedAt = new Date().toISOString();
+                try {
+                    const result = await ensureStockStatusNotificationsForAllOrgs();
+                    console.log(
+                        `✅ [CRON] Stock status notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned: ${result.scanned}, created: ${result.created}, resolved: ${result.resolved}`
+                    );
+                } catch (error) {
+                    console.error('❌ [CRON] Stock status notification trigger failed:', error.message);
+                }
+            }, {
+                timezone: "Asia/Kolkata",
+            });
+
+            console.log('📅 [CRON] Stock Status Notification Trigger: Scheduled daily at 8:00 AM (IST)');
+            console.log('   → Creates notifications when parts become out of stock or need purchase');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule stock status notification trigger:', error.message);
         }
     }
 
@@ -586,6 +617,15 @@ class CronService {
                 nextRun: 'Daily at 8:30 AM IST',
                 status: 'ACTIVE',
                 purpose: 'Remind assigned users to record utility consumption (daily/weekly/monthly/half-yearly)'
+            },
+            stockStatusNotificationTrigger: {
+                name: 'Stock Status Notification Trigger',
+                schedule: '0 8 * * *',
+                description: 'Creates notifications when parts become out of stock or need purchase.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 8:00 AM IST',
+                status: 'ACTIVE',
+                purpose: 'Notify users when stock hits out-of-stock or needs-purchase thresholds'
             }
         };
     }
