@@ -2,7 +2,7 @@ const EmployeeTechCertModel = require("../models/employeeTechCertModel");
 const operationalCache = require('../utils/operationalCache');
 const {
   uploadBuffer,
-  getPresignedDownloadUrl,
+  getObjectStream,
   resolveLocalPath,
 } = require('../utils/documentStorage');
 const { runWithDb, tryGetDb } = require('../utils/dbContext');
@@ -313,6 +313,9 @@ const getEmployeeCertificateDownloadUrl = async (req, res) => {
   try {
     const { id } = req.params;
     const orgId = req.user?.org_id;
+    const mode = String(req.query?.mode || 'view').toLowerCase() === 'download'
+      ? 'download'
+      : 'view';
 
     if (!id) {
       return res.status(400).json({
@@ -337,6 +340,25 @@ const getEmployeeCertificateDownloadUrl = async (req, res) => {
       });
     }
 
+    const filename = path.basename(String(cert.file_path).split('?')[0]) || 'certificate.pdf';
+    const ext = path.extname(filename).toLowerCase();
+    const mimeByExt = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+    };
+    if (mimeByExt[ext]) {
+      res.setHeader('Content-Type', mimeByExt[ext]);
+    }
+    res.setHeader(
+      'Content-Disposition',
+      `${mode === 'download' ? 'attachment' : 'inline'}; filename="${filename}"`,
+    );
+
+    // Always stream through the API so browsers never hit Docker-only MinIO DNS (mansoor-minio).
     const localPath = resolveLocalPath(cert.file_path);
     if (localPath) {
       if (!fs.existsSync(localPath)) {
@@ -345,15 +367,26 @@ const getEmployeeCertificateDownloadUrl = async (req, res) => {
           message: "Certificate file not found on server"
         });
       }
-      return res.download(localPath, path.basename(localPath));
+      if (mode === 'download') {
+        return res.download(localPath, filename);
+      }
+      return res.sendFile(path.resolve(localPath));
     }
 
-    const url = await getPresignedDownloadUrl(cert.file_path, 60 * 10);
-
-    return res.status(200).json({
-      success: true,
-      url
+    const stream = await getObjectStream(cert.file_path);
+    stream.on('error', (streamErr) => {
+      console.error('Employee tech cert stream error:', streamErr.message);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          message: 'Failed to stream certificate file',
+          error: streamErr.message,
+        });
+      } else {
+        res.end();
+      }
     });
+    return stream.pipe(res);
   } catch (error) {
     console.error("Error generating employee certificate download URL:", error);
     return res.status(500).json({

@@ -197,6 +197,78 @@ const DEFAULT_ASSET_TYPES = [
     serialFormat: 1,
     depreciationType: "SL",
     description: "Security surveillance equipment."
+  },
+  {
+    id: "AT018",
+    name: "Electrical",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Electrical panels, switchgear, transformers, lighting and power distribution."
+  },
+  {
+    id: "AT019",
+    name: "Plumbing",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Water supply, drainage, pumps and plumbing fixtures."
+  },
+  {
+    id: "AT020",
+    name: "HVAC",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Heating, ventilation, air handling units, chillers and campus climate systems."
+  },
+  {
+    id: "AT021",
+    name: "Civil",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Buildings, structures, roads, drainage works and civil fabric."
+  },
+  {
+    id: "AT022",
+    name: "Fire Systems",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Fire alarms, extinguishers, hydrants, sprinklers and life-safety systems."
+  },
+  {
+    id: "AT023",
+    name: "Campus Infrastructure",
+    assignmentType: "department",
+    inspectionRequired: true,
+    groupRequired: false,
+    maintRequired: true,
+    maintTypeId: "MT002",
+    serialFormat: 1,
+    depreciationType: "SL",
+    description: "Common physical facilities and systems that support the entire campus rather than a specific piece of equipment."
   }
 ];
 
@@ -380,6 +452,60 @@ const DEFAULT_PROD_SERVICES = [
     psType: "Product",
     status: 1,
     description: "Fixed dome camera."
+  },
+  {
+    id: "PS021",
+    assetTypeId: "AT018",
+    brand: "Generic",
+    model: "Electrical System",
+    psType: "Product",
+    status: 1,
+    description: "Campus electrical distribution equipment."
+  },
+  {
+    id: "PS022",
+    assetTypeId: "AT019",
+    brand: "Generic",
+    model: "Plumbing System",
+    psType: "Product",
+    status: 1,
+    description: "Campus plumbing and water systems."
+  },
+  {
+    id: "PS023",
+    assetTypeId: "AT020",
+    brand: "Generic",
+    model: "HVAC System",
+    psType: "Product",
+    status: 1,
+    description: "Campus HVAC plant and air handling."
+  },
+  {
+    id: "PS024",
+    assetTypeId: "AT021",
+    brand: "Generic",
+    model: "Civil Work",
+    psType: "Product",
+    status: 1,
+    description: "Campus civil and structural assets."
+  },
+  {
+    id: "PS025",
+    assetTypeId: "AT022",
+    brand: "Generic",
+    model: "Fire System",
+    psType: "Product",
+    status: 1,
+    description: "Campus fire detection and suppression."
+  },
+  {
+    id: "PS026",
+    assetTypeId: "AT023",
+    brand: "Generic",
+    model: "Campus Infrastructure",
+    psType: "Product",
+    status: 1,
+    description: "Shared campus facilities and supporting systems."
   }
 ];
 
@@ -426,6 +552,27 @@ const DEFAULT_APPS = [
   { id: "DEPARTMENTSADMIN", label: "Departments Admin" },
   { id: "BRANCHES", label: "Branches" },
   { id: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping" },
+  { id: "AUDITATMAPPING", label: "Audit Type – Asset Type Mapping" },
+  { id: "UTILITYMASTER", label: "Utility Master" },
+  { id: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping" },
+  { id: "UTILITYCONSUMPTION", label: "Record Utility Consumption" },
+  { id: "ASSETLIFECYCLEREPORT", label: "Asset Lifecycle Report" },
+  { id: "ASSETREPORT", label: "Asset Report" },
+  { id: "QAAUDITREPORT", label: "QA Audit Report" },
+  { id: "ASSETVALUATION", label: "Asset Valuation" },
+  { id: "ASSETWORKFLOWHISTORY", label: "Asset Workflow History" },
+  { id: "BREAKDOWNHISTORY", label: "Breakdown History" },
+  { id: "SLAREPORT", label: "SLA Reports" },
+  { id: "MAINTENANCEHISTORY", label: "Maintenance History of Asset" },
+  { id: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report" },
+  { id: "AUDITREPORT", label: "Audit Reports" },
+  { id: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register" },
+  { id: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance" },
+  { id: "WORKFORCEREPORT", label: "Workforce" },
+  { id: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report" },
+  { id: "OUTOFSTOCKREPORT", label: "Stock & Purchase" },
+  { id: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase" },
+  { id: "REOPENEDBREAKDOWNS", label: "Reopened Breakdowns" },
   { id: "VENDORS", label: "Vendors" },
   { id: "PRODSERV", label: "Products / Services" },
   { id: "SPAREPARTS", label: "Spare Part Lot" },
@@ -493,7 +640,8 @@ const DEFAULT_MAINT_TYPES = [
   { id: "MT001", name: "Subscription Renewal" },
   { id: "MT002", name: "Regular Maintenance" },
   { id: "MT003", name: "Others" },
-  { id: "MT004", name: "Break Down" }
+  { id: "MT004", name: "Break Down" },
+  { id: "MT017", name: "Calibration" },
 ];
 
 const DEFAULT_UOM = [
@@ -504,6 +652,13 @@ const DEFAULT_UOM = [
   { id: "UOM005", name: "KMS" },
   // Spare-parts / quantity UOMs (required for spare part category create)
   { id: "UOM006", name: "Piece" },
+  // Utility consumption UOMs (tblUtility_H.uom_id)
+  { id: "UOM007", name: "kWh" },
+  { id: "UOM008", name: "Litre" },
+  { id: "UOM009", name: "Cubic Metre" },
+  { id: "UOM010", name: "kg" },
+  { id: "UOM011", name: "Cylinder" },
+  { id: "UOM012", name: "Unit" },
 ];
 
 /** Inspection checklist response types (Qualitative / Quantitative). */
@@ -544,6 +699,9 @@ const DEFAULT_DOC_TYPE_OBJECTS = [
   { id: "DTO017", object_type: "asset type", doc_type: "CC", doc_type_text: "Clearance Certificate" },
   { id: "DTO018", object_type: "asset", doc_type: "TM", doc_type_text: "Technical Manual" },
   { id: "DTO019", object_type: "inspection certificate", doc_type: "IC", doc_type_text: "Inspection Certificate" },
+  { id: "DTO020", object_type: "asset", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO021", object_type: "asset group", doc_type: "CL", doc_type_text: "Calibration Certificate" },
+  { id: "DTO044", object_type: "maintenance", doc_type: "CL", doc_type_text: "Calibration Certificate" },
 ];
 
 const DEFAULT_MAINT_STATUS = [
@@ -592,7 +750,16 @@ const DEFAULT_ID_SEQUENCES = [
   { tableKey: "audit_type", prefix: "AUDTP", lastNumber: 0 },
   { tableKey: "audtp", prefix: "AUDTP", lastNumber: 0 },
   { tableKey: "audit_at_mapping", prefix: "AUDATM", lastNumber: 0 },
-  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 }
+  { tableKey: "audatm", prefix: "AUDATM", lastNumber: 0 },
+  { tableKey: "utility_h", prefix: "UTIL", lastNumber: 0 },
+  { tableKey: "ut_consum_type", prefix: "UTCTP", lastNumber: 2 },
+  { tableKey: "util_freq", prefix: "uf", lastNumber: 5 },
+  { tableKey: "utility_d", prefix: "utild", lastNumber: 0 },
+  { tableKey: "at_utility_map", prefix: "ATUM", lastNumber: 0 },
+  { tableKey: "util_consumption", prefix: "utcv", lastNumber: 0 },
+  { tableKey: "tcert", prefix: "TCERT", lastNumber: 0 },
+  { tableKey: "tech_cert", prefix: "TCERT", lastNumber: 0 },
+  { tableKey: "etc", prefix: "ETC", lastNumber: 0 },
 ];
 
 const DEFAULT_JOB_ROLES = [
@@ -648,11 +815,20 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN059", jobRoleId: "JR001", parentId: "JRN012", appId: "USAGEBASEDASSETREPORT", label: "Usage Based Asset Report", sequence: 9, accessLevel: "A", isGroup: false },
   { id: "JRN062", jobRoleId: "JR001", parentId: "JRN012", appId: "AUDITREPORT", label: "Audit Reports", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN063", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register", sequence: 11, accessLevel: "A", isGroup: false },
+  { id: "JRN064", jobRoleId: "JR001", parentId: "JRN012", appId: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance", sequence: 12, accessLevel: "A", isGroup: false },
+  { id: "JRN065", jobRoleId: "JR001", parentId: "JRN012", appId: "WORKFORCEREPORT", label: "Engineering Team Productivity Report", sequence: 13, accessLevel: "A", isGroup: false },
+  { id: "JRN066", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report", sequence: 14, accessLevel: "A", isGroup: false },
+  { id: "JRN068", jobRoleId: "JR001", parentId: "JRN012", appId: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase", sequence: 15, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN035", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPASSETS", label: "Scrap Assets", sequence: 2, accessLevel: "A", isGroup: false },
   { id: "JRN061", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPMAINTENANCEAPPROVAL", label: "Scrap Approval", sequence: 3, accessLevel: "A", isGroup: false },
+
+  { id: "JRN070", jobRoleId: "JR001", parentId: null, appId: null, label: "Utilities", sequence: 12, accessLevel: "A", isGroup: true },
+  { id: "JRN071", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYMASTER", label: "Utility Master", sequence: 1, accessLevel: "A", isGroup: false },
+  { id: "JRN072", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping", sequence: 2, accessLevel: "A", isGroup: false },
+  { id: "JRN073", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYCONSUMPTION", label: "Record Consumption", sequence: 3, accessLevel: "A", isGroup: false },
 
   { id: "JRN008", jobRoleId: "JR001", parentId: null, appId: null, label: "Admin Settings", sequence: 8, accessLevel: "A", isGroup: true },
   { id: "JRN023", jobRoleId: "JR001", parentId: "JRN008", appId: "AUDITLOGS", label: "Audit Logs", sequence: 1, accessLevel: "A", isGroup: false },
@@ -666,8 +842,9 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN017", jobRoleId: "JR001", parentId: "JRN009", appId: "DEPARTMENTSASSET", label: "Departments AssetType", sequence: 4, accessLevel: "A", isGroup: false },
   { id: "JRN018", jobRoleId: "JR001", parentId: "JRN009", appId: "BRANCHES", label: "Branches", sequence: 5, accessLevel: "A", isGroup: false },
   { id: "JRN018A", jobRoleId: "JR001", parentId: "JRN009", appId: "BRANCHDEPTMAPPING", label: "Branch – Department Mapping", sequence: 6, accessLevel: "A", isGroup: false },
-  { id: "JRN019", jobRoleId: "JR001", parentId: "JRN009", appId: "VENDORS", label: "Vendors", sequence: 7, accessLevel: "A", isGroup: false },
-  { id: "JRN020", jobRoleId: "JR001", parentId: "JRN009", appId: "PRODSERV", label: "Products/Services", sequence: 8, accessLevel: "A", isGroup: false },
+  { id: "JRN018B", jobRoleId: "JR001", parentId: "JRN009", appId: "AUDITATMAPPING", label: "Audit Type – Asset Type Mapping", sequence: 7, accessLevel: "A", isGroup: false },
+  { id: "JRN019", jobRoleId: "JR001", parentId: "JRN009", appId: "VENDORS", label: "Vendors", sequence: 8, accessLevel: "A", isGroup: false },
+  { id: "JRN020", jobRoleId: "JR001", parentId: "JRN009", appId: "PRODSERV", label: "Products/Services", sequence: 9, accessLevel: "A", isGroup: false },
   { id: "JRN014C", jobRoleId: "JR001", parentId: "JRN009", appId: "SPAREPARTSCONFIG", label: "Spare Parts Configuration", sequence: 9, accessLevel: "A", isGroup: false },
   { id: "JRN014G", jobRoleId: "JR001", parentId: "JRN009", appId: "SPAREPARTMASTER", label: "Spare Part", sequence: 10, accessLevel: "A", isGroup: false },
   { id: "JRN028", jobRoleId: "JR001", parentId: "JRN009", appId: "ROLES", label: "Bulk Upload", sequence: 11, accessLevel: "A", isGroup: false },

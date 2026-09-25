@@ -5,6 +5,7 @@ const {
   listDocsByAsset,
   listDocsByWorkOrder,
   getDownloadUrl,
+  streamAssetMaintDocFile,
   archiveDoc,
   deleteDoc,
   getDocById,
@@ -31,6 +32,9 @@ router.get('/work-order/:ams_id', listDocsByWorkOrder);
 
 // Get document details by ID
 router.get('/document/:amd_id', getDocById);
+
+// Stream local fallback file (auth required)
+router.get('/:amd_id/file', streamAssetMaintDocFile);
 
 // Get download/view URL for asset maintenance document
 router.get('/:amd_id/download', getDownloadUrl);

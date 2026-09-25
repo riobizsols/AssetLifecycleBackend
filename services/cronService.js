@@ -77,6 +77,10 @@ class CronService {
         setTimeout(() => {
             this.scheduleAssetExpiryNotificationTrigger();
         }, 90000);
+
+        setTimeout(() => {
+            this.scheduleMissedConsumptionNotificationTrigger();
+        }, 105000);
     }
 
     // Schedule workflow escalation for overdue approvals
@@ -169,6 +173,32 @@ class CronService {
             console.log('   → Creates notifications for assets expiring within 7 days and for expired assets');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule asset expiry notification trigger:', error.message);
+        }
+    }
+
+    // Schedule missed utility-consumption alerts (push to assigned users).
+    // Dashboard/list alerts are computed live; this job only pushes FCM.
+    scheduleMissedConsumptionNotificationTrigger() {
+        try {
+            cron.schedule('30 8 * * *', async () => {
+                const startedAt = new Date().toISOString();
+                try {
+                    const missedConsumptionNotificationService = require('./missedConsumptionNotificationService');
+                    const result = await missedConsumptionNotificationService.runScanAndNotify({});
+                    console.log(
+                        `✅ [CRON] Missed consumption notification trigger completed at ${startedAt}. Assignees: ${result.assignees}, missed: ${result.missed}, notified: ${result.notified}`
+                    );
+                } catch (error) {
+                    console.error('❌ [CRON] Missed consumption notification trigger failed:', error.message);
+                }
+            }, {
+                timezone: "Asia/Kolkata",
+            });
+
+            console.log('📅 [CRON] Missed Consumption Notification Trigger: Scheduled daily at 8:30 AM (IST)');
+            console.log('   → Notifies assigned users when utility consumption is overdue by frequency');
+        } catch (error) {
+            console.error('❌ [CRON] Failed to schedule missed consumption notification trigger:', error.message);
         }
     }
 
@@ -547,6 +577,15 @@ class CronService {
                 nextRun: 'Daily at 7:00 AM IST',
                 status: 'ACTIVE',
                 purpose: 'Notify job roles with notif_scrap before asset expiry_date and when expired'
+            },
+            missedConsumptionNotificationTrigger: {
+                name: 'Missed Consumption Notification Trigger',
+                schedule: '30 8 * * *',
+                description: 'Pushes alerts to asset assignees when utility consumption is overdue based on measurement-profile frequency.',
+                timezone: 'Asia/Kolkata',
+                nextRun: 'Daily at 8:30 AM IST',
+                status: 'ACTIVE',
+                purpose: 'Remind assigned users to record utility consumption (daily/weekly/monthly/half-yearly)'
             }
         };
     }

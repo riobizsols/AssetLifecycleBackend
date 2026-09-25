@@ -94,7 +94,9 @@ class TechCertModel {
       throw new Error('tblTechCert does not contain required columns');
     }
 
-    const whereClause = columns.org ? `WHERE ${columns.org} = $1` : '';
+    const whereClause = columns.org
+      ? `WHERE (${columns.org} = $1 OR ${columns.org} IS NULL)`
+      : '';
     const params = columns.org ? [orgId] : [];
     const query = `
       SELECT
@@ -119,6 +121,7 @@ class TechCertModel {
 
     const dbPool = getDb();
     let attempt = 0;
+    let lastErr = null;
     while (attempt < 5) {
       const techCertId = await generateCustomId('tcert', 3);
       const insertColumns = [columns.id, columns.name, columns.number];
@@ -139,7 +142,9 @@ class TechCertModel {
 
       if (columns.createdOn) {
         insertColumns.push(columns.createdOn);
-        valueTokens.push('NOW()');
+        // created_on is varchar on some tenants — store ISO string, not NOW()
+        values.push(new Date().toISOString());
+        valueTokens.push(`$${values.length}`);
       }
 
       const query = `
@@ -153,15 +158,22 @@ class TechCertModel {
         const result = await dbPool.query(query, values);
         return result.rows[0];
       } catch (err) {
-        // If duplicate key error, retry with a new ID
-        if (err.code === '23505' && String(err.detail || '').includes('tblTechCert_pkey')) {
-          attempt++;
+        lastErr = err;
+        // Retry on any PK/unique collision (sequence lag). Detail text may not
+        // include the constraint name — check constraint / code instead.
+        const isDup =
+          err.code === '23505' &&
+          (/tbltechcert_pkey/i.test(String(err.constraint || '')) ||
+            /tbltechcert_pkey/i.test(String(err.detail || '')) ||
+            /tc_id/i.test(String(err.detail || '')));
+        if (isDup) {
+          attempt += 1;
           continue;
         }
         throw err;
       }
     }
-    throw new Error('Failed to generate unique certificate ID after multiple attempts');
+    throw lastErr || new Error('Failed to generate unique certificate ID after multiple attempts');
   }
 
   static async updateCertificate({ id, name, number }) {

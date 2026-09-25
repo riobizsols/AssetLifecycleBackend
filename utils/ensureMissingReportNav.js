@@ -1,27 +1,32 @@
+const { DEFAULT_JOB_ROLE_NAV } = require('../constants/setupDefaults');
 const { generateCustomIdForClient, syncJobRoleNavIdSequence } = require('./idGenerator');
 
-/** Later-added Reports screens that existing tenants often never received. */
-const MISSING_REPORT_NAV_ITEMS = [
-  { app_id: 'AUDITREPORT', label: 'Audit Reports' },
-];
+/** Reports group parent in DEFAULT_JOB_ROLE_NAV (JR001 template). */
+const REPORTS_PARENT_ID = 'JRN012';
+
+/**
+ * All report screens from the System Administrator template.
+ * Kept in sync with DEFAULT_JOB_ROLE_NAV so new tenants and catch-up inserts
+ * always include every merged report (SLA/Workforce/Maintenance Status/Audit/etc.).
+ */
+function getDefaultReportNavItems() {
+  return DEFAULT_JOB_ROLE_NAV
+    .filter((item) => item.parentId === REPORTS_PARENT_ID && item.appId && !item.isGroup)
+    .map((item) => ({
+      app_id: item.appId,
+      label: item.label,
+      sequence: item.sequence,
+    }));
+}
+
+/** @deprecated Prefer getDefaultReportNavItems(); kept for callers that import the constant. */
+const MISSING_REPORT_NAV_ITEMS = getDefaultReportNavItems();
 
 /** Any of these on a role means that role already has the Reports menu. */
-const EXISTING_REPORT_APP_IDS = [
-  'ASSETLIFECYCLEREPORT',
-  'ASSETREPORT',
-  'QAAUDITREPORT',
-  'SLAREPORT',
-  'MAINTENANCEHISTORY',
-  'ASSETVALUATION',
-  'ASSETWORKFLOWHISTORY',
-  'BREAKDOWNHISTORY',
-  'USAGEBASEDASSETREPORT',
-  'REOPENEDBREAKDOWNS',
-  'CONSOLIDATEDASSETREPORT',
-];
+const EXISTING_REPORT_APP_IDS = getDefaultReportNavItems().map((item) => item.app_id);
 
-async function ensureApps(client, orgId) {
-  for (const item of MISSING_REPORT_NAV_ITEMS) {
+async function ensureApps(client, orgId, items) {
+  for (const item of items) {
     await client.query(
       `
         INSERT INTO "tblApps" (app_id, text, int_status, org_id)
@@ -36,19 +41,25 @@ async function ensureApps(client, orgId) {
 }
 
 /**
- * Add Audit Reports to every job role that already has other report screens.
+ * Ensure every default report screen exists on each job role that already has Reports.
  * Uses the same parent as those screens so flattened or grouped menus both work.
- * Safe to call on login / navigation load.
+ * Safe to call on tenant create, login, and navigation load.
  */
 async function ensureMissingReportNav(client, orgId, logLabel = 'ReportNav') {
   if (!client?.query || !orgId) {
     return { inserted: 0, skipped: true };
   }
 
-  await client.query('SET search_path TO public');
-  await ensureApps(client, orgId);
+  const reportItems = getDefaultReportNavItems();
+  if (!reportItems.length) {
+    return { inserted: 0, skipped: true };
+  }
 
-  const missingIds = MISSING_REPORT_NAV_ITEMS.map((item) => item.app_id);
+  await client.query('SET search_path TO public');
+  await ensureApps(client, orgId, reportItems);
+
+  const existingAppIds = reportItems.map((item) => item.app_id);
+  const missingIds = existingAppIds;
   const gaps = await client.query(
     `
       WITH report_parents AS (
@@ -81,7 +92,7 @@ async function ensureMissingReportNav(client, orgId, logLabel = 'ReportNav') {
           AND COALESCE(n.int_status, 1) = 1
       )
     `,
-    [EXISTING_REPORT_APP_IDS, missingIds],
+    [existingAppIds, missingIds],
   );
 
   if (!gaps.rows.length) {
@@ -89,7 +100,7 @@ async function ensureMissingReportNav(client, orgId, logLabel = 'ReportNav') {
   }
 
   const labelByAppId = Object.fromEntries(
-    MISSING_REPORT_NAV_ITEMS.map((item) => [item.app_id, item.label]),
+    reportItems.map((item) => [item.app_id, item.label]),
   );
 
   let inserted = 0;
@@ -146,6 +157,8 @@ async function ensureMissingReportNav(client, orgId, logLabel = 'ReportNav') {
 }
 
 module.exports = {
+  REPORTS_PARENT_ID,
+  getDefaultReportNavItems,
   MISSING_REPORT_NAV_ITEMS,
   EXISTING_REPORT_APP_IDS,
   ensureMissingReportNav,

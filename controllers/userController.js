@@ -138,6 +138,10 @@ exports.updateUser = async (req, res) => {
         }
         res.json(updatedUser);
     } catch (error) {
+        if (error.code === 'EMAIL_MUST_BE_DOT_COM') {
+            return res.status(400).json({ error: error.message, code: error.code });
+        }
+        console.error('Failed to update user:', error);
         res.status(500).json({ error: "Failed to update user" });
     }
 };

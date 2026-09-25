@@ -13,6 +13,8 @@ const defaultPrefixesFromSetup = Object.fromEntries(
 const SEQUENCE_KEY_ALIASES = {
     job_role_nav: 'jobrolenav',
     job_role: 'jobrole',
+    audtp: 'audit_type',
+    audatm: 'audit_at_mapping',
 };
 
 function resolveSequenceKey(tableKey) {
@@ -41,6 +43,8 @@ const defaultPrefixes = {
     // Existing scrap details table (legacy, used by reports/UI)
     'asset_scrap_det': 'ASD',
     'etc': 'ETC',
+    'tcert': 'TCERT',
+    'tech_cert': 'TCERT',
     // Spare parts
     'sp_category': 'SPC',
     'sp_lot_det': 'SPLD',
@@ -75,6 +79,12 @@ const defaultPrefixes = {
     'audtp': 'AUDTP',
     'audit_at_mapping': 'AUDATM',
     'audatm': 'AUDATM',
+    'utility_h': 'UTIL',
+    'ut_consum_type': 'UTCTP',
+    'util_freq': 'uf',
+    'utility_d': 'utild',
+    'at_utility_map': 'ATUM',
+    'util_consumption': 'utcv',
 };
 
 /**
@@ -198,8 +208,20 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'wfscrap_d': 'tblWFScrap_D',
         'asset_scrap': 'tblAssetScrap',
         'scrap_asset_hist': 'tblScrapAssetHist',
+        'utility_h': 'tblUtility_H',
+        'ut_consum_type': 'tblUTConsumType',
+        'util_freq': 'tblUtilFreq',
+        'utility_d': 'tblUtility_D',
+        'at_utility_map': 'tblATUtilityMap',
+        'util_consumption': 'tblUtilConsumption',
+        'audit_type': 'tblAuditType',
+        'audtp': 'tblAuditType',
+        'audit_at_mapping': 'tblAuditATMapping',
+        'audatm': 'tblAuditATMapping',
         'asset_scrap_det': 'tblAssetScrapDet',
         'etc': 'tblEmpTechCert',
+        'tcert': 'tblTechCert',
+        'tech_cert': 'tblTechCert',
         'sp_category': 'tblSPCategory',
         'sp_brand': 'tblSPBrand',
         'sp_model': 'tblSPBMod',
@@ -276,8 +298,20 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'wfscrap_d': 'id',
         'asset_scrap': 'id',
         'scrap_asset_hist': 'scraphis_id',
+        'utility_h': 'util_id',
+        'ut_consum_type': 'utctp_id',
+        'util_freq': 'utfq_id',
+        'utility_d': 'utild_id',
+        'at_utility_map': 'atum_id',
+        'util_consumption': 'utcv_id',
+        'audit_type': 'audtp_id',
+        'audtp': 'audtp_id',
+        'audit_at_mapping': 'audatm_id',
+        'audatm': 'audatm_id',
         'asset_scrap_det': 'asd_id',
         'etc': 'etc_id',
+        'tcert': 'tc_id',
+        'tech_cert': 'tc_id',
         'sp_category': 'spc_id',
         'sp_brand': 'spb_id',
         'sp_model': 'spbm_id',
@@ -347,7 +381,7 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
                   SET last_number = GREATEST(
                     s.last_number,
                     COALESCE((
-                      SELECT MAX(CAST(SUBSTRING(t.${columnName} FROM $3) AS INTEGER))
+                      SELECT MAX(CAST(SUBSTR(t.${columnName}, $3) AS INTEGER))
                       FROM "${targetTable}" t
                       WHERE t.${columnName} ~ ('^' || $2 || '[0-9]+$')
                     ), 0)

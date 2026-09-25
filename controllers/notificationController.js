@@ -20,6 +20,9 @@ const {
 const {
   getSpareIssuedNotificationsByUser,
 } = require('../models/sparePartsModel');
+const {
+  getConsumptionMissNotificationsByUser,
+} = require('../models/utilityModel');
 const scrapMaintenanceModel = require('../models/scrapMaintenanceModel');
 
 // Get all maintenance notifications for an organization
@@ -139,6 +142,18 @@ const getUserNotifications = async (req, res) => {
     } catch (spareErr) {
       console.warn(
         `🐛 [getUserNotifications] Spare issued notifications skipped: ${spareErr.message}`
+      );
+    }
+    let consumptionMissNotifications = [];
+    try {
+      consumptionMissNotifications = await getConsumptionMissNotificationsByUser({
+        empIntId: userId,
+        orgId,
+        branchId,
+      });
+    } catch (missErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Consumption miss notifications skipped: ${missErr.message}`
       );
     }
     
@@ -341,6 +356,46 @@ const getUserNotifications = async (req, res) => {
       }
     );
 
+    const formattedConsumptionMissNotifications = (consumptionMissNotifications || []).map(
+      (notification) => ({
+        id: notification.id,
+        wfamshId: null,
+        workflowId: notification.workflowId,
+        workflowType: 'CONSUMPTION_MISS',
+        route: notification.route || '/utilities/consumption',
+        userId: userId,
+        userName: notification.userName || null,
+        userEmail: null,
+        status: 'NEW',
+        dueDate: notification.dueDate,
+        cutoffDate: notification.cutoffDate,
+        daysUntilCutoff: notification.daysUntilCutoff ?? 0,
+        isUrgent: true,
+        isOverdue: true,
+        maintenanceType: 'Consumption Miss Alert',
+        assetId: notification.assetId,
+        assetTypeName: notification.assetTypeName,
+        categoryName: notification.categoryName,
+        maintenanceId: notification.maintenanceId || notification.utildId,
+        quantityIssued: null,
+        isGroupMaintenance: false,
+        groupId: null,
+        groupName: null,
+        groupAssetCount: null,
+        title: notification.title || 'Consumption Miss Alert',
+        body: notification.body,
+        statusLabel: notification.statusLabel || 'Missed',
+        notifyId: null,
+        notificationStatus: 'NEW',
+        utildId: notification.utildId,
+        utilId: notification.utilId,
+        utilityName: notification.utilityName,
+        utilitySh: notification.utilitySh,
+        frequencyLabel: notification.frequencyLabel,
+        lastConsumptionDate: notification.lastConsumptionDate,
+      }),
+    );
+
     console.log('🐛 [getUserNotifications] Formatted notifications count:', formattedNotifications.length);
     console.log('🐛 [getUserNotifications] First 3 formatted notifications:', formattedNotifications.slice(0, 3));
 
@@ -352,12 +407,14 @@ const getUserNotifications = async (req, res) => {
         ...formattedWarrantyNotifications,
         ...formattedExpiryNotifications,
         ...formattedSpareIssuedNotifications,
+        ...formattedConsumptionMissNotifications,
       ],
       count:
         formattedNotifications.length +
         formattedWarrantyNotifications.length +
         formattedExpiryNotifications.length +
-        formattedSpareIssuedNotifications.length,
+        formattedSpareIssuedNotifications.length +
+        formattedConsumptionMissNotifications.length,
       userId: userId,
       timestamp: new Date().toISOString()
     });

@@ -146,11 +146,35 @@ async function ensureAuditTablesSchema(dbPool) {
     INSERT INTO "tblIDSequences" (table_key, prefix, last_number)
     VALUES
       ('audit_type', 'AUDTP', 0),
-      ('audtp', 'AUDTP', 0),
-      ('audit_at_mapping', 'AUDATM', 0),
-      ('audatm', 'AUDATM', 0)
+      ('audit_at_mapping', 'AUDATM', 0)
     ON CONFLICT (table_key) DO UPDATE
     SET prefix = EXCLUDED.prefix
+  `);
+
+  // Keep sequences ahead of any seeded / manually inserted IDs
+  await dbPool.query(`
+    UPDATE "tblIDSequences" AS s
+    SET last_number = GREATEST(
+      s.last_number,
+      COALESCE((
+        SELECT MAX(CAST(SUBSTRING(t.audtp_id FROM 6) AS INTEGER))
+        FROM "tblAuditType" t
+        WHERE t.audtp_id ~ '^AUDTP[0-9]+$'
+      ), 0)
+    )
+    WHERE s.table_key = 'audit_type'
+  `);
+  await dbPool.query(`
+    UPDATE "tblIDSequences" AS s
+    SET last_number = GREATEST(
+      s.last_number,
+      COALESCE((
+        SELECT MAX(CAST(SUBSTRING(t.audatm_id FROM 7) AS INTEGER))
+        FROM "tblAuditATMapping" t
+        WHERE t.audatm_id ~ '^AUDATM[0-9]+$'
+      ), 0)
+    )
+    WHERE s.table_key = 'audit_at_mapping'
   `);
 
   // Soft CHECK for ID shape (skip if legacy bad rows somehow present)

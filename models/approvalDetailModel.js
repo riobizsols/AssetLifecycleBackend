@@ -82,6 +82,34 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
       return { success: false, message: 'Workflow header not found' };
     }
 
+    // Keep linked maintenance schedules in sync for in-house technicians
+    if (technicianId !== null && technicianId !== undefined && String(technicianId).trim() !== '') {
+      const tech = await resolveTechnicianFromEmp(technicianId, getDb());
+      await getDb().query(
+        `
+          UPDATE "tblAssetMaintSch" ams
+          SET
+            emp_int_id = $1,
+            technician_name = COALESCE(NULLIF(BTRIM($2), ''), technician_name),
+            technician_email = COALESCE(NULLIF(BTRIM($3), ''), technician_email),
+            technician_phno = COALESCE(NULLIF(BTRIM($4), ''), technician_phno),
+            changed_by = $5,
+            changed_on = NOW()::timestamp without time zone
+          WHERE ams.wfamsh_id = $6
+            AND ams.org_id = $7
+        `,
+        [
+          technicianId,
+          tech.technician_name,
+          tech.technician_email,
+          tech.technician_phno,
+          userId ? userId.substring(0, 20) : 'system',
+          wfamshId,
+          orgId,
+        ],
+      );
+    }
+
     // Keep asset master in sync: if vendor is changed at workflow level,
     // update the specific asset's service vendor immediately.
     if (vendorId !== null && vendorId !== undefined) {
@@ -590,6 +618,29 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
                changed_on = NOW()::timestamp without time zone
            WHERE wfamsh_id = $3 AND org_id = $4`,
           [technicianId, userId.substring(0, 20), currentUserStep.wfamsh_id, orgId],
+        );
+        const tech = await resolveTechnicianFromEmp(technicianId, getDb());
+        await getDb().query(
+          `
+            UPDATE "tblAssetMaintSch"
+            SET
+              emp_int_id = $1,
+              technician_name = COALESCE(NULLIF(BTRIM($2), ''), technician_name),
+              technician_email = COALESCE(NULLIF(BTRIM($3), ''), technician_email),
+              technician_phno = COALESCE(NULLIF(BTRIM($4), ''), technician_phno),
+              changed_by = $5,
+              changed_on = NOW()::timestamp without time zone
+            WHERE wfamsh_id = $6 AND org_id = $7
+          `,
+          [
+            technicianId,
+            tech.technician_name,
+            tech.technician_email,
+            tech.technician_phno,
+            userId.substring(0, 20),
+            currentUserStep.wfamsh_id,
+            orgId,
+          ],
         );
       }
 

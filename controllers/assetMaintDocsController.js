@@ -1,15 +1,13 @@
-const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/minioClient');
 const {
-  resolveObjectKey,
-  formatStoredPath,
-  parseAssetMaintenanceActiveKey,
-  buildAssetMaintenanceActiveKey,
-  buildAssetMaintenanceArchivedKey,
-} = require('../utils/minioDocPath');
+  uploadBuffer,
+  resolveLocalPath,
+} = require('../utils/documentStorage');
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const { generateCustomId } = require('../utils/idGenerator');
+const { runWithDb, tryGetDb } = require('../utils/dbContext');
 const { 
   insertAssetMaintDoc, 
   listAssetMaintDocs, 
@@ -24,18 +22,56 @@ const {
   deleteAssetMaintDoc
 } = require('../models/assetMaintDocsModel');
 
+const { MINIO_BUCKET } = require('../utils/minioClient');
+const {
+  resolveObjectKey,
+  formatStoredPath,
+  parseAssetMaintenanceActiveKey,
+  buildAssetMaintenanceActiveKey,
+  buildAssetMaintenanceArchivedKey,
+} = require('../utils/minioDocPath');
+const { minioClient } = require('../utils/minioClient');
+
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+/** Multer can break AsyncLocalStorage; re-bind tenant pool from req before handlers run. */
+function withTenantDb(req, res, next) {
+  if (tryGetDb()) return next();
+  const pool = req.db || req.tenantPool;
+  if (!pool) {
+    return res.status(503).json({
+      message: 'Tenant database context is required',
+      error: 'TENANT_DB_CONTEXT_REQUIRED',
+    });
+  }
+  return runWithDb(pool, () => next());
+}
+
+function getRequestOrgId(req) {
+  try {
+    const { getEffectiveListContext } = require('../utils/acmAccess');
+    const context = getEffectiveListContext(req);
+    return context.orgId || req.user?.org_id || null;
+  } catch {
+    return req.user?.org_id || null;
+  }
+}
+
 // Upload document for asset maintenance
 const uploadAssetMaintDoc = [
-  upload.single('file'),
+  (req, res, next) => {
+    upload.single('file')(req, res, (err) => {
+      if (err) return next(err);
+      return withTenantDb(req, res, next);
+    });
+  },
   async (req, res) => {
     try {
       const body = req.body || {};
       const asset_id = body.asset_id || req.params.asset_id;
       const { dto_id, doc_type_name } = body;
-      const org_id = req.user.org_id;
+      const org_id = getRequestOrgId(req);
 
       if (!req.file) {
         return res.status(400).json({ message: 'File is required' });
@@ -51,17 +87,20 @@ const uploadAssetMaintDoc = [
         return res.status(404).json({ message: 'Asset not found' });
       }
 
-      await ensureBucketExists(MINIO_BUCKET);
-
       const ext = path.extname(req.file.originalname);
       const hash = crypto.randomBytes(8).toString('hex');
       const objectName = `${org_id}/asset-maintenance/${asset_id}/${Date.now()}_${hash}${ext}`;
 
-      await minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
-        'Content-Type': req.file.mimetype
+      const doc_path = await uploadBuffer({
+        buffer: req.file.buffer,
+        objectName,
+        contentType: req.file.mimetype || 'application/octet-stream',
+        bucket: MINIO_BUCKET,
       });
 
-      const doc_path = `${MINIO_BUCKET}/${objectName}`;
+      if (!doc_path) {
+        return res.status(500).json({ message: 'Upload failed', error: 'Storage returned empty path' });
+      }
 
       // Generate unique document ID
       const amd_id = await generateCustomId('asset_maint_doc', 3);
@@ -161,25 +200,85 @@ const getDownloadUrl = async (req, res) => {
 
     const doc = result.rows[0];
     const storedPath = doc.is_archived && doc.archived_path ? doc.archived_path : doc.doc_path;
-    const [bucket, ...keyParts] = storedPath.split('/');
-    const objectName = keyParts.join('/');
-
-    const respHeaders = {};
-    if (mode === 'download') {
-      respHeaders['response-content-disposition'] = `attachment; filename="${path.basename(objectName)}"`;
-    } else if (mode === 'view') {
-      respHeaders['response-content-disposition'] = 'inline';
+    if (!storedPath) {
+      return res.status(404).json({ message: 'Document path not found' });
     }
 
-    const url = await minioClient.presignedGetObject(bucket, objectName, 60 * 60, respHeaders);
-    return res.json({ 
-      message: 'URL generated successfully',
-      url,
-      document: doc
+    // Always proxy through API so browsers never hit Docker-only MinIO DNS (mansoor-minio).
+    return res.json({
+      message: 'Proxy file ready',
+      local: true,
+      proxy: true,
+      url: `/api/asset-maint-docs/${encodeURIComponent(amd_id)}/file?mode=${mode}`,
+      document: doc,
     });
   } catch (err) {
     console.error('Failed to get download url', err);
     return res.status(500).json({ message: 'Failed to get download url', error: err.message });
+  }
+};
+
+// Stream document file with auth — works for local fallback and MinIO (avoids browser DNS to mansoor-minio)
+const streamAssetMaintDocFile = async (req, res) => {
+  try {
+    const { amd_id } = req.params;
+    const mode = (req.query && req.query.mode) ? String(req.query.mode).toLowerCase() : 'view';
+    const result = await getAssetMaintDocById(amd_id);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const doc = result.rows[0];
+    const storedPath = doc.is_archived && doc.archived_path ? doc.archived_path : doc.doc_path;
+    if (!storedPath) {
+      return res.status(404).json({ message: 'Document path not found' });
+    }
+
+    const filename = path.basename(String(storedPath).split('?')[0]) || 'document';
+    const ext = path.extname(filename).toLowerCase();
+    const mimeByExt = {
+      '.pdf': 'application/pdf',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.webp': 'image/webp',
+      '.txt': 'text/plain',
+    };
+    if (mimeByExt[ext]) {
+      res.setHeader('Content-Type', mimeByExt[ext]);
+    }
+    if (mode === 'download') {
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    } else {
+      res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
+    }
+
+    const localPath = resolveLocalPath(storedPath);
+    if (localPath) {
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({ message: 'Local document file not found' });
+      }
+      if (mode === 'download') {
+        return res.download(localPath, filename);
+      }
+      return res.sendFile(path.resolve(localPath));
+    }
+
+    const { getObjectStream } = require('../utils/documentStorage');
+    const stream = await getObjectStream(storedPath);
+    stream.on('error', (err) => {
+      console.error('Document stream error:', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Failed to stream document', error: err.message });
+      } else {
+        res.end();
+      }
+    });
+    return stream.pipe(res);
+  } catch (err) {
+    console.error('Failed to stream document file', err);
+    return res.status(500).json({ message: 'Failed to stream document', error: err.message });
   }
 };
 
@@ -335,9 +434,10 @@ module.exports = {
   uploadAssetMaintDoc, 
   listDocsByAsset,
   listDocsByWorkOrder,
-  getDownloadUrl, 
-  archiveDoc, 
-  deleteDoc, 
+  getDownloadUrl,
+  streamAssetMaintDocFile,
+  archiveDoc,
+  deleteDoc,
   getDocById,
   updateDocArchiveStatus
 };

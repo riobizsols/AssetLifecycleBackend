@@ -1724,6 +1724,7 @@ async function seedTenantDefaultData(client, orgId, adminUserId, adminEmployeeId
     console.log('[TenantSetup] Ensuring default screen apps + JR001 navigation template...');
     await ensureDefaultScreenApps(client, orgId, 'TenantSetup');
     await seedDefaultJobRoleNav(client, orgId, 'TenantSetup');
+    await ensureMissingReportNav(client, orgId, 'TenantSetup');
 
     console.log('[TenantSetup] Verifying required master data from hospitality...');
     await seedRequiredMasterData(client, { orgId });

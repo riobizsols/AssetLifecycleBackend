@@ -5,6 +5,7 @@ const {
     SYSTEM_ADMIN_JOB_ROLE_ID,
 } = require('../utils/systemAdmin');
 const { ensureMissingReportNav } = require('../utils/ensureMissingReportNav');
+const { ensureUtilityNav } = require('../utils/ensureUtilityNav');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -214,6 +215,11 @@ const getUserNavigation = async (user_id, platform = 'D') => {
             const orgId = orgRes.rows[0]?.org_id;
             if (orgId) {
                 await ensureMissingReportNav(dbPool, orgId, 'JobRoleNav');
+                try {
+                    await ensureUtilityNav(dbPool, orgId, 'JobRoleNav');
+                } catch (utilityNavErr) {
+                    console.warn(`[JobRoleNavModel] Utility nav ensure failed: ${utilityNavErr.message}`);
+                }
             }
         } catch (reportNavErr) {
             console.warn(`[JobRoleNavModel] Missing report nav ensure failed: ${reportNavErr.message}`);
