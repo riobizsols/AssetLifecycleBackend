@@ -46,6 +46,13 @@ const {
   updateSparePartMaster,
   getPropertyListValues,
 } = require('../controllers/sparePartsController');
+const {
+  getSummary: getSparePartManagementSummary,
+  getSlowNonMoving,
+  getConsumption: getSparePartConsumption,
+  getEquipmentWise,
+  getHoldDuration,
+} = require('../controllers/sparePartManagementController');
 
 router.use(protect);
 
@@ -101,5 +108,11 @@ router.get('/issue-approvals/:si_id', getIssueApprovalDetail);
 router.post('/issue-approvals/:si_id/approve', approveIssue);
 router.post('/maintenance-list/:ams_id/issue', confirmIssue);
 router.get('/available-quantity/:spc_id', getAvailableQty);
+
+router.get('/management/summary', getSparePartManagementSummary);
+router.get('/management/slow-non-moving', getSlowNonMoving);
+router.get('/management/consumption', getSparePartConsumption);
+router.get('/management/equipment-wise', getEquipmentWise);
+router.get('/management/hold-duration', getHoldDuration);
 
 module.exports = router;

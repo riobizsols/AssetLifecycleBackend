@@ -2,7 +2,15 @@ const { minioClient, ensureBucketExists, MINIO_BUCKET } = require('../utils/mini
 const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const { generateCustomId } = require('../utils/idGenerator');
+const {
+  uploadBuffer,
+  getPresignedDownloadUrl,
+  getObjectStream,
+  resolveLocalPath,
+  LOCAL_PREFIX,
+} = require('../utils/documentStorage');
 const { 
   insertVendorDoc, 
   listVendorDocs, 
@@ -41,17 +49,15 @@ const uploadVendorDoc = [
         return res.status(404).json({ message: 'Vendor not found' });
       }
 
-      await ensureBucketExists(MINIO_BUCKET);
-
       const ext = path.extname(req.file.originalname);
       const hash = crypto.randomBytes(8).toString('hex');
       const objectName = `${org_id}/vendors/${vendor_id}/${Date.now()}_${hash}${ext}`;
 
-      await minioClient.putObject(MINIO_BUCKET, objectName, req.file.buffer, {
-        'Content-Type': req.file.mimetype
+      const doc_path = await uploadBuffer({
+        buffer: req.file.buffer,
+        objectName,
+        contentType: req.file.mimetype,
       });
-
-      const doc_path = `${MINIO_BUCKET}/${objectName}`;
 
       // Generate unique document ID
       const vd_id = await generateCustomId('vendor_doc', 3);
@@ -119,25 +125,96 @@ const getDownloadUrl = async (req, res) => {
     }
 
     const doc = result.rows[0];
-    const [bucket, ...keyParts] = doc.doc_path.split('/');
-    const objectName = keyParts.join('/');
+    const fileName = path.basename(doc.doc_path || 'document');
+
+    if (doc.doc_path?.startsWith(`${LOCAL_PREFIX}/`) || resolveLocalPath(doc.doc_path)) {
+      return res.json({
+        message: 'Stream via API',
+        stream: true,
+        fileName,
+        path: `/vendor-docs/${vd_id}/file?mode=${mode}`,
+        document: doc,
+      });
+    }
 
     const respHeaders = {};
     if (mode === 'download') {
-      respHeaders['response-content-disposition'] = `attachment; filename="${path.basename(objectName)}"`;
+      respHeaders['response-content-disposition'] = `attachment; filename="${fileName}"`;
     } else if (mode === 'view') {
       respHeaders['response-content-disposition'] = 'inline';
     }
 
-    const url = await minioClient.presignedGetObject(bucket, objectName, 60 * 60, respHeaders);
-    return res.json({ 
-      message: 'URL generated successfully',
-      url,
-      document: doc
+    try {
+      const url = await getPresignedDownloadUrl(doc.doc_path, 60 * 60, respHeaders);
+      if (url) {
+        return res.json({
+          message: 'URL generated successfully',
+          url,
+          fileName,
+          document: doc,
+        });
+      }
+    } catch (presignErr) {
+      console.warn('[VendorDocs] Presign failed, using API stream:', presignErr.message);
+    }
+
+    return res.json({
+      message: 'Stream via API',
+      stream: true,
+      fileName,
+      path: `/vendor-docs/${vd_id}/file?mode=${mode}`,
+      document: doc,
     });
   } catch (err) {
     console.error('Failed to get download url', err);
     return res.status(500).json({ message: 'Failed to get download url', error: err.message });
+  }
+};
+
+const streamVendorDocFile = async (req, res) => {
+  try {
+    const { vd_id } = req.params;
+    const mode = (req.query && req.query.mode) ? String(req.query.mode).toLowerCase() : 'view';
+    const result = await getVendorDocById(vd_id);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: 'Document not found' });
+    }
+
+    const doc = result.rows[0];
+    if (!doc.doc_path) return res.status(404).json({ message: 'No file path' });
+
+    const fileName = path.basename(doc.doc_path);
+    const disposition =
+      mode === 'download'
+        ? `attachment; filename="${fileName}"`
+        : 'inline';
+
+    const localPath = resolveLocalPath(doc.doc_path);
+    if (localPath) {
+      if (!fs.existsSync(localPath)) {
+        return res.status(404).json({ message: 'Document file is missing in storage' });
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', disposition);
+      return res.sendFile(localPath);
+    }
+
+    const stream = await getObjectStream(doc.doc_path);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', disposition);
+    stream.on('error', (streamErr) => {
+      console.error('[VendorDocs] Stream error:', streamErr);
+      if (!res.headersSent) {
+        res.status(500).json({ message: 'Failed to stream document', error: streamErr.message });
+      }
+    });
+    return stream.pipe(res);
+  } catch (err) {
+    console.error('[VendorDocs] streamVendorDocFile:', err);
+    return res.status(500).json({
+      message: 'Failed to stream document',
+      error: err.message,
+    });
   }
 };
 
@@ -300,7 +377,8 @@ const updateDocArchiveStatus = async (req, res) => {
 module.exports = { 
   uploadVendorDoc, 
   listDocs, 
-  getDownloadUrl, 
+  getDownloadUrl,
+  streamVendorDocFile,
   archiveDoc, 
   deleteDoc, 
   getDocById,
