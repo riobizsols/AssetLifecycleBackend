@@ -1,8 +1,8 @@
 /**
- * Ensure SPAREPARTMGMT app + nav under Spare Parts for existing tenants.
+ * Ensure SPAREPARTMGMT app + nav under Reports for existing tenants.
  * Usage: node scripts/seedSparePartManagementNav.js
  *
- * Schema mirrors seedSparePartsTopLevelGroup.js (job_role_nav_id, label, …).
+ * Moves/renames the item to "Spare part consumption report" under Reports.
  */
 require('dotenv').config();
 const { Pool } = require('pg');
@@ -13,7 +13,8 @@ const p = new Pool({
 });
 
 const APP_ID = 'SPAREPARTMGMT';
-const APP_LABEL = 'Spare Part Report';
+const APP_LABEL = 'Spare part consumption report';
+const REPORTS_LABEL = 'Reports';
 
 (async () => {
   const client = await p.connect();
@@ -39,87 +40,115 @@ const APP_LABEL = 'Spare Part Report';
       `
         SELECT DISTINCT job_role_id, org_id, access_level, mob_desk
         FROM "tblJobRoleNav"
-        WHERE int_status = 1
-          AND app_id = ANY($1::text[])
+        WHERE org_id IS NOT NULL
+          AND (
+            app_id = $1
+            OR LOWER(BTRIM(COALESCE(label, ''))) = 'reports'
+          )
       `,
-      [['SPAREPARTS', 'SPAREPARTLIST', 'SPAREPARTAPPROVAL', 'SPAREPARTISSUE']],
+      [APP_ID],
     );
 
-    let navCounter = 1;
-    const nextNavId = async () => {
-      for (;;) {
-        const id = `SPM${String(navCounter).padStart(4, '0')}`;
-        navCounter += 1;
-        const exists = await client.query(
-          `SELECT 1 FROM "tblJobRoleNav" WHERE job_role_nav_id = $1 LIMIT 1`,
-          [id],
-        );
-        if (!exists.rows.length) return id;
-      }
-    };
-
-    let inserted = 0;
+    let moved = 0;
     for (const role of roles.rows) {
-      const group = await client.query(
+      const { job_role_id, org_id, access_level, mob_desk } = role;
+
+      const reportsGroup = await client.query(
         `
           SELECT job_role_nav_id
           FROM "tblJobRoleNav"
-          WHERE job_role_id = $1
-            AND int_status = 1
+          WHERE org_id = $1
+            AND job_role_id = $2
             AND is_group = true
-            AND parent_id IS NULL
-            AND (
-              LOWER(TRIM(label)) = 'spare parts'
-              OR app_id = 'SPAREPARTSGROUP'
-            )
-          ORDER BY sequence
+            AND LOWER(BTRIM(COALESCE(label, ''))) = LOWER($3)
+          ORDER BY sequence ASC NULLS LAST
           LIMIT 1
         `,
-        [role.job_role_id],
+        [org_id, job_role_id, REPORTS_LABEL],
       );
-      const groupId = group.rows[0]?.job_role_nav_id;
-      if (!groupId) continue;
+      if (!reportsGroup.rowCount) continue;
+      const parentId = reportsGroup.rows[0].job_role_nav_id;
 
-      const exists = await client.query(
+      const existing = await client.query(
         `
-          SELECT 1 FROM "tblJobRoleNav"
-          WHERE job_role_id = $1
-            AND app_id = $2
-            AND int_status = 1
+          SELECT job_role_nav_id, parent_id
+          FROM "tblJobRoleNav"
+          WHERE org_id = $1
+            AND job_role_id = $2
+            AND app_id = $3
           LIMIT 1
         `,
-        [role.job_role_id, APP_ID],
+        [org_id, job_role_id, APP_ID],
       );
-      if (exists.rowCount) continue;
 
-      const navId = await nextNavId();
+      if (existing.rowCount) {
+        await client.query(
+          `
+            UPDATE "tblJobRoleNav"
+            SET parent_id = $1,
+                label = $2,
+                int_status = 1
+            WHERE job_role_nav_id = $3
+              AND org_id = $4
+          `,
+          [parentId, APP_LABEL, existing.rows[0].job_role_nav_id, org_id],
+        );
+        moved += 1;
+        continue;
+      }
+
+      const seqRes = await client.query(
+        `
+          SELECT COALESCE(MAX(sequence), 0) + 1 AS next_seq
+          FROM "tblJobRoleNav"
+          WHERE org_id = $1
+            AND job_role_id = $2
+            AND parent_id = $3
+        `,
+        [org_id, job_role_id, parentId],
+      );
+      const sequence = seqRes.rows[0].next_seq || 17;
+
+      const idRes = await client.query(
+        `
+          SELECT CONCAT('JRN', LPAD((COALESCE(MAX(
+            CASE WHEN job_role_nav_id ~ '^JRN[0-9]+$'
+              THEN NULLIF(REGEXP_REPLACE(job_role_nav_id, '\\D', '', 'g'), '')::int
+              ELSE NULL END
+          ), 0) + 1)::text, 3, '0')) AS next_id
+          FROM "tblJobRoleNav"
+          WHERE org_id = $1
+        `,
+        [org_id],
+      );
+      const navId = idRes.rows[0].next_id;
+
       await client.query(
         `
           INSERT INTO "tblJobRoleNav" (
-            job_role_nav_id, org_id, int_status, job_role_id, parent_id,
-            app_id, label, sub_menu, sequence, access_level, is_group, mob_desk
-          ) VALUES (
-            $1, $2, 1, $3, $4,
-            $5, $6, NULL, 2, $7, false, $8
-          )
+            job_role_nav_id, job_role_id, parent_id, app_id, label,
+            sequence, access_level, is_group, org_id, mob_desk, int_status
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, $8, $9, 1)
         `,
         [
           navId,
-          role.org_id,
-          role.job_role_id,
-          groupId,
+          job_role_id,
+          parentId,
           APP_ID,
           APP_LABEL,
-          role.access_level || 'A',
-          role.mob_desk || 'D',
+          sequence,
+          access_level || 'A',
+          org_id,
+          mob_desk || 'D',
         ],
       );
-      inserted += 1;
-      console.log(`Inserted ${APP_ID} for ${role.job_role_id}: ${navId}`);
+      moved += 1;
     }
 
     await client.query('COMMIT');
-    console.log(`Done. Roles scanned: ${roles.rowCount}, nav rows inserted: ${inserted}`);
+    console.log(
+      `Done. SPAREPARTMGMT under Reports as "${APP_LABEL}". Roles updated: ${moved}`,
+    );
   } catch (err) {
     await client.query('ROLLBACK');
     console.error(err);

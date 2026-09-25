@@ -15,9 +15,9 @@ const p = new Pool({
 
 const CHILD_APPS = [
   { app_id: 'SPAREPARTS', label: 'Spare Part Lot', sequence: 1 },
-  { app_id: 'SPAREPARTMGMT', label: 'Spare Part Report', sequence: 2 },
-  { app_id: 'SPAREPARTLIST', label: 'Spare Part List', sequence: 3 },
-  { app_id: 'SPAREPARTAPPROVAL', label: 'Spare Part Approval', sequence: 4 },
+  { app_id: 'SPAREPARTLIST', label: 'Spare Part List', sequence: 2 },
+  { app_id: 'SPAREPARTAPPROVAL', label: 'Spare Part Approval', sequence: 3 },
+  { app_id: 'SPAREPARTISSUE', label: 'Spare Part Issue', sequence: 4 },
 ];
 
 (async () => {

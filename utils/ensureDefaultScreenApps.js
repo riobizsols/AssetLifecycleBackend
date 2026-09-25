@@ -10,7 +10,7 @@ const REQUIRED_SPARE_AND_ORG_APPS = [
   { id: 'SPAREPARTLIST', label: 'Spare Part List' },
   { id: 'SPAREPARTISSUE', label: 'Spare Part Issue' },
   { id: 'SPAREPARTAPPROVAL', label: 'Spare Part Approval' },
-  { id: 'SPAREPARTMGMT', label: 'Spare Part Report' },
+  { id: 'SPAREPARTMGMT', label: 'Spare part consumption report' },
 ];
 
 function buildRequiredScreenApps() {

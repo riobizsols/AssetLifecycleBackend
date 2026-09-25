@@ -589,7 +589,7 @@ const DEFAULT_APPS = [
   { id: "SPAREPARTLIST", label: "Spare Part List" },
   { id: "SPAREPARTISSUE", label: "Spare Part Issue" },
   { id: "SPAREPARTAPPROVAL", label: "Spare Part Approval" },
-  { id: "SPAREPARTMGMT", label: "Spare Part Report" }
+  { id: "SPAREPARTMGMT", label: "Spare part consumption report" }
 ];
 
 const DEFAULT_AUDIT_EVENTS = [
@@ -787,10 +787,9 @@ const DEFAULT_JOB_ROLE_NAV = [
   // Spare parts (from main) — use JRN014A–G so they do not collide with tenant JRN014=DEPARTMENTS
   { id: "JRN014A", jobRoleId: "JR001", parentId: null, appId: null, label: "Spare Parts", sequence: 4, accessLevel: "A", isGroup: true },
   { id: "JRN014B", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTS", label: "Spare Part Lot", sequence: 1, accessLevel: "A", isGroup: false },
-  { id: "JRN014H", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTMGMT", label: "Spare Part Report", sequence: 2, accessLevel: "A", isGroup: false },
-  { id: "JRN014D", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTLIST", label: "Spare Part List", sequence: 3, accessLevel: "A", isGroup: false },
-  { id: "JRN014E", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTAPPROVAL", label: "Spare Part Approval", sequence: 4, accessLevel: "A", isGroup: false },
-  { id: "JRN014F", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTISSUE", label: "Spare Part Issue", sequence: 5, accessLevel: "A", isGroup: false },
+  { id: "JRN014D", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTLIST", label: "Spare Part List", sequence: 2, accessLevel: "A", isGroup: false },
+  { id: "JRN014E", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTAPPROVAL", label: "Spare Part Approval", sequence: 3, accessLevel: "A", isGroup: false },
+  { id: "JRN014F", jobRoleId: "JR001", parentId: "JRN014A", appId: "SPAREPARTISSUE", label: "Spare Part Issue", sequence: 4, accessLevel: "A", isGroup: false },
 
   { id: "JRN040", jobRoleId: "JR001", parentId: null, appId: null, label: "Maintenance", sequence: 5, accessLevel: "A", isGroup: true },
   { id: "JRN006", jobRoleId: "JR001", parentId: "JRN040", appId: "SUPERVISORAPPROVAL", label: "Maintenance List", sequence: 1, accessLevel: "A", isGroup: false },
@@ -821,6 +820,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN066", jobRoleId: "JR001", parentId: "JRN012", appId: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report", sequence: 14, accessLevel: "A", isGroup: false },
   { id: "JRN068", jobRoleId: "JR001", parentId: "JRN012", appId: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase", sequence: 15, accessLevel: "A", isGroup: false },
   { id: "JRN069", jobRoleId: "JR001", parentId: "JRN012", appId: "SPAREPARTSREPORT", label: "Spare Parts Report", sequence: 16, accessLevel: "A", isGroup: false },
+  { id: "JRN014H", jobRoleId: "JR001", parentId: "JRN012", appId: "SPAREPARTMGMT", label: "Spare part consumption report", sequence: 17, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
