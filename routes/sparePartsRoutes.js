@@ -55,8 +55,8 @@ const {
   getHoldDuration,
 } = require('../controllers/sparePartManagementController');
 const {
-  getFilterOptions: getSparePartsReportFilterOptions,
-  getReport: getSparePartsReport,
+  getSparePartsReportFilterOptions,
+  getSparePartsReport,
 } = require('../controllers/sparePartsReportController');
 
 router.use(protect);
