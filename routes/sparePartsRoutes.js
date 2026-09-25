@@ -53,10 +53,6 @@ const {
   getEquipmentWise,
   getHoldDuration,
 } = require('../controllers/sparePartManagementController');
-const {
-  getFilterOptions: getSparePartsReportFilterOptions,
-  getReport: getSparePartsReport,
-} = require('../controllers/sparePartsReportController');
 
 router.use(protect);
 
@@ -118,8 +114,5 @@ router.get('/management/slow-non-moving', getSlowNonMoving);
 router.get('/management/consumption', getSparePartConsumption);
 router.get('/management/equipment-wise', getEquipmentWise);
 router.get('/management/hold-duration', getHoldDuration);
-
-router.get('/report/filter-options', getSparePartsReportFilterOptions);
-router.get('/report', getSparePartsReport);
 
 module.exports = router;
