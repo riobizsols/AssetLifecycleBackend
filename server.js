@@ -83,6 +83,7 @@ const outOfStockReportRoutes = require("./routes/outOfStockReportRoutes");
 const purchaseRequirementReportRoutes = require("./routes/purchaseRequirementReportRoutes");
 const utilityRoutes = require("./routes/utilityRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
+const sparePartsReportRoutes = require("./routes/sparePartsReportRoutes");
 const techCertRoutes = require("./routes/techCertRoutes");
 const employeeTechCertRoutes = require("./routes/employeeTechCertRoutes");
 const inspectionChecklistRoutes = require("./routes/inspectionChecklistRoutes");
@@ -277,6 +278,7 @@ app.use("/api/out-of-stock-report", outOfStockReportRoutes);
 app.use("/api/purchase-requirement-report", purchaseRequirementReportRoutes);
 app.use("/api/utilities", utilityRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
+app.use("/api/spare-parts-report", sparePartsReportRoutes);
 
 app.use("/api/inspection-checklists", inspectionChecklistRoutes);
 app.use("/api/inspection-frequencies", inspectionFrequencyRoutes);

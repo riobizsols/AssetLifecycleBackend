@@ -50,7 +50,8 @@ const REPORT_CHILDREN = [
   { app_id: 'QAAUDITREPORT', label: 'QA Audit Report', sequence: 8 },
   { app_id: 'USAGEBASEDASSETREPORT', label: 'Usage Based Asset Report', sequence: 9 },
   { app_id: 'REOPENEDBREAKDOWNS', label: 'Reopened Breakdowns', sequence: 10 },
-  { app_id: 'MAINTENANCESTATUSREPORT', label: 'Maintenance Status Report', sequence: 11 },
+  { app_id: 'MAINTENANCESTATUSREPORT', label: 'Facility Maintenance Report', sequence: 11 },
+  { app_id: 'SPAREPARTSREPORT', label: 'Spare Parts Report', sequence: 12 },
 ];
 
 async function nextNavId(client) {
