@@ -16,6 +16,16 @@ async function hasVendorRenewalTable(db) {
   return Boolean(rows[0]?.t);
 }
 
+async function ensureAssetCoverageColumns(db) {
+  await db.query(`
+    ALTER TABLE "tblAssets"
+      ADD COLUMN IF NOT EXISTS amc_start_date DATE,
+      ADD COLUMN IF NOT EXISTS amc_end_date DATE,
+      ADD COLUMN IF NOT EXISTS cmc_start_date DATE,
+      ADD COLUMN IF NOT EXISTS cmc_end_date DATE
+  `);
+}
+
 function toDateOnly(value) {
   if (!value) return null;
   const d = value instanceof Date ? value : new Date(value);
@@ -45,8 +55,8 @@ function formatRow(row) {
 
 /**
  * Warranty: tblAssets.warranty_period.
- * AMC: vendor contract_end_date, one row per covered asset (or vendor if none linked).
- * CMC: selectable, no dedicated store yet (empty).
+ * AMC: asset amc_* dates when set; otherwise vendor contract dates.
+ * CMC: asset cmc_* dates.
  */
 async function getCoverageExpiryReport(opts = {}) {
   const db = getDb();
@@ -57,21 +67,14 @@ async function getCoverageExpiryReport(opts = {}) {
     throw err;
   }
 
+  await ensureAssetCoverageColumns(db);
+
   const expiringDays = Math.max(0, parseInt(opts.expiringDays, 10) || 30);
   const coverageTypes = asList(opts.coverageTypes, VALID_COVERAGE);
   const statuses = asList(opts.statuses, VALID_STATUS);
   const includeWarranty = coverageTypes.length === 0 || coverageTypes.includes('Warranty');
   const includeAmc = coverageTypes.length === 0 || coverageTypes.includes('AMC');
-  const includeCmcOnly = coverageTypes.length === 1 && coverageTypes[0] === 'CMC';
-
-  if (includeCmcOnly) {
-    return {
-      rows: [],
-      summary: { total: 0, active: 0, expiring: 0, expired: 0 },
-      expiringDays,
-      note: 'CMC coverage is not stored as dated contracts yet.',
-    };
-  }
+  const includeCmc = coverageTypes.length === 0 || coverageTypes.includes('CMC');
 
   const renewalExists = await hasVendorRenewalTable(db);
   const renewalSelect = renewalExists
@@ -135,7 +138,34 @@ async function getCoverageExpiryReport(opts = {}) {
   }
 
   if (includeAmc) {
-    // When filtering to one asset, only contracts covering that asset.
+    // Preferred: asset-level AMC dates
+    unions.push(`
+      SELECT
+        'AMC'::text AS coverage_type,
+        a.asset_id,
+        a.text AS asset_name,
+        a.serial_number,
+        at.text AS asset_type,
+        b.text AS branch,
+        d.text AS department,
+        COALESCE(sv.vendor_id, pv.vendor_id) AS vendor_id,
+        COALESCE(sv.vendor_name, pv.vendor_name) AS vendor_name,
+        a.amc_start_date::date AS coverage_start,
+        a.amc_end_date::date AS coverage_end,
+        NULL::timestamp AS last_renewal_date,
+        NULL::date AS previous_end_date
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
+      LEFT JOIN "tblDepartments" d ON d.dept_id = a.dept_id
+      LEFT JOIN "tblVendors" sv ON sv.vendor_id = a.service_vendor_id
+      LEFT JOIN "tblVendors" pv ON pv.vendor_id = a.purchase_vendor_id
+      WHERE a.org_id = $1
+        AND a.amc_end_date IS NOT NULL
+        ${assetFilterSql}
+    `);
+
+    // Fallback: vendor contract dates when asset has no AMC dates
     const assetJoinType = opts.assetId ? 'INNER JOIN' : 'LEFT JOIN';
     unions.push(`
       SELECT
@@ -156,12 +186,41 @@ async function getCoverageExpiryReport(opts = {}) {
       ${assetJoinType} "tblAssets" a
         ON a.org_id = v.org_id
        AND (a.service_vendor_id = v.vendor_id OR a.purchase_vendor_id = v.vendor_id)
+       AND a.amc_end_date IS NULL
        ${assetFilterSql}
       LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
       LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
       LEFT JOIN "tblDepartments" d ON d.dept_id = a.dept_id
       WHERE v.org_id = $1
         AND v.contract_end_date IS NOT NULL
+    `);
+  }
+
+  if (includeCmc) {
+    unions.push(`
+      SELECT
+        'CMC'::text AS coverage_type,
+        a.asset_id,
+        a.text AS asset_name,
+        a.serial_number,
+        at.text AS asset_type,
+        b.text AS branch,
+        d.text AS department,
+        COALESCE(sv.vendor_id, pv.vendor_id) AS vendor_id,
+        COALESCE(sv.vendor_name, pv.vendor_name) AS vendor_name,
+        a.cmc_start_date::date AS coverage_start,
+        a.cmc_end_date::date AS coverage_end,
+        NULL::timestamp AS last_renewal_date,
+        NULL::date AS previous_end_date
+      FROM "tblAssets" a
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      LEFT JOIN "tblBranches" b ON b.branch_id = a.branch_id
+      LEFT JOIN "tblDepartments" d ON d.dept_id = a.dept_id
+      LEFT JOIN "tblVendors" sv ON sv.vendor_id = a.service_vendor_id
+      LEFT JOIN "tblVendors" pv ON pv.vendor_id = a.purchase_vendor_id
+      WHERE a.org_id = $1
+        AND a.cmc_end_date IS NOT NULL
+        ${assetFilterSql}
     `);
   }
 
