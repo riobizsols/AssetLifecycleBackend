@@ -235,3 +235,22 @@ exports.createAssetConsumption = async (req, res) => {
     fail(res, err, err.statusCode || 400);
   }
 };
+
+exports.getConsumptionReport = async (req, res) => {
+  try {
+    ok(
+      res,
+      await utilityModel.getConsumptionReport({
+        orgId: orgFrom(req),
+        utilId: req.query.utilId || null,
+        utildId: req.query.utildId || null,
+        assetTypeId: req.query.assetTypeId || null,
+        dateFrom: req.query.dateFrom || null,
+        dateTo: req.query.dateTo || null,
+        dateOrder: req.query.dateOrder || 'desc',
+      }),
+    );
+  } catch (err) {
+    fail(res, err, 500);
+  }
+};

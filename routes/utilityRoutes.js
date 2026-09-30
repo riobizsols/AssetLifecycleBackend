@@ -32,4 +32,6 @@ router.get('/mobile/my-assets', ctrl.listMyAssignedUtilityAssets);
 router.get('/mobile/assets/:assetId/consumptions', ctrl.listMyAssetConsumptions);
 router.post('/mobile/consumptions', ctrl.createAssetConsumption);
 
+router.get('/report', ctrl.getConsumptionReport);
+
 module.exports = router;

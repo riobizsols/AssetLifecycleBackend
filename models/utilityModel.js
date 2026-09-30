@@ -830,6 +830,139 @@ async function getConsumptionMissNotificationsByUser({
   return alerts;
 }
 
+async function getConsumptionReport({
+  orgId,
+  utilId = null,
+  utildId = null,
+  assetTypeId = null,
+  dateFrom = null,
+  dateTo = null,
+  dateOrder = 'desc',
+} = {}) {
+  await ensureSchema();
+  const order = String(dateOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  const { rows } = await getDb().query(
+    `
+      SELECT
+        c.utcv_id,
+        c.consumption_date,
+        c.reading,
+        c.quantity_consumed,
+        c.asset_id,
+        COALESCE(
+          NULLIF(BTRIM(a.description), ''),
+          NULLIF(BTRIM(a.text), ''),
+          c.asset_id
+        ) AS asset_name,
+        at.asset_type_id,
+        at.text AS asset_type_name,
+        h.util_id,
+        h.utility_name,
+        d.utild_id,
+        d.utility_sh,
+        ct.consumption_type,
+        COALESCE(u.uom, uh.uom) AS uom_name,
+        f.description AS frequency_label
+      FROM "tblUtilConsumption" c
+      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
+      JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
+      LEFT JOIN "tblUom" u ON u.uom_id = d.uom_id
+      LEFT JOIN "tblUom" uh ON uh.uom_id = h.uom_id
+      LEFT JOIN "tblUtilFreq" f ON f.utfq_id = d.utfq_id
+      LEFT JOIN "tblAssets" a ON a.asset_id = c.asset_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      WHERE ($1::text IS NULL OR COALESCE(c.org_id, d.org_id, h.org_id) = $1)
+        AND ($2::text IS NULL OR h.util_id = $2)
+        AND ($3::text IS NULL OR d.utild_id = $3)
+        AND ($4::text IS NULL OR at.asset_type_id = $4)
+        AND ($5::date IS NULL OR c.consumption_date >= $5::date)
+        AND ($6::date IS NULL OR c.consumption_date <= $6::date)
+      ORDER BY c.consumption_date ${order}, h.utility_name, d.utility_sh, c.created_on DESC
+      LIMIT 5000
+    `,
+    [
+      orgId || null,
+      utilId || null,
+      utildId || null,
+      assetTypeId || null,
+      dateFrom || null,
+      dateTo || null,
+    ],
+  );
+
+  const byKey = new Map();
+  const byAssetKey = new Map();
+  const utilities = new Set();
+  const assets = new Set();
+  const metrics = new Set();
+  for (const row of rows) {
+    utilities.add(row.util_id);
+    metrics.add(row.utild_id);
+    if (row.asset_id) assets.add(row.asset_id);
+    const key = `${row.util_id}|${row.utild_id}|${row.uom_name || ''}`;
+    const current = byKey.get(key) || {
+      util_id: row.util_id,
+      utility_name: row.utility_name,
+      utild_id: row.utild_id,
+      utility_sh: row.utility_sh,
+      consumption_type: row.consumption_type,
+      uom_name: row.uom_name,
+      frequency_label: row.frequency_label,
+      entries: 0,
+      total_quantity: 0,
+      assets: new Set(),
+    };
+    current.entries += 1;
+    current.total_quantity += Number(row.quantity_consumed || 0);
+    if (row.asset_id) current.assets.add(row.asset_id);
+    byKey.set(key, current);
+
+    const assetKey = `${row.asset_id || 'unassigned'}|${key}`;
+    const assetRow = byAssetKey.get(assetKey) || {
+      asset_id: row.asset_id,
+      asset_name: row.asset_name || 'Unassigned',
+      asset_type_name: row.asset_type_name || '',
+      utility_name: row.utility_name,
+      utility_sh: row.utility_sh,
+      uom_name: row.uom_name,
+      entries: 0,
+      total_quantity: 0,
+    };
+    assetRow.entries += 1;
+    assetRow.total_quantity += Number(row.quantity_consumed || 0);
+    byAssetKey.set(assetKey, assetRow);
+  }
+
+  const summaryRows = Array.from(byKey.values())
+    .map((item) => ({
+      ...item,
+      asset_count: item.assets.size,
+      total_quantity: Number(item.total_quantity.toFixed(4)),
+      assets: undefined,
+    }))
+    .sort((a, b) => b.total_quantity - a.total_quantity);
+
+  const byAsset = Array.from(byAssetKey.values())
+    .map((item) => ({
+      ...item,
+      total_quantity: Number(item.total_quantity.toFixed(4)),
+    }))
+    .sort((a, b) => b.total_quantity - a.total_quantity);
+
+  return {
+    summary: {
+      entries: rows.length,
+      utilities: utilities.size,
+      metrics: metrics.size,
+      assets: assets.size,
+    },
+    byUtility: summaryRows,
+    byAsset,
+    rows,
+  };
+}
+
 module.exports = {
   listHeaders,
   getHeaderWithDetails,
@@ -855,6 +988,7 @@ module.exports = {
   createAssetConsumption,
   isAssetAssignedToEmployee,
   getConsumptionMissNotificationsByUser,
+  getConsumptionReport,
   calculateMeterConsumption,
   CONSUMPTION_TYPE,
 };
