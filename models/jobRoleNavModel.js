@@ -181,6 +181,9 @@ const getNavigationStructure = async (job_role_id, platform = 'D') => {
  * @returns {Promise<Array>} Array of user's navigation items
  */
 // Get user's navigation based on their job roles (supports multiple roles)
+const navEnsureAt = new Map();
+const NAV_ENSURE_TTL_MS = 10 * 60 * 1000;
+
 const getUserNavigation = async (user_id, platform = 'D') => {
     try {
         // Get all user's job roles
@@ -213,13 +216,16 @@ const getUserNavigation = async (user_id, platform = 'D') => {
                 [job_role_ids],
             );
             const orgId = orgRes.rows[0]?.org_id;
-            if (orgId) {
+            const ensuredAt = orgId ? navEnsureAt.get(orgId) : 0;
+            const navAlreadyEnsured = ensuredAt && Date.now() - ensuredAt < NAV_ENSURE_TTL_MS;
+            if (orgId && !navAlreadyEnsured) {
                 await ensureMissingReportNav(dbPool, orgId, 'JobRoleNav');
                 try {
                     await ensureUtilityNav(dbPool, orgId, 'JobRoleNav');
                 } catch (utilityNavErr) {
                     console.warn(`[JobRoleNavModel] Utility nav ensure failed: ${utilityNavErr.message}`);
                 }
+                navEnsureAt.set(orgId, Date.now());
             }
         } catch (reportNavErr) {
             console.warn(`[JobRoleNavModel] Missing report nav ensure failed: ${reportNavErr.message}`);

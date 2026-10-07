@@ -18,17 +18,29 @@ async function addProdserv(data) {
     description
   } = data;
 
-  const brandName = String(brand || '').trim();
-  const modelName = String(model || '').trim();
-  if (!brandName) {
-    const err = new Error('Brand is required');
-    err.statusCode = 400;
-    throw err;
-  }
-  if (!modelName) {
-    const err = new Error('Model is required');
-    err.statusCode = 400;
-    throw err;
+  const isService = String(ps_type || '').toLowerCase() === 'service';
+  let brandName = String(brand || '').trim();
+  let modelName = String(model || '').trim();
+  const descriptionText = String(description || '').trim();
+  if (isService) {
+    if (!descriptionText) {
+      const err = new Error('Description is required');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!brandName) brandName = `S${String(Date.now()).slice(-8)}`;
+    if (!modelName) modelName = 'S';
+  } else {
+    if (!brandName) {
+      const err = new Error('Brand is required');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!modelName) {
+      const err = new Error('Model is required');
+      err.statusCode = 400;
+      throw err;
+    }
   }
 
   const dbPool = getDb();
@@ -58,7 +70,7 @@ async function addProdserv(data) {
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
     RETURNING *;
   `;
-  const values = [prod_serv_id, org_id, asset_type_id, brandName, modelName, status, ps_type, description];
+  const values = [prod_serv_id, org_id, asset_type_id, brandName, modelName, status, ps_type, descriptionText || null];
 
   const result = await dbPool.query(query, values);
   return result.rows[0];
