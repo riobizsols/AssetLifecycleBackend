@@ -20,7 +20,7 @@ const getBreakdownHistory = async (req, res) => {
     const APP_ID = 'BREAKDOWNHISTORY';
     
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.user?.org_id || req.query.orgId || 'ORG001';
         const filters = req.query || {};
         
         // Add user's branch_id as default filter only if user doesn't have super access
@@ -272,7 +272,7 @@ const getBreakdownHistory = async (req, res) => {
 const getBreakdownById = async (req, res) => {
     try {
         const { breakdownId } = req.params;
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.user?.org_id || req.query.orgId || 'ORG001';
 
         const result = await model.getBreakdownById(breakdownId, orgId);
         if (!result.rows || result.rows.length === 0) {
@@ -389,7 +389,7 @@ const getBreakdownById = async (req, res) => {
 const getBreakdownHistoryByAsset = async (req, res) => {
     try {
         const { assetId } = req.params;
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.user?.org_id || req.query.orgId || 'ORG001';
         
         console.log('Breakdown History by Asset Request:', { assetId, orgId });
         
@@ -489,7 +489,7 @@ const getBreakdownHistoryByAsset = async (req, res) => {
 // Get breakdown history summary
 const getBreakdownHistorySummary = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.user?.org_id || req.query.orgId || 'ORG001';
         
         console.log('Breakdown History Summary Request:', { orgId });
         
@@ -528,7 +528,7 @@ const getBreakdownHistorySummary = async (req, res) => {
 // Get breakdowns reopened more than once (for Reopen Details screen)
 const getBreakdownsReopenedMultiple = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = req.user?.org_id || req.query.orgId || 'ORG001';
         const userBranchId = req.user?.branch_id;
         const hasSuperAccess = req.user?.hasSuperAccess || false;
 
@@ -552,7 +552,7 @@ const getBreakdownsReopenedMultiple = async (req, res) => {
 // Get available filter options
 const getBreakdownFilterOptions = async (req, res) => {
     try {
-        const orgId = req.query.orgId;
+        const orgId = req.user?.org_id || req.query.orgId;
         
         console.log('Breakdown Filter Options Request:', { orgId });
         
@@ -583,7 +583,7 @@ const getBreakdownFilterOptions = async (req, res) => {
 // Export breakdown history
 const exportBreakdownHistory = async (req, res) => {
     try {
-        const orgId = req.query.orgId;
+        const orgId = req.user?.org_id || req.query.orgId;
         const exportType = req.query.type || 'csv'; // 'pdf' or 'csv'
         const filters = req.body || {};
         

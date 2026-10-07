@@ -380,7 +380,7 @@ class EmployeeTechCertModel {
 
     if (empColumns.org) {
       params.push(orgId);
-      where.push(`etc.${empColumns.org} = $${params.length}`);
+      where.push(`(etc.${empColumns.org} = $${params.length} OR etc.${empColumns.org} IS NULL)`);
     }
 
     const query = `

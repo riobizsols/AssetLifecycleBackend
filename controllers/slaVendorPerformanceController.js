@@ -13,15 +13,22 @@ function buildFilters(req) {
     throw err;
   }
 
+  const headerBranchId = req.user?.acmSelection?.branchId
+    ? String(req.user.acmSelection.branchId)
+    : null;
+  let branchIds = parseListParam(q.branchIds || q.branch_id || q.locations);
+  if (headerBranchId) branchIds = [headerBranchId];
+
   return {
     orgId,
+    headerBranchId,
     period: q.period || 'last_30_days',
     dateFrom: q.dateFrom || q.date_from || null,
     dateTo: q.dateTo || q.date_to || null,
     vendorIds: parseListParam(q.vendorIds || q.vendor_id || q.vendors),
     assetIds: parseListParam(q.assetIds || q.asset_id || q.assets),
     assetTypeIds: parseListParam(q.assetTypeIds || q.asset_type_id),
-    branchIds: parseListParam(q.branchIds || q.branch_id || q.locations),
+    branchIds,
     maintTypeIds: parseListParam(q.maintTypeIds || q.maint_type_id),
     reasonIds: parseListParam(q.reasonIds || q.reason_id),
     slaStatus: q.slaStatus || q.sla_status || 'all',

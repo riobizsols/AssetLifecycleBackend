@@ -407,7 +407,8 @@ async function getCertifiedTechnicians(req, res) {
     
     console.log('Getting certified technicians for asset type:', assetTypeId, 'Org:', orgId);
     
-    const technicians = await inspectionApprovalModel.getCertifiedTechnicians(orgId, assetTypeId);
+    const scope = ['maintenance', 'inspection'].includes(req.query.scope) ? req.query.scope : 'all';
+    const technicians = await inspectionApprovalModel.getCertifiedTechnicians(orgId, assetTypeId, scope);
     
     console.log(`Found ${technicians.length} certified technicians for asset type:`, assetTypeId);
     return res.json({ 

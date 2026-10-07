@@ -439,7 +439,90 @@ async function getAuditReportView(opts) {
       `,
       [orgId, assetIds],
     );
-    empty.sections.certifications = rows;
+
+    const assetTypeIds = [...new Set(assets.map((a) => a.asset_type_id))];
+    const { rows: mappedCerts } = await db.query(
+      `
+        SELECT DISTINCT m.asset_type_id, m.tc_id, tc.certificate_name, tc.certificate_no, m.cert_scope
+        FROM (
+          SELECT asset_type_id, tc_id, 'Maintenance' AS cert_scope
+          FROM "tblATMaintCert"
+          WHERE asset_type_id = ANY($2::varchar[])
+            AND (org_id = $1 OR org_id IS NULL)
+          UNION
+          SELECT asset_type_id, tc_id, 'Inspection' AS cert_scope
+          FROM "tblATInspCert"
+          WHERE asset_type_id = ANY($2::varchar[])
+            AND (org_id = $1 OR org_id IS NULL)
+        ) m
+        INNER JOIN "tblTechCert" tc ON tc.tc_id = m.tc_id
+        ORDER BY m.asset_type_id, m.cert_scope, tc.certificate_name
+      `,
+      [orgId, assetTypeIds],
+    );
+
+    const mappedTcIds = [...new Set(mappedCerts.map((c) => c.tc_id))];
+    const { rows: holderRows } = mappedTcIds.length
+      ? await db.query(
+          `
+            SELECT
+              etc.etc_id,
+              etc.tc_id,
+              etc.emp_int_id,
+              e.full_name AS technician_name,
+              etc.certificate_date,
+              etc.certificate_expiry,
+              etc.status,
+              (NULLIF(TRIM(COALESCE(etc.file_path, '')), '') IS NOT NULL) AS has_file
+            FROM "tblEmpTechCert" etc
+            INNER JOIN "tblEmployees" e ON e.emp_int_id = etc.emp_int_id
+            WHERE etc.tc_id = ANY($2::varchar[])
+              AND (etc.org_id = $1 OR etc.org_id IS NULL)
+              AND e.org_id = $1
+              AND COALESCE(e.int_status, 1) = 1
+              AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
+            ORDER BY e.full_name, etc.certificate_expiry DESC NULLS LAST
+          `,
+          [orgId, mappedTcIds],
+        )
+      : { rows: [] };
+
+    const holdersByCert = new Map();
+    holderRows.forEach((h) => {
+      if (!holdersByCert.has(h.tc_id)) holdersByCert.set(h.tc_id, []);
+      holdersByCert.get(h.tc_id).push(h);
+    });
+
+    const certsByType = new Map();
+    mappedCerts.forEach((c) => {
+      if (!certsByType.has(c.asset_type_id)) certsByType.set(c.asset_type_id, []);
+      certsByType.get(c.asset_type_id).push(c);
+    });
+
+    const mappedRows = [];
+    assets.forEach((a) => {
+      (certsByType.get(a.asset_type_id) || []).forEach((c) => {
+        mappedRows.push({
+          a_d_id: null,
+          asset_id: a.asset_id,
+          serial_number: a.serial_number,
+          asset_type_name: a.asset_type_name,
+          document_type: c.certificate_name,
+          doc_type: null,
+          doc_path: null,
+          is_archived: false,
+          tc_id: c.tc_id,
+          certificate_no: c.certificate_no,
+          required_for: c.cert_scope,
+          holders: holdersByCert.get(c.tc_id) || [],
+          source: 'mapping',
+        });
+      });
+    });
+
+    empty.sections.certifications = [...rows, ...mappedRows].sort((x, y) =>
+      String(x.asset_id).localeCompare(String(y.asset_id)),
+    );
   }
 
   if (include.invoices) {

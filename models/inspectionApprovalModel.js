@@ -682,10 +682,12 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
 /**
  * Collect every certificate required for an asset type (maintenance + inspection mappings).
  */
-async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
+async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId, scope = 'all') {
   const tcIds = new Set();
+  const includeMaintenance = scope !== 'inspection';
+  const includeInspection = scope !== 'maintenance';
 
-  try {
+  if (includeMaintenance) try {
     const mapCols = await getTableColumns('tblATMaintCert');
     const mapAssetTypeId = pickColumn(mapCols, ['asset_type_id', 'assettype_id']);
     const mapTcId = pickColumn(mapCols, ['tc_id']);
@@ -696,7 +698,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
       const where = [`${qId(mapAssetTypeId)} = $1`];
       if (mapOrg) {
         params.push(orgId);
-        where.push(`${qId(mapOrg)} = $${params.length}`);
+        where.push(`(${qId(mapOrg)} = $${params.length} OR ${qId(mapOrg)} IS NULL)`);
       }
       const result = await getDb().query(
         `SELECT DISTINCT ${qId(mapTcId)} AS tc_id FROM "tblATMaintCert" WHERE ${where.join(' AND ')}`,
@@ -708,7 +710,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
     console.warn('Required maintenance cert lookup skipped:', error.message);
   }
 
-  try {
+  if (includeInspection) try {
     const mapCols = await getTableColumns('tblATInspCert');
     const mapAssetTypeId = pickColumn(mapCols, ['asset_type_id', 'assettype_id']);
     const mapTcId = pickColumn(mapCols, ['tc_id', 'tech_cert_id']);
@@ -719,7 +721,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
       const where = [`${qId(mapAssetTypeId)} = $1`];
       if (mapOrg) {
         params.push(orgId);
-        where.push(`${qId(mapOrg)} = $${params.length}`);
+        where.push(`(${qId(mapOrg)} = $${params.length} OR ${qId(mapOrg)} IS NULL)`);
       }
       const result = await getDb().query(
         `SELECT DISTINCT ${qId(mapTcId)} AS tc_id FROM "tblATInspCert" WHERE ${where.join(' AND ')}`,
@@ -731,7 +733,7 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
     console.warn('Required inspection cert lookup skipped:', error.message);
   }
 
-  try {
+  if (includeInspection) try {
     const result = await getDb().query(
       `
         SELECT DISTINCT atic.tc_id
@@ -755,9 +757,9 @@ async function getRequiredTechCertIdsForAssetType(orgId, assetTypeId) {
  * @param {string} assetTypeId - Asset Type ID
  * @returns {Array} List of certified technicians
  */
-async function getCertifiedTechnicians(orgId, assetTypeId) {
+async function getCertifiedTechnicians(orgId, assetTypeId, scope = 'all') {
   try {
-    const requiredTcIds = await getRequiredTechCertIdsForAssetType(orgId, assetTypeId);
+    const requiredTcIds = await getRequiredTechCertIdsForAssetType(orgId, assetTypeId, scope);
     if (!requiredTcIds.length) return [];
 
     const params = [requiredTcIds, orgId];
@@ -848,11 +850,11 @@ async function getAssetTypesWithCertifiedTechnicians(orgId) {
 
         if (mapOrg) {
           params.push(orgId);
-          where.push(`atmc.${qId(mapOrg)} = $${params.length}`);
+          where.push(`(atmc.${qId(mapOrg)} = $${params.length} OR atmc.${qId(mapOrg)} IS NULL)`);
         }
         if (empCertOrg) {
           params.push(orgId);
-          where.push(`etc.${qId(empCertOrg)} = $${params.length}`);
+          where.push(`(etc.${qId(empCertOrg)} = $${params.length} OR etc.${qId(empCertOrg)} IS NULL)`);
         }
         if (empOrg) {
           params.push(orgId);

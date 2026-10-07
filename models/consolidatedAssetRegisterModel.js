@@ -84,7 +84,7 @@ function buildAssetScope(filters = {}) {
       orgIds = requestedOrgIds.filter((id) => allow.has(id));
       if (!orgIds.length) {
         conditions.push('1=0');
-        return { conditions, params, paramCount: i };
+        return { conditions, params, paramCount: i, orgIds: [] };
       }
     }
   }
@@ -140,7 +140,7 @@ function buildAssetScope(filters = {}) {
     params.push(`%${String(filters.search).trim()}%`);
   }
 
-  return { conditions, params, paramCount: i };
+  return { conditions, params, paramCount: i, orgIds: orgIds || null };
 }
 
 function whereSql(scope) {
@@ -151,6 +151,72 @@ function num(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : 0;
 }
+
+/** Properties mapped on asset types (tblAssetTypeProps) plus their list values. */
+async function getMappedProperties(orgIds) {
+  const db = getDb();
+  const orgParam = orgIds == null ? null : orgIds;
+  const result = await db.query(
+    `
+      SELECT
+        p.prop_id,
+        p.property,
+        p.org_id,
+        COALESCE(
+          (
+            SELECT json_agg(vals.value ORDER BY vals.value)
+            FROM (
+              SELECT DISTINCT TRIM(v.value) AS value
+              FROM "tblAssetPropListValues" v
+              WHERE v.prop_id = p.prop_id
+                AND COALESCE(v.int_status, 1) = 1
+                AND NULLIF(TRIM(v.value), '') IS NOT NULL
+            ) vals
+          ),
+          '[]'::json
+        ) AS list_values
+      FROM "tblProps" p
+      WHERE COALESCE(p.int_status, 1) = 1
+        AND EXISTS (
+          SELECT 1
+          FROM "tblAssetTypeProps" atp
+          WHERE atp.prop_id = p.prop_id
+            AND ($1::text[] IS NULL OR atp.org_id = ANY($1::text[]))
+        )
+      ORDER BY p.property ASC
+    `,
+    [orgParam],
+  );
+
+  return result.rows.map((row) => ({
+    prop_id: row.prop_id,
+    property: row.property,
+    org_id: row.org_id,
+    list_values: Array.isArray(row.list_values) ? row.list_values.filter(Boolean) : [],
+  }));
+}
+
+const ASSET_PROPERTIES_SQL = `
+  (
+    SELECT COALESCE(jsonb_object_agg(src.prop_id, src.value), '{}'::jsonb)
+    FROM (
+      SELECT DISTINCT ON (COALESCE(p_direct.prop_id, p_map.prop_id))
+        COALESCE(p_direct.prop_id, p_map.prop_id) AS prop_id,
+        TRIM(apv.value) AS value
+      FROM "tblAssetPropValues" apv
+      LEFT JOIN "tblProps" p_direct
+        ON p_direct.prop_id = apv.asset_type_prop_id
+      LEFT JOIN "tblAssetTypeProps" atp
+        ON atp.asset_type_prop_id = apv.asset_type_prop_id
+      LEFT JOIN "tblProps" p_map
+        ON p_map.prop_id = atp.prop_id
+      WHERE apv.asset_id = a.asset_id
+        AND NULLIF(TRIM(apv.value), '') IS NOT NULL
+        AND COALESCE(p_direct.prop_id, p_map.prop_id) IS NOT NULL
+      ORDER BY COALESCE(p_direct.prop_id, p_map.prop_id), TRIM(apv.value)
+    ) src
+  )
+`;
 
 async function getFilterOptions(filters = {}) {
   const db = getDb();
@@ -165,7 +231,7 @@ async function getFilterOptions(filters = {}) {
   });
   const where = whereSql(scope);
 
-  const [orgs, campuses, departments, statuses, assetTypes] = await Promise.all([
+  const [orgs, campuses, departments, statuses, assetTypes, properties] = await Promise.all([
     db.query(
       `
         SELECT DISTINCT a.org_id AS id, COALESCE(o.text, a.org_id) AS label
@@ -226,6 +292,7 @@ async function getFilterOptions(filters = {}) {
       `,
       scope.params,
     ),
+    getMappedProperties(scope.orgIds),
   ]);
 
   return {
@@ -234,6 +301,7 @@ async function getFilterOptions(filters = {}) {
     departments: departments.rows,
     statuses: statuses.rows,
     assetTypes: assetTypes.rows,
+    properties,
   };
 }
 
@@ -450,7 +518,8 @@ async function getRegister(filters = {}) {
           a.asset_type_id,
           COALESCE(a.current_status, '—') AS status,
           ${ACQUISITION_SQL}::float8 AS acquisition_value,
-          ${BOOK_VALUE_SQL}::float8 AS book_value
+          ${BOOK_VALUE_SQL}::float8 AS book_value,
+          ${ASSET_PROPERTIES_SQL} AS properties
         ${BASE_JOINS}
         ${where}
         ORDER BY institution ASC, campus ASC, a.asset_id ASC
@@ -476,6 +545,7 @@ async function getRegister(filters = {}) {
       status: r.status,
       acquisition_value: num(r.acquisition_value),
       book_value: num(r.book_value),
+      properties: r.properties && typeof r.properties === 'object' ? r.properties : {},
     })),
     total,
     page,

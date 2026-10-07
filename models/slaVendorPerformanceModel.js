@@ -404,10 +404,11 @@ async function getFilterOptions(filters = {}) {
       `
         SELECT DISTINCT b.branch_id AS id, b.text AS label
         FROM "tblBranches" b
-        WHERE b.org_id = $1 OR b.org_id IS NULL
+        WHERE (b.org_id = $1 OR b.org_id IS NULL)
+          AND ($2::text IS NULL OR b.branch_id = $2)
         ORDER BY 2
       `,
-      [orgId],
+      [orgId, filters.headerBranchId || null],
     ),
     db.query(
       `
