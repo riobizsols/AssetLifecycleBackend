@@ -452,7 +452,7 @@ exports.peekNextId = async (prefix, table, column, padding = 3, sequenceKey = nu
     const dbPool = getDb();
     // Global table max (no org filter) — PKs are ID-only in tenant DBs
     const result = await dbPool.query(
-        `SELECT COALESCE(MAX(CAST(SUBSTRING(${column} FROM $2) AS INTEGER)), 0) AS max_num
+        `SELECT COALESCE(MAX(CAST(SUBSTRING(${column} FROM $2::integer) AS INTEGER)), 0) AS max_num
          FROM ${table}
          WHERE ${column} ~ ('^' || $1 || '[0-9]+$')`,
         [prefix, prefix.length + 1]

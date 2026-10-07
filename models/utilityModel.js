@@ -848,14 +848,15 @@ async function getConsumptionReport({
         c.consumption_date,
         c.reading,
         c.quantity_consumed,
-        c.asset_id,
+        COALESCE(c.asset_id, map_fb.mapped_asset_id) AS asset_id,
         COALESCE(
           NULLIF(BTRIM(a.description), ''),
           NULLIF(BTRIM(a.text), ''),
-          c.asset_id
+          c.asset_id,
+          CASE WHEN c.asset_id IS NULL THEN map_fb.mapped_asset_name END
         ) AS asset_name,
-        at.asset_type_id,
-        at.text AS asset_type_name,
+        COALESCE(at.asset_type_id, map_fb.mapped_asset_type_id) AS asset_type_id,
+        COALESCE(at.text, map_fb.mapped_type_name) AS asset_type_name,
         h.util_id,
         h.utility_name,
         d.utild_id,
@@ -872,10 +873,32 @@ async function getConsumptionReport({
       LEFT JOIN "tblUtilFreq" f ON f.utfq_id = d.utfq_id
       LEFT JOIN "tblAssets" a ON a.asset_id = c.asset_id
       LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      LEFT JOIN LATERAL (
+        SELECT
+          string_agg(DISTINCT at2.text, ', ' ORDER BY at2.text) AS mapped_type_name,
+          CASE WHEN COUNT(DISTINCT at2.asset_type_id) = 1 THEN MAX(at2.asset_type_id) END AS mapped_asset_type_id,
+          CASE WHEN COUNT(DISTINCT a2.asset_id) = 1 THEN MAX(a2.asset_id) END AS mapped_asset_id,
+          CASE
+            WHEN COUNT(DISTINCT a2.asset_id) = 1 THEN MAX(
+              COALESCE(NULLIF(BTRIM(a2.description), ''), NULLIF(BTRIM(a2.text), ''), a2.asset_id)
+            )
+          END AS mapped_asset_name
+        FROM "tblATUtilityMap" m
+        JOIN "tblAssetTypes" at2 ON at2.asset_type_id = m.assettype_id
+        LEFT JOIN "tblAssets" a2
+          ON a2.asset_type_id = at2.asset_type_id
+         AND ($1::text IS NULL OR a2.org_id = $1)
+         AND COALESCE(a2.current_status, '') <> 'SCRAPPED'
+        WHERE m.utild_id = d.utild_id
+      ) map_fb ON TRUE
       WHERE ($1::text IS NULL OR COALESCE(c.org_id, d.org_id, h.org_id) = $1)
         AND ($2::text IS NULL OR h.util_id = $2)
         AND ($3::text IS NULL OR d.utild_id = $3)
-        AND ($4::text IS NULL OR at.asset_type_id = $4)
+        AND (
+          $4::text IS NULL
+          OR at.asset_type_id = $4
+          OR (c.asset_id IS NULL AND map_fb.mapped_asset_type_id = $4)
+        )
         AND ($5::date IS NULL OR c.consumption_date >= $5::date)
         AND ($6::date IS NULL OR c.consumption_date <= $6::date)
       ORDER BY c.consumption_date ${order}, h.utility_name, d.utility_sh, c.created_on DESC
