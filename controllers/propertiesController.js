@@ -29,6 +29,33 @@ class PropertiesController {
     }
   }
 
+  static async getAssetIdsByTypeProperty(req, res) {
+    try {
+      const { assetTypeId } = req.params;
+      const property = String(req.query.property || '').trim();
+      const listValue = String(req.query.value || '').trim();
+      const op = String(req.query.op || 'contains');
+      const orgId = req.user.org_id;
+      if (!property) {
+        return res.status(400).json({ success: false, message: 'Property is required' });
+      }
+      const assetIds = await PropertiesModel.getAssetIdsByTypeProperty(
+        assetTypeId,
+        property,
+        orgId,
+        listValue,
+        op,
+      );
+      return res.json({ success: true, data: assetIds });
+    } catch (error) {
+      console.error('Error in getAssetIdsByTypeProperty:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to fetch assets for property',
+      });
+    }
+  }
+
   // Get values for a specific property
   static async getPropertyValues(req, res) {
     try {

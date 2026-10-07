@@ -42,6 +42,9 @@ router.get('/asset-types', PropertiesController.getAllAssetTypes);
 // Get properties for a specific asset type
 router.get('/asset-types/:assetTypeId/properties', PropertiesController.getPropertiesByAssetType);
 
+// Assets of a type that have a value for one property
+router.get('/asset-types/:assetTypeId/assets', PropertiesController.getAssetIdsByTypeProperty);
+
 // Get values for a specific property
 router.get('/properties/:propId/values', PropertiesController.getPropertyValues);
 

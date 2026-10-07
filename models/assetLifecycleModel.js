@@ -745,7 +745,7 @@ const getAssetLifecycleCount = async (filters = {}) => {
 
 // Get filter options for dropdowns (scoped to ACM)
 const getAssetLifecycleFilterOptions = async (acmCtx = {}) => {
-  const acmScope = buildLifecycleAssetScopeClause(acmCtx);
+  const acmScope = buildReportAssetScopeClause(acmCtx);
   const params = [...acmScope.params];
 
   const query = `
