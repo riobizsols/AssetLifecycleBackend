@@ -34,6 +34,50 @@ class PropertiesModel {
     }
   }
 
+  // Assets of a type that have a saved value for a property
+  static async getAssetIdsByTypeProperty(assetTypeId, propertyName, orgId, listValue, op = 'contains') {
+    const dbPool = getDb();
+    const match = {
+      'starts with': `apv.value ILIKE $4 || '%'`,
+      'ends with': `apv.value ILIKE '%' || $4`,
+      '=': `LOWER(apv.value) = LOWER($4)`,
+    }[op] || `apv.value ILIKE '%' || $4 || '%'`;
+    const valueFilter = listValue ? `AND ${match}` : '';
+    const params = listValue
+      ? [orgId, assetTypeId, propertyName, listValue]
+      : [orgId, assetTypeId, propertyName];
+    const query = `
+      SELECT DISTINCT a.asset_id
+      FROM "tblAssets" a
+      INNER JOIN "tblAssetPropValues" apv ON apv.asset_id = a.asset_id
+      INNER JOIN "tblAssetTypeProps" atp ON apv.asset_type_prop_id = atp.asset_type_prop_id
+      INNER JOIN "tblProps" p ON atp.prop_id = p.prop_id
+      WHERE a.org_id = $1
+        AND a.asset_type_id = $2
+        AND LOWER(p.property) = LOWER($3)
+        AND p.org_id = $1
+        AND p.int_status = 1
+        AND apv.value IS NOT NULL
+        AND BTRIM(apv.value) <> ''
+        ${valueFilter}
+      UNION
+      SELECT DISTINCT a.asset_id
+      FROM "tblAssets" a
+      INNER JOIN "tblAssetPropValues" apv ON apv.asset_id = a.asset_id
+      INNER JOIN "tblProps" p ON apv.asset_type_prop_id = p.prop_id
+      WHERE a.org_id = $1
+        AND a.asset_type_id = $2
+        AND LOWER(p.property) = LOWER($3)
+        AND p.org_id = $1
+        AND p.int_status = 1
+        AND apv.value IS NOT NULL
+        AND BTRIM(apv.value) <> ''
+        ${valueFilter}
+    `;
+    const result = await dbPool.query(query, params);
+    return result.rows.map((row) => row.asset_id);
+  }
+
   // Get values for a specific property
   static async getPropertyValues(propId, orgId) {
     try {
