@@ -446,6 +446,29 @@ function classifyReadingKind({ utility_name, utility_sh, uom_name, consumption_t
   return 'meter';
 }
 
+async function listAssetsForUtilityDetail({ orgId, utildId }) {
+  await ensureSchema();
+  const { rows } = await getDb().query(
+    `
+      SELECT DISTINCT
+        a.asset_id,
+        COALESCE(NULLIF(BTRIM(a.description), ''), NULLIF(BTRIM(a.text), ''), a.asset_id) AS asset_name,
+        a.serial_number,
+        at.asset_type_id,
+        at.text AS asset_type_name
+      FROM "tblATUtilityMap" m
+      INNER JOIN "tblAssets" a ON a.asset_type_id = m.assettype_id
+      INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      WHERE m.utild_id = $1
+        AND ($2::text IS NULL OR a.org_id = $2)
+        AND COALESCE(a.current_status, '') <> 'SCRAPPED'
+      ORDER BY a.asset_id
+    `,
+    [utildId, orgId || null],
+  );
+  return rows;
+}
+
 async function listMyAssignedUtilityAssets({ orgId, employeeIntId, deptId = null }) {
   await ensureSchema();
   if (!orgId || !employeeIntId) {
@@ -1006,6 +1029,7 @@ module.exports = {
   getPreviousReading,
   previewConsumption,
   createConsumption,
+  listAssetsForUtilityDetail,
   listMyAssignedUtilityAssets,
   listAssetConsumptions,
   createAssetConsumption,

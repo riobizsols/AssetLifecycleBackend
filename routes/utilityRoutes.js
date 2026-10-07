@@ -15,6 +15,7 @@ router.delete('/headers/:utilId', ctrl.deleteHeader);
 
 router.get('/details', ctrl.listDetails);
 router.post('/details', ctrl.createDetail);
+router.get('/details/:utildId/assets', ctrl.listDetailAssets);
 router.put('/details/:utildId', ctrl.updateDetail);
 router.delete('/details/:utildId', ctrl.deleteDetail);
 
