@@ -58,7 +58,6 @@ async function findOrCreateUtilityGroup(client, { job_role_id, mob_desk, orgId }
       FROM "tblJobRoleNav"
       WHERE job_role_id = $1
         AND COALESCE(mob_desk, 'D') = $2
-        AND COALESCE(int_status, 1) = 1
         AND COALESCE(is_group, false) = true
         AND LOWER(TRIM(label)) = LOWER($3)
       ORDER BY sequence NULLS LAST
@@ -144,7 +143,6 @@ async function ensureUtilityNav(client, orgId, logLabel = 'UtilityNav') {
           WHERE job_role_id = $1
             AND app_id = $2
             AND COALESCE(mob_desk, 'D') = $3
-            AND COALESCE(int_status, 1) = 1
           LIMIT 1
         `,
         [role.job_role_id, item.app_id, role.mob_desk || 'D'],

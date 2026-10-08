@@ -89,7 +89,6 @@ async function ensureMissingReportNav(client, orgId, logLabel = 'ReportNav') {
         WHERE n.job_role_id = p.job_role_id
           AND n.app_id = missing.app_id
           AND COALESCE(n.mob_desk, 'D') = p.mob_desk
-          AND COALESCE(n.int_status, 1) = 1
       )
     `,
     [existingAppIds, missingIds],
