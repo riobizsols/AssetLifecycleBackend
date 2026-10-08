@@ -1,5 +1,9 @@
 const model = require('../models/maintenanceHistoryModel');
 const reportsCache = require('../utils/reportsCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+const resolveOrgId = (req) =>
+    req.query.orgId || getEffectiveListContext(req).orgId || req.user?.org_id;
 const {
     logReportApiCall,
     logReportDataRetrieval,
@@ -19,7 +23,7 @@ const getMaintenanceHistory = async (req, res) => {
     const APP_ID = 'MAINTENANCEHISTORY';
     
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
         const {
             asset_id,
             vendor_id,
@@ -273,7 +277,7 @@ const getMaintenanceHistory = async (req, res) => {
 const getMaintenanceHistoryByAsset = async (req, res) => {
     try {
         const { assetId } = req.params;
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
 
         if (!assetId) {
             return res.status(400).json({
@@ -360,7 +364,7 @@ const getMaintenanceHistoryByAsset = async (req, res) => {
 const getMaintenanceHistoryByWorkOrder = async (req, res) => {
     try {
         const { woId } = req.params;
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
 
         if (!woId) {
             return res.status(400).json({
@@ -446,7 +450,7 @@ const getMaintenanceHistoryByWorkOrder = async (req, res) => {
 // Get maintenance history summary statistics
 const getMaintenanceHistorySummary = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
 
         const result = await model.getMaintenanceHistorySummary(orgId);
         const summary = result.rows[0];
@@ -480,7 +484,7 @@ const getMaintenanceHistorySummary = async (req, res) => {
 // Get filter options for dropdowns
 const getFilterOptions = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
 
         const { data: options } = await reportsCache.cachedFilterOptions(
             req,
@@ -524,7 +528,7 @@ const getFilterOptions = async (req, res) => {
 // Export maintenance history to PDF or CSV
 const exportMaintenanceHistory = async (req, res) => {
     try {
-        const orgId = req.query.orgId || 'ORG001';
+        const orgId = resolveOrgId(req);
         const exportType = req.query.type || 'pdf'; // 'pdf' or 'csv'
         const filters = req.body || {};
 
