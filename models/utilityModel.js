@@ -446,7 +446,7 @@ function classifyReadingKind({ utility_name, utility_sh, uom_name, consumption_t
   return 'meter';
 }
 
-async function listAssetsForUtilityDetail({ orgId, utildId }) {
+async function listAssetsForUtilityDetail({ orgId, utildId = null }) {
   await ensureSchema();
   const { rows } = await getDb().query(
     `
@@ -459,12 +459,12 @@ async function listAssetsForUtilityDetail({ orgId, utildId }) {
       FROM "tblATUtilityMap" m
       INNER JOIN "tblAssets" a ON a.asset_type_id = m.assettype_id
       INNER JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
-      WHERE m.utild_id = $1
+      WHERE ($1::text IS NULL OR m.utild_id = $1)
         AND ($2::text IS NULL OR a.org_id = $2)
         AND COALESCE(a.current_status, '') <> 'SCRAPPED'
       ORDER BY a.asset_id
     `,
-    [utildId, orgId || null],
+    [utildId || null, orgId || null],
   );
   return rows;
 }

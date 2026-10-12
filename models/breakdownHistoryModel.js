@@ -88,8 +88,15 @@ const getBreakdownHistory = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblUsers" u ON brd.reported_by = u.user_id
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-        LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
-            AND ams.status IN ('IN', 'AP', 'IP', 'CO')
+        LEFT JOIN LATERAL (
+            SELECT ams0.*
+            FROM "tblAssetMaintSch" ams0
+            WHERE ams0.asset_id = brd.asset_id
+              AND ams0.status IN ('IN', 'AP', 'IP', 'CO')
+              AND ams0.wo_id ~ ('-' || brd.abr_id || '(-|$)')
+            ORDER BY ams0.ams_id DESC
+            LIMIT 1
+        ) ams ON TRUE
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
@@ -374,8 +381,15 @@ const getBreakdownHistoryCount = async (filters = {}, orgId = 'ORG001') => {
         LEFT JOIN "tblUsers" u ON brd.reported_by = u.user_id
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-        LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
-            AND ams.status IN ('IN', 'AP', 'IP', 'CO')
+        LEFT JOIN LATERAL (
+            SELECT ams0.*
+            FROM "tblAssetMaintSch" ams0
+            WHERE ams0.asset_id = brd.asset_id
+              AND ams0.status IN ('IN', 'AP', 'IP', 'CO')
+              AND ams0.wo_id ~ ('-' || brd.abr_id || '(-|$)')
+            ORDER BY ams0.ams_id DESC
+            LIMIT 1
+        ) ams ON TRUE
         WHERE brd.org_id = $1
     `;
     
@@ -550,8 +564,15 @@ const getBreakdownById = async (breakdownId, orgId = 'ORG001') => {
         LEFT JOIN "tblUsers" u ON brd.reported_by = u.user_id
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-        LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
-            AND ams.status IN ('IN', 'AP', 'IP', 'CO')
+        LEFT JOIN LATERAL (
+            SELECT ams0.*
+            FROM "tblAssetMaintSch" ams0
+            WHERE ams0.asset_id = brd.asset_id
+              AND ams0.status IN ('IN', 'AP', 'IP', 'CO')
+              AND ams0.wo_id ~ ('-' || brd.abr_id || '(-|$)')
+            ORDER BY ams0.ams_id DESC
+            LIMIT 1
+        ) ams ON TRUE
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
@@ -646,8 +667,15 @@ const getBreakdownHistoryByAsset = async (assetId, orgId = 'ORG001') => {
         LEFT JOIN "tblUsers" u ON brd.reported_by = u.user_id
         LEFT JOIN "tblDepartments" d ON u.dept_id = d.dept_id
         LEFT JOIN "tblVendors" v ON a.service_vendor_id = v.vendor_id
-        LEFT JOIN "tblAssetMaintSch" ams ON brd.asset_id = ams.asset_id 
-            AND ams.status IN ('IN', 'AP', 'IP', 'CO')
+        LEFT JOIN LATERAL (
+            SELECT ams0.*
+            FROM "tblAssetMaintSch" ams0
+            WHERE ams0.asset_id = brd.asset_id
+              AND ams0.status IN ('IN', 'AP', 'IP', 'CO')
+              AND ams0.wo_id ~ ('-' || brd.abr_id || '(-|$)')
+            ORDER BY ams0.ams_id DESC
+            LIMIT 1
+        ) ams ON TRUE
         LEFT JOIN "tblMaintTypes" mt ON ams.maint_type_id = mt.maint_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
         LEFT JOIN "tblAssetGroup_H" ag ON a.group_id = ag.assetgroup_h_id
@@ -713,6 +741,7 @@ const getBreakdownFilterOptions = async (orgId = 'ORG001') => {
         SELECT DISTINCT ams.ams_id as work_order_id
         FROM "tblAssetMaintSch" ams 
         INNER JOIN "tblAssetBRDet" brd ON ams.asset_id = brd.asset_id
+            AND ams.wo_id ~ ('-' || brd.abr_id || '(-|$)')
         WHERE ams.org_id = $1 AND ams.status IN ('IN', 'AP', 'IP', 'CO')
         ORDER BY ams.ams_id
     `;

@@ -108,6 +108,14 @@ exports.listDetailAssets = async (req, res) => {
   }
 };
 
+exports.listMappedAssets = async (req, res) => {
+  try {
+    ok(res, await utilityModel.listAssetsForUtilityDetail({ orgId: orgFrom(req) }));
+  } catch (err) {
+    fail(res, err, 500);
+  }
+};
+
 exports.listAssetTypes = async (req, res) => {
   try {
     ok(res, await utilityModel.listAssetTypes());

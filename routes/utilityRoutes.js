@@ -21,6 +21,7 @@ router.delete('/details/:utildId', ctrl.deleteDetail);
 
 router.get('/asset-types', ctrl.listAssetTypes);
 router.get('/mappings', ctrl.listMappings);
+router.get('/mapped-assets', ctrl.listMappedAssets);
 router.post('/mappings', ctrl.createMapping);
 router.delete('/mappings/:atumId', ctrl.deleteMapping);
 
