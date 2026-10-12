@@ -23,6 +23,9 @@ const PROTECTED_RUNTIME_TABLES = [
   'tblUtility_D',
   'tblATUtilityMap',
   'tblUtilConsumption',
+  'tblConsumables',
+  'tblConsumInven',
+  'tblConsumeUsage',
 ];
 
 function tenantUrl(dbName) {
@@ -708,6 +711,22 @@ async function ensureCriticalRuntimeSchema(client) {
     console.warn('[TenantSchemaAlign] Could not ensure utility tables:', err.message);
     results.push({
       object: 'tblUtility_*+tblATUtilityMap',
+      status: 'error',
+      message: err.message,
+    });
+  }
+
+  try {
+    const { ensureConsumablesSchema } = require('../utils/ensureConsumablesSchema');
+    const consumables = await ensureConsumablesSchema(client);
+    results.push({
+      object: 'tblConsumables+tblConsumInven+tblConsumeUsage',
+      status: consumables.created ? 'ensured' : 'skipped',
+    });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure consumables tables:', err.message);
+    results.push({
+      object: 'tblConsumables+tblConsumInven+tblConsumeUsage',
       status: 'error',
       message: err.message,
     });

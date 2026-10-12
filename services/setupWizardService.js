@@ -241,6 +241,16 @@ const applyPostSchemaMigrations = async (client, logs = []) => {
     console.warn('[SetupWizard] Utility tables ensure skipped:', utilErr.message);
   }
 
+  try {
+    const { ensureConsumablesSchema } = require('../utils/ensureConsumablesSchema');
+    await ensureConsumablesSchema(client);
+    const consumMessage = 'Consumables tables ensured (tblConsumables/tblConsumInven/tblConsumeUsage)';
+    console.log(`[SetupWizard] ✅ ${consumMessage}`);
+    logs.push({ message: consumMessage, scope: 'schema' });
+  } catch (consumErr) {
+    console.warn('[SetupWizard] Consumables tables ensure skipped:', consumErr.message);
+  }
+
   const message = "Post-schema migrations applied (tblAssetTypes.branch_id; removed deprecated maint columns; tblUtility_H)";
   console.log(`[SetupWizard] ✅ ${message}`);
   if (logs) {

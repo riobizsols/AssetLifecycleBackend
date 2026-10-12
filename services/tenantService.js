@@ -298,6 +298,12 @@ function resolveTenantDbHost(host) {
   return host;
 }
 
+/** Local SSH tunnels expose tenant Postgres on a non-default port (e.g. 15432). */
+function resolveTenantDbPort(port) {
+  const override = String(process.env.TENANT_DB_PORT_OVERRIDE || '').trim();
+  return override || port;
+}
+
 function tenantSslShouldDisable(connectionHost) {
   if (process.env.DB_SSL === 'false' || process.env.DATABASE_SSL === 'false') {
     return true;
@@ -318,7 +324,8 @@ function tenantSslShouldDisable(connectionHost) {
  */
 function getTenantConnectionString(credentials) {
   const host = resolveTenantDbHost(credentials.host);
-  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${host}:${credentials.port}/${credentials.database}`;
+  const port = resolveTenantDbPort(credentials.port);
+  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${host}:${port}/${credentials.database}`;
 
   const lower = base.toLowerCase();
   if (lower.includes('sslmode=')) {

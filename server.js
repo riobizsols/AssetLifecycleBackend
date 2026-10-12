@@ -82,6 +82,7 @@ const maintenanceStatusReportRoutes = require("./routes/maintenanceStatusReportR
 const outOfStockReportRoutes = require("./routes/outOfStockReportRoutes");
 const purchaseRequirementReportRoutes = require("./routes/purchaseRequirementReportRoutes");
 const utilityRoutes = require("./routes/utilityRoutes");
+const consumablesRoutes = require("./routes/consumablesRoutes");
 const opcRoutes = require("./routes/opcRoutes");
 const qaAuditReportRoutes = require("./routes/qaAuditReportRoutes");
 const sparePartsReportRoutes = require("./routes/sparePartsReportRoutes");
@@ -278,6 +279,7 @@ app.use("/api/maintenance-status-report", maintenanceStatusReportRoutes);
 app.use("/api/out-of-stock-report", outOfStockReportRoutes);
 app.use("/api/purchase-requirement-report", purchaseRequirementReportRoutes);
 app.use("/api/utilities", utilityRoutes);
+app.use("/api/consumables", consumablesRoutes);
 app.use("/api/opc", opcRoutes);
 app.use("/api/qa-audit", qaAuditReportRoutes);
 app.use("/api/spare-parts-report", sparePartsReportRoutes);

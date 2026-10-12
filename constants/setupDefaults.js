@@ -556,6 +556,9 @@ const DEFAULT_APPS = [
   { id: "UTILITYMASTER", label: "Utility Master" },
   { id: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping" },
   { id: "UTILITYCONSUMPTION", label: "Record Utility Consumption" },
+  { id: "CONSUMABLESMASTER", label: "Consumables" },
+  { id: "CONSUMABLESINVENTORY", label: "Consumables Inventory" },
+  { id: "CONSUMABLESUSAGE", label: "Consumables Usage" },
   { id: "ASSETLIFECYCLEREPORT", label: "Asset Lifecycle Report" },
   { id: "ASSETREPORT", label: "Asset Report" },
   { id: "QAAUDITREPORT", label: "QA Audit Report" },
@@ -568,6 +571,7 @@ const DEFAULT_APPS = [
   { id: "AUDITREPORT", label: "Audit Reports" },
   { id: "CONSOLIDATEDASSETREPORT", label: "Consolidated Asset Register" },
   { id: "SLAVENDORPERFORMANCE", label: "SLA & Vendor Performance" },
+  { id: "CONSUMABLESREPORT", label: "Consumables Report" },
   { id: "WORKFORCEREPORT", label: "Workforce" },
   { id: "MAINTENANCESTATUSREPORT", label: "Maintenance Status Report" },
   { id: "OUTOFSTOCKREPORT", label: "Stock & Purchase" },
@@ -821,6 +825,7 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN068", jobRoleId: "JR001", parentId: "JRN012", appId: "PURCHASEREQUIREMENTREPORT", label: "Stock & Purchase", sequence: 15, accessLevel: "A", isGroup: false },
   { id: "JRN069", jobRoleId: "JR001", parentId: "JRN012", appId: "SPAREPARTSREPORT", label: "Spare Parts Report", sequence: 16, accessLevel: "A", isGroup: false },
   { id: "JRN014H", jobRoleId: "JR001", parentId: "JRN012", appId: "SPAREPARTMGMT", label: "Spare part consumption report", sequence: 17, accessLevel: "A", isGroup: false },
+  { id: "JRN094", jobRoleId: "JR001", parentId: "JRN012", appId: "CONSUMABLESREPORT", label: "Consumables Report", sequence: 18, accessLevel: "A", isGroup: false },
 
   { id: "JRN042", jobRoleId: "JR001", parentId: null, appId: null, label: "Scrap", sequence: 7, accessLevel: "A", isGroup: true },
   { id: "JRN024", jobRoleId: "JR001", parentId: "JRN042", appId: "SCRAPSALES", label: "Scrap Sales", sequence: 1, accessLevel: "A", isGroup: false },
@@ -831,6 +836,11 @@ const DEFAULT_JOB_ROLE_NAV = [
   { id: "JRN071", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYMASTER", label: "Utility Master", sequence: 1, accessLevel: "A", isGroup: false },
   { id: "JRN072", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYATMAPPING", label: "Utility – Asset Type Mapping", sequence: 2, accessLevel: "A", isGroup: false },
   { id: "JRN073", jobRoleId: "JR001", parentId: "JRN070", appId: "UTILITYCONSUMPTION", label: "Record Consumption", sequence: 3, accessLevel: "A", isGroup: false },
+
+  { id: "JRN090", jobRoleId: "JR001", parentId: null, appId: null, label: "Consumables", sequence: 13, accessLevel: "A", isGroup: true },
+  { id: "JRN091", jobRoleId: "JR001", parentId: "JRN090", appId: "CONSUMABLESMASTER", label: "Consumables", sequence: 1, accessLevel: "A", isGroup: false },
+  { id: "JRN092", jobRoleId: "JR001", parentId: "JRN090", appId: "CONSUMABLESINVENTORY", label: "Consumables Inventory", sequence: 2, accessLevel: "A", isGroup: false },
+  { id: "JRN093", jobRoleId: "JR001", parentId: "JRN090", appId: "CONSUMABLESUSAGE", label: "Consumables Usage", sequence: 3, accessLevel: "A", isGroup: false },
 
   { id: "JRN008", jobRoleId: "JR001", parentId: null, appId: null, label: "Admin Settings", sequence: 8, accessLevel: "A", isGroup: true },
   { id: "JRN023", jobRoleId: "JR001", parentId: "JRN008", appId: "AUDITLOGS", label: "Audit Logs", sequence: 1, accessLevel: "A", isGroup: false },

@@ -75,6 +75,9 @@ const TABLE_ID_CONVENTIONS = [
   { table: 'tblUtility_D', column: 'utild_id', tableKey: 'utility_d', prefix: 'utild', pad: 3 },
   { table: 'tblATUtilityMap', column: 'atum_id', tableKey: 'at_utility_map', prefix: 'ATUM', pad: 3 },
   { table: 'tblUtilConsumption', column: 'utcv_id', tableKey: 'util_consumption', prefix: 'utcv', pad: 3 },
+  { table: 'tblConsumables', column: 'consum_id', tableKey: 'consumable', prefix: 'consum', pad: 3 },
+  { table: 'tblConsumInven', column: 'cinven_id', tableKey: 'consum_inven', prefix: 'cinven', pad: 3 },
+  { table: 'tblConsumeUsage', column: 'cusage_id', tableKey: 'consume_usage', prefix: 'cusage', pad: 3 },
   // Semantic IDs — do not enforce PREFIX### shape
   { table: 'tblApps', column: 'app_id', tableKey: 'app', prefix: null, enforceFormat: false },
   { table: 'tblEvents', column: 'event_id', tableKey: 'event', prefix: 'Eve', enforceFormat: false },
