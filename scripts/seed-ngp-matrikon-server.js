@@ -1,20 +1,24 @@
 #!/usr/bin/env node
 /**
- * Seed the NGP (ORG003) Matrikon test server into tblOpcServers as OPS001.
- * Skips if the row already exists.
+ * Seed an NGP (ORG003) Matrikon test server into tblOpcServers. Skips if the row already exists.
+ * Each PC running Matrikon + the collector needs its own server row.
  *
- * Usage: node scripts/seed-ngp-matrikon-server.js
+ * Usage: node scripts/seed-ngp-matrikon-server.js [SERVER_ID] ["Server name"]
+ *   node scripts/seed-ngp-matrikon-server.js                                  -> OPS001 NGP CSE Lab - Matrikon
+ *   node scripts/seed-ngp-matrikon-server.js OPS002 "NGP CSE Lab - Matrikon 2"
  */
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 const { Pool } = require('pg');
 
+const [, , argId, argName] = process.argv;
 const SERVER = {
-  server_id: 'OPS001',
-  server_name: 'NGP CSE Lab - Matrikon',
+  server_id: argId || 'OPS001',
+  server_name: argName || 'NGP CSE Lab - Matrikon',
   endpoint_url: 'Matrikon.OPC.Simulation.1',
   security_mode: 'None',
   org_id: 'ORG003',
 };
+const SERVER_NUMBER = parseInt(SERVER.server_id.replace(/\D/g, ''), 10) || 1;
 
 (async () => {
   const pool = new Pool({
@@ -43,7 +47,8 @@ const SERVER = {
     }
 
     await client.query(
-      `UPDATE "tblIDSequences" SET last_number = GREATEST(last_number, 1) WHERE table_key = 'opc_server'`
+      `UPDATE "tblIDSequences" SET last_number = GREATEST(last_number, $1) WHERE table_key = 'opc_server'`,
+      [SERVER_NUMBER]
     );
 
     await client.query('COMMIT');
