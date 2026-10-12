@@ -7,6 +7,7 @@ const { getDbFromContext } = require('../utils/dbContext');
 const opcModel = require('../models/opcModel');
 const maintenanceModel = require('../models/maintenanceScheduleModel');
 const inspectionModel = require('../models/inspectionScheduleModel');
+const operationalCache = require('../utils/operationalCache');
 
 const getDb = () => getDbFromContext();
 
@@ -199,6 +200,10 @@ exports.evaluateReadings = async (serverId, orgId, readings) => {
       isMet: latched,
       triggerRef: outcome.status === 'created' ? outcome.ref : null,
     });
+    if (outcome.status === 'created') {
+      // Inspection / maintenance lists are cached per org
+      operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+    }
     if (outcome.status === 'error') console.error(`[CBM] ${rule.cbm_id}: ${outcome.message}`);
     results.push({ cbm_id: rule.cbm_id, value: raw, ...outcome });
   }
