@@ -17,6 +17,8 @@ router.delete('/components/:compId', ctrl.deleteComponent);
 router.get('/servers', ctrl.listServers);
 router.get('/servers/:serverId/browsed-tags', ctrl.listBrowsedTags);
 router.post('/servers/:serverId/browsed-tags', ctrl.uploadBrowsedTags);
+router.get('/servers/:serverId/browse', ctrl.browseTags);
+router.get('/servers/:serverId/browse/search', ctrl.searchTags);
 router.get('/servers/:serverId/cbm-tags', ctrl.listCbmTags);
 router.post('/servers/:serverId/readings', ctrl.postReadings);
 
@@ -24,6 +26,7 @@ router.get('/tags', ctrl.listTags);
 
 router.get('/comp-tags', ctrl.listCompTags);
 router.post('/comp-tags', ctrl.createCompTag);
+router.put('/comp-tags/:ctId', ctrl.updateCompTag);
 router.delete('/comp-tags/:ctId', ctrl.deleteCompTag);
 
 router.get('/cbm', ctrl.listCbmRules);

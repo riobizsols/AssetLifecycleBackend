@@ -198,40 +198,79 @@ exports.listCompTags = async (orgId) => {
   return rows;
 };
 
-exports.createCompTag = async (payload) => {
-  const serverId = clean(payload.server_id);
-  const compId = clean(payload.comp_id);
-  const tagPath = clean(payload.tag_full_path);
-  const tagName = clean(payload.tag_name);
-  const dataType = clean(payload.data_type);
-  const unit = clean(payload.unit) || null;
-  const tagType = clean(payload.tag_type);
-  const { org_id: orgId, user_id: userId } = payload;
+const readCompTagPayload = (payload) => {
+  const p = {
+    serverId: clean(payload.server_id),
+    compId: clean(payload.comp_id),
+    tagPath: clean(payload.tag_full_path),
+    tagName: clean(payload.tag_name),
+    dataType: clean(payload.data_type),
+    unit: clean(payload.unit) || null,
+    tagType: clean(payload.tag_type),
+    orgId: payload.org_id,
+    userId: payload.user_id,
+  };
+  if (!p.serverId) throw new Error('Server is required');
+  if (!p.compId) throw new Error('Component is required');
+  if (!p.tagPath) throw new Error('OPC tag is required');
+  if (!p.tagName) throw new Error('Tag name is required');
+  if (!DATA_TYPES.includes(p.dataType)) throw new Error(`Data type must be one of ${DATA_TYPES.join(', ')}`);
+  if (!TAG_TYPES.includes(p.tagType)) throw new Error(`Tag type must be one of ${TAG_TYPES.join(', ')}`);
+  return p;
+};
 
-  if (!serverId) throw new Error('Server is required');
-  if (!compId) throw new Error('Component is required');
-  if (!tagPath) throw new Error('OPC tag is required');
-  if (!tagName) throw new Error('Tag name is required');
-  if (!DATA_TYPES.includes(dataType)) throw new Error(`Data type must be one of ${DATA_TYPES.join(', ')}`);
-  if (!TAG_TYPES.includes(tagType)) throw new Error(`Tag type must be one of ${TAG_TYPES.join(', ')}`);
+const assertCompAndServer = async (client, { compId, serverId, orgId }) => {
+  const comp = await client.query(
+    `SELECT comp_id FROM "tblAssetComponents"
+      WHERE comp_id = $1 AND org_id = $2 AND COALESCE(int_status, 1) = 1`,
+    [compId, orgId],
+  );
+  if (!comp.rows.length) throw new Error('Component not found');
+
+  const server = await client.query(
+    `SELECT server_id FROM "tblOpcServers"
+      WHERE server_id = $1 AND org_id = $2 AND COALESCE(int_status, 1) = 1`,
+    [serverId, orgId],
+  );
+  if (!server.rows.length) throw new Error('Server not found');
+};
+
+// Tag definitions are shared per org by name, so editing one updates every mapping that uses it.
+const upsertOpcTag = async (client, { tagName, dataType, unit, tagType, orgId, userId }) => {
+  const existingTag = await client.query(
+    `SELECT tag_id FROM "tblOpcTags"
+      WHERE org_id = $1 AND LOWER(tag_name) = LOWER($2) AND COALESCE(int_status, 1) = 1
+      LIMIT 1`,
+    [orgId, tagName],
+  );
+  if (existingTag.rows.length) {
+    const tagId = existingTag.rows[0].tag_id;
+    await client.query(
+      `UPDATE "tblOpcTags"
+          SET data_type = $2, unit = $3, tag_type = $4, changed_by = $5, changed_on = NOW()
+        WHERE tag_id = $1`,
+      [tagId, dataType, unit, tagType, userId],
+    );
+    return tagId;
+  }
+  const tagId = await generateCustomIdForClient(client, 'opc_tag', 3);
+  await client.query(
+    `INSERT INTO "tblOpcTags"
+       (tag_id, tag_name, data_type, unit, tag_type, org_id, int_status, created_by, created_on, changed_by, changed_on)
+     VALUES ($1, $2, $3, $4, $5, $6, 1, $7, NOW(), $7, NOW())`,
+    [tagId, tagName, dataType, unit, tagType, orgId, userId],
+  );
+  return tagId;
+};
+
+exports.createCompTag = async (payload) => {
+  const p = readCompTagPayload(payload);
+  const { serverId, compId, tagPath, orgId, userId } = p;
 
   const client = await getDb().connect();
   try {
     await client.query('BEGIN');
-
-    const comp = await client.query(
-      `SELECT comp_id FROM "tblAssetComponents"
-        WHERE comp_id = $1 AND org_id = $2 AND COALESCE(int_status, 1) = 1`,
-      [compId, orgId],
-    );
-    if (!comp.rows.length) throw new Error('Component not found');
-
-    const server = await client.query(
-      `SELECT server_id FROM "tblOpcServers"
-        WHERE server_id = $1 AND org_id = $2 AND COALESCE(int_status, 1) = 1`,
-      [serverId, orgId],
-    );
-    if (!server.rows.length) throw new Error('Server not found');
+    await assertCompAndServer(client, p);
 
     const existingMap = await client.query(
       `SELECT ct_id, int_status FROM "tblCompTags" WHERE server_id = $1 AND tag_full_path = $2`,
@@ -241,30 +280,7 @@ exports.createCompTag = async (payload) => {
       throw new Error(`${tagPath} is already mapped on this server`);
     }
 
-    let tagId;
-    const existingTag = await client.query(
-      `SELECT tag_id FROM "tblOpcTags"
-        WHERE org_id = $1 AND LOWER(tag_name) = LOWER($2) AND COALESCE(int_status, 1) = 1
-        LIMIT 1`,
-      [orgId, tagName],
-    );
-    if (existingTag.rows.length) {
-      tagId = existingTag.rows[0].tag_id;
-      await client.query(
-        `UPDATE "tblOpcTags"
-            SET data_type = $2, unit = $3, tag_type = $4, changed_by = $5, changed_on = NOW()
-          WHERE tag_id = $1`,
-        [tagId, dataType, unit, tagType, userId],
-      );
-    } else {
-      tagId = await generateCustomIdForClient(client, 'opc_tag', 3);
-      await client.query(
-        `INSERT INTO "tblOpcTags"
-           (tag_id, tag_name, data_type, unit, tag_type, org_id, int_status, created_by, created_on, changed_by, changed_on)
-         VALUES ($1, $2, $3, $4, $5, $6, 1, $7, NOW(), $7, NOW())`,
-        [tagId, tagName, dataType, unit, tagType, orgId, userId],
-      );
-    }
+    const tagId = await upsertOpcTag(client, p);
 
     let ctId;
     if (existingMap.rows.length) {
@@ -284,6 +300,91 @@ exports.createCompTag = async (payload) => {
          VALUES ($1, $2, $3, $4, $5, $6, 1, $7, NOW(), $7, NOW())`,
         [ctId, serverId, compId, tagId, tagPath, orgId, userId],
       );
+    }
+
+    await client.query('COMMIT');
+    return { ct_id: ctId, tag_id: tagId };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+exports.updateCompTag = async (ctId, payload) => {
+  const p = readCompTagPayload(payload);
+  const { serverId, compId, tagPath, orgId, userId } = p;
+
+  const client = await getDb().connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await client.query(
+      `SELECT ct.ct_id, ct.server_id, ct.tag_full_path, t.data_type
+         FROM "tblCompTags" ct
+         JOIN "tblOpcTags" t ON t.tag_id = ct.tag_id
+        WHERE ct.ct_id = $1 AND ct.org_id = $2 AND COALESCE(ct.int_status, 1) = 1`,
+      [ctId, orgId],
+    );
+    if (!current.rows.length) throw new Error('Mapping not found');
+    const before = current.rows[0];
+
+    await assertCompAndServer(client, p);
+
+    const clash = await client.query(
+      `SELECT ct_id, int_status FROM "tblCompTags"
+        WHERE server_id = $1 AND tag_full_path = $2 AND ct_id <> $3`,
+      [serverId, tagPath, ctId],
+    );
+    if (clash.rows.length) {
+      throw new Error(
+        Number(clash.rows[0].int_status ?? 1) === 1
+          ? `${tagPath} is already mapped on this server`
+          : `${tagPath} has a deleted mapping (${clash.rows[0].ct_id}); add it as a new mapping instead`,
+      );
+    }
+
+    const rules = await client.query(
+      `SELECT cbm_id FROM "tblCbm" WHERE ct_id = $1 AND COALESCE(int_status, 1) = 1 ORDER BY cbm_id`,
+      [ctId],
+    );
+    if (rules.rows.length && operatorFamily(before.data_type) !== operatorFamily(p.dataType)) {
+      throw new Error(
+        `Condition rule(s) ${rules.rows.map((r) => r.cbm_id).join(', ')} use this tag as ${before.data_type}; ` +
+          'delete them before changing to a different kind of data type',
+      );
+    }
+
+    const tagId = await upsertOpcTag(client, p);
+    await client.query(
+      `UPDATE "tblCompTags"
+          SET server_id = $2, comp_id = $3, tag_id = $4, tag_full_path = $5, changed_by = $6, changed_on = NOW()
+        WHERE ct_id = $1`,
+      [ctId, serverId, compId, tagId, tagPath, userId],
+    );
+
+    // Rules follow the mapping: new asset, and a fresh start if the tag being read changed.
+    const signalChanged = before.server_id !== serverId || before.tag_full_path !== tagPath;
+    await client.query(
+      `UPDATE "tblCbm" r
+          SET asset_id = c.asset_id,
+              is_met = CASE WHEN $3 THEN false ELSE r.is_met END,
+              last_evaluated_on = CASE WHEN $3 THEN NULL ELSE r.last_evaluated_on END,
+              changed_by = $2, changed_on = NOW()
+         FROM "tblAssetComponents" c
+        WHERE r.ct_id = $1 AND c.comp_id = $4 AND COALESCE(r.int_status, 1) = 1`,
+      [ctId, userId, signalChanged, compId],
+    );
+    const ruleRows = await client.query(
+      `SELECT cbm_id, operator, value1, value2 FROM "tblCbm" WHERE ct_id = $1 AND COALESCE(int_status, 1) = 1`,
+      [ctId],
+    );
+    for (const r of ruleRows.rows) {
+      await client.query(`UPDATE "tblCbm" SET condition = $2 WHERE cbm_id = $1`, [
+        r.cbm_id,
+        describeCondition({ ...r, tag_name: p.tagName, unit: p.unit }),
+      ]);
     }
 
     await client.query('COMMIT');
@@ -391,6 +492,19 @@ const validateRule = ({ data_type, operator, value1, value2, action_type }) => {
   };
 };
 
+// Minutes between checks; the collector reads tags once a minute, so 1 is the floor.
+const MAX_CHECK_MINUTES = 60 * 24 * 365;
+const parseCheckFrequency = (raw) => {
+  if (raw == null || String(raw).trim() === '') return 1;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) throw new Error('Check frequency must be a whole number of minutes (at least 1)');
+  if (n > MAX_CHECK_MINUTES) throw new Error('Check frequency cannot be more than 365 days');
+  return n;
+};
+
+// Legacy rows hold 'COLLECTOR' (every reading), which counts as 1 minute.
+const CHECK_MINUTES_SQL = `CASE WHEN r.check_frequency ~ '^[0-9]+$' THEN r.check_frequency::int ELSE 1 END`;
+
 const getActiveCompTag = async (ctId, orgId) => {
   const { rows } = await getDb().query(
     `SELECT ct.ct_id, c.asset_id, t.tag_name, t.data_type, t.unit
@@ -409,6 +523,7 @@ exports.listCbmRules = async (orgId) => {
     `SELECT r.cbm_id, r.ct_id, r.asset_id, a.text AS asset_name, c.comp_id, c.comp_name,
             ct.server_id, ct.tag_full_path, t.tag_name, t.data_type, t.unit,
             r.operator, r.value1, r.value2, r.condition, r.action_type,
+            ${CHECK_MINUTES_SQL} AS check_frequency_minutes,
             r.last_value, r.last_evaluated_on, r.is_met, r.last_triggered_on, r.last_trigger_ref,
             r.created_on
        FROM "tblCbm" r
@@ -433,15 +548,16 @@ exports.createCbmRule = async (payload) => {
   const tag = await getActiveCompTag(ctId, orgId);
   const { value1, value2 } = validateRule({ ...tag, operator, value1: payload.value1, value2: payload.value2, action_type: actionType });
   const condition = describeCondition({ ...tag, operator, value1, value2 });
+  const checkMinutes = parseCheckFrequency(payload.check_frequency_minutes);
 
   const cbmId = await generateCustomId('cbm', 3);
   const { rows } = await getDb().query(
     `INSERT INTO "tblCbm"
        (cbm_id, asset_id, ct_id, condition, check_frequency, operator, value1, value2, action_type,
         is_met, org_id, int_status, created_by, created_on, changed_by, changed_on)
-     VALUES ($1, $2, $3, $4, 'COLLECTOR', $5, $6, $7, $8, false, $9, 1, $10, NOW(), $10, NOW())
+     VALUES ($1, $2, $3, $4, $11, $5, $6, $7, $8, false, $9, 1, $10, NOW(), $10, NOW())
      RETURNING *`,
-    [cbmId, tag.asset_id, ctId, condition, operator, value1, value2, actionType, orgId, userId],
+    [cbmId, tag.asset_id, ctId, condition, operator, value1, value2, actionType, orgId, userId, String(checkMinutes)],
   );
   return rows[0];
 };
@@ -456,15 +572,17 @@ exports.updateCbmRule = async (cbmId, payload) => {
   const tag = await getActiveCompTag(ctId, orgId);
   const { value1, value2 } = validateRule({ ...tag, operator, value1: payload.value1, value2: payload.value2, action_type: actionType });
   const condition = describeCondition({ ...tag, operator, value1, value2 });
+  const checkMinutes = parseCheckFrequency(payload.check_frequency_minutes);
 
   // A changed condition starts fresh so it can trigger again on the next reading.
   const { rows } = await getDb().query(
     `UPDATE "tblCbm"
         SET asset_id = $2, ct_id = $3, condition = $4, operator = $5, value1 = $6, value2 = $7,
-            action_type = $8, is_met = false, changed_by = $10, changed_on = NOW()
+            action_type = $8, check_frequency = $11, is_met = false, last_evaluated_on = NULL,
+            changed_by = $10, changed_on = NOW()
       WHERE cbm_id = $1 AND org_id = $9 AND COALESCE(int_status, 1) = 1
       RETURNING *`,
-    [cbmId, tag.asset_id, ctId, condition, operator, value1, value2, actionType, orgId, userId],
+    [cbmId, tag.asset_id, ctId, condition, operator, value1, value2, actionType, orgId, userId, String(checkMinutes)],
   );
   if (!rows.length) throw new Error('Rule not found');
   return rows[0];
@@ -504,7 +622,9 @@ exports.listActiveRulesForPaths = async (serverId, orgId, paths) => {
        JOIN "tblCompTags" ct ON ct.ct_id = r.ct_id
        JOIN "tblOpcTags" t ON t.tag_id = ct.tag_id
       WHERE ct.server_id = $1 AND r.org_id = $2 AND ct.tag_full_path = ANY($3::varchar[])
-        AND COALESCE(r.int_status, 1) = 1 AND COALESCE(ct.int_status, 1) = 1`,
+        AND COALESCE(r.int_status, 1) = 1 AND COALESCE(ct.int_status, 1) = 1
+        AND (r.last_evaluated_on IS NULL
+             OR r.last_evaluated_on <= NOW() - make_interval(mins => ${CHECK_MINUTES_SQL}) + INTERVAL '10 seconds')`,
     [serverId, orgId, paths],
   );
   return rows;
@@ -526,3 +646,4 @@ exports.TAG_TYPES = TAG_TYPES;
 exports.OPERATORS = OPERATORS;
 exports.ACTION_TYPES = ACTION_TYPES;
 exports.operatorFamily = operatorFamily;
+exports.MAX_CHECK_MINUTES = MAX_CHECK_MINUTES;
