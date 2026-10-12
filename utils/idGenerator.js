@@ -85,6 +85,12 @@ const defaultPrefixes = {
     'utility_d': 'utild',
     'at_utility_map': 'ATUM',
     'util_consumption': 'utcv',
+    // OPC / condition monitoring
+    'asset_component': 'CMP',
+    'opc_tag': 'TAG',
+    'opc_server': 'OPS',
+    'comp_tag': 'CT',
+    'cbm': 'CBM',
 };
 
 /**
@@ -250,6 +256,11 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'asset_br_det': 'tblAssetBRDet',
         'tblAssetBRDet': 'tblAssetBRDet',
         'org': 'tblOrgs',
+        'asset_component': 'tblAssetComponents',
+        'opc_tag': 'tblOpcTags',
+        'opc_server': 'tblOpcServers',
+        'comp_tag': 'tblCompTags',
+        'cbm': 'tblCbm',
     };
 
     const columnMap = {
@@ -340,6 +351,11 @@ async function generateCustomIdWithDb(dbPool, tableKey, padLength = 3) {
         'asset_br_det': 'abr_id',
         'tblAssetBRDet': 'abr_id',
         'org': 'org_id',
+        'asset_component': 'comp_id',
+        'opc_tag': 'tag_id',
+        'opc_server': 'server_id',
+        'comp_tag': 'ct_id',
+        'cbm': 'cbm_id',
     };
 
     const targetTable = tableMap[tableKey] || tableMap[sequenceKey];
