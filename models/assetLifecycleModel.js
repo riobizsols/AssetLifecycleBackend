@@ -26,7 +26,7 @@ const getAssetLifecycleData = async (filters = {}) => {
   } = filters;
 
   const acmScope = buildReportAssetScopeClause(filters.acmCtx || {});
-  let whereConditions = [];
+  let whereConditions = [`department <> 'Unassigned'`];
   let queryParams = [...acmScope.params];
   let paramCount = acmScope.paramCount;
 
@@ -430,7 +430,7 @@ const getAssetLifecycleCount = async (filters = {}) => {
   } = filters;
 
   const acmScope = buildReportAssetScopeClause(filters.acmCtx || {});
-  let whereConditions = [];
+  let whereConditions = [`department <> 'Unassigned'`];
   let queryParams = [...acmScope.params];
   let paramCount = acmScope.paramCount;
 
