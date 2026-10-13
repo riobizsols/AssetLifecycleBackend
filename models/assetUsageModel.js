@@ -638,9 +638,19 @@ const getAllAssetsForAssetTypes = async (orgId, assetTypeIds) => {
       a.description,
       a.text,
       a.branch_id,
-      at.text AS asset_type_name
+      at.text AS asset_type_name,
+      aa.dept_id
     FROM "tblAssets" a
     INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+    LEFT JOIN LATERAL (
+      SELECT x.dept_id
+      FROM "tblAssetAssignments" x
+      WHERE x.asset_id = a.asset_id
+        AND x.action = 'A'
+        AND x.latest_assignment_flag = true
+        AND x.dept_id IS NOT NULL
+      LIMIT 1
+    ) aa ON TRUE
     WHERE a.org_id = $1
       AND a.asset_type_id = ANY($2::text[])
       AND a.current_status != 'SCRAPPED'
