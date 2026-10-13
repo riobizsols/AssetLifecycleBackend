@@ -24,7 +24,8 @@ function parseHorizonDays(value, fallback = 30) {
   return Math.min(Math.floor(n), 365);
 }
 
-async function listBranches(orgId) {
+/** allowedBranchIds: null = every branch of the org. */
+async function listBranches(orgId, allowedBranchIds = null) {
   const db = getDb();
   const res = await db.query(
     `
@@ -32,9 +33,10 @@ async function listBranches(orgId) {
       FROM "tblBranches"
      WHERE org_id = $1
        AND COALESCE(int_status, 1) = 1
+       AND ($2::text[] IS NULL OR branch_id = ANY($2::text[]))
      ORDER BY text
     `,
-    [orgId],
+    [orgId, allowedBranchIds],
   );
   return res.rows;
 }

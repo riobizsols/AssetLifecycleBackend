@@ -1,4 +1,18 @@
 const assetUsageModel = require("../models/assetUsageModel");
+const { getReportAllowedBranchIds, scopeReportBranchIds } = require("../utils/acmAccess");
+
+const splitList = (value) => {
+  if (!value) return [];
+  const list = Array.isArray(value) ? value : String(value).split(",");
+  return list.map((v) => String(v).trim()).filter(Boolean);
+};
+
+/** Picked branches limited to the header ACM scope; null = no branch filter. */
+const scopedReportBranches = (req, raw) => {
+  const ids = scopeReportBranchIds(req, splitList(raw));
+  return ids.length ? ids : null;
+};
+
 const getAssetsForUsageRecording = async (req, res) => {
   try {
     const { org_id: orgId, emp_int_id: employeeIntId, dept_id: deptId } = req.user || {};
@@ -189,7 +203,7 @@ const getUsageReport = async (req, res) => {
       usageCounterMin: usageCounterMin ? parseInt(usageCounterMin) : null,
       usageCounterMax: usageCounterMax ? parseInt(usageCounterMax) : null,
       department: parseCommaSeparated(department),
-      branchId: (!hasSuperAccess) ? parseCommaSeparated(branchId) : null, // Only add branchId if no super access
+      branchId: scopedReportBranches(req, branchId),
       hasSuperAccess: hasSuperAccess, // Pass to model
       limit: limit ? parseInt(limit) : 1000,
       offset: offset ? parseInt(offset) : 0,
@@ -378,10 +392,15 @@ const getUsageReportFilterOptions = async (req, res) => {
         AND a.asset_type_id = ANY($2::text[])
         AND aa.action = 'A'
         AND aa.latest_assignment_flag = true
+        AND ($3::text[] IS NULL OR b.branch_id = ANY($3::text[]))
       ORDER BY b.text
     `;
 
-    const branchesResult = await dbPool.query(branchesQuery, [orgId, assetTypeIds]);
+    const branchesResult = await dbPool.query(branchesQuery, [
+      orgId,
+      assetTypeIds,
+      getReportAllowedBranchIds(req),
+    ]);
     const branches = branchesResult.rows;
 
     // Get users from tblAssetUsageReg created_by column
@@ -466,7 +485,7 @@ const exportUsageReportCSV = async (req, res) => {
       usageCounterMin: usageCounterMin ? parseInt(usageCounterMin) : null,
       usageCounterMax: usageCounterMax ? parseInt(usageCounterMax) : null,
       department: department || null,
-      branchId: branchId || null,
+      branchId: scopedReportBranches(req, branchId),
       limit: 10000, // Large limit for export
       offset: 0,
     };
@@ -549,7 +568,7 @@ const exportUsageReportPDF = async (req, res) => {
       usageCounterMin: usageCounterMin ? parseInt(usageCounterMin) : null,
       usageCounterMax: usageCounterMax ? parseInt(usageCounterMax) : null,
       department: department || null,
-      branchId: (!hasSuperAccess) ? branchId : null, // Only add branchId if no super access
+      branchId: scopedReportBranches(req, branchId),
       hasSuperAccess: hasSuperAccess, // Pass to model
       limit: 10000, // Large limit for export
       offset: 0,

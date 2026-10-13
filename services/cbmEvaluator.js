@@ -152,6 +152,17 @@ const createCbmInspection = async (rule, orgId, note) => {
   return { status: 'created', message: `Inspection ${aisId} created`, ref: aisId };
 };
 
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const lastPruneByOrg = new Map();
+
+const pruneReadingLogHourly = async (orgId) => {
+  const now = Date.now();
+  if (now - (lastPruneByOrg.get(orgId) || 0) < PRUNE_INTERVAL_MS) return;
+  lastPruneByOrg.set(orgId, now);
+  const removed = await opcModel.pruneReadingLog(orgId);
+  if (removed) console.log(`[CBM] Pruned ${removed} reading log rows older than ${opcModel.CBM_LOG_RETENTION_DAYS} days for ${orgId}`);
+};
+
 /**
  * readings: [{ tag_full_path, value, quality }] for one server.
  * Returns one result per evaluated rule.
@@ -177,8 +188,9 @@ exports.evaluateReadings = async (serverId, orgId, readings) => {
     }
 
     if (!met || rule.is_met) {
-      await opcModel.saveRuleEvaluation(rule.cbm_id, { value: raw, isMet: met });
-      results.push({ cbm_id: rule.cbm_id, status: met ? 'still_met' : 'not_met', value: raw });
+      const status = met ? 'still_met' : 'not_met';
+      await opcModel.saveRuleEvaluation(rule.cbm_id, { value: raw, isMet: met, outcome: status });
+      results.push({ cbm_id: rule.cbm_id, status, value: raw });
       continue;
     }
 
@@ -198,6 +210,8 @@ exports.evaluateReadings = async (serverId, orgId, readings) => {
     await opcModel.saveRuleEvaluation(rule.cbm_id, {
       value: raw,
       isMet: latched,
+      conditionMet: true,
+      outcome: outcome.status,
       triggerRef: outcome.status === 'created' ? outcome.ref : null,
     });
     if (outcome.status === 'created') {
@@ -208,5 +222,6 @@ exports.evaluateReadings = async (serverId, orgId, readings) => {
     results.push({ cbm_id: rule.cbm_id, value: raw, ...outcome });
   }
 
+  if (rules.length) await pruneReadingLogHourly(orgId);
   return results;
 };

@@ -630,15 +630,68 @@ exports.listActiveRulesForPaths = async (serverId, orgId, paths) => {
   return rows;
 };
 
-exports.saveRuleEvaluation = async (cbmId, { value, isMet, triggerRef }) => {
+const CBM_LOG_RETENTION_DAYS = 3;
+const { STATEMENTS: CBM_LOG_DDL } = require('./cbmReadingLogSchema');
+
+const insertReadingLog = (db, cbmId, { value, conditionMet, outcome, triggerRef }) =>
+  db.query(
+    `INSERT INTO "tblCbmReadingLog"
+       (cbm_id, asset_id, ct_id, server_id, tag_full_path, value, is_met, outcome, trigger_ref, recorded_on, org_id)
+     SELECT r.cbm_id, r.asset_id, r.ct_id, ct.server_id, ct.tag_full_path, $2, $3, $4, $5, r.last_evaluated_on, r.org_id
+       FROM "tblCbm" r
+       LEFT JOIN "tblCompTags" ct ON ct.ct_id = r.ct_id
+      WHERE r.cbm_id = $1`,
+    [cbmId, value, conditionMet, outcome || null, triggerRef || null],
+  );
+
+// History must never stop rule evaluation, so a missing table is created on first use.
+const logRuleReading = async (cbmId, entry) => {
+  const db = getDb();
+  try {
+    await insertReadingLog(db, cbmId, entry);
+  } catch (err) {
+    if (err.code !== '42P01') {
+      console.error(`[CBM] Could not log reading for ${cbmId}:`, err.message);
+      return;
+    }
+    try {
+      for (const sql of CBM_LOG_DDL) await db.query(sql);
+      await insertReadingLog(db, cbmId, entry);
+    } catch (retryErr) {
+      console.error(`[CBM] Could not log reading for ${cbmId}:`, retryErr.message);
+    }
+  }
+};
+
+/**
+ * isMet is the latched state stored on the rule; conditionMet (defaults to isMet) is what the
+ * reading itself showed and is what goes into the 3-day reading log.
+ */
+exports.saveRuleEvaluation = async (cbmId, { value, isMet, triggerRef, conditionMet = isMet, outcome }) => {
+  const stored = value == null ? null : String(value).slice(0, 100);
   await getDb().query(
     `UPDATE "tblCbm"
         SET last_value = $2, last_evaluated_on = NOW(), is_met = $3,
             last_triggered_on = CASE WHEN $4::varchar IS NULL THEN last_triggered_on ELSE NOW() END,
             last_trigger_ref = COALESCE($4::varchar, last_trigger_ref)
       WHERE cbm_id = $1`,
-    [cbmId, value == null ? null : String(value).slice(0, 100), isMet, triggerRef || null],
+    [cbmId, stored, isMet, triggerRef || null],
   );
+  await logRuleReading(cbmId, { value: stored, conditionMet, outcome, triggerRef });
+};
+
+exports.pruneReadingLog = async (orgId) => {
+  try {
+    const { rowCount } = await getDb().query(
+      `DELETE FROM "tblCbmReadingLog"
+        WHERE org_id = $1 AND recorded_on < NOW() - make_interval(days => $2)`,
+      [orgId, CBM_LOG_RETENTION_DAYS],
+    );
+    return rowCount;
+  } catch (err) {
+    if (err.code !== '42P01') console.error('[CBM] Could not prune reading log:', err.message);
+    return 0;
+  }
 };
 
 exports.DATA_TYPES = DATA_TYPES;
@@ -647,3 +700,4 @@ exports.OPERATORS = OPERATORS;
 exports.ACTION_TYPES = ACTION_TYPES;
 exports.operatorFamily = operatorFamily;
 exports.MAX_CHECK_MINUTES = MAX_CHECK_MINUTES;
+exports.CBM_LOG_RETENTION_DAYS = CBM_LOG_RETENTION_DAYS;

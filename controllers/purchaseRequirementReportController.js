@@ -3,6 +3,7 @@ const { exportToExcel } = require('../utils/exportUtils');
 const {
   ensureStockStatusNotificationsForOrg,
 } = require('../models/stockStatusNotifyModel');
+const { getReportAllowedBranchIds, scopeReportBranchIds } = require('../utils/acmAccess');
 
 function orgIdFrom(req) {
   return req.user?.org_id;
@@ -12,7 +13,10 @@ function filtersFrom(req) {
   const src = req.method === 'GET' ? req.query : req.body || {};
   return {
     orgId: orgIdFrom(req),
-    branchIds: model.parseList(src.branchIds || src.branch_ids || src.branches),
+    branchIds: scopeReportBranchIds(
+      req,
+      model.parseList(src.branchIds || src.branch_ids || src.branches),
+    ),
     categoryIds: model.parseList(src.categoryIds || src.category_ids || src.categories),
     focus: src.focus || src.view || 'all',
     horizonDays: model.parseHorizonDays(src.horizonDays || src.horizon_days || src.horizon, 30),
@@ -34,7 +38,7 @@ const getOptions = async (req, res) => {
     if (!orgId) return res.status(401).json({ error: 'Unauthorized - Missing organization ID' });
 
     const [branches, categories] = await Promise.all([
-      model.listBranches(orgId),
+      model.listBranches(orgId, getReportAllowedBranchIds(req)),
       model.listCategories(orgId),
     ]);
 

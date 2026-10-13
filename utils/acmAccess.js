@@ -464,6 +464,34 @@ function getEffectiveListContext(req) {
   };
 }
 
+/**
+ * Branches a report may show for the header ACM selection.
+ * null = no restriction (org-wide access, or no branch known for the user).
+ */
+function getReportAllowedBranchIds(req) {
+  const ctx = getEffectiveListContext(req);
+  if (ctx.hasSuperAccess) return null;
+  const ids = (ctx.branchIds && ctx.branchIds.length ? ctx.branchIds : [ctx.branchId])
+    .filter(Boolean)
+    .map(String);
+  return ids.length ? ids : null;
+}
+
+/**
+ * Report branch filter limited to the ACM scope.
+ * Nothing picked → every allowed branch ([] = all when unrestricted).
+ * Picked branches outside the scope are dropped; if none remain, matches nothing.
+ */
+const NO_BRANCH = '__no_branch__';
+function scopeReportBranchIds(req, requested = []) {
+  const picked = (requested || []).map(String).filter(Boolean);
+  const allowed = getReportAllowedBranchIds(req);
+  if (!allowed) return picked;
+  if (!picked.length) return allowed;
+  const kept = picked.filter((id) => allowed.includes(id));
+  return kept.length ? kept : [NO_BRANCH];
+}
+
 function applyAcmSqlFilters(acm, cols = {}, startIndex = 1) {
   if (!acm) {
     return { sql: '', params: [], nextIndex: startIndex };
@@ -694,6 +722,8 @@ module.exports = {
   deriveAcmListScope,
   applyAcmSelectionToRequestUser,
   getEffectiveListContext,
+  getReportAllowedBranchIds,
+  scopeReportBranchIds,
   applyAcmSqlFilters,
   buildAssetListScopeSql,
   buildAssetGroupScopeExistsSql,
