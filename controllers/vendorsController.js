@@ -423,7 +423,11 @@ exports.updateVendor = async (req, res) => {
       contract_end_date,
       changed_by,
       changed_on,
+      product_supply,
+      service_supply,
+      spare_supply,
     } = sanitized;
+    const optionalFlag = (v) => (v === undefined || v === null || v === '' ? null : Boolean(v) && v !== 'false');
 
     // Validate int_status: 0 = Inactive, 1 = Active, 3 = CRApproved, 4 = Blocked
     if (int_status !== undefined && int_status !== null) {
@@ -468,7 +472,10 @@ exports.updateVendor = async (req, res) => {
           contract_start_date = $16,
           contract_end_date = $17,
           changed_by = $18,
-          changed_on = $19
+          changed_on = $19,
+          product_supply = COALESCE($21::boolean, product_supply),
+          service_supply = COALESCE($22::boolean, service_supply),
+          spare_supply = COALESCE($23::boolean, spare_supply)
         WHERE vendor_id = $20
         RETURNING *;
       `;
@@ -494,6 +501,9 @@ exports.updateVendor = async (req, res) => {
       changed_by,
       changed_on,
       vendor_id,
+      optionalFlag(product_supply),
+      optionalFlag(service_supply),
+      optionalFlag(spare_supply),
     ];
 
     const { rows } = await dbPool.query(query, values);
