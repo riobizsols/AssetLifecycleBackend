@@ -703,20 +703,42 @@ const getMaintenanceScheduleById = async (
       }
     }
 
+    // The asset type's current frequency setting wins over values captured when the
+    // schedule was created (a type can be switched from vendor to in-house later).
+    let currentFreq = null;
+    try {
+      const freqRes = await dbPool.query(
+        `SELECT maintained_by, emp_int_id
+         FROM "tblATMaintFreq"
+         WHERE org_id = $1
+           AND (at_main_freq_id = $2 OR asset_type_id = $3)
+           AND NULLIF(BTRIM(maintained_by), '') IS NOT NULL
+         ORDER BY (at_main_freq_id = $2) DESC NULLS LAST
+         LIMIT 1`,
+        [orgId, record.at_main_freq_id || null, record.asset_type_id || null],
+      );
+      currentFreq = freqRes.rows[0] || null;
+    } catch (_) {
+      /* optional */
+    }
+
     const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
-    const maintainedBy = record.maintained_by || null;
+    const currentMaintainedBy = currentFreq?.maintained_by || null;
+    const maintainedBy = currentMaintainedBy || record.maintained_by || null;
     // Treat as in-house when maintained_by says so, OR when a header technician is assigned
     // without an explicit vendor-maintained flag.
-    const isInhouse =
-      isInhouseMaintainedBy(maintainedBy) ||
-      (!String(maintainedBy || '').toLowerCase().includes('vendor') &&
-        Boolean(headerEmp?.emp_int_id || record.emp_int_id));
+    const isInhouse = currentMaintainedBy
+      ? !String(currentMaintainedBy).toLowerCase().includes('vendor')
+      : isInhouseMaintainedBy(maintainedBy) ||
+        (!String(maintainedBy || '').toLowerCase().includes('vendor') &&
+          Boolean(headerEmp?.emp_int_id || record.emp_int_id));
     const resolvedEmpId =
       record.emp_int_id ||
-      (isInhouse ? headerEmp?.emp_int_id : null) ||
+      (isInhouse ? headerEmp?.emp_int_id || currentFreq?.emp_int_id : null) ||
       null;
 
     record.is_inhouse = isInhouse;
+    record.current_maintained_by = currentMaintainedBy;
     record.header_emp_int_id = headerEmp?.emp_int_id || null;
 
     if (isInhouse && resolvedEmpId) {
