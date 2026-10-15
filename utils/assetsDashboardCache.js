@@ -62,11 +62,23 @@ function acmScope(req) {
   return `acm:${sel.orgId || '*'}:${branchScope(req)}:${deptPart}`;
 }
 
-function tenantScope(req) {
-  const pool = req.db || req.tenantPool;
-  if (pool?.options?.database) {
-    return pool.options.database;
+function poolDatabaseName(pool) {
+  if (!pool?.options) return null;
+  if (pool.options.database) return pool.options.database;
+  const connectionString = pool.options.connectionString;
+  if (!connectionString) return null;
+  try {
+    const name = decodeURIComponent(new URL(connectionString).pathname.replace(/^\//, ''));
+    return name || null;
+  } catch {
+    return null;
   }
+}
+
+// Tenant DBs reuse internal org IDs (e.g. ORG004), so keys must carry the real database name.
+function tenantScope(req) {
+  const database = poolDatabaseName(req.db || req.tenantPool);
+  if (database) return database;
   return req.isTenant ? 'tenant' : 'default';
 }
 
