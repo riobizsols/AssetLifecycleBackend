@@ -21,6 +21,7 @@ function applyWorkflowActAccess(branchAccess, headerStatus) {
 const { branchCodeFromReq, branchIdFromReq } = require('../utils/reqUserBranch');
 const { userHasSystemAdminRole } = require('../utils/systemAdmin');
 const {
+    isMaintenanceWorkflowHeaderId,
     getMaintenanceAssetBranchId,
     getApprovalBranchAccessForRequest,
     attachBranchAccess,
@@ -111,8 +112,8 @@ const getApprovalDetail = async (req, res) => {
       });
     }
 
-    // Detect if assetId is a WFAMSH ID (starts with 'WFAMSH_')
-    const isWfamshId = String(assetId || '').startsWith('WFAMSH_');
+    // Detect workflow header ID (WFAMSH_01 or WFAMSH016)
+    const isWfamshId = isMaintenanceWorkflowHeaderId(assetId);
     
     let approvalDetail;
     if (isWfamshId) {

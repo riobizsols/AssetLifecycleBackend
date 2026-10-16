@@ -682,7 +682,26 @@ const createSpareIssueRequests = async ({
       created_by,
     });
 
+    // Open requests for this maintenance (pending / reserved / issued) — block duplicates
+    const openIssues = await client.query(
+      `
+        SELECT si.si_id, si.status, si.remarks, ind.spc_id AS issued_spc_id
+        FROM "tblSpareIssue" si
+        LEFT JOIN "tblSPIndDet" ind ON si.spid_id = ind.spid_id
+        WHERE si.assetmaintsch_id = $1
+          AND si.org_id = $2
+          AND si.status IN ('RQ', 'IS', 'IE')
+      `,
+      [assetmaintsch_id, org_id]
+    );
+    const openBySpc = new Map();
+    for (const row of openIssues.rows) {
+      const spc = resolveIssueSpcId(row);
+      if (spc && !openBySpc.has(spc)) openBySpc.set(spc, row);
+    }
+
     const created = [];
+    const requestedInBatch = new Set();
 
     for (const item of items) {
       const spc_id = item?.spc_id;
@@ -695,6 +714,29 @@ const createSpareIssueRequests = async ({
       if (!Number.isFinite(qty) || qty <= 0 || Math.floor(qty) !== qty) {
         const err = new Error('Quantity must be a positive whole number');
         err.statusCode = 400;
+        throw err;
+      }
+      if (requestedInBatch.has(spc_id)) {
+        const err = new Error(
+          `Category ${spc_id} is selected more than once in this request`
+        );
+        err.statusCode = 400;
+        throw err;
+      }
+      requestedInBatch.add(spc_id);
+
+      const existing = openBySpc.get(spc_id);
+      if (existing) {
+        const label =
+          existing.status === SPARE_ISSUE_STATUS.REQUESTED
+            ? 'already requested and pending approval'
+            : existing.status === SPARE_ISSUE_STATUS.RESERVED
+              ? 'already approved (reserved)'
+              : 'already issued';
+        const err = new Error(
+          `Spare part category is ${label} for this maintenance. Duplicate request is not allowed.`
+        );
+        err.statusCode = 409;
         throw err;
       }
 

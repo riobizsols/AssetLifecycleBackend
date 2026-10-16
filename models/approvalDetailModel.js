@@ -15,6 +15,7 @@ const {
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { formatDateLocal, formatTimeLocal, parseDbTimestamp } = require('../utils/dateTimeFormat');
 const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+const { isMaintenanceWorkflowHeaderId } = require('../utils/approvalBranchAccess');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
 const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate = null, technicianId = null, userId, orgId = 'ORG001') => {
@@ -493,7 +494,7 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
     }
     
     // Detect whether the identifier is a wfamsh_id or asset_id (needed for vendor check)
-    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    const isWfamshId = isMaintenanceWorkflowHeaderId(assetOrWfamshId);
     
     // If vendor_id is provided, validate it's active (int_status = 1)
     // Also check the current vendor from workflow if no new vendor is provided
@@ -892,8 +893,8 @@ const rejectMaintenance = async (assetOrWfamshId, empIntId, reason, orgId = 'ORG
       throw new Error('User has no assigned roles');
     }
 
-    // Check if the parameter is a workflow ID (WFAMSH_XX) or asset ID
-    const isWfamshId = String(assetOrWfamshId || '').startsWith('WFAMSH_');
+    // Workflow header ID (WFAMSH_01 or WFAMSH016) vs asset ID
+    const isWfamshId = isMaintenanceWorkflowHeaderId(assetOrWfamshId);
 
     // ROLE-BASED: Matching role can reject the AP step. System Admin (JR001) can reject any AP step.
     const currentResult = await fetchCurrentApStep({

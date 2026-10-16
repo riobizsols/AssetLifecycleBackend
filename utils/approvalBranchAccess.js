@@ -65,9 +65,14 @@ async function getAssetBranchId(assetId, db = getDbFromContext()) {
   return result.rows[0]?.branch_id || null;
 }
 
+/** True for both WFAMSH_01 (idGenerator default) and WFAMSH016 (prefix without underscore). */
+function isMaintenanceWorkflowHeaderId(id) {
+  return /^WFAMSH[_-]?\d+/i.test(String(id || '').trim());
+}
+
 async function getMaintenanceAssetBranchId(assetOrWfamshId, db = getDbFromContext()) {
   if (!assetOrWfamshId) return null;
-  if (String(assetOrWfamshId).startsWith('WFAMSH_')) {
+  if (isMaintenanceWorkflowHeaderId(assetOrWfamshId)) {
     const result = await db.query(
       `
         SELECT a.branch_id
@@ -203,6 +208,7 @@ function crossBranchForbiddenBody() {
 
 module.exports = {
   CROSS_BRANCH_VIEW_ONLY_MESSAGE,
+  isMaintenanceWorkflowHeaderId,
   evaluateApprovalBranchAccess,
   resolveUserBranchId,
   getAssetBranchId,
