@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const { getDbFromContext } = require('../utils/dbContext');
 const { getStatusId } = require('../utils/workflowStatusCodes');
+const { generateCustomId } = require('../utils/idGenerator');
 const crypto = require('crypto');
 
 // Helper function to get database connection (tenant pool or default)
@@ -494,7 +495,6 @@ const deleteScrapSale = async (ssh_id) => {
 const createScrapSaleWithWorkflow = async (saleData, orgId, userId) => {
     const dbPool = getDb();
     const client = await dbPool.connect();
-    const { generateCustomId } = require('../utils/idGenerator');
     const crypto = require('crypto');
     
     // Helper functions from scrapMaintenanceModel pattern
