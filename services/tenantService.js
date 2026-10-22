@@ -318,6 +318,12 @@ function tenantSslShouldDisable(connectionHost) {
   return h === 'alm_db' || h === 'localhost' || h === '127.0.0.1' || h === 'host.docker.internal';
 }
 
+/** Playwright CI sets this so the suite always opens playwright_db. */
+function resolveTenantDbName(database) {
+  const override = String(process.env.TENANT_DB_NAME_OVERRIDE || '').trim();
+  return override || database;
+}
+
 /**
  * Create connection string for tenant database.
  * Appends sslmode=disable when SSL is off (Docker alm_db / non-TLS Postgres).
@@ -325,7 +331,8 @@ function tenantSslShouldDisable(connectionHost) {
 function getTenantConnectionString(credentials) {
   const host = resolveTenantDbHost(credentials.host);
   const port = resolveTenantDbPort(credentials.port);
-  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${host}:${port}/${credentials.database}`;
+  const database = resolveTenantDbName(credentials.database);
+  const base = `postgresql://${credentials.user}:${encodeURIComponent(credentials.password)}@${host}:${port}/${database}`;
 
   const lower = base.toLowerCase();
   if (lower.includes('sslmode=')) {
@@ -361,7 +368,7 @@ async function getTenantPool(orgId) {
   }
 
   const connectionString = getTenantConnectionString(credentials);
-  logger.log(`[TenantService] Creating pool for org_id: ${orgId}, database: ${credentials.database}`);
+  logger.log(`[TenantService] Creating pool for org_id: ${orgId}, database: ${resolveTenantDbName(credentials.database)}`);
 
   const pool = new Pool(
     buildPoolConfig(connectionString, {
