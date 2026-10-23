@@ -1,6 +1,26 @@
 const AssetSerialPrintModel = require('../models/assetSerialPrintModel');
 const serialPrintLogger = require('../eventLoggers/serialNumberPrintEventLogger');
 const operationalCache = require('../utils/operationalCache');
+const { getEffectiveListContext } = require('../utils/acmAccess');
+
+/** Org-wide ACM (header says Organization) must not fall back to the user's home branch. */
+function printQueueScope(req) {
+  const ctx = getEffectiveListContext(req);
+  const orgWide = Boolean(ctx.allBranches || ctx.hasSuperAccess);
+  const branchId = orgWide ? null : ctx.branchId || null;
+  return {
+    orgId: ctx.orgId || req.user?.org_id,
+    branchId,
+    hasSuperAccess: orgWide || !branchId,
+  };
+}
+
+function invalidatePrintQueue(orgId) {
+  if (!orgId) return;
+  operationalCache.invalidateOrgCaches(orgId).catch((err) => {
+    console.error('Print queue cache invalidate failed:', err.message);
+  });
+}
 
 class AssetSerialPrintController {
   // Add serial number to print queue
@@ -56,6 +76,7 @@ class AssetSerialPrintController {
 
       // Add to print queue
       const result = await AssetSerialPrintModel.addToPrintQueue(serialData);
+      invalidatePrintQueue(orgId);
 
       // STEP 4: Log added successfully (non-blocking)
       serialPrintLogger.logAddedToPrintQueue({
@@ -110,9 +131,7 @@ class AssetSerialPrintController {
     const userId = req.user?.user_id;
     
     try {
-      const orgId = req.user.org_id;
-      const branchId = req.user?.branch_id;
-      const hasSuperAccess = req.user?.hasSuperAccess || false;
+      const { orgId, branchId, hasSuperAccess } = printQueueScope(req);
 
       // STEP 1: Log API called (non-blocking)
       serialPrintLogger.logPrintQueueFetchApiCalled({
@@ -196,9 +215,7 @@ class AssetSerialPrintController {
     const userId = req.user?.user_id;
     
     try {
-      const orgId = req.user.org_id;
-      const branchId = req.user?.branch_id;
-      const hasSuperAccess = req.user?.hasSuperAccess || false;
+      const { orgId, branchId, hasSuperAccess } = printQueueScope(req);
       const { status } = req.params;
 
       // STEP 1: Log API called (non-blocking)
@@ -335,6 +352,7 @@ class AssetSerialPrintController {
 
       // Update status
       const result = await AssetSerialPrintModel.updatePrintStatus(psnqId, status, orgId);
+      if (result) invalidatePrintQueue(orgId);
 
       if (!result) {
         serialPrintLogger.logPrintQueueItemNotFound({
@@ -400,6 +418,7 @@ class AssetSerialPrintController {
 
       // Delete from print queue
       const result = await AssetSerialPrintModel.deleteFromPrintQueue(psnqId, orgId);
+      if (result) invalidatePrintQueue(orgId);
 
       if (!result) {
         serialPrintLogger.logPrintQueueItemNotFound({
