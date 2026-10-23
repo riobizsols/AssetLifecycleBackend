@@ -783,8 +783,18 @@ async function getCertifiedTechnicians(orgId, assetTypeId, scope = 'all') {
       INNER JOIN "tblEmpTechCert" etc ON etc.tc_id = rc.tc_id
       INNER JOIN "tblEmployees" e ON e.emp_int_id = etc.emp_int_id
       LEFT JOIN "tblTechCert" tc ON tc.tc_id = rc.tc_id
-      WHERE e.org_id = $2
-        AND e.int_status = 1
+      WHERE e.int_status = 1
+        AND (
+          e.org_id = $2
+          OR EXISTS (
+            SELECT 1
+            FROM "tblEmpTechCert" etc_org
+            INNER JOIN "tblTechCert" tc_org ON tc_org.tc_id = etc_org.tc_id
+            WHERE etc_org.emp_int_id = e.emp_int_id
+              AND tc_org.org_id = $2
+              AND (etc_org.status IS NULL OR UPPER(etc_org.status) IN ('APPROVED', 'CONFIRMED'))
+          )
+        )
         AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
         AND rcnt.cnt > 0
       GROUP BY e.emp_int_id, e.full_name, e.email_id, e.phone_number
@@ -936,8 +946,18 @@ async function getTechnicianFromWorkflowHeader(orgId, empIntId) {
       e.phone_number
     FROM "tblEmployees" e
     WHERE e.emp_int_id = $1
-      AND e.org_id = $2
-      AND e.int_status = 1;
+      AND e.int_status = 1
+      AND (
+        e.org_id = $2
+        OR EXISTS (
+          SELECT 1
+          FROM "tblEmpTechCert" etc
+          INNER JOIN "tblTechCert" tc ON tc.tc_id = etc.tc_id
+          WHERE etc.emp_int_id = e.emp_int_id
+            AND tc.org_id = $2
+            AND (etc.status IS NULL OR UPPER(etc.status) IN ('APPROVED', 'CONFIRMED'))
+        )
+      );
   `;
   
   try {
