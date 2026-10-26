@@ -254,16 +254,38 @@ async function processApprovalAction(req, res) {
           'Activated by previous approval'
         );
         nextStepMessage = 'Next approver notified.';
+        try {
+          await workflowNotificationService.notifyNewInspectionDetail({
+            wfaiisd_id: nextStep.wfaiisd_id,
+            wfaiish_id: step.wfaiish_id,
+            job_role_id: nextStep.job_role_id,
+            status: 'AP',
+            sequence: nextStep.sequence,
+            org_id: orgId,
+          });
+        } catch (notifyErr) {
+          console.error('Failed to notify next inspection approver:', notifyErr.message);
+        }
       } else {
         // 4b. Workflow complete - create master inspection record first.
         // If this fails, return error and do NOT mark header as completed.
-        await inspectionApprovalModel.createCompletedInspectionRecord(
+        const completed = await inspectionApprovalModel.createCompletedInspectionRecord(
           orgId,
           step.wfaiish_id,
           userId,
           technicianId
         );
         console.log('Created master inspection record for:', step.wfaiish_id, 'with technician:', technicianId);
+        try {
+          await workflowNotificationService.notifyInspectionDue({
+            ais_id: completed?.ais_id,
+            emp_int_id: completed?.emp_int_id || completed?.inspected_by || technicianId,
+            asset_id: completed?.asset_id,
+            org_id: orgId,
+          });
+        } catch (notifyErr) {
+          console.error('Failed to send inspection due notification:', notifyErr.message);
+        }
 
         // 5. Mark header as 'CO' (Completed) only after master record exists
         await inspectionApprovalModel.updateHeaderStatus(

@@ -145,6 +145,65 @@ class WorkflowNotificationService {
     }
 
     /**
+     * Notify the assigned technician that an inspection is ready to fill on mobile.
+     */
+    async notifyInspectionDue({ ais_id, emp_int_id, asset_id, asset_name, org_id }) {
+        try {
+            if (!emp_int_id || !ais_id) {
+                return { success: true, reason: 'No assigned technician' };
+            }
+
+            const userResult = await getDb().query(
+                `SELECT user_id FROM "tblUsers"
+                 WHERE emp_int_id = $1 AND org_id = $2 AND int_status = 1
+                 LIMIT 1`,
+                [emp_int_id, org_id]
+            );
+            if (!userResult.rows.length) {
+                console.log(`No user found for inspection technician ${emp_int_id}`);
+                return { success: false, reason: 'Technician user not found' };
+            }
+
+            let assetLabel = asset_name || asset_id || 'asset';
+            if (!asset_name && asset_id) {
+                try {
+                    const assetRes = await getDb().query(
+                        `SELECT at.text as asset_name
+                         FROM "tblAssets" a
+                         LEFT JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+                         WHERE a.asset_id = $1 AND a.org_id = $2
+                         LIMIT 1`,
+                        [asset_id, org_id]
+                    );
+                    if (assetRes.rows[0]?.asset_name) {
+                        assetLabel = assetRes.rows[0].asset_name;
+                    }
+                } catch (err) {
+                    console.warn('Could not resolve asset name for inspection due notification:', err.message);
+                }
+            }
+
+            const result = await fcmService.sendNotificationToUser({
+                userId: userResult.rows[0].user_id,
+                title: 'Inspection Due',
+                body: `Asset "${assetLabel}" is ready for inspection. Open the app to fill the checklist.`,
+                data: {
+                    ais_id: String(ais_id),
+                    asset_id: String(asset_id || ''),
+                    notification_type: 'inspection_due',
+                    screen: 'InspectionExecution',
+                },
+                notificationType: 'inspection_due',
+            });
+            console.log(`Inspection due notification sent for ${ais_id} to ${emp_int_id}:`, result);
+            return result;
+        } catch (error) {
+            console.error('Error sending inspection due notification:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
      * Get inspection workflow header information
      */
     async getInspectionWorkflowInfo(wfaiish_id, org_id) {
@@ -428,7 +487,10 @@ class WorkflowNotificationService {
             const notificationTypes = [
                 'workflow_approval',
                 'breakdown_approval',
-                'workflow_rejection_reverted'
+                'workflow_rejection_reverted',
+                'inspection_approval',
+                'inspection_due',
+                'inspection_rejection'
             ];
 
             for (const notificationType of notificationTypes) {

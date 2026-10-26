@@ -460,6 +460,22 @@ const createWorkflowInspection = async (
       user_id: jobRole.emp_int_id || null
     });
 
+    if (status === 'AP') {
+      try {
+        const workflowNotificationService = require('../services/workflowNotificationService');
+        await workflowNotificationService.notifyNewInspectionDetail({
+          wfaiisd_id,
+          wfaiish_id,
+          job_role_id: jobRole.job_role_id,
+          status,
+          sequence: i + 1,
+          org_id,
+        });
+      } catch (notifyErr) {
+        console.error('Failed to send inspection approval notification:', notifyErr.message);
+      }
+    }
+
     console.log(`       📝 Approver ${i + 1}: JobRole ${jobRole.job_role_id} (${status})`);
   }
 
@@ -489,6 +505,21 @@ const createDirectInspection = async (
     org_id,
     branch_code: asset.branch_code
   });
+
+  try {
+    const workflowNotificationService = require('../services/workflowNotificationService');
+    await workflowNotificationService.notifyInspectionDue({
+      ais_id,
+      emp_int_id: frequency.emp_int_id || null,
+      asset_id: asset.asset_id,
+      asset_name: asset.asset_type_name,
+      org_id,
+    });
+  } catch (notifyErr) {
+    console.error('Failed to send inspection due notification:', notifyErr.message);
+  }
+
+  return ais_id;
 };
 
 /**
@@ -545,20 +576,7 @@ const createManualInspectionSchedule = async (req, res) => {
       });
     }
 
-    const ais_id = inspectionModel.generateUniqueId('AIS');
-
-    await inspectionModel.createDirectInspectionSchedule({
-      ais_id,
-      aatif_id: frequency.aatif_id,
-      asset_id: asset.asset_id,
-      vendor_id: asset.vendor_id || null,
-      emp_int_id: frequency.emp_int_id || null,
-      act_insp_st_date: scheduledDate,
-      status: 'PN',
-      created_by,
-      org_id,
-      branch_code: asset.branch_code || null
-    });
+    const ais_id = await createDirectInspection(asset, frequency, scheduledDate, org_id);
 
     operationalCache.invalidateOrgCaches(org_id).catch(() => {});
 

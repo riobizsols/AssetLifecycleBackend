@@ -169,6 +169,32 @@ class FCMService {
     }
 
     /**
+     * Missing preference rows used to block all pushes. Default new types to enabled
+     * so inspection / warranty / maintenance alerts actually reach mobile devices.
+     */
+    async ensurePushPreference(userId, notificationType) {
+        if (!userId) return false;
+        const type = notificationType || 'general';
+        const dbPool = getDb();
+        const existing = await dbPool.query(
+            `SELECT push_enabled FROM "tblNotificationPreferences"
+             WHERE user_id = $1 AND notification_type = $2`,
+            [userId, type]
+        );
+        if (existing.rows.length === 0) {
+            await dbPool.query(
+                `INSERT INTO "tblNotificationPreferences" (
+                    preference_id, user_id, notification_type,
+                    is_enabled, email_enabled, push_enabled
+                ) VALUES ($1, $2, $3, true, true, true)`,
+                [`PREF${uuidv4().replace(/-/g, '').slice(0, 12).toUpperCase()}`, userId, type]
+            );
+            return true;
+        }
+        return !!existing.rows[0].push_enabled;
+    }
+
+    /**
      * Send notification to a specific user
      * @param {Object} notificationData - Notification data
      * @param {string} notificationData.userId - Target user ID
@@ -182,15 +208,8 @@ class FCMService {
         try {
             const { userId, title, body, data = {}, notificationType, platform = null } = notificationData;
 
-            // Check if user has push notifications enabled for this type
-            const preferenceQuery = `
-                SELECT push_enabled FROM "tblNotificationPreferences" 
-                WHERE user_id = $1 AND notification_type = $2
-            `;
-            const dbPool = getDb();
-            const preference = await dbPool.query(preferenceQuery, [userId, notificationType]);
-
-            if (preference.rows.length === 0 || !preference.rows[0].push_enabled) {
+            const pushEnabled = await this.ensurePushPreference(userId, notificationType);
+            if (!pushEnabled) {
                 console.log(`Push notifications disabled for user ${userId}, type ${notificationType}`);
                 return { success: false, reason: 'Push notifications disabled' };
             }
@@ -229,16 +248,21 @@ class FCMService {
                     const tokenRecord = tokens.find(t => t.device_token === token);
                     
                     try {
+                        const payload = {
+                            ...data,
+                            notificationType,
+                            timestamp: new Date().toISOString()
+                        };
+                        const stringData = {};
+                        Object.keys(payload).forEach((key) => {
+                            stringData[key] = payload[key] == null ? '' : String(payload[key]);
+                        });
                         const message = {
                             notification: {
                                 title,
                                 body
                             },
-                            data: {
-                                ...data,
-                                notificationType,
-                                timestamp: new Date().toISOString()
-                            },
+                            data: stringData,
                             token: token
                         };
 
