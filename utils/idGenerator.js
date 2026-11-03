@@ -24,6 +24,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfs': 'WFS',
             'wfas': 'WFAS',
             'wfjr': 'WFJR',
+            'wfis': 'WFIS',
+            'wfatis': 'WFATIS',
+            'wfijr': 'WFIJR',
             'amsbr': 'AMSBR',
             'prop': 'PROP',
             'atbrrc': 'ATBRRC',
@@ -128,6 +131,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
         'wfs': 'tblWFSteps',
         'wfas': 'tblWFATSeqs',
         'wfjr': 'tblWFJobRole',
+        'wfis': 'tblWFInspSteps',
+        'wfatis': 'tblWFATInspSeqs',
+        'wfijr': 'tblWFInspJobRole',
         'amsbr': 'tblAssetMaintSch_BR_Hist',
         'prop': 'tblProps',
         'atbrrc': 'tblATBRReasonCodes',
@@ -178,6 +184,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
             'wfs': 'wf_steps_id',
             'wfas': 'wf_at_seqs_id',
             'wfjr': 'wf_job_role_id',
+            'wfis': 'wf_insp_steps_id',
+            'wfatis': 'wfatis_id',
+            'wfijr': 'wf_insp_job_role_id',
             'amsbr': 'amsbr_id',
             'prop': 'prop_id',
             'atbrrc': 'atbrrc_id',
@@ -210,9 +219,9 @@ exports.generateCustomId = async (tableKey, padLength = 3) => {
                     return await exports.generateCustomId(tableKey, padLength);
                 }
             } catch (e) {
-                if (e.code === '42P01') {
+                if (e.code === '42P01' || e.code === '42703') {
                     console.warn(
-                        `[idGenerator] Table "${targetTable}" missing; skip duplicate check for ${tableKey}`
+                        `[idGenerator] Skip duplicate check for ${tableKey}: ${e.message}`
                     );
                 } else {
                     throw e;

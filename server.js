@@ -194,6 +194,7 @@ app.use("/api/admin", deptAdminRoutes);
 app.use("/api/dept-assets", deptAssetTypeRoutes);
 app.use("/api/ids", require("./routes/idRoutes"));
 app.use("/api/maintenance-details", require("./routes/maintenanceDetailsRoutes"));
+app.use("/api/inspection-details", require("./routes/inspectionDetailsRoutes"));
 app.use("/api/", vendorsRoutes);
 app.use("/api/", slaRoutes);
 app.use("/api/", prodServRoutes);
