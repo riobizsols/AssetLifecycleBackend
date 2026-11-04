@@ -42,6 +42,11 @@ async function getInhouseVendorId(orgId = 'ORG001') {
 }
 
 async function resolveVendorIdForMaintRecord(vendorId, maintainedBy, orgId) {
+  // In-house must never keep the asset's service_vendor_id — that makes Furnace/etc.
+  // look "vendor based" and skips technician fields on the schedule.
+  if (isInhouseMaintainedBy(maintainedBy)) {
+    return getInhouseVendorId(orgId);
+  }
   if (vendorId != null && String(vendorId).trim() !== '') {
     return vendorId;
   }

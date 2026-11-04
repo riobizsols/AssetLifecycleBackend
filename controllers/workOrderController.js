@@ -4,7 +4,7 @@ const operationalCache = require("../utils/operationalCache");
 // Get all work orders
 const getAllWorkOrders = async (req, res) => {
     try {
-        console.log('Fetching all work orders with status "IN" and maintained_by "Vendor"...');
+        console.log('Fetching all open work orders (vendor + in-house)...');
         
         const { getEffectiveListContext } = require('../utils/acmAccess');
         const { orgId, branchId, hasSuperAccess } = getEffectiveListContext(req);
@@ -37,6 +37,9 @@ const getAllWorkOrders = async (req, res) => {
             recent_activities: row.recent_activities || [],
             maint_type_id: row.maint_type_id,
             maintenance_type_name: row.maintenance_type_name,
+            maintained_by: row.maintained_by || null,
+            is_inhouse: Boolean(row.is_inhouse),
+            emp_int_id: row.emp_int_id || null,
             act_maint_st_date: row.act_maint_st_date,
             act_main_end_date: row.act_main_end_date,
             status: row.status,
@@ -96,17 +99,17 @@ const getAllWorkOrders = async (req, res) => {
         if (formattedData.length === 0) {
             return res.status(200).json({
                 success: true,
-                message: "No work orders found with status 'IN' and maintained_by 'Vendor'",
+                message: "No open work orders found",
                 data: [],
                 count: 0
             });
         }
         
-        console.log(`Successfully fetched ${formattedData.length} work orders with status 'IN' and maintained_by 'Vendor'`);
+        console.log(`Successfully fetched ${formattedData.length} open work orders (vendor + in-house)`);
         
         return res.status(200).json({
             success: true,
-            message: "Work orders with status 'IN' and maintained_by 'Vendor' retrieved successfully",
+            message: "Open work orders retrieved successfully",
             data: formattedData,
             count: formattedData.length
         });

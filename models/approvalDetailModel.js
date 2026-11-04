@@ -1863,7 +1863,7 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         SELECT 
           wfh.wfamsh_id,
           wfh.asset_id,
-          wfh.emp_int_id as emp_int_id,
+          COALESCE(NULLIF(BTRIM(wfh.emp_int_id), ''), atmf.emp_int_id) as emp_int_id,
           wfh.group_id,
           wfh.pl_sch_date as act_maint_st_date,
           a.asset_type_id,
@@ -1889,8 +1889,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
               AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%' OR d.notes ILIKE '%Breakdown%')
             LIMIT 1
           ) as bf01_notes,
+          -- Frequency maintained_by wins; do not let asset.service_vendor_id flip Inhouse → Vendor
           COALESCE(
-            atmf.maintained_by,
+            NULLIF(BTRIM(atmf.maintained_by), ''),
             CASE 
               WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
               ELSE 'Inhouse'
@@ -1900,7 +1901,9 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
         INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
         LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
-        LEFT JOIN "tblATMaintFreq" atmf ON wfh.at_main_freq_id = atmf.at_main_freq_id
+        LEFT JOIN "tblATMaintFreq" atmf
+          ON wfh.at_main_freq_id = atmf.at_main_freq_id
+         AND atmf.org_id = wfh.org_id
         WHERE wfh.wfamsh_id = $1 AND wfh.org_id = $2
       `;
      

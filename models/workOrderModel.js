@@ -188,34 +188,79 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
         params.push(userBranchId);
     }
     
+    // Open work orders only — include both vendor AND in-house (Furnace etc.).
+    // Previously this filtered to maintained_by ILIKE 'vendor', which hid in-house jobs
+    // and made Upcoming Jobs / WO lists look vendor-only with blank technicians.
     query += ` AND (
             (COALESCE(ams.maint_type_id, '') = 'MT004' AND ams.status IN ('IN', 'IP')) 
             OR 
             (COALESCE(ams.maint_type_id, '') != 'MT004' AND ams.status = 'IN')
           )
           AND ams.wo_id IS NOT NULL
-          AND (
-            -- Include vendor-maintained work orders (case-insensitive; freq table stores 'vendor')
-            COALESCE(ams.maintained_by, '') ILIKE 'vendor'
-            OR
-            -- Include breakdown maintenance (MT004) even if not vendor-maintained
-            ams.maint_type_id = 'MT004'
-            OR
-            -- Include breakdown work orders identified by notes or breakdown table (for backward compatibility)
-            (ams.notes ILIKE '%Breakdown%' AND EXISTS (
-              SELECT 1 FROM "tblAssetBRDet" brd
-              WHERE brd.asset_id = ams.asset_id
-                AND brd.org_id = ams.org_id
-                AND (brd.status = 'CF' OR brd.status = 'Reopened')
-                AND brd.decision_code IN ('BF01', 'BF02', 'BF03')
-                AND (ams.notes ILIKE '%' || brd.abr_id || '%' OR ams.wo_id ILIKE '%' || brd.abr_id || '%')
-            ))
-          )
         ORDER BY ams.created_on DESC, ams.ams_id DESC
     `;
     
     const dbPool = getDb();
-    return await dbPool.query(query, params);
+    const result = await dbPool.query(query, params);
+    if (!result.rows.length) return result;
+
+    // Enrich rows using current frequency (type may have switched vendor → in-house)
+    const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
+    const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+    for (const row of result.rows) {
+      let currentMaintainedBy = row.maintained_by || null;
+      let freqEmpId = null;
+      try {
+        const freq = await dbPool.query(
+          `SELECT maintained_by, emp_int_id
+           FROM "tblATMaintFreq"
+           WHERE org_id = $1
+             AND (at_main_freq_id = $2 OR asset_type_id = $3)
+             AND NULLIF(BTRIM(maintained_by), '') IS NOT NULL
+           ORDER BY (at_main_freq_id = $2) DESC NULLS LAST
+           LIMIT 1`,
+          [orgId, row.at_main_freq_id || null, row.asset_type_id || null],
+        );
+        if (freq.rows[0]?.maintained_by) {
+          currentMaintainedBy = freq.rows[0].maintained_by;
+          row.maintained_by = currentMaintainedBy;
+        }
+        freqEmpId = freq.rows[0]?.emp_int_id || null;
+      } catch (_) { /* optional */ }
+
+      const isInhouse =
+        isInhouseMaintainedBy(currentMaintainedBy) ||
+        Boolean(row.emp_int_id && !String(currentMaintainedBy || '').toLowerCase().includes('vendor'));
+      row.is_inhouse = isInhouse;
+      if (!isInhouse) continue;
+
+      let empId = row.emp_int_id || null;
+      if (!empId && row.wfamsh_id) {
+        try {
+          const header = await dbPool.query(
+            `SELECT emp_int_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2 LIMIT 1`,
+            [row.wfamsh_id, orgId],
+          );
+          empId = header.rows[0]?.emp_int_id || null;
+        } catch (_) { /* optional */ }
+      }
+      if (!empId) empId = freqEmpId;
+      if (!empId) continue;
+      const tech = await resolveTechnicianFromEmp(empId, dbPool);
+      row.emp_int_id = empId;
+      if (!row.technician_name || !String(row.technician_name).trim()) {
+        row.technician_name = tech.technician_name || row.technician_name;
+      } else if (tech.technician_name) {
+        row.technician_name = tech.technician_name;
+      }
+      if (!row.technician_email || !String(row.technician_email).trim()) {
+        row.technician_email = tech.technician_email || row.technician_email;
+      }
+      if (!row.technician_phno || !String(row.technician_phno).trim()) {
+        row.technician_phno = tech.technician_phno || row.technician_phno;
+      }
+    }
+    return result;
 };
 
 // Get work order by ID with detailed information
