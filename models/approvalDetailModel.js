@@ -1809,15 +1809,6 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
         try {
           console.log(`Attempting to send notification to ${user.full_name} (${user.user_id}, emp_int_id: ${user.emp_int_id})`);
           
-          // Check if user has device tokens
-          const deviceTokens = await fcmService.getUserDeviceTokens(user.user_id);
-          if (deviceTokens.length === 0) {
-            console.log(`⚠️  User ${user.user_id} has no registered device tokens. Notification will be skipped.`);
-            failureCount++;
-            continue;
-          }
-          console.log(`User ${user.user_id} has ${deviceTokens.length} device token(s)`);
-          
           const notificationResult = await fcmService.sendNotificationToUser({
             userId: user.user_id,
             title: 'Maintenance Workflow Completed',

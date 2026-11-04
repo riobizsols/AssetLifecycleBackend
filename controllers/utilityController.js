@@ -6,9 +6,9 @@ const orgFrom = (req) =>
 const userFrom = (req) => req.user?.user_id || req.user?.id || null;
 
 const ok = (res, data) => res.json({ success: true, data });
-const fail = (res, err, code = 400) => {
+const fail = (res, err, code) => {
   console.error('[Utility]', err.message);
-  return res.status(code).json({ success: false, error: err.message || 'Request failed' });
+  return res.status(code || err.statusCode || 400).json({ success: false, error: err.message || 'Request failed' });
 };
 
 exports.getLookups = async (req, res) => {
@@ -185,6 +185,14 @@ exports.createConsumption = async (req, res) => {
   }
 };
 
+exports.deleteConsumption = async (req, res) => {
+  try {
+    ok(res, await utilityModel.deleteConsumption(req.params.utcvId, { orgId: orgFrom(req) }));
+  } catch (err) {
+    fail(res, err);
+  }
+};
+
 exports.listMyAssignedUtilityAssets = async (req, res) => {
   try {
     const orgId = orgFrom(req);
@@ -254,7 +262,34 @@ exports.createAssetConsumption = async (req, res) => {
     });
     ok(res, row);
   } catch (err) {
-    fail(res, err, err.statusCode || 400);
+    fail(res, err);
+  }
+};
+
+exports.deleteAssetConsumption = async (req, res) => {
+  try {
+    const orgId = orgFrom(req);
+    const employeeIntId = req.user?.emp_int_id;
+    const deptId = req.user?.dept_id || null;
+    if (!orgId || !employeeIntId) {
+      return fail(res, new Error('User is not linked to an employee or organization'), 400);
+    }
+    const existing = await utilityModel.fetchConsumptionRow(req.params.utcvId);
+    if (!existing) return fail(res, new Error('Consumption record not found'), 404);
+    if (existing.asset_id) {
+      const allowed = await utilityModel.isAssetAssignedToEmployee(
+        existing.asset_id,
+        employeeIntId,
+        orgId,
+        deptId,
+      );
+      if (!allowed) {
+        return fail(res, new Error('You can only delete readings for assets assigned to you'), 403);
+      }
+    }
+    ok(res, await utilityModel.deleteConsumption(req.params.utcvId, { orgId }));
+  } catch (err) {
+    fail(res, err);
   }
 };
 

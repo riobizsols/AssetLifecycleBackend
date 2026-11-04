@@ -96,13 +96,23 @@ const internalRoutes = require("./routes/internalRoutes");
 const jobMonitorRoutes = require("./routes/jobMonitorRoutes");
 const orgSettingsRoutes = require("./routes/orgSettingsRoutes");
 const textMessagesRoutes = require("./routes/textMessagesRoutes");
+const whatsappRoutes = require("./routes/whatsappRoutes");
+const whatsappWebhookRoutes = require("./routes/whatsappWebhookRoutes");
 
 const { applyScalingMiddleware, registerHealthRoutes } = require('./middlewares/scalingMiddleware');
 
 const app = express();
 applyScalingMiddleware(app);
 registerHealthRoutes(app);
-const jsonParser = express.json({ limit: "10mb" });
+const jsonParser = express.json({
+  limit: "10mb",
+  verify: (req, res, buf) => {
+    const path = String(req.originalUrl || req.url || '');
+    if (path.includes('/webhooks/whatsapp')) {
+      req.rawBody = Buffer.from(buf);
+    }
+  },
+});
 const urlEncodedParser = express.urlencoded({ extended: true, limit: "10mb" });
 app.use(jsonParser);
 app.use(urlEncodedParser);
@@ -293,6 +303,8 @@ app.use("/api/audit-logs", auditLogRoutes);
 app.use("/api/audit-log-configs", auditLogConfigRoutes);
 app.use("/api/column-access-config", columnAccessConfigRoutes);
 app.use("/api/fcm", fcmRoutes);
+app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/webhooks/whatsapp", whatsappWebhookRoutes);
 app.use("/api/cost-center-transfer", costCenterTransferRoutes);
 app.use("/api/internal", internalRoutes);
 app.use("/api/job-monitor", jobMonitorRoutes);
@@ -314,6 +326,10 @@ const server = app.listen(PORT, () => {
   const { ensureTenantUserEmailsTable } = require('./services/tenantEmailRegistryService');
   ensureTenantUserEmailsTable().catch((err) => {
     console.warn('[TenantEmailRegistry] Startup table ensure skipped:', err.message);
+  });
+  const { ensureTenantUserWhatsAppTable } = require('./services/tenantWhatsAppRegistryService');
+  ensureTenantUserWhatsAppTable().catch((err) => {
+    console.warn('[TenantWhatsAppRegistry] Startup table ensure skipped:', err.message);
   });
   
   // Initialize cron jobs after server starts

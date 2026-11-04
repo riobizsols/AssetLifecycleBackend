@@ -485,6 +485,13 @@ async function runEnsureUtilityHSchema(dbPool) {
       ON "tblUtilConsumption" (asset_id, utild_id, consumption_date DESC)
   `,
     );
+    await safeQuery(
+      dbPool,
+      `
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_tblUtilConsumption_utild_asset_date
+      ON "tblUtilConsumption" (utild_id, COALESCE(asset_id, ''), consumption_date)
+  `,
+    );
 
     try {
       const exists = await dbPool.query(

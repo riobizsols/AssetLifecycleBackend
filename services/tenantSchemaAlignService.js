@@ -26,6 +26,9 @@ const PROTECTED_RUNTIME_TABLES = [
   'tblConsumables',
   'tblConsumInven',
   'tblConsumeUsage',
+  'tblWhatsAppMessages',
+  'tblWhatsAppEvents',
+  'tblWhatsAppApprovals',
 ];
 
 function tenantUrl(dbName) {
@@ -738,6 +741,15 @@ async function ensureCriticalRuntimeSchema(client) {
   } catch (err) {
     console.warn('[TenantSchemaAlign] Could not ensure tblProdServs.status 0/1:', err.message);
     results.push({ object: 'tblProdServs.status', status: 'error', message: err.message });
+  }
+
+  try {
+    const { ensureWhatsAppSchema } = require('../utils/ensureWhatsAppSchema');
+    await ensureWhatsAppSchema(client);
+    results.push({ object: 'tblWhatsApp*', status: 'ensured' });
+  } catch (err) {
+    console.warn('[TenantSchemaAlign] Could not ensure WhatsApp tables:', err.message);
+    results.push({ object: 'tblWhatsApp*', status: 'error', message: err.message });
   }
 
   console.log('[TenantSchemaAlign] Critical runtime schema:', JSON.stringify(results));

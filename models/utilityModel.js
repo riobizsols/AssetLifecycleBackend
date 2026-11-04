@@ -11,8 +11,11 @@ const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
 const {
   CONSUMPTION_TYPE,
+  DATE_ALREADY_RECORDED,
   calculateMeterConsumption,
   buildConsumptionRecord,
+  assertConsumptionDateNotFuture,
+  toIsoDate,
 } = require('../utils/utilityConsumptionLogic');
 const { ensureUtilityHSchema } = require('../utils/ensureUtilityHSchema');
 
@@ -362,6 +365,17 @@ async function listConsumptions({ orgId, utildId, limit = 100 } = {}) {
   return rows;
 }
 
+function httpError(message, statusCode = 400) {
+  const err = new Error(message);
+  err.statusCode = statusCode;
+  return err;
+}
+
+function assetScopeSql(assetId, paramIndex) {
+  if (assetId) return { sql: `AND asset_id = $${paramIndex}`, params: [assetId] };
+  return { sql: 'AND asset_id IS NULL', params: [] };
+}
+
 async function getPreviousReading(utildId, beforeDate, assetId = null) {
   const { rows } = await getDb().query(
     `
@@ -369,7 +383,7 @@ async function getPreviousReading(utildId, beforeDate, assetId = null) {
       FROM "tblUtilConsumption"
       WHERE utild_id = $1
         AND reading IS NOT NULL
-        AND ($2::date IS NULL OR consumption_date <= $2::date)
+        AND ($2::date IS NULL OR consumption_date < $2::date)
         AND (
           $3::text IS NULL
           OR asset_id = $3
@@ -386,17 +400,100 @@ async function getPreviousReading(utildId, beforeDate, assetId = null) {
   return rows[0] || null;
 }
 
+async function findConsumptionOnDate(utildId, consumptionDate, assetId = null) {
+  const scope = assetScopeSql(assetId, 3);
+  const { rows } = await getDb().query(
+    `
+      SELECT utcv_id, reading, start_reading, quantity_consumed, consumption_date, asset_id
+      FROM "tblUtilConsumption"
+      WHERE utild_id = $1
+        AND consumption_date = $2::date
+        ${scope.sql}
+      LIMIT 1
+    `,
+    [utildId, consumptionDate, ...scope.params],
+  );
+  return rows[0] || null;
+}
+
+async function assertDateAvailable(utildId, consumptionDate, assetId = null) {
+  const existing = await findConsumptionOnDate(utildId, consumptionDate, assetId);
+  if (existing) throw httpError(DATE_ALREADY_RECORDED, 409);
+}
+
+async function fetchConsumptionRow(utcvId) {
+  const { rows } = await getDb().query(
+    `
+      SELECT c.*, d.utility_sh, d.meter_max, d.utctp_id, ct.consumption_type, h.utility_name
+      FROM "tblUtilConsumption" c
+      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
+      JOIN "tblUtility_H" h ON h.util_id = d.util_id
+      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
+      WHERE c.utcv_id = $1
+    `,
+    [utcvId],
+  );
+  return rows[0] || null;
+}
+
+async function recalculateLaterReadings({ detail, utildId, assetId, afterDate, anchorReading }) {
+  const typeId = String(detail?.utctp_id || '').toUpperCase();
+  if (typeId !== CONSUMPTION_TYPE.METER) return 0;
+
+  const scope = assetScopeSql(assetId, 3);
+  const { rows: later } = await getDb().query(
+    `
+      SELECT utcv_id, reading, consumption_date
+      FROM "tblUtilConsumption"
+      WHERE utild_id = $1
+        AND consumption_date > $2::date
+        AND reading IS NOT NULL
+        ${scope.sql}
+      ORDER BY consumption_date ASC, created_on ASC
+    `,
+    [utildId, afterDate, ...scope.params],
+  );
+  if (!later.length) return 0;
+
+  let previousReading = anchorReading == null || anchorReading === '' ? null : Number(anchorReading);
+  let updated = 0;
+  for (const row of later) {
+    const calc = calculateMeterConsumption({
+      previousReading,
+      currentReading: row.reading,
+      meterMax: detail.meter_max || 9999,
+      firstReadingMode: 'baseline',
+    });
+    await getDb().query(
+      `
+        UPDATE "tblUtilConsumption"
+        SET start_reading = $2,
+            quantity_consumed = $3,
+            rolled_over = $4
+        WHERE utcv_id = $1
+      `,
+      [row.utcv_id, previousReading, calc.quantityConsumed, Boolean(calc.rolledOver)],
+    );
+    previousReading = Number(row.reading);
+    updated += 1;
+  }
+  return updated;
+}
+
 async function previewConsumption({ utild_id, reading, quantity_consumed, consumption_date, asset_id }) {
   await ensureSchema();
   const detail = await getDetail(utild_id);
   if (!detail) throw new Error('Utility detail not found');
 
-  const previous = await getPreviousReading(utild_id, consumption_date, asset_id || null);
+  const date = assertConsumptionDateNotFuture(consumption_date);
+  await assertDateAvailable(utild_id, date, asset_id || null);
+
+  const previous = await getPreviousReading(utild_id, date, asset_id || null);
   const built = buildConsumptionRecord(detail, {
     reading,
     quantityConsumed: quantity_consumed,
     previousReading: previous?.reading,
-    consumptionDate: consumption_date,
+    consumptionDate: date,
     firstReadingMode: 'baseline',
   });
 
@@ -569,17 +666,16 @@ async function createAssetConsumption(payload, { userId, orgId, employeeIntId, d
   const utildId = payload.utild_id;
   if (!assetId) throw new Error('asset_id is required');
   if (!utildId) throw new Error('utild_id is required');
-  if (!payload.consumption_date) throw new Error('consumption_date is required');
 
   const allowed = await isAssetAssignedToEmployee(assetId, employeeIntId, orgId, deptId);
   if (!allowed) {
-    const err = new Error('You can only record readings for assets assigned to you');
-    err.statusCode = 403;
-    throw err;
+    throw httpError('You can only record readings for assets assigned to you', 403);
   }
 
   const detail = await getDetail(utildId);
   if (!detail) throw new Error('Utility detail not found');
+  const consumptionDate = assertConsumptionDateNotFuture(payload.consumption_date);
+  await assertDateAvailable(utildId, consumptionDate, assetId);
 
   // Ensure asset type is mapped to this utility detail
   const mapCheck = await getDb().query(
@@ -626,94 +722,134 @@ async function createAssetConsumption(payload, { userId, orgId, employeeIntId, d
   }
 
   const utcv_id = await generateCustomId('util_consumption', 3);
-  await getDb().query(
-    `
-      INSERT INTO "tblUtilConsumption"
-        (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
-         created_on, created_by, rolled_over, org_id, asset_id)
-      VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
-    `,
-    [
-      utcv_id,
-      utildId,
-      end,
-      start,
-      quantity_consumed,
-      payload.consumption_date,
-      userId || null,
-      Boolean(rolled_over),
-      detail.org_id || orgId,
-      assetId,
-    ],
-  );
+  try {
+    await getDb().query(
+      `
+        INSERT INTO "tblUtilConsumption"
+          (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
+           created_on, created_by, rolled_over, org_id, asset_id)
+        VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
+      `,
+      [
+        utcv_id,
+        utildId,
+        end,
+        start,
+        quantity_consumed,
+        consumptionDate,
+        userId || null,
+        Boolean(rolled_over),
+        detail.org_id || orgId,
+        assetId,
+      ],
+    );
+  } catch (err) {
+    if (err.code === '23505') throw httpError(DATE_ALREADY_RECORDED, 409);
+    throw err;
+  }
 
-  const { rows } = await getDb().query(
-    `
-      SELECT c.*, d.utility_sh, d.meter_max, ct.consumption_type, h.utility_name
-      FROM "tblUtilConsumption" c
-      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
-      JOIN "tblUtility_H" h ON h.util_id = d.util_id
-      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
-      WHERE c.utcv_id = $1
-    `,
-    [utcv_id],
-  );
-  return rows[0];
+  const recalculated = await recalculateLaterReadings({
+    detail,
+    utildId,
+    assetId,
+    afterDate: consumptionDate,
+    anchorReading: end,
+  });
+
+  const row = await fetchConsumptionRow(utcv_id);
+  return { ...row, later_readings_recalculated: recalculated };
 }
 
 async function createConsumption(payload, userId) {
   await ensureSchema();
   const detail = await getDetail(payload.utild_id);
   if (!detail) throw new Error('Utility detail not found');
-  if (!payload.consumption_date) throw new Error('consumption_date is required');
+  const consumptionDate = assertConsumptionDateNotFuture(payload.consumption_date);
+  const assetId = payload.asset_id || null;
+  await assertDateAvailable(payload.utild_id, consumptionDate, assetId);
 
-  const previous = await getPreviousReading(
-    payload.utild_id,
-    payload.consumption_date,
-    payload.asset_id || null,
-  );
+  const previous = await getPreviousReading(payload.utild_id, consumptionDate, assetId);
   const built = buildConsumptionRecord(detail, {
     reading: payload.reading,
     quantityConsumed: payload.quantity_consumed,
     previousReading: previous?.reading,
-    consumptionDate: payload.consumption_date,
+    consumptionDate,
     firstReadingMode: payload.first_reading_mode || 'baseline',
   });
 
   const utcv_id = await generateCustomId('util_consumption', 3);
-  await getDb().query(
-    `
-      INSERT INTO "tblUtilConsumption"
-        (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
-         created_on, created_by, rolled_over, org_id, asset_id)
-      VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
-    `,
-    [
-      utcv_id,
-      built.utild_id,
-      built.reading,
-      payload.start_reading ?? previous?.reading ?? null,
-      built.quantity_consumed,
-      built.consumption_date,
-      userId || null,
-      Boolean(built.rolled_over),
-      detail.org_id,
-      payload.asset_id || null,
-    ],
-  );
+  try {
+    await getDb().query(
+      `
+        INSERT INTO "tblUtilConsumption"
+          (utcv_id, utild_id, reading, start_reading, quantity_consumed, consumption_date,
+           created_on, created_by, rolled_over, org_id, asset_id)
+        VALUES ($1,$2,$3,$4,$5,$6, CURRENT_TIMESTAMP, $7, $8, $9, $10)
+      `,
+      [
+        utcv_id,
+        built.utild_id,
+        built.reading,
+        payload.start_reading ?? previous?.reading ?? null,
+        built.quantity_consumed,
+        built.consumption_date,
+        userId || null,
+        Boolean(built.rolled_over),
+        detail.org_id,
+        assetId,
+      ],
+    );
+  } catch (err) {
+    if (err.code === '23505') throw httpError(DATE_ALREADY_RECORDED, 409);
+    throw err;
+  }
 
-  const { rows } = await getDb().query(
-    `
-      SELECT c.*, d.utility_sh, d.meter_max, ct.consumption_type, h.utility_name
-      FROM "tblUtilConsumption" c
-      JOIN "tblUtility_D" d ON d.utild_id = c.utild_id
-      JOIN "tblUtility_H" h ON h.util_id = d.util_id
-      LEFT JOIN "tblUTConsumType" ct ON ct.utctp_id = d.utctp_id
-      WHERE c.utcv_id = $1
-    `,
-    [utcv_id],
+  const recalculated = await recalculateLaterReadings({
+    detail,
+    utildId: payload.utild_id,
+    assetId,
+    afterDate: consumptionDate,
+    anchorReading: built.reading,
+  });
+
+  const row = await fetchConsumptionRow(utcv_id);
+  return { ...row, later_readings_recalculated: recalculated };
+}
+
+async function deleteConsumption(utcvId, { orgId } = {}) {
+  await ensureSchema();
+  if (!utcvId) throw httpError('utcv_id is required', 400);
+
+  const existing = await fetchConsumptionRow(utcvId);
+  if (!existing) throw httpError('Consumption record not found', 404);
+  if (orgId && existing.org_id && existing.org_id !== orgId) {
+    throw httpError('Consumption record not found', 404);
+  }
+
+  await getDb().query(`DELETE FROM "tblUtilConsumption" WHERE utcv_id = $1`, [utcvId]);
+
+  const deletedDate = toIsoDate(existing.consumption_date);
+  const previous = await getPreviousReading(
+    existing.utild_id,
+    deletedDate,
+    existing.asset_id || null,
   );
-  return rows[0];
+  const detail = await getDetail(existing.utild_id);
+  const recalculated = detail
+    ? await recalculateLaterReadings({
+        detail,
+        utildId: existing.utild_id,
+        assetId: existing.asset_id || null,
+        afterDate: deletedDate,
+        anchorReading: previous?.reading ?? null,
+      })
+    : 0;
+
+  return {
+    deleted: true,
+    utcv_id: utcvId,
+    later_readings_recalculated: recalculated,
+  };
 }
 
 /**
@@ -1029,6 +1165,8 @@ module.exports = {
   getPreviousReading,
   previewConsumption,
   createConsumption,
+  deleteConsumption,
+  fetchConsumptionRow,
   listAssetsForUtilityDetail,
   listMyAssignedUtilityAssets,
   listAssetConsumptions,

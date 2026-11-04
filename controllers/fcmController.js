@@ -318,6 +318,7 @@ class FCMController {
                         isEnabled: pref.is_enabled,
                         emailEnabled: pref.email_enabled,
                         pushEnabled: pref.push_enabled,
+                        whatsappEnabled: pref.whatsapp_enabled !== false,
                         createdOn: pref.created_on,
                         updatedOn: pref.updated_on
                     }))

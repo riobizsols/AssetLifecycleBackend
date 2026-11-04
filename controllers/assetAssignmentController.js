@@ -17,13 +17,15 @@ const addAssetAssignment = async (req, res) => {
             asset_assign_id,
             dept_id,
             asset_id,
-            org_id,
+            org_id: bodyOrgId,
             employee_int_id,
             action = "Assigned",
             action_by,
             latest_assignment_flag
         } = req.body;
 
+        // Prefer JWT org — mobile used to hardcode ORG001 and trip FK on tenant DBs
+        const org_id = req.user?.org_id || bodyOrgId;
         const created_by = req.user.user_id;
 
         // STEP 1: Log API called (non-blocking)
@@ -204,13 +206,15 @@ const addEmployeeAssetAssignment = async (req, res) => {
             asset_assign_id,
             dept_id,
             asset_id,
-            org_id,
+            org_id: bodyOrgId,
             employee_int_id,
             action = "Assigned",
             action_by,
             latest_assignment_flag
         } = req.body;
 
+        // Prefer JWT org — mobile used to hardcode ORG001 and trip FK on tenant DBs
+        const org_id = req.user?.org_id || bodyOrgId;
         const created_by = req.user.user_id;
 
         // STEP 1: Log API called (non-blocking)

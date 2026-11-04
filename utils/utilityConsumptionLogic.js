@@ -26,6 +26,36 @@ const CONSUMPTION_TYPE = Object.freeze({
   QUANTITY: 'UTCTP002',
 });
 
+const IST_TZ = 'Asia/Kolkata';
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DATE_ALREADY_RECORDED =
+  'A reading already exists for this date. Delete it and re-enter if you need to change it.';
+
+function todayIstDate() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: IST_TZ });
+}
+
+function toIsoDate(value) {
+  if (value == null || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const s = String(value).trim().slice(0, 10);
+  return ISO_DATE_RE.test(s) ? s : null;
+}
+
+function assertConsumptionDateNotFuture(value) {
+  const date = toIsoDate(value);
+  if (!date) {
+    throw new Error('consumption_date is required and must be YYYY-MM-DD');
+  }
+  const today = todayIstDate();
+  if (date > today) {
+    throw new Error(`Consumption date cannot be in the future (latest allowed is ${today})`);
+  }
+  return date;
+}
+
 function isMeterMax(value) {
   const n = Number(value);
   return METER_MAX_VALUES.includes(n);
@@ -141,7 +171,11 @@ function buildConsumptionRecord(detail, input) {
 module.exports = {
   METER_MAX_VALUES,
   CONSUMPTION_TYPE,
+  DATE_ALREADY_RECORDED,
   isMeterMax,
   calculateMeterConsumption,
   buildConsumptionRecord,
+  todayIstDate,
+  toIsoDate,
+  assertConsumptionDateNotFuture,
 };

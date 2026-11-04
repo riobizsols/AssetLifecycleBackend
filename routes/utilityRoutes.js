@@ -28,11 +28,13 @@ router.delete('/mappings/:atumId', ctrl.deleteMapping);
 router.get('/consumptions', ctrl.listConsumptions);
 router.post('/consumptions/preview', ctrl.previewConsumption);
 router.post('/consumptions', ctrl.createConsumption);
+router.delete('/consumptions/:utcvId', ctrl.deleteConsumption);
 
 // Mobile — assigned-asset utility readings (bus km / meter start–end)
 router.get('/mobile/my-assets', ctrl.listMyAssignedUtilityAssets);
 router.get('/mobile/assets/:assetId/consumptions', ctrl.listMyAssetConsumptions);
 router.post('/mobile/consumptions', ctrl.createAssetConsumption);
+router.delete('/mobile/consumptions/:utcvId', ctrl.deleteAssetConsumption);
 
 router.get('/report', ctrl.getConsumptionReport);
 

@@ -452,6 +452,40 @@ const insertWorkflowMaintenanceScheduleHeader = async (scheduleData, dbClient = 
   return await runner.query(query, values);
 };
 
+/**
+ * When a workflow is created the first step is AP (action required / pending).
+ * Later steps get an AP history row only after the previous person approves —
+ * write that same pending row for the first approver at create time.
+ */
+const insertPendingApprovalHistory = async (detail, dbClient = null) => {
+  if (!detail || String(detail.status || '').toUpperCase() !== 'AP') return null;
+  if (!detail.wfamsd_id || !detail.wfamsh_id) return null;
+
+  const runner = dbClient || getDb();
+  const wfamhisId = dbClient
+    ? await generateCustomIdForClient(dbClient, 'wfamhis', 3)
+    : await generateCustomId('wfamhis', 3);
+  const actionBy = String(detail.created_by || 'SYSTEM').substring(0, 20);
+
+  await runner.query(
+    `
+      INSERT INTO "tblWFAssetMaintHist" (
+        wfamhis_id, wfamsh_id, wfamsd_id, action_by, action_on, action, notes, org_id
+      ) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP, $5, $6, $7)
+    `,
+    [
+      wfamhisId,
+      detail.wfamsh_id,
+      detail.wfamsd_id,
+      actionBy,
+      'AP',
+      detail.notes || null,
+      detail.org_id || null,
+    ],
+  );
+  return wfamhisId;
+};
+
 // 11. Insert workflow maintenance schedule detail
 const insertWorkflowMaintenanceScheduleDetail = async (detailData, dbClient = null) => {
   const {
@@ -501,6 +535,26 @@ const insertWorkflowMaintenanceScheduleDetail = async (detailData, dbClient = nu
 
   const runner = dbClient || getDb();
   const result = await runner.query(query, values);
+
+  try {
+    await insertPendingApprovalHistory(
+      {
+        ...detailData,
+        status,
+        wfamsd_id,
+        wfamsh_id,
+        notes,
+        created_by,
+        org_id,
+      },
+      dbClient,
+    );
+  } catch (historyError) {
+    console.error(
+      `Failed to insert first-approver history for ${wfamsd_id}:`,
+      historyError,
+    );
+  }
 
   // Send push notification for new workflow detail
   try {
@@ -1607,6 +1661,25 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
           created_by,
           org_id,
         ]);
+
+        try {
+          await insertPendingApprovalHistory(
+            {
+              wfamsd_id: wfamsdId,
+              wfamsh_id: wfamshId,
+              status,
+              notes: null,
+              created_by,
+              org_id,
+            },
+            client,
+          );
+        } catch (historyError) {
+          console.error(
+            `Failed to insert first-approver history for ${wfamsdId}:`,
+            historyError,
+          );
+        }
 
         detailCreated++;
       }

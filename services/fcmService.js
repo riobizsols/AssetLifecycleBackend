@@ -176,6 +176,12 @@ class FCMService {
         if (!userId) return false;
         const type = notificationType || 'general';
         const dbPool = getDb();
+        try {
+            const { ensureWhatsAppSchema } = require('../utils/ensureWhatsAppSchema');
+            await ensureWhatsAppSchema(dbPool);
+        } catch (schemaErr) {
+            console.warn('[FCM] WhatsApp schema ensure skipped:', schemaErr.message);
+        }
         const existing = await dbPool.query(
             `SELECT push_enabled FROM "tblNotificationPreferences"
              WHERE user_id = $1 AND notification_type = $2`,
@@ -204,34 +210,50 @@ class FCMService {
      * @param {string} notificationData.notificationType - Type of notification
      * @param {string} notificationData.platform - Target platform (optional)
      */
+    async sendWhatsAppBestEffort(notificationData) {
+        try {
+            const whatsappNotificationService = require('./whatsappNotificationService');
+            return await whatsappNotificationService.sendToUser({
+                userId: notificationData.userId,
+                title: notificationData.title,
+                body: notificationData.body,
+                data: notificationData.data || {},
+                notificationType: notificationData.notificationType,
+            });
+        } catch (error) {
+            console.warn('[WhatsApp] notification skipped:', error.message);
+            return { success: false, reason: error.message };
+        }
+    }
+
     async sendNotificationToUser(notificationData) {
+        let pushResult = { success: false };
         try {
             const { userId, title, body, data = {}, notificationType, platform = null } = notificationData;
 
             const pushEnabled = await this.ensurePushPreference(userId, notificationType);
             if (!pushEnabled) {
                 console.log(`Push notifications disabled for user ${userId}, type ${notificationType}`);
-                return { success: false, reason: 'Push notifications disabled' };
-            }
-
+                pushResult = { success: false, reason: 'Push notifications disabled' };
+            } else {
             // Get user's device tokens
             const tokens = await this.getUserDeviceTokens(userId, platform);
 
             if (tokens.length === 0) {
                 console.log(`No active device tokens found for user ${userId}`);
-                return { success: false, reason: 'No device tokens found' };
-            }
+                pushResult = { success: false, reason: 'No device tokens found' };
+            } else {
 
             const deviceTokens = tokens.map(token => token.device_token);
 
             // Check if Firebase is properly configured
             if (!this.initialized || !admin.apps.length) {
                 console.log('FCM service not initialized or Firebase not configured');
-                return { 
-                    success: false, 
-                    reason: 'FCM service not initialized. Please configure Firebase credentials.' 
+                pushResult = {
+                    success: false,
+                    reason: 'FCM service not initialized. Please configure Firebase credentials.'
                 };
-            }
+            } else {
 
             // Try to send notification via Firebase, but catch errors and simulate if needed
             try {
@@ -310,7 +332,7 @@ class FCMService {
                 // Log notification history
                 await this.logNotificationHistory(userId, tokens, notificationType, title, body, data, response);
 
-                return {
+                pushResult = {
                     success: true,
                     successCount,
                     failureCount,
@@ -334,7 +356,7 @@ class FCMService {
                     tokenSuccessMap: simulatedTokenSuccessMap
                 });
 
-                return {
+                pushResult = {
                     success: true,
                     successCount: 1,
                     failureCount: 0,
@@ -342,12 +364,21 @@ class FCMService {
                     message: 'Test notification simulated (Firebase error: ' + firebaseError.message + ')'
                 };
             }
-
+            } // firebase configured
+            } // tokens exist
+            } // push enabled
 
         } catch (error) {
             console.error('Error sending notification to user:', error);
-            throw error;
+            pushResult = { success: false, reason: error.message };
         }
+
+        const whatsapp = await this.sendWhatsAppBestEffort(notificationData);
+        return {
+            ...pushResult,
+            success: !!(pushResult?.success || whatsapp?.success),
+            whatsapp,
+        };
     }
 
     /**
@@ -554,17 +585,32 @@ class FCMService {
      */
     async updateNotificationPreferences(userId, notificationType, preferences) {
         try {
-            const { isEnabled, emailEnabled, pushEnabled } = preferences;
+            const { isEnabled, emailEnabled, pushEnabled, whatsappEnabled } = preferences;
 
             const query = `
                 UPDATE "tblNotificationPreferences" 
-                SET is_enabled = $1, email_enabled = $2, push_enabled = $3, updated_on = CURRENT_TIMESTAMP
-                WHERE user_id = $4 AND notification_type = $5
+                SET is_enabled = $1, email_enabled = $2, push_enabled = $3,
+                    whatsapp_enabled = COALESCE($4, whatsapp_enabled),
+                    updated_on = CURRENT_TIMESTAMP
+                WHERE user_id = $5 AND notification_type = $6
                 RETURNING *
             `;
 
             const dbPool = getDb();
-            const result = await dbPool.query(query, [isEnabled, emailEnabled, pushEnabled, userId, notificationType]);
+            try {
+                const { ensureWhatsAppSchema } = require('../utils/ensureWhatsAppSchema');
+                await ensureWhatsAppSchema(dbPool);
+            } catch (schemaErr) {
+                console.warn('[FCM] WhatsApp schema ensure skipped:', schemaErr.message);
+            }
+            const result = await dbPool.query(query, [
+                isEnabled,
+                emailEnabled,
+                pushEnabled,
+                whatsappEnabled === undefined ? null : !!whatsappEnabled,
+                userId,
+                notificationType,
+            ]);
             return { success: true, preference: result.rows[0] };
         } catch (error) {
             console.error('Error updating notification preferences:', error);
