@@ -5,6 +5,10 @@ const orgFrom = (req) =>
 
 const userFrom = (req) => req.user?.user_id || req.user?.id || null;
 
+/** Login dept — ACM wildcard overlay must not wipe this for assignment checks. */
+const deptFrom = (req) =>
+  req.user?._acmOriginalScope?.dept_id || req.user?.dept_id || null;
+
 const ok = (res, data) => res.json({ success: true, data });
 const fail = (res, err, code) => {
   console.error('[Utility]', err.message);
@@ -197,7 +201,7 @@ exports.listMyAssignedUtilityAssets = async (req, res) => {
   try {
     const orgId = orgFrom(req);
     const employeeIntId = req.user?.emp_int_id;
-    const deptId = req.user?.dept_id || null;
+    const deptId = deptFrom(req);
     if (!orgId || !employeeIntId) {
       return fail(res, new Error('User is not linked to an employee or organization'), 400);
     }
@@ -218,7 +222,7 @@ exports.listMyAssetConsumptions = async (req, res) => {
   try {
     const orgId = orgFrom(req);
     const employeeIntId = req.user?.emp_int_id;
-    const deptId = req.user?.dept_id || null;
+    const deptId = deptFrom(req);
     const assetId = req.params.assetId;
     if (!orgId || !employeeIntId) {
       return fail(res, new Error('User is not linked to an employee or organization'), 400);
@@ -250,7 +254,7 @@ exports.createAssetConsumption = async (req, res) => {
   try {
     const orgId = orgFrom(req);
     const employeeIntId = req.user?.emp_int_id;
-    const deptId = req.user?.dept_id || null;
+    const deptId = deptFrom(req);
     if (!orgId || !employeeIntId) {
       return fail(res, new Error('User is not linked to an employee or organization'), 400);
     }
@@ -270,7 +274,7 @@ exports.deleteAssetConsumption = async (req, res) => {
   try {
     const orgId = orgFrom(req);
     const employeeIntId = req.user?.emp_int_id;
-    const deptId = req.user?.dept_id || null;
+    const deptId = deptFrom(req);
     if (!orgId || !employeeIntId) {
       return fail(res, new Error('User is not linked to an employee or organization'), 400);
     }

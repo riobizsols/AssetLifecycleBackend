@@ -144,7 +144,40 @@ const getEligibleWarrantyRoles = async (orgId) => {
   return { roles, totalUsers };
 };
 
+/**
+ * If no job role has warranty alerts enabled, turn them on for System Administrator
+ * so expired/expiring warranties are not silently dropped.
+ */
+const ensureDefaultWarrantyRecipients = async (orgId) => {
+  let eligibility = await getEligibleWarrantyRoles(orgId);
+  if (eligibility.totalUsers > 0) return eligibility;
+
+  await getDb().query(
+    `
+      UPDATE "tblJobRoles"
+      SET notif_warranty = TRUE
+      WHERE org_id = $1
+        AND COALESCE(notif_warranty, FALSE) = FALSE
+        AND (
+          job_role_id = 'JR001'
+          OR LOWER(COALESCE(text, '')) LIKE '%system admin%'
+        )
+    `,
+    [orgId]
+  );
+  eligibility = await getEligibleWarrantyRoles(orgId);
+  if (eligibility.totalUsers > 0) {
+    console.log(
+      `[WarrantyNotify] Enabled notif_warranty for System Admin roles in ${orgId} (${eligibility.totalUsers} users)`
+    );
+  }
+  return eligibility;
+};
+
 const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
+  // Ensure System Admin can receive alerts when no role has notif_warranty yet.
+  await ensureDefaultWarrantyRecipients(orgId);
+
   const db = getDb();
   const client = await db.connect();
   try {
@@ -152,7 +185,11 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
 
     const assetRes = await client.query(
       `
-        SELECT a.asset_id, a.text, a.warranty_period, a.service_vendor_id, a.asset_type_id
+        SELECT a.asset_id,
+               COALESCE(NULLIF(BTRIM(a.text), ''), NULLIF(BTRIM(a.description), ''), 'Unnamed Asset') AS text,
+               a.warranty_period,
+               a.service_vendor_id,
+               a.asset_type_id
         FROM "tblAssets" a
         WHERE a.asset_id = $1 AND a.org_id = $2
       `,
@@ -282,7 +319,7 @@ const createWarrantyNotificationsForAsset = async ({ assetId, orgId }) => {
 };
 
 const ensureWarrantyNotificationsForWindow = async ({ orgId, days = 10 }) => {
-  const eligibility = await getEligibleWarrantyRoles(orgId);
+  const eligibility = await ensureDefaultWarrantyRecipients(orgId);
   const assetsRes = await getDb().query(
     `
       SELECT asset_id
@@ -342,6 +379,65 @@ const ensureWarrantyNotificationsForWindowAllOrgs = async ({ days = 10 }) => {
   }
 
   return { orgs: orgsRes.rows.length, scanned, created, org_breakdown: orgBreakdown };
+};
+
+/**
+ * Multi-tenant safe entry used by the daily cron.
+ * Iterates active registry tenants and runs ensure inside each tenant pool.
+ */
+const ensureWarrantyNotificationsAcrossTenants = async ({ days = 10 } = {}) => {
+  const { initTenantRegistryPool, getTenantPool } = require("../services/tenantService");
+  const { runWithDb } = require("../utils/dbContext");
+
+  const registry = initTenantRegistryPool();
+  const tenants = await registry.query(
+    `
+      SELECT grouped_org_id AS org_id, COALESCE(subdomain, db_name) AS label
+      FROM "tenants"
+      WHERE is_active = true
+      ORDER BY grouped_org_id
+    `
+  );
+
+  let scanned = 0;
+  let created = 0;
+  let orgs = 0;
+  const tenantBreakdown = [];
+
+  for (const tenant of tenants.rows) {
+    try {
+      const pool = await getTenantPool(tenant.org_id);
+      const result = await runWithDb(pool, () =>
+        ensureWarrantyNotificationsForWindowAllOrgs({ days })
+      );
+      orgs += Number(result.orgs || 0);
+      scanned += Number(result.scanned || 0);
+      created += Number(result.created || 0);
+      tenantBreakdown.push({
+        tenant: tenant.org_id,
+        label: tenant.label,
+        ...result,
+      });
+    } catch (error) {
+      console.error(
+        `[WarrantyNotify] Tenant ${tenant.org_id} (${tenant.label}) failed:`,
+        error.message
+      );
+      tenantBreakdown.push({
+        tenant: tenant.org_id,
+        label: tenant.label,
+        error: error.message,
+      });
+    }
+  }
+
+  return {
+    tenants: tenants.rows.length,
+    orgs,
+    scanned,
+    created,
+    tenant_breakdown: tenantBreakdown,
+  };
 };
 
 const getWarrantyNotificationsByUser = async ({
@@ -703,10 +799,12 @@ const resolveWarrantyNotificationsByAsset = async ({ assetId, orgId }) => {
 
 module.exports = {
   mapStatus,
+  getWarrantyPhase,
   createWarrantyNotificationsForAsset,
   createAssetExpiryNotificationsForAsset,
   ensureWarrantyNotificationsForWindow,
   ensureWarrantyNotificationsForWindowAllOrgs,
+  ensureWarrantyNotificationsAcrossTenants,
   ensureAssetExpiryNotificationsForWindow,
   ensureAssetExpiryNotificationsForWindowAllOrgs,
   getWarrantyNotificationsByUser,

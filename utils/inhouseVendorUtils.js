@@ -60,9 +60,78 @@ function isInhouseMaintainedBy(maintainedBy) {
   return !maint.includes('vendor');
 }
 
+/**
+ * Resolve provider from tblATMaintFreq — never from asset.service_vendor_id.
+ * Many in-house types (Furnace, etc.) still have a purchase/service vendor row;
+ * using that as "Vendor" blanks technicians and mislabels Upcoming Jobs / WOs.
+ */
+async function resolveMaintenanceProvider({
+  orgId,
+  atMainFreqId = null,
+  assetTypeId = null,
+  serviceVendorId = null,
+  dbPool = null,
+} = {}) {
+  const db = dbPool || getDb();
+  let maintainedBy = null;
+  let empIntId = null;
+  let resolvedFreqId = atMainFreqId || null;
+
+  if (atMainFreqId || assetTypeId) {
+    try {
+      const freq = await db.query(
+        `SELECT at_main_freq_id, maintained_by, emp_int_id
+         FROM "tblATMaintFreq"
+         WHERE org_id = $1
+           AND (
+             ($2::text IS NOT NULL AND at_main_freq_id = $2)
+             OR ($3::text IS NOT NULL AND asset_type_id = $3)
+           )
+           AND COALESCE(int_status, 1) = 1
+           AND NULLIF(BTRIM(maintained_by), '') IS NOT NULL
+         ORDER BY (at_main_freq_id = $2) DESC NULLS LAST, at_main_freq_id ASC
+         LIMIT 1`,
+        [orgId, atMainFreqId || null, assetTypeId || null],
+      );
+      if (freq.rows[0]) {
+        maintainedBy = freq.rows[0].maintained_by;
+        empIntId = freq.rows[0].emp_int_id || null;
+        resolvedFreqId = freq.rows[0].at_main_freq_id || resolvedFreqId;
+      }
+    } catch (_) {
+      /* optional */
+    }
+  }
+
+  // Missing freq → Inhouse. Do not treat service_vendor_id as Vendor.
+  if (!maintainedBy) {
+    maintainedBy = 'Inhouse';
+  }
+
+  const isInhouse = isInhouseMaintainedBy(maintainedBy);
+  if (!isInhouse) {
+    empIntId = null;
+  }
+
+  const vendorId = await resolveVendorIdForMaintRecord(
+    serviceVendorId,
+    maintainedBy,
+    orgId,
+  );
+
+  return {
+    maintainedBy,
+    empIntId,
+    isInhouse,
+    vendorId,
+    atMainFreqId: resolvedFreqId,
+  };
+}
+
 module.exports = {
   INHOUSE_VENDOR_NAME,
   getInhouseVendorId,
   resolveVendorIdForMaintRecord,
   isInhouseMaintainedBy,
+  resolveMaintenanceProvider,
 };

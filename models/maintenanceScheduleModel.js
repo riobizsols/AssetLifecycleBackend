@@ -14,6 +14,71 @@ const ensureActualDowntimeColumn = async (dbPool = getDb()) => {
   `);
 };
 
+/**
+ * Legacy tenants stored AMS created_on as TIME (time-of-day only).
+ * List UI formats it as a date, so those cells render blank.
+ * Promote to timestamp and rebuild values from workflow/schedule date + time.
+ */
+const ensureCreatedOnTimestampColumn = async (dbPool = getDb()) => {
+  const { rows } = await dbPool.query(`
+    SELECT data_type
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'tblAssetMaintSch'
+      AND column_name = 'created_on'
+  `);
+  const dataType = String(rows[0]?.data_type || '').toLowerCase();
+  if (!dataType) return;
+  if (dataType !== 'time without time zone' && dataType !== 'time with time zone') {
+    return;
+  }
+
+  await dbPool.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    ADD COLUMN IF NOT EXISTS created_on_ts timestamp without time zone
+  `);
+
+  await dbPool.query(`
+    UPDATE "tblAssetMaintSch" ams
+    SET created_on_ts = (
+      CASE
+        WHEN ams.created_on IS NULL THEN NULL
+        ELSE (
+          COALESCE(wfh.created_on::date, ams.act_maint_st_date::date, CURRENT_DATE)
+          + ams.created_on
+        )
+      END
+    )
+    FROM "tblWFAssetMaintSch_H" wfh
+    WHERE wfh.wfamsh_id = ams.wfamsh_id
+      AND ams.created_on_ts IS NULL
+  `);
+
+  await dbPool.query(`
+    UPDATE "tblAssetMaintSch" ams
+    SET created_on_ts = (
+      CASE
+        WHEN ams.created_on IS NULL THEN NULL
+        ELSE (COALESCE(ams.act_maint_st_date::date, CURRENT_DATE) + ams.created_on)
+      END
+    )
+    WHERE ams.created_on_ts IS NULL
+  `);
+
+  await dbPool.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    DROP COLUMN created_on
+  `);
+  await dbPool.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    RENAME COLUMN created_on_ts TO created_on
+  `);
+  await dbPool.query(`
+    ALTER TABLE "tblAssetMaintSch"
+    ALTER COLUMN created_on SET DEFAULT CURRENT_TIMESTAMP
+  `).catch(() => {});
+};
+
 const parseActualDowntime = (raw) => {
   if (raw === undefined || raw === null || String(raw).trim() === '') {
     return null;
@@ -661,6 +726,7 @@ const getAllMaintenanceSchedules = async (orgId = "ORG001", acmCtx = {}) => {
   const { buildAssetListScopeSql } = require('../utils/acmAccess');
   const dbPool = getDb();
   await ensureAssetTypeRequirementColumns(dbPool);
+  await ensureCreatedOnTimestampColumn(dbPool);
   let query = `
         SELECT 
             ams.*,
@@ -1226,6 +1292,7 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
     created_by,
     org_id,
     branch_code,
+    emp_int_id = null,
   } = scheduleData;
 
   // Auto-generate work order ID
@@ -1233,6 +1300,7 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
 
   // If branch_code not provided, fetch it from asset
   let finalBranchCode = branch_code;
+  const dbPool = getDb();
   if (!finalBranchCode && asset_id) {
     const branchQuery = `
             SELECT b.branch_code
@@ -1240,12 +1308,24 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             LEFT JOIN "tblBranches" b ON a.branch_id = b.branch_id
             WHERE a.asset_id = $1
         `;
-    const dbPool = getDb();
 
     const branchResult = await dbPool.query(branchQuery, [asset_id]);
     if (branchResult.rows.length > 0) {
       finalBranchCode = branchResult.rows[0].branch_code;
     }
+  }
+
+  let techName = null;
+  let techEmail = null;
+  let techPhone = null;
+  if (emp_int_id) {
+    try {
+      const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+      const tech = await resolveTechnicianFromEmp(emp_int_id, dbPool);
+      techName = tech.technician_name || null;
+      techEmail = tech.technician_email || null;
+      techPhone = tech.technician_phno || null;
+    } catch (_) { /* optional */ }
   }
 
   const query = `
@@ -1264,10 +1344,12 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
             created_by,
             created_on,
             org_id,
-            branch_code
-        ,
-            emp_int_id
-        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12, $13, $14)
+            branch_code,
+            emp_int_id,
+            technician_name,
+            technician_email,
+            technician_phno
+        ) VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP, $12, $13, $14, $15, $16, $17)
         RETURNING *
     `;
 
@@ -1285,10 +1367,11 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
     created_by,
     org_id,
     finalBranchCode,
-    null, // emp_int_id will be filled by lookup below when available
+    emp_int_id,
+    techName,
+    techEmail,
+    techPhone,
   ];
-
-  const dbPool = getDb();
 
   return await dbPool.query(query, values);
 };
@@ -1351,30 +1434,17 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       const atMainFreqId = freqResult.rows[0].at_main_freq_id;
       const maintTypeId = freqResult.rows[0].maint_type_id || "MT002";
 
-      let empIntToSave = null;
-      let maintainedBy = asset.service_vendor_id ? "Vendor" : "Inhouse";
-      try {
-        if (atMainFreqId) {
-          const mfRes = await client.query(
-            `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 LIMIT 1`,
-            [atMainFreqId]
-          );
-          if (mfRes.rows.length > 0) {
-            const mf = mfRes.rows[0];
-            const mBy = mf.maintained_by || '';
-            if (mBy) {
-              maintainedBy = mBy;
-            }
-            if (String(mBy).toLowerCase().includes('vendor')) {
-              empIntToSave = null;
-            } else {
-              empIntToSave = mf.emp_int_id || null;
-            }
-          }
-        }
-      } catch (err) {
-        empIntToSave = null;
-      }
+      const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
+      const provider = await resolveMaintenanceProvider({
+        orgId: org_id,
+        atMainFreqId,
+        assetTypeId: asset_type_id,
+        serviceVendorId: asset.service_vendor_id,
+        dbPool: client,
+      });
+      const maintainedBy = provider.maintainedBy;
+      const empIntToSave = provider.empIntId;
+      const scheduleVendorId = provider.vendorId;
 
       const directInsertQuery = `
                 INSERT INTO "tblAssetMaintSch" (
@@ -1401,7 +1471,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         amsId,
         asset_id,
         maintTypeId,
-        asset.service_vendor_id,
+        scheduleVendorId,
         atMainFreqId,
         maintainedBy,
         new Date().toISOString().split("T")[0],
@@ -1493,8 +1563,18 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     const maintTypeId =
       (freqResult.rows.length > 0 && freqResult.rows[0].maint_type_id) || "MT002";
 
-    // Determine maintained_by
-    const maintainedBy = asset.service_vendor_id ? "Vendor" : "Inhouse";
+    // Frequency decides in-house vs vendor — never asset.service_vendor_id
+    const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
+    const provider = await resolveMaintenanceProvider({
+      orgId: org_id,
+      atMainFreqId,
+      assetTypeId: asset_type_id,
+      serviceVendorId: asset.service_vendor_id,
+      dbPool: client,
+    });
+    const maintainedBy = provider.maintainedBy;
+    const headerEmpInt = provider.empIntId;
+    const scheduleVendorId = provider.vendorId;
 
     // Verify the generated ID doesn't already exist (handle race conditions)
     let idExists = true;
@@ -1521,29 +1601,6 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       throw new Error(
         "Unable to generate unique WFAMSH ID after multiple attempts",
       );
-    }
-
-    // Create workflow header (using client for transaction)
-    // Lookup AT maintenance frequency to determine emp_int_id for header and schedule
-    let headerEmpInt = null;
-    try {
-      if (atMainFreqId) {
-        const mfRes = await client.query(
-          `SELECT maintained_by, emp_int_id FROM "tblATMaintFreq" WHERE at_main_freq_id = $1 LIMIT 1`,
-          [atMainFreqId]
-        );
-        if (mfRes.rows.length > 0) {
-          const mf = mfRes.rows[0];
-          const mBy = mf.maintained_by || '';
-          if (String(mBy).toLowerCase().includes('vendor')) {
-            headerEmpInt = null;
-          } else {
-            headerEmpInt = mf.emp_int_id || null;
-          }
-        }
-      }
-    } catch (err) {
-      headerEmpInt = null;
     }
 
     const headerQuery = `
@@ -1574,7 +1631,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       maintTypeId,
       asset_id,
       null, // group_id
-      asset.service_vendor_id,
+      scheduleVendorId,
       new Date().toISOString().split("T")[0], // pl_sch_date
       null, // act_sch_date
       "IN", // status
@@ -1719,7 +1776,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       null, // wo_id - will be generated after approval
       asset_id,
       maintTypeId,
-      asset.service_vendor_id,
+      scheduleVendorId,
       atMainFreqId,
       maintainedBy,
       null, // notes

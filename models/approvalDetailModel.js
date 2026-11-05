@@ -1106,7 +1106,7 @@ const getWorkflowHistoryByWfamshId = async (wfamshId, orgId = 'ORG001') => {
           actionColor = 'text-red-600';
           break;
         case 'AP':
-          actionText = 'Approval Pending';
+          actionText = 'Action Pending';
           actionColor = 'text-orange-600';
           break;
         case 'IN':
@@ -1889,13 +1889,11 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
               AND (d.notes ILIKE '%BF01-Breakdown%' OR d.notes ILIKE '%BF03-Breakdown%' OR d.notes ILIKE '%Breakdown%')
             LIMIT 1
           ) as bf01_notes,
-          -- Frequency maintained_by wins; do not let asset.service_vendor_id flip Inhouse → Vendor
+          -- Frequency maintained_by wins. Missing freq → Inhouse.
+          -- Never treat asset.service_vendor_id as Vendor (in-house types often still have a supply vendor).
           COALESCE(
             NULLIF(BTRIM(atmf.maintained_by), ''),
-            CASE 
-              WHEN a.service_vendor_id IS NOT NULL AND a.service_vendor_id != '' THEN 'Vendor'
-              ELSE 'Inhouse'
-            END
+            'Inhouse'
           ) as maintained_by
         FROM "tblWFAssetMaintSch_H" wfh
         INNER JOIN "tblAssets" a ON wfh.asset_id = a.asset_id
@@ -2012,8 +2010,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
           status = 'IN',
            act_maint_st_date = $6,
            notes = CASE 
-             WHEN notes IS NULL OR notes = '' THEN $9
-             WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+             WHEN notes IS NULL OR notes = '' THEN $9::text
+             WHEN $9::text IS NOT NULL AND notes NOT ILIKE '%' || $9::text || '%' THEN notes || ' - ' || $9::text
              ELSE notes
            END,
            changed_by = 'system',
@@ -2489,8 +2487,8 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
             technician_phno = COALESCE($14, technician_phno),
             branch_code = COALESCE($6, branch_code),
              notes = CASE 
-               WHEN notes IS NULL OR notes = '' THEN $9
-               WHEN $9 IS NOT NULL AND notes NOT ILIKE '%' || $9 || '%' THEN notes || ' - ' || $9
+               WHEN notes IS NULL OR notes = '' THEN $9::text
+               WHEN $9::text IS NOT NULL AND notes NOT ILIKE '%' || $9::text || '%' THEN notes || ' - ' || $9::text
                ELSE notes
              END,
              wo_id = COALESCE($10, wo_id),

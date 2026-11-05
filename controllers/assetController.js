@@ -67,6 +67,23 @@ const {
   DEFAULT_ALERT_DAYS,
 } = require("../models/assetExpiryNotifyModel");
 
+/** Create warranty alerts when warranty is already expired or within the next 10 days. */
+async function maybeCreateWarrantyAlertForAsset({ assetId, orgId, warrantyPeriod }) {
+  if (!assetId || !orgId || !warrantyPeriod) return;
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const riskWindowEnd = new Date(now);
+  riskWindowEnd.setDate(riskWindowEnd.getDate() + 10);
+  const parsed =
+    warrantyPeriod && !Number.isNaN(new Date(warrantyPeriod).getTime())
+      ? new Date(warrantyPeriod)
+      : null;
+  if (!parsed) return;
+  parsed.setHours(0, 0, 0, 0);
+  if (parsed > riskWindowEnd) return;
+  await createWarrantyNotificationsForAsset({ assetId, orgId });
+}
+
 const addAsset = async (req, res) => {
     const startTime = Date.now();
     const userId = req.user?.user_id;
@@ -357,6 +374,19 @@ const addAsset = async (req, res) => {
             userId: created_by,
             duration: Date.now() - startTime
         });
+
+        try {
+          await maybeCreateWarrantyAlertForAsset({
+            assetId: insertedAssetId,
+            orgId: org_id || req.user?.org_id,
+            warrantyPeriod: warranty_period,
+          });
+        } catch (warrantyCreateErr) {
+          console.error(
+            "Failed to create warranty notification on addAsset:",
+            warrantyCreateErr.message
+          );
+        }
 
         res.status(201).json({
             message: "Asset added successfully",
@@ -2137,6 +2167,19 @@ if (useful_life_years && useful_life_years > 0) {
             }
 
             await client.query('COMMIT');
+
+            try {
+              await maybeCreateWarrantyAlertForAsset({
+                assetId: insertedAssetId,
+                orgId: finalOrgId || req.user?.org_id,
+                warrantyPeriod: warranty_period,
+              });
+            } catch (warrantyCreateErr) {
+              console.error(
+                "Failed to create warranty notification on createAsset:",
+                warrantyCreateErr.message
+              );
+            }
             
             res.status(201).json({
                 message: "Asset added successfully",

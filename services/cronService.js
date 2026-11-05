@@ -11,7 +11,7 @@ const maintenanceCronLogger = require('../eventLoggers/maintenanceCronEventLogge
 const { generateMaintenanceSchedules } = require('../controllers/maintenanceScheduleController');
 const { generateInspectionSchedules } = require('../controllers/inspectionScheduleController');
 const {
-    ensureWarrantyNotificationsForWindowAllOrgs,
+    ensureWarrantyNotificationsAcrossTenants,
 } = require('../models/assetWarrantyNotifyModel');
 const {
     ensureExpiryNotificationsForWindowAllOrgs,
@@ -141,9 +141,10 @@ class CronService {
             cron.schedule('0 7 * * *', async () => {
                 const startedAt = new Date().toISOString();
                 try {
-                    const result = await ensureWarrantyNotificationsForWindowAllOrgs({ days: 5 });
+                    // Multi-tenant: each registry tenant needs its own DB context.
+                    const result = await ensureWarrantyNotificationsAcrossTenants({ days: 10 });
                     console.log(
-                        `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
+                        `✅ [CRON] Warranty notification trigger completed at ${startedAt}. Tenants: ${result.tenants}, orgs: ${result.orgs}, scanned assets: ${result.scanned}, created notifications: ${result.created}`
                     );
                 } catch (error) {
                     console.error('❌ [CRON] Warranty notification trigger failed:', error.message);
@@ -153,7 +154,7 @@ class CronService {
             });
 
             console.log('📅 [CRON] Warranty Notification Trigger: Scheduled daily at 7:00 AM (IST)');
-            console.log('   → Creates notifications for assets with warranty expiry within next 5 days');
+            console.log('   → Creates notifications for expired warranties and those within next 10 days (all tenants)');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule warranty notification trigger:', error.message);
         }

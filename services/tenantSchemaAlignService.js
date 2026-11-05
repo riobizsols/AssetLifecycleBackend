@@ -533,6 +533,67 @@ async function ensureCriticalRuntimeSchema(client) {
     results.push({ object: 'tblAssetMaintSch.hours_spent/maint_notes', status: 'table_missing' });
   }
 
+  // Legacy: created_on was TIME; list screen needs a full timestamp
+  try {
+    const createdOnType = await client.query(`
+      SELECT data_type
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'tblAssetMaintSch'
+        AND column_name = 'created_on'
+    `);
+    const dataType = String(createdOnType.rows[0]?.data_type || '').toLowerCase();
+    if (dataType === 'time without time zone' || dataType === 'time with time zone') {
+      await client.query(`
+        ALTER TABLE "tblAssetMaintSch"
+        ADD COLUMN IF NOT EXISTS created_on_ts timestamp without time zone
+      `);
+      await client.query(`
+        UPDATE "tblAssetMaintSch" ams
+        SET created_on_ts = (
+          CASE
+            WHEN ams.created_on IS NULL THEN NULL
+            ELSE (
+              COALESCE(wfh.created_on::date, ams.act_maint_st_date::date, CURRENT_DATE)
+              + ams.created_on
+            )
+          END
+        )
+        FROM "tblWFAssetMaintSch_H" wfh
+        WHERE wfh.wfamsh_id = ams.wfamsh_id
+          AND ams.created_on_ts IS NULL
+      `);
+      await client.query(`
+        UPDATE "tblAssetMaintSch" ams
+        SET created_on_ts = (
+          CASE
+            WHEN ams.created_on IS NULL THEN NULL
+            ELSE (COALESCE(ams.act_maint_st_date::date, CURRENT_DATE) + ams.created_on)
+          END
+        )
+        WHERE ams.created_on_ts IS NULL
+      `);
+      await client.query(`ALTER TABLE "tblAssetMaintSch" DROP COLUMN created_on`);
+      await client.query(`ALTER TABLE "tblAssetMaintSch" RENAME COLUMN created_on_ts TO created_on`);
+      await client.query(`
+        ALTER TABLE "tblAssetMaintSch"
+        ALTER COLUMN created_on SET DEFAULT CURRENT_TIMESTAMP
+      `).catch(() => {});
+      results.push({ object: 'tblAssetMaintSch.created_on', status: 'promoted_time_to_timestamp' });
+    } else if (dataType) {
+      results.push({ object: 'tblAssetMaintSch.created_on', status: 'ok' });
+    } else {
+      results.push({ object: 'tblAssetMaintSch.created_on', status: 'missing' });
+    }
+  } catch (err) {
+    if (err.code !== '42P01') {
+      console.warn('[TenantSchemaAlign] Could not fix tblAssetMaintSch.created_on:', err.message);
+      results.push({ object: 'tblAssetMaintSch.created_on', status: 'error', message: err.message });
+    } else {
+      results.push({ object: 'tblAssetMaintSch.created_on', status: 'table_missing' });
+    }
+  }
+
   // Reopened breakdowns report / history writes
   try {
     const brHistExists = await client.query(`

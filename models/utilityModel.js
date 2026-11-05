@@ -504,7 +504,30 @@ async function previewConsumption({ utild_id, reading, quantity_consumed, consum
   };
 }
 
+async function resolveEmployeeDeptIds(employeeIntId, preferredDeptId = null) {
+  const depts = new Set();
+  if (preferredDeptId && String(preferredDeptId).trim()) {
+    depts.add(String(preferredDeptId).trim());
+  }
+  if (!employeeIntId) return [...depts];
+  try {
+    const { rows } = await getDb().query(
+      `
+        SELECT dept_id FROM "tblEmployees" WHERE emp_int_id = $1 AND NULLIF(BTRIM(dept_id), '') IS NOT NULL
+        UNION
+        SELECT dept_id FROM "tblUsers" WHERE emp_int_id = $1 AND NULLIF(BTRIM(dept_id), '') IS NOT NULL
+      `,
+      [employeeIntId],
+    );
+    rows.forEach((r) => {
+      if (r.dept_id) depts.add(String(r.dept_id).trim());
+    });
+  } catch (_) { /* optional */ }
+  return [...depts];
+}
+
 async function isAssetAssignedToEmployee(assetId, employeeIntId, orgId, deptId = null) {
+  const deptIds = await resolveEmployeeDeptIds(employeeIntId, deptId);
   const { rows } = await getDb().query(
     `
       SELECT 1
@@ -517,11 +540,14 @@ async function isAssetAssignedToEmployee(assetId, employeeIntId, orgId, deptId =
         AND COALESCE(a.current_status, '') <> 'SCRAPPED'
         AND (
           aa.employee_int_id = $2
-          OR ($4::text IS NOT NULL AND aa.dept_id = $4)
+          OR (
+            cardinality($4::text[]) > 0
+            AND aa.dept_id = ANY($4::text[])
+          )
         )
       LIMIT 1
     `,
-    [assetId, employeeIntId, orgId, deptId || null],
+    [assetId, employeeIntId, orgId, deptIds],
   );
   return rows.length > 0;
 }
@@ -572,6 +598,10 @@ async function listMyAssignedUtilityAssets({ orgId, employeeIntId, deptId = null
     throw new Error('Organization and employee are required');
   }
 
+  // Manufacturing assets are often dept-assigned (employee_int_id NULL).
+  // Resolve dept from login + employee/user row so ACM overlays cannot hide them.
+  const deptIds = await resolveEmployeeDeptIds(employeeIntId, deptId);
+
   const { rows } = await getDb().query(
     `
       SELECT DISTINCT ON (a.asset_id, d.utild_id)
@@ -592,7 +622,7 @@ async function listMyAssignedUtilityAssets({ orgId, employeeIntId, deptId = null
         aa.action_on AS assigned_on,
         CASE
           WHEN aa.employee_int_id = $2 THEN 'USER'
-          WHEN $3::text IS NOT NULL AND aa.dept_id = $3 THEN 'DEPARTMENT'
+          WHEN cardinality($3::text[]) > 0 AND aa.dept_id = ANY($3::text[]) THEN 'DEPARTMENT'
           ELSE 'UNKNOWN'
         END AS assignment_scope
       FROM "tblAssetAssignments" aa
@@ -612,12 +642,15 @@ async function listMyAssignedUtilityAssets({ orgId, employeeIntId, deptId = null
         AND ($1::text IS NULL OR COALESCE(d.org_id, h.org_id) = $1)
         AND (
           aa.employee_int_id = $2
-          OR ($3::text IS NOT NULL AND aa.dept_id = $3)
+          OR (
+            cardinality($3::text[]) > 0
+            AND aa.dept_id = ANY($3::text[])
+          )
         )
       ORDER BY a.asset_id, d.utild_id,
         CASE WHEN aa.employee_int_id = $2 THEN 0 ELSE 1 END
     `,
-    [orgId, employeeIntId, deptId || null],
+    [orgId, employeeIntId, deptIds],
   );
 
   return rows.map((row) => {

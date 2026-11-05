@@ -199,6 +199,15 @@ const getSparePartMaintenanceList = async (
       AND ${inhouseOnly}
       AND at.required_maint IS TRUE
       AND at.required_spare_parts IS TRUE
+      -- Must have at least one active spare-category mapping for the asset type.
+      -- Type flags alone (e.g. CNC Trainer) must not put unmapped assets on Spare Part List.
+      AND EXISTS (
+        SELECT 1
+        FROM "tblSPCatATMap" m
+        WHERE m.org_id = ams.org_id
+          AND m.asset_type_id = a.asset_type_id
+          AND COALESCE(m.int_status, 1) = 1
+      )
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);
@@ -379,6 +388,13 @@ const getSparePartMaintenanceDetail = async (
       AND ${inhouseOnly}
       AND at.required_maint IS TRUE
       AND at.required_spare_parts IS TRUE
+      AND EXISTS (
+        SELECT 1
+        FROM "tblSPCatATMap" m
+        WHERE m.org_id = ams.org_id
+          AND m.asset_type_id = a.asset_type_id
+          AND COALESCE(m.int_status, 1) = 1
+      )
   `;
   if (!hasSuperAccess && branch_id) {
     params.push(branch_id);

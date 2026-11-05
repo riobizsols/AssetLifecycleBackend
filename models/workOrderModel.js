@@ -204,64 +204,142 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
     const result = await dbPool.query(query, params);
     if (!result.rows.length) return result;
 
-    // Enrich rows using current frequency (type may have switched vendor → in-house)
-    const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
-    const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
     for (const row of result.rows) {
-      let currentMaintainedBy = row.maintained_by || null;
-      let freqEmpId = null;
-      try {
-        const freq = await dbPool.query(
-          `SELECT maintained_by, emp_int_id
-           FROM "tblATMaintFreq"
-           WHERE org_id = $1
-             AND (at_main_freq_id = $2 OR asset_type_id = $3)
-             AND NULLIF(BTRIM(maintained_by), '') IS NOT NULL
-           ORDER BY (at_main_freq_id = $2) DESC NULLS LAST
-           LIMIT 1`,
-          [orgId, row.at_main_freq_id || null, row.asset_type_id || null],
-        );
-        if (freq.rows[0]?.maintained_by) {
-          currentMaintainedBy = freq.rows[0].maintained_by;
-          row.maintained_by = currentMaintainedBy;
-        }
-        freqEmpId = freq.rows[0]?.emp_int_id || null;
-      } catch (_) { /* optional */ }
-
-      const isInhouse =
-        isInhouseMaintainedBy(currentMaintainedBy) ||
-        Boolean(row.emp_int_id && !String(currentMaintainedBy || '').toLowerCase().includes('vendor'));
-      row.is_inhouse = isInhouse;
-      if (!isInhouse) continue;
-
-      let empId = row.emp_int_id || null;
-      if (!empId && row.wfamsh_id) {
-        try {
-          const header = await dbPool.query(
-            `SELECT emp_int_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2 LIMIT 1`,
-            [row.wfamsh_id, orgId],
-          );
-          empId = header.rows[0]?.emp_int_id || null;
-        } catch (_) { /* optional */ }
-      }
-      if (!empId) empId = freqEmpId;
-      if (!empId) continue;
-      const tech = await resolveTechnicianFromEmp(empId, dbPool);
-      row.emp_int_id = empId;
-      if (!row.technician_name || !String(row.technician_name).trim()) {
-        row.technician_name = tech.technician_name || row.technician_name;
-      } else if (tech.technician_name) {
-        row.technician_name = tech.technician_name;
-      }
-      if (!row.technician_email || !String(row.technician_email).trim()) {
-        row.technician_email = tech.technician_email || row.technician_email;
-      }
-      if (!row.technician_phno || !String(row.technician_phno).trim()) {
-        row.technician_phno = tech.technician_phno || row.technician_phno;
-      }
+      await enrichWorkOrderProviderFields(row, orgId, dbPool);
     }
     return result;
 };
+
+/**
+ * Frequency (not service_vendor_id) decides in-house vs vendor.
+ * Corrects stale AMS rows stamped Vendor because the asset had a service vendor.
+ */
+async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
+  if (!row) return row;
+  const {
+    isInhouseMaintainedBy,
+    resolveMaintenanceProvider,
+  } = require('../utils/inhouseVendorUtils');
+  const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+
+  const provider = await resolveMaintenanceProvider({
+    orgId,
+    atMainFreqId: row.at_main_freq_id || null,
+    assetTypeId: row.asset_type_id || null,
+    serviceVendorId: row.service_vendor_id || row.vendor_id || null,
+    dbPool,
+  });
+
+  let headerEmpId = null;
+  if (row.wfamsh_id) {
+    try {
+      const header = await dbPool.query(
+        `SELECT emp_int_id FROM "tblWFAssetMaintSch_H" WHERE wfamsh_id = $1 AND org_id = $2 LIMIT 1`,
+        [row.wfamsh_id, orgId],
+      );
+      headerEmpId = header.rows[0]?.emp_int_id || null;
+    } catch (_) { /* optional */ }
+  }
+
+  // Frequency wins; fall back to stored AMS only when freq missing.
+  const storedMaintainedBy = row.maintained_by || null;
+  const storedEmpId = row.emp_int_id || null;
+  const storedTechName = row.technician_name || null;
+  const currentMaintainedBy = provider.maintainedBy || storedMaintainedBy || 'Inhouse';
+  const isInhouse =
+    isInhouseMaintainedBy(currentMaintainedBy) ||
+    Boolean(
+      (storedEmpId || headerEmpId || provider.empIntId) &&
+        !String(currentMaintainedBy || '').toLowerCase().includes('vendor'),
+    );
+
+  row.maintained_by = currentMaintainedBy;
+  row.is_inhouse = isInhouse;
+
+  if (!isInhouse) {
+    return row;
+  }
+
+  const empId = storedEmpId || headerEmpId || provider.empIntId || null;
+  let tech = {
+    technician_name: null,
+    technician_email: null,
+    technician_phno: null,
+  };
+  if (empId) {
+    tech = await resolveTechnicianFromEmp(empId, dbPool);
+    row.emp_int_id = empId;
+    if (!row.technician_name || !String(row.technician_name).trim()) {
+      row.technician_name = tech.technician_name || row.technician_name;
+    } else if (tech.technician_name) {
+      row.technician_name = tech.technician_name;
+    }
+    if (!row.technician_email || !String(row.technician_email).trim()) {
+      row.technician_email = tech.technician_email || row.technician_email;
+    }
+    if (!row.technician_phno || !String(row.technician_phno).trim()) {
+      row.technician_phno = tech.technician_phno || row.technician_phno;
+    }
+  }
+
+  const inhouseVendorId = provider.vendorId || null;
+  const vendorNeedsRemap =
+    Boolean(inhouseVendorId) &&
+    String(row.vendor_id || '') !== String(inhouseVendorId);
+
+  // Always surface in-house vendor on the response (JOIN may still have service vendor)
+  if (vendorNeedsRemap) {
+    row.vendor_id = inhouseVendorId;
+    try {
+      const v = await dbPool.query(
+        `SELECT vendor_name, contact_person_name,
+                contact_person_email, contact_person_number
+         FROM "tblVendors" WHERE vendor_id = $1 LIMIT 1`,
+        [inhouseVendorId],
+      );
+      if (v.rows[0]) {
+        row.vendor_name = v.rows[0].vendor_name;
+        row.contact_person_name = v.rows[0].contact_person_name;
+        row.vendor_email = v.rows[0].contact_person_email;
+        row.vendor_phone = v.rows[0].contact_person_number;
+      }
+    } catch (_) { /* optional */ }
+  }
+
+  const needsPersist =
+    String(storedMaintainedBy || '').toLowerCase() !==
+      String(currentMaintainedBy || '').toLowerCase() ||
+    (empId && !storedEmpId) ||
+    (empId && (!storedTechName || !String(storedTechName).trim())) ||
+    vendorNeedsRemap;
+
+  if (needsPersist) {
+    try {
+      await dbPool.query(
+        `UPDATE "tblAssetMaintSch"
+         SET maintained_by = $1,
+             emp_int_id = COALESCE(emp_int_id, $2),
+             technician_name = COALESCE(NULLIF(BTRIM($3), ''), technician_name),
+             technician_email = COALESCE(NULLIF(BTRIM($4), ''), technician_email),
+             technician_phno = COALESCE(NULLIF(BTRIM($5), ''), technician_phno),
+             vendor_id = COALESCE($6, vendor_id)
+         WHERE ams_id = $7 AND org_id = $8`,
+        [
+          currentMaintainedBy,
+          empId,
+          tech.technician_name || null,
+          tech.technician_email || null,
+          tech.technician_phno || null,
+          inhouseVendorId,
+          row.ams_id,
+          orgId,
+        ],
+      );
+    } catch (_) { /* best-effort */ }
+  }
+
+  return row;
+}
 
 // Get work order by ID with detailed information
 // Supports super access users who can view all branches
@@ -460,6 +538,7 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
     // If this is a group maintenance, fetch all assets in the group
     if (result.rows.length > 0) {
         const workOrder = result.rows[0];
+        await enrichWorkOrderProviderFields(workOrder, orgId, dbPool);
         const groupId = workOrder.group_id;
         
         // Check if this is a group maintenance by checking group_id from workflow header

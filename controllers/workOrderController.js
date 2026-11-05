@@ -136,7 +136,7 @@ const getWorkOrderById = async (req, res) => {
             });
         }
         
-        console.log(`Fetching work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);
+        console.log(`Fetching work order with ID: ${id}`);
         
         // Get organization ID and branch ID from request or use default
         const orgId = req.query.org_id || req.user?.org_id || 'ORG001';
@@ -167,6 +167,9 @@ const getWorkOrderById = async (req, res) => {
             recent_activities: workOrder.recent_activities || [],
             maint_type_id: workOrder.maint_type_id,
             maintenance_type_name: workOrder.maintenance_type_name,
+            maintained_by: workOrder.maintained_by || null,
+            is_inhouse: Boolean(workOrder.is_inhouse),
+            emp_int_id: workOrder.emp_int_id || null,
             act_maint_st_date: workOrder.act_maint_st_date,
             act_main_end_date: workOrder.act_main_end_date,
             status: workOrder.status,
@@ -229,7 +232,7 @@ const getWorkOrderById = async (req, res) => {
             group_assets: workOrder.group_assets || []
         };
         
-        console.log(`Successfully fetched work order with ID: ${id} with status 'IN' and maintained_by 'Vendor'`);
+        console.log(`Successfully fetched work order with ID: ${id}`);
         console.log('Formatted asset location:', formattedData.asset.location);
         console.log('Group maintenance info:', {
             is_group_maintenance: formattedData.is_group_maintenance,
@@ -239,7 +242,7 @@ const getWorkOrderById = async (req, res) => {
         
         return res.status(200).json({
             success: true,
-            message: "Work order with status 'IN' and maintained_by 'Vendor' retrieved successfully",
+            message: "Work order retrieved successfully",
             data: formattedData
         });
         

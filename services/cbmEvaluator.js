@@ -90,29 +90,39 @@ const createCbmMaintenance = async (rule, orgId, note) => {
   if (open) return { status: 'skipped', message: `CBM maintenance ${open} is already open`, ref: open };
 
   const assetRes = await getDb().query(
-    `SELECT service_vendor_id, purchase_vendor_id FROM "tblAssets" WHERE asset_id = $1 AND org_id = $2`,
+    `SELECT asset_type_id, service_vendor_id, purchase_vendor_id
+     FROM "tblAssets" WHERE asset_id = $1 AND org_id = $2`,
     [rule.asset_id, orgId],
   );
   const asset = assetRes.rows[0];
   if (!asset) return { status: 'error', message: `Asset ${rule.asset_id} not found` };
-  // tblAssetMaintSch.vendor_id is NOT NULL
-  const vendorId = asset.service_vendor_id || asset.purchase_vendor_id;
-  if (!vendorId) return { status: 'error', message: `Asset ${rule.asset_id} has no service or purchase vendor` };
+
+  const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
+  const provider = await resolveMaintenanceProvider({
+    orgId,
+    assetTypeId: asset.asset_type_id || null,
+    serviceVendorId: asset.service_vendor_id || asset.purchase_vendor_id || null,
+  });
+  // tblAssetMaintSch.vendor_id is NOT NULL — provider always returns in-house vendor when needed
+  if (!provider.vendorId) {
+    return { status: 'error', message: `Asset ${rule.asset_id} has no resolvable maintenance vendor` };
+  }
 
   const amsId = await maintenanceModel.getNextAMSId();
   await maintenanceModel.insertDirectMaintenanceSchedule({
     ams_id: amsId,
     asset_id: rule.asset_id,
     maint_type_id: maintTypeId,
-    vendor_id: vendorId,
-    at_main_freq_id: null,
-    maintained_by: asset.service_vendor_id ? 'Vendor' : 'Inhouse',
+    vendor_id: provider.vendorId,
+    at_main_freq_id: provider.atMainFreqId,
+    maintained_by: provider.maintainedBy,
     notes: note,
     status: 'IN',
     act_maint_st_date: new Date(),
     created_by: CREATED_BY,
     org_id: orgId,
     branch_code: null,
+    emp_int_id: provider.empIntId,
   });
   return { status: 'created', message: `CBM maintenance ${amsId} created`, ref: amsId };
 };

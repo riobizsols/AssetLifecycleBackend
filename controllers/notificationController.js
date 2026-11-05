@@ -5,6 +5,7 @@ const {
 } = require('../models/notificationModel');
 const {
   getWarrantyNotificationsByUser,
+  ensureWarrantyNotificationsForWindow,
   markWarrantyNotificationOpen,
   discardWarrantyNotification,
   snoozeWarrantyNotification,
@@ -113,6 +114,14 @@ const getUserNotifications = async (req, res) => {
     // Warranty/expiry tables (or notify_type) may be missing on some tenants — never 500 the whole list
     let warrantyNotifications = [];
     let expiryNotifications = [];
+    // Parity with stock: ensure expired/expiring warranty rows exist before reading inbox
+    try {
+      await ensureWarrantyNotificationsForWindow({ orgId, days: 10 });
+    } catch (ensureWarrantyErr) {
+      console.warn(
+        `🐛 [getUserNotifications] Warranty ensure skipped: ${ensureWarrantyErr.message}`
+      );
+    }
     try {
       warrantyNotifications = await getWarrantyNotificationsByUser({
         empIntId: userId,

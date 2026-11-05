@@ -388,8 +388,14 @@ function applyAcmSelectionToRequestUser(req) {
   if (selDept) {
     req.user.dept_id = selDept;
   } else if (selOrg || selBranch) {
-    // Lock to ACM-granted department(s); multi-dept kept on acmDeptIds
-    req.user.dept_id = scope.deptId;
+    // Lock to a single ACM-granted department when ACM lists exactly one.
+    // If ACM allows all / multiple depts (deptId null), keep the user's login
+    // dept — otherwise dept-assigned assets (utility readings, etc.) disappear.
+    if (scope.deptId) {
+      req.user.dept_id = scope.deptId;
+    } else if (req.user._acmOriginalScope?.dept_id) {
+      req.user.dept_id = req.user._acmOriginalScope.dept_id;
+    }
   }
 }
 

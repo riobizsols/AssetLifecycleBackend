@@ -461,21 +461,26 @@ const triggerBreakdownWorkflow = async (
     } else {
       // No workflow and no existing schedule: create direct schedule in AMS
       const ams_id = await msModel.getNextAMSId();
-      // Determine maintained_by based on service_vendor_id (similar to BF02 logic)
-      const maintainedBy =
-        assetRow && assetRow.service_vendor_id ? "Vendor" : "Inhouse";
+      const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
+      const provider = await resolveMaintenanceProvider({
+        orgId: org_id,
+        assetTypeId: assetRow?.asset_type_id || null,
+        serviceVendorId: assetRow?.service_vendor_id || null,
+        dbPool: client,
+      });
       const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
         ams_id,
         asset_id,
         maint_type_id: "MT004", // Set MT004 for breakdown maintenance
-        vendor_id: assetRow ? assetRow.service_vendor_id : null,
-        at_main_freq_id: null,
-        maintained_by: maintainedBy,
+        vendor_id: provider.vendorId,
+        at_main_freq_id: provider.atMainFreqId,
+        maintained_by: provider.maintainedBy,
         notes: `Breakdown Maintenance - ${abr_id}`,
         status: "IN",
         act_maint_st_date: nowISODateOnly,
         created_by: reported_by,
         org_id,
+        emp_int_id: provider.empIntId,
       });
       maintenanceResult = insertDirectRes.rows[0];
     }
@@ -535,21 +540,26 @@ const triggerBreakdownWorkflow = async (
     } else {
       // Create a new AMS line, do not touch existing
       const ams_id = await msModel.getNextAMSId();
-      // Determine maintained_by based on service_vendor_id (similar to workflow logic)
-      const maintainedBy =
-        assetRow && assetRow.service_vendor_id ? "Vendor" : "Inhouse";
+      const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
+      const provider = await resolveMaintenanceProvider({
+        orgId: org_id,
+        assetTypeId: assetRow?.asset_type_id || null,
+        serviceVendorId: assetRow?.service_vendor_id || null,
+        dbPool: client,
+      });
       const insertDirectRes = await msModel.insertDirectMaintenanceSchedule({
         ams_id,
         asset_id,
         maint_type_id: "MT004", // Set MT004 for breakdown maintenance
-        vendor_id: assetRow ? assetRow.service_vendor_id : null,
-        at_main_freq_id: null,
-        maintained_by: maintainedBy,
+        vendor_id: provider.vendorId,
+        at_main_freq_id: provider.atMainFreqId,
+        maintained_by: provider.maintainedBy,
         notes: `Breakdown Maintenance - ${abr_id}`,
         status: "IN",
         act_maint_st_date: nowISODateOnly,
         created_by: reported_by,
         org_id,
+        emp_int_id: provider.empIntId,
       });
       maintenanceResult = insertDirectRes.rows[0];
     }
