@@ -79,6 +79,7 @@ const consolidatedAssetRegisterRoutes = require("./routes/consolidatedAssetRegis
 const slaVendorPerformanceRoutes = require("./routes/slaVendorPerformanceRoutes");
 const workforceReportRoutes = require("./routes/workforceReportRoutes");
 const maintenanceStatusReportRoutes = require("./routes/maintenanceStatusReportRoutes");
+const upcomingMaintenanceScheduleReportRoutes = require("./routes/upcomingMaintenanceScheduleReportRoutes");
 const outOfStockReportRoutes = require("./routes/outOfStockReportRoutes");
 const purchaseRequirementReportRoutes = require("./routes/purchaseRequirementReportRoutes");
 const utilityRoutes = require("./routes/utilityRoutes");

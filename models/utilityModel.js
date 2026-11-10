@@ -889,24 +889,29 @@ async function deleteConsumption(utcvId, { orgId } = {}) {
  * Missed consumption alerts for the employee currently assigned to the asset.
  * Frequency rules (tblUtilFreq.freq):
  *   0  = OnActualUsage → skip alerts
- *   1  = Daily → due if no consumption with consumption_date = today (IST-ish UTC date)
+ *   1  = Daily → due if no consumption with consumption_date = today (IST)
  *   N  = Weekly/Monthly/Halfyearly → due if last consumption_date + N days < today
  *        (also due if never recorded)
+ *
+ * Manufacturing often assigns assets to a department (employee_int_id NULL).
+ * Match both direct employee assignment and the employee's department(s).
  */
 async function getConsumptionMissNotificationsByUser({
   empIntId,
   orgId = null,
   branchId = null,
+  deptId = null,
 } = {}) {
   await ensureSchema();
   if (!empIntId) return [];
 
-  const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const { todayIstDate } = require('../utils/utilityConsumptionLogic');
+  const todayStr = todayIstDate();
+  const deptIds = await resolveEmployeeDeptIds(empIntId, deptId);
 
   const { rows } = await getDb().query(
     `
-      SELECT
+      SELECT DISTINCT ON (a.asset_id, d.utild_id)
         a.asset_id,
         a.org_id,
         a.branch_id,
@@ -924,7 +929,18 @@ async function getConsumptionMissNotificationsByUser({
           SELECT MAX(c.consumption_date)::date
           FROM "tblUtilConsumption" c
           WHERE c.utild_id = d.utild_id
-            AND c.asset_id = a.asset_id
+            AND (
+              c.asset_id = a.asset_id
+              OR (
+                c.asset_id IS NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM "tblUtilConsumption" x
+                  WHERE x.utild_id = d.utild_id
+                    AND x.asset_id = a.asset_id
+                )
+              )
+            )
         ) AS last_consumption_date
       FROM "tblAssetAssignments" aa
       INNER JOIN "tblAssets" a ON a.asset_id = aa.asset_id
@@ -935,14 +951,21 @@ async function getConsumptionMissNotificationsByUser({
       INNER JOIN "tblUtilFreq" f ON f.utfq_id = d.utfq_id
       WHERE aa.action = 'A'
         AND aa.latest_assignment_flag = true
-        AND aa.employee_int_id = $1
+        AND (
+          aa.employee_int_id = $1
+          OR (
+            cardinality($4::text[]) > 0
+            AND aa.dept_id = ANY($4::text[])
+          )
+        )
         AND COALESCE(a.current_status, '') <> 'SCRAPPED'
         AND ($2::text IS NULL OR a.org_id = $2)
         AND ($3::text IS NULL OR a.branch_id = $3 OR a.branch_id IS NULL)
         AND COALESCE(f.freq, 0) > 0
-      ORDER BY a.asset_id, d.utild_id
+      ORDER BY a.asset_id, d.utild_id,
+        CASE WHEN aa.employee_int_id = $1 THEN 0 ELSE 1 END
     `,
-    [empIntId, orgId || null, branchId || null],
+    [empIntId, orgId || null, branchId || null, deptIds],
   );
 
   const alerts = [];

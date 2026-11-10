@@ -129,7 +129,11 @@ const getAllAssetTypes = async (req, res) => {
                 let types = result.rows;
 
                 if (assignment_type) {
-                    types = types.filter((type) => type.assignment_type === assignment_type);
+                    const wanted = String(assignment_type).trim().toLowerCase();
+                    types = types.filter(
+                      (type) =>
+                        String(type.assignment_type || '').trim().toLowerCase() === wanted,
+                    );
                 }
 
                 return types.map((type) => ({

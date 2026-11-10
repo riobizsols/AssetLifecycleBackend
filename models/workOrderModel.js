@@ -27,8 +27,11 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
             mt.text as maintenance_type_name,
             v.vendor_name,
             v.contact_person_name,
-            v.contact_person_email as vendor_email,
-            v.contact_person_number as vendor_phone,
+            COALESCE(
+              NULLIF(BTRIM(v.contact_person_email), ''),
+              NULLIF(BTRIM(v.company_email), '')
+            ) as vendor_email,
+            NULLIF(BTRIM(v.contact_person_number), '') as vendor_phone,
             -- Calculate days until due (if act_maint_st_date is in the future)
             CASE 
                 WHEN ams.act_maint_st_date > CURRENT_DATE THEN 
@@ -115,7 +118,8 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
                 ) AS activity_row
             ) as recent_activities,
             -- Get final approver name from history (who performed last UA action; works for role-based flow where wfd.user_id may be NULL)
-            (
+            COALESCE(
+              (
                 SELECT COALESCE(u.full_name, u_emp.full_name)
                 FROM "tblWFAssetMaintHist" wh
                 LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
@@ -125,9 +129,21 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
                   AND wh.action = 'UA'
                 ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
+              ),
+              (
+                SELECT COALESCE(u.full_name, u_emp.full_name)
+                FROM "tblWFAssetMaintHist" wh
+                LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+                LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                ORDER BY wh.action_on DESC NULLS LAST
+                LIMIT 1
+              )
             ) as final_approver_name,
-            -- Get final approval date from history
-            (
+            -- Final approval date: UA first, then any hist action, then AMS created/changed
+            COALESCE(
+              (
                 SELECT wh.action_on
                 FROM "tblWFAssetMaintHist" wh
                 WHERE wh.wfamsh_id = ams.wfamsh_id
@@ -135,6 +151,17 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
                   AND wh.action = 'UA'
                 ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
+              ),
+              (
+                SELECT wh.action_on
+                FROM "tblWFAssetMaintHist" wh
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                ORDER BY wh.action_on DESC NULLS LAST
+                LIMIT 1
+              ),
+              ams.created_on,
+              ams.changed_on
             ) as approval_date,
             -- Get breakdown information if this is a breakdown maintenance
             (
@@ -245,6 +272,9 @@ async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
   const storedMaintainedBy = row.maintained_by || null;
   const storedEmpId = row.emp_int_id || null;
   const storedTechName = row.technician_name || null;
+  const storedTechEmail = row.technician_email || null;
+  const storedTechPhone = row.technician_phno || null;
+  const blank = (v) => !v || !String(v).trim();
   const currentMaintainedBy = provider.maintainedBy || storedMaintainedBy || 'Inhouse';
   const isInhouse =
     isInhouseMaintainedBy(currentMaintainedBy) ||
@@ -256,7 +286,60 @@ async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
   row.maintained_by = currentMaintainedBy;
   row.is_inhouse = isInhouse;
 
+  // Older vendor master rows often leave contact_person_email blank but have company_email.
+  const applyVendorContactFallback = async (vendorId) => {
+    if (!vendorId) return;
+    const emailMissing = blank(row.vendor_email);
+    const phoneMissing = blank(row.vendor_phone);
+    const nameMissing = blank(row.contact_person_name);
+    const vendorNameMissing = blank(row.vendor_name);
+    if (!emailMissing && !phoneMissing && !nameMissing && !vendorNameMissing) {
+      return;
+    }
+    try {
+      const v = await dbPool.query(
+        `SELECT vendor_name, contact_person_name,
+                COALESCE(
+                  NULLIF(BTRIM(contact_person_email), ''),
+                  NULLIF(BTRIM(company_email), '')
+                ) AS vendor_email,
+                NULLIF(BTRIM(contact_person_number), '') AS vendor_phone
+         FROM "tblVendors"
+         WHERE vendor_id = $1
+         LIMIT 1`,
+        [vendorId],
+      );
+      if (!v.rows[0]) return;
+      if (vendorNameMissing && v.rows[0].vendor_name) {
+        row.vendor_name = v.rows[0].vendor_name;
+      }
+      if (nameMissing && v.rows[0].contact_person_name) {
+        row.contact_person_name = v.rows[0].contact_person_name;
+      }
+      if (emailMissing && v.rows[0].vendor_email) {
+        row.vendor_email = v.rows[0].vendor_email;
+      }
+      if (phoneMissing && v.rows[0].vendor_phone) {
+        row.vendor_phone = v.rows[0].vendor_phone;
+      }
+    } catch (_) { /* optional */ }
+  };
+
   if (!isInhouse) {
+    await applyVendorContactFallback(row.vendor_id || row.service_vendor_id);
+    if (blank(row.technician_email) && row.emp_int_id) {
+      const tech = await resolveTechnicianFromEmp(row.emp_int_id, dbPool);
+      if (tech.technician_email) row.technician_email = tech.technician_email;
+      if (blank(row.technician_phno) && tech.technician_phno) {
+        row.technician_phno = tech.technician_phno;
+      }
+      if (blank(row.technician_name) && tech.technician_name) {
+        row.technician_name = tech.technician_name;
+      }
+    }
+    if (!row.approval_date) {
+      row.approval_date = row.created_on || row.changed_on || null;
+    }
     return row;
   }
 
@@ -269,17 +352,38 @@ async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
   if (empId) {
     tech = await resolveTechnicianFromEmp(empId, dbPool);
     row.emp_int_id = empId;
-    if (!row.technician_name || !String(row.technician_name).trim()) {
+    if (blank(row.technician_name)) {
       row.technician_name = tech.technician_name || row.technician_name;
     } else if (tech.technician_name) {
       row.technician_name = tech.technician_name;
     }
-    if (!row.technician_email || !String(row.technician_email).trim()) {
+    if (blank(row.technician_email)) {
       row.technician_email = tech.technician_email || row.technician_email;
     }
-    if (!row.technician_phno || !String(row.technician_phno).trim()) {
+    if (blank(row.technician_phno)) {
       row.technician_phno = tech.technician_phno || row.technician_phno;
     }
+  }
+
+  // Fallback: user email linked to emp when employee email_id is empty
+  if (empId && blank(row.technician_email)) {
+    try {
+      const u = await dbPool.query(
+        `SELECT email, full_name, phone
+         FROM "tblUsers"
+         WHERE emp_int_id = $1 AND org_id = $2
+         ORDER BY CASE WHEN COALESCE(int_status, 1) = 1 THEN 0 ELSE 1 END
+         LIMIT 1`,
+        [empId, orgId],
+      );
+      if (u.rows[0]?.email) row.technician_email = u.rows[0].email;
+      if (blank(row.technician_name) && u.rows[0]?.full_name) {
+        row.technician_name = u.rows[0].full_name;
+      }
+      if (blank(row.technician_phno) && u.rows[0]?.phone) {
+        row.technician_phno = u.rows[0].phone;
+      }
+    } catch (_) { /* optional */ }
   }
 
   const inhouseVendorId = provider.vendorId || null;
@@ -290,27 +394,20 @@ async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
   // Always surface in-house vendor on the response (JOIN may still have service vendor)
   if (vendorNeedsRemap) {
     row.vendor_id = inhouseVendorId;
-    try {
-      const v = await dbPool.query(
-        `SELECT vendor_name, contact_person_name,
-                contact_person_email, contact_person_number
-         FROM "tblVendors" WHERE vendor_id = $1 LIMIT 1`,
-        [inhouseVendorId],
-      );
-      if (v.rows[0]) {
-        row.vendor_name = v.rows[0].vendor_name;
-        row.contact_person_name = v.rows[0].contact_person_name;
-        row.vendor_email = v.rows[0].contact_person_email;
-        row.vendor_phone = v.rows[0].contact_person_number;
-      }
-    } catch (_) { /* optional */ }
+  }
+  await applyVendorContactFallback(row.vendor_id || inhouseVendorId);
+
+  if (!row.approval_date) {
+    row.approval_date = row.created_on || row.changed_on || null;
   }
 
   const needsPersist =
     String(storedMaintainedBy || '').toLowerCase() !==
       String(currentMaintainedBy || '').toLowerCase() ||
     (empId && !storedEmpId) ||
-    (empId && (!storedTechName || !String(storedTechName).trim())) ||
+    (empId && blank(storedTechName) && !blank(row.technician_name)) ||
+    (empId && blank(storedTechEmail) && !blank(row.technician_email)) ||
+    (empId && blank(storedTechPhone) && !blank(row.technician_phno)) ||
     vendorNeedsRemap;
 
   if (needsPersist) {
@@ -327,9 +424,9 @@ async function enrichWorkOrderProviderFields(row, orgId, dbPool) {
         [
           currentMaintainedBy,
           empId,
-          tech.technician_name || null,
-          tech.technician_email || null,
-          tech.technician_phno || null,
+          row.technician_name || null,
+          row.technician_email || null,
+          row.technician_phno || null,
           inhouseVendorId,
           row.ams_id,
           orgId,
@@ -364,8 +461,11 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
             mt.text as maintenance_type_name,
             v.vendor_name,
             v.contact_person_name,
-            v.contact_person_email as vendor_email,
-            v.contact_person_number as vendor_phone,
+            COALESCE(
+              NULLIF(BTRIM(v.contact_person_email), ''),
+              NULLIF(BTRIM(v.company_email), '')
+            ) as vendor_email,
+            NULLIF(BTRIM(v.contact_person_number), '') as vendor_phone,
             -- Calculate days until due (if act_maint_st_date is in the future)
             CASE 
                 WHEN ams.act_maint_st_date > CURRENT_DATE THEN 
@@ -452,7 +552,8 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
                 ) AS activity_row
             ) as recent_activities,
             -- Get final approver name from history (who performed last UA action; works for role-based flow where wfd.user_id may be NULL)
-            (
+            COALESCE(
+              (
                 SELECT COALESCE(u.full_name, u_emp.full_name)
                 FROM "tblWFAssetMaintHist" wh
                 LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
@@ -462,9 +563,21 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
                   AND wh.action = 'UA'
                 ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
+              ),
+              (
+                SELECT COALESCE(u.full_name, u_emp.full_name)
+                FROM "tblWFAssetMaintHist" wh
+                LEFT JOIN "tblUsers" u ON wh.action_by = u.user_id
+                LEFT JOIN "tblUsers" u_emp ON wh.action_by = u_emp.emp_int_id
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                ORDER BY wh.action_on DESC NULLS LAST
+                LIMIT 1
+              )
             ) as final_approver_name,
-            -- Get final approval date from history
-            (
+            -- Final approval date: UA first, then any hist action, then AMS created/changed
+            COALESCE(
+              (
                 SELECT wh.action_on
                 FROM "tblWFAssetMaintHist" wh
                 WHERE wh.wfamsh_id = ams.wfamsh_id
@@ -472,6 +585,17 @@ const getWorkOrderById = async (amsId, orgId = 'ORG001', userBranchId = 'BR001',
                   AND wh.action = 'UA'
                 ORDER BY wh.action_on DESC NULLS LAST
                 LIMIT 1
+              ),
+              (
+                SELECT wh.action_on
+                FROM "tblWFAssetMaintHist" wh
+                WHERE wh.wfamsh_id = ams.wfamsh_id
+                  AND wh.org_id = ams.org_id
+                ORDER BY wh.action_on DESC NULLS LAST
+                LIMIT 1
+              ),
+              ams.created_on,
+              ams.changed_on
             ) as approval_date,
             -- Get breakdown information if this is a breakdown maintenance
             (

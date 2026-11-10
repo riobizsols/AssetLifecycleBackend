@@ -185,16 +185,18 @@ class CronService {
     }
 
     // Schedule missed utility-consumption alerts (push to assigned users).
-    // Dashboard/list alerts are computed live; this job only pushes FCM.
+    // Dashboard/list alerts are computed live (incl. dept assignments); this job pushes FCM across tenants.
     scheduleMissedConsumptionNotificationTrigger() {
         try {
             cron.schedule('30 8 * * *', async () => {
                 const startedAt = new Date().toISOString();
                 try {
                     const missedConsumptionNotificationService = require('./missedConsumptionNotificationService');
-                    const result = await missedConsumptionNotificationService.runScanAndNotify({});
+                    const result = await missedConsumptionNotificationService.runScanAndNotify({
+                        allTenants: true,
+                    });
                     console.log(
-                        `✅ [CRON] Missed consumption notification trigger completed at ${startedAt}. Assignees: ${result.assignees}, missed: ${result.missed}, notified: ${result.notified}`
+                        `✅ [CRON] Missed consumption notification trigger completed at ${startedAt}. Tenants: ${result.tenants}, Assignees: ${result.assignees}, missed: ${result.missed}, notified: ${result.notified}`
                     );
                 } catch (error) {
                     console.error('❌ [CRON] Missed consumption notification trigger failed:', error.message);
@@ -204,7 +206,7 @@ class CronService {
             });
 
             console.log('📅 [CRON] Missed Consumption Notification Trigger: Scheduled daily at 8:30 AM (IST)');
-            console.log('   → Notifies assigned users when utility consumption is overdue by frequency');
+            console.log('   → Notifies assigned users (employee or department) when utility consumption is overdue — all tenants');
         } catch (error) {
             console.error('❌ [CRON] Failed to schedule missed consumption notification trigger:', error.message);
         }

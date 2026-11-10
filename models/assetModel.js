@@ -314,7 +314,7 @@ const getInactiveAssetsByAssetType = async (
 
   // Filter by assignment_type if provided (for department vs employee assignments)
   if (assignmentType) {
-    query += ` AND at.assignment_type = $${paramIndex}`;
+    query += ` AND LOWER(COALESCE(at.assignment_type, '')) = LOWER($${paramIndex})`;
     params.push(assignmentType);
     paramIndex++;
   }

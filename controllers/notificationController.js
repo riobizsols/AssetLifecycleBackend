@@ -165,6 +165,7 @@ const getUserNotifications = async (req, res) => {
         empIntId: userId,
         orgId,
         branchId,
+        deptId: req.user?.dept_id || null,
       });
     } catch (missErr) {
       console.warn(

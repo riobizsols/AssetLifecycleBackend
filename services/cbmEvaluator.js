@@ -1,7 +1,8 @@
 /**
  * Condition-based monitoring: evaluate live OPC readings against tblCbm rules and,
- * when a rule's condition becomes true, create a CBM maintenance or an inspection
- * directly (no approval workflow) for the asset that owns the component.
+ * when a rule's condition becomes true, create a CBM maintenance (via the normal
+ * approval workflow so vendor/approvers can act) or a direct inspection for the
+ * asset that owns the component.
  */
 const { getDbFromContext } = require('../utils/dbContext');
 const opcModel = require('../models/opcModel');
@@ -96,35 +97,33 @@ const createCbmMaintenance = async (rule, orgId, note) => {
   );
   const asset = assetRes.rows[0];
   if (!asset) return { status: 'error', message: `Asset ${rule.asset_id} not found` };
-
-  const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
-  const provider = await resolveMaintenanceProvider({
-    orgId,
-    assetTypeId: asset.asset_type_id || null,
-    serviceVendorId: asset.service_vendor_id || asset.purchase_vendor_id || null,
-  });
-  // tblAssetMaintSch.vendor_id is NOT NULL — provider always returns in-house vendor when needed
-  if (!provider.vendorId) {
-    return { status: 'error', message: `Asset ${rule.asset_id} has no resolvable maintenance vendor` };
+  if (!asset.asset_type_id) {
+    return { status: 'error', message: `Asset ${rule.asset_id} has no asset type` };
   }
 
-  const amsId = await maintenanceModel.getNextAMSId();
-  await maintenanceModel.insertDirectMaintenanceSchedule({
-    ams_id: amsId,
+  // Same path as manual maintenance: WFAMSH (detail AP) + AMS status AP.
+  // Vendor / technician can be reviewed on the Maintenance Approval screen.
+  // requireWorkflow prevents the no-sequence direct-IN bypass.
+  const result = await maintenanceModel.createManualMaintenanceSchedule({
     asset_id: rule.asset_id,
-    maint_type_id: maintTypeId,
-    vendor_id: provider.vendorId,
-    at_main_freq_id: provider.atMainFreqId,
-    maintained_by: provider.maintainedBy,
-    notes: note,
-    status: 'IN',
-    act_maint_st_date: new Date(),
-    created_by: CREATED_BY,
+    asset_type_id: asset.asset_type_id,
     org_id: orgId,
-    branch_code: null,
-    emp_int_id: provider.empIntId,
+    created_by: CREATED_BY,
+    maint_type_id: maintTypeId,
+    notes: note,
+    requireWorkflow: true,
   });
-  return { status: 'created', message: `CBM maintenance ${amsId} created`, ref: amsId };
+
+  const ref = result.ams_id || result.wfamsh_id;
+  return {
+    status: 'created',
+    message: result.wfamsh_id
+      ? `CBM maintenance ${result.ams_id} submitted for approval (${result.wfamsh_id})`
+      : `CBM maintenance ${ref} created`,
+    ref,
+    ams_id: result.ams_id || null,
+    wfamsh_id: result.wfamsh_id || null,
+  };
 };
 
 const createCbmInspection = async (rule, orgId, note) => {

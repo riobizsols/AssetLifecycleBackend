@@ -1376,9 +1376,18 @@ const insertDirectMaintenanceSchedule = async (scheduleData) => {
   return await dbPool.query(query, values);
 };
 
-// Create manual maintenance schedule (with workflow)
+// Create manual maintenance schedule (with workflow).
+// Optional overrides (used by CBM and similar): maint_type_id, notes, requireWorkflow.
 const createManualMaintenanceSchedule = async (scheduleData) => {
-  const { asset_id, asset_type_id, org_id, created_by } = scheduleData;
+  const {
+    asset_id,
+    asset_type_id,
+    org_id,
+    created_by,
+    maint_type_id: maintTypeOverride = null,
+    notes: notesOverride = null,
+    requireWorkflow = false,
+  } = scheduleData;
 
   const dbPool = getDb();
   const client = await dbPool.connect();
@@ -1416,7 +1425,13 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     const hasWorkflow = workflowSeqResult.rows.length > 0;
 
     // No workflow sequences: insert directly into tblAssetMaintSch (frequency from tblATMaintFreq)
+    // CBM / approval-required callers must set requireWorkflow so this bypass is refused.
     if (!hasWorkflow) {
+      if (requireWorkflow) {
+        throw new Error(
+          `No maintenance approval workflow configured for asset type ${asset_type_id}. CBM maintenance requires approval.`,
+        );
+      }
       const amsId = await generateCustomIdForClient(client, 'ams', 3);
 
       const freqQuery = `
@@ -1432,7 +1447,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         throw new Error("No active maintenance frequency configured for this asset type");
       }
       const atMainFreqId = freqResult.rows[0].at_main_freq_id;
-      const maintTypeId = freqResult.rows[0].maint_type_id || "MT002";
+      const maintTypeId = maintTypeOverride || freqResult.rows[0].maint_type_id || "MT002";
 
       const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
       const provider = await resolveMaintenanceProvider({
@@ -1464,7 +1479,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
                     org_id,
                     branch_code,
                     emp_int_id
-                ) VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, NULL, 'IN', $7, $8, CURRENT_TIMESTAMP, $9, $10, $11)
+                ) VALUES ($1, NULL, NULL, $2, $3, $4, $5, $6, $7, 'IN', $8, $9, CURRENT_TIMESTAMP, $10, $11, $12)
                 RETURNING *
             `;
       await client.query(directInsertQuery, [
@@ -1474,6 +1489,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         scheduleVendorId,
         atMainFreqId,
         maintainedBy,
+        notesOverride,
         new Date().toISOString().split("T")[0],
         created_by,
         org_id,
@@ -1561,7 +1577,9 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     const atMainFreqId =
       freqResult.rows.length > 0 ? freqResult.rows[0].at_main_freq_id : null;
     const maintTypeId =
-      (freqResult.rows.length > 0 && freqResult.rows[0].maint_type_id) || "MT002";
+      maintTypeOverride ||
+      (freqResult.rows.length > 0 && freqResult.rows[0].maint_type_id) ||
+      "MT002";
 
     // Frequency decides in-house vs vendor — never asset.service_vendor_id
     const { resolveMaintenanceProvider } = require('../utils/inhouseVendorUtils');
@@ -1779,7 +1797,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       scheduleVendorId,
       atMainFreqId,
       maintainedBy,
-      null, // notes
+      notesOverride, // notes (CBM trigger note, etc.)
       "AP", // Status: Approval Pending
       new Date().toISOString().split("T")[0], // act_maint_st_date
       created_by,
