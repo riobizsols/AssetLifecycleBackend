@@ -14,7 +14,10 @@ const {
 } = require('../utils/inhouseVendorUtils');
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { formatDateLocal, formatTimeLocal, parseDbTimestamp } = require('../utils/dateTimeFormat');
-const { resolveTechnicianFromEmp } = require('../utils/technicianResolveUtils');
+const {
+  resolveTechnicianFromEmp,
+  resolveVendorContactTech,
+} = require('../utils/technicianResolveUtils');
 const { isMaintenanceWorkflowHeaderId } = require('../utils/approvalBranchAccess');
 
 // Update workflow header (vendor_id, maintenance date and/or technician) independently
@@ -1485,6 +1488,7 @@ const getMaintenanceApprovals = async (
            at.text as asset_type_name,
            a.serial_number,
            a.description as asset_description,
+           COALESCE(NULLIF(BTRIM(a.description), ''), NULLIF(BTRIM(a.text), ''), a.asset_id) as asset_name,
            v.vendor_name,
            v.vendor_name as vendor,
            d.text as department_name,
@@ -1931,7 +1935,25 @@ const getVendorRenewalApprovals = async (empIntId, orgId = 'ORG001', userBranchC
     if (workflowData.emp_int_id && isInhouseMaintainedBy(workflowData.maintained_by)) {
       empIntToSave = workflowData.emp_int_id;
     }
-    const technicianDetails = await resolveTechnicianFromEmp(empIntToSave, getDb());
+    let technicianDetails = await resolveTechnicianFromEmp(empIntToSave, getDb());
+    // Vendor-based: auto-fill technician name/email/phone from vendor contact person
+    if (
+      !isInhouseMaintainedBy(workflowData.maintained_by) &&
+      workflowData.vendor_id &&
+      (!technicianDetails.technician_name ||
+        !technicianDetails.technician_email ||
+        !technicianDetails.technician_phno)
+    ) {
+      const vendorTech = await resolveVendorContactTech(workflowData.vendor_id, getDb());
+      technicianDetails = {
+        technician_name:
+          technicianDetails.technician_name || vendorTech.technician_name || null,
+        technician_email:
+          technicianDetails.technician_email || vendorTech.technician_email || null,
+        technician_phno:
+          technicianDetails.technician_phno || vendorTech.technician_phno || null,
+      };
+    }
      
      // Check if maintenance record already exists with status 'AP' (manual creation)
      // This should be checked BEFORE group maintenance and BF01/BF03 logic

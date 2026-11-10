@@ -53,6 +53,63 @@ async function resolveTechnicianFromEmp(empIntId, dbPool) {
   return result.rows[0];
 }
 
+/**
+ * Resolve technician display fields from vendor contact person / company email.
+ * Used when maintenance is vendor-maintained so the supervisor form auto-fills.
+ */
+async function resolveVendorContactTech(vendorId, dbPool) {
+  if (!vendorId || !dbPool) {
+    return {
+      vendor_id: vendorId || null,
+      technician_name: null,
+      technician_email: null,
+      technician_phno: null,
+    };
+  }
+
+  const result = await dbPool.query(
+    `SELECT
+       v.vendor_id,
+       COALESCE(
+         NULLIF(BTRIM(v.contact_person_name), ''),
+         NULLIF(BTRIM(v.vendor_name), ''),
+         NULLIF(BTRIM(v.company_name), '')
+       ) AS technician_name,
+       COALESCE(
+         NULLIF(BTRIM(v.contact_person_email), ''),
+         NULLIF(BTRIM(v.company_email), '')
+       ) AS technician_email,
+       NULLIF(BTRIM(v.contact_person_number), '') AS technician_phno
+     FROM "tblVendors" v
+     WHERE v.vendor_id = $1
+     LIMIT 1`,
+    [vendorId]
+  );
+
+  if (!result.rows[0]) {
+    return {
+      vendor_id: vendorId,
+      technician_name: null,
+      technician_email: null,
+      technician_phno: null,
+    };
+  }
+
+  const row = result.rows[0];
+  let phone = row.technician_phno ? String(row.technician_phno).replace(/\D/g, '') : null;
+  if (phone && phone.length > 10 && phone.startsWith('0')) {
+    phone = phone.slice(-10);
+  } else if (phone && phone.length > 10) {
+    phone = phone.slice(0, 10);
+  }
+
+  return {
+    ...row,
+    technician_phno: phone || null,
+  };
+}
+
 module.exports = {
   resolveTechnicianFromEmp,
+  resolveVendorContactTech,
 };

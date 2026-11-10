@@ -866,6 +866,7 @@ const getMaintenanceScheduleById = async (
       const tech = await resolveTechnicianFromEmp(resolvedEmpId, dbPool);
       record.emp_int_id = resolvedEmpId;
       record.technician_autofilled = true;
+      record.technician_autofill_source = 'employee';
       if (!record.technician_name || String(record.technician_name).trim() === '') {
         record.technician_name = tech.technician_name || record.technician_name;
       } else if (tech.technician_name) {
@@ -903,6 +904,75 @@ const getMaintenanceScheduleById = async (
         );
       } catch (persistErr) {
         console.warn('Could not persist in-house technician onto schedule:', persistErr.message);
+      }
+    } else if (!isInhouse) {
+      // Vendor-based: auto-fill name / email / phone from vendor contact when empty
+      let vendorIdForTech = record.vendor_id || null;
+      if (record.wfamsh_id) {
+        try {
+          const headerVendor = await dbPool.query(
+            `SELECT vendor_id
+             FROM "tblWFAssetMaintSch_H"
+             WHERE wfamsh_id = $1 AND org_id = $2
+             LIMIT 1`,
+            [record.wfamsh_id, orgId],
+          );
+          if (headerVendor.rows[0]?.vendor_id) {
+            vendorIdForTech = headerVendor.rows[0].vendor_id;
+          }
+        } catch (_) {
+          /* optional */
+        }
+      }
+
+      const needsVendorFill =
+        !record.technician_name ||
+        String(record.technician_name).trim() === '' ||
+        !record.technician_email ||
+        String(record.technician_email).trim() === '' ||
+        !record.technician_phno ||
+        String(record.technician_phno).trim() === '';
+
+      if (vendorIdForTech && needsVendorFill) {
+        const { resolveVendorContactTech } = require('../utils/technicianResolveUtils');
+        const vendorTech = await resolveVendorContactTech(vendorIdForTech, dbPool);
+        if (!record.technician_name || String(record.technician_name).trim() === '') {
+          record.technician_name = vendorTech.technician_name || record.technician_name;
+        }
+        if (!record.technician_email || String(record.technician_email).trim() === '') {
+          record.technician_email = vendorTech.technician_email || record.technician_email;
+        }
+        if (!record.technician_phno || String(record.technician_phno).trim() === '') {
+          record.technician_phno = vendorTech.technician_phno || record.technician_phno;
+        }
+        record.technician_autofilled = Boolean(
+          record.technician_name || record.technician_email || record.technician_phno,
+        );
+        record.technician_autofill_source = 'vendor';
+        record.vendor_id = record.vendor_id || vendorIdForTech;
+
+        try {
+          await dbPool.query(
+            `UPDATE "tblAssetMaintSch"
+             SET vendor_id = COALESCE(vendor_id, $1),
+                 technician_name = COALESCE(NULLIF(BTRIM($2), ''), technician_name),
+                 technician_email = COALESCE(NULLIF(BTRIM($3), ''), technician_email),
+                 technician_phno = COALESCE(NULLIF(BTRIM($4), ''), technician_phno)
+             WHERE ams_id = $5 AND org_id = $6`,
+            [
+              vendorIdForTech,
+              record.technician_name,
+              record.technician_email,
+              record.technician_phno,
+              amsId,
+              orgId,
+            ],
+          );
+        } catch (persistErr) {
+          console.warn('Could not persist vendor contact onto schedule:', persistErr.message);
+        }
+      } else {
+        record.technician_autofilled = false;
       }
     } else {
       record.technician_autofilled = false;
