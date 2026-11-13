@@ -10,6 +10,7 @@ require('../utils/pgTimestampUtc');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const { buildPoolConfig, pgSslOptions, attachPoolErrorHandler } = require('../utils/pgSsl');
+const { attachIstSessionTimezone, IST_TZ } = require('../utils/istTime');
 require('dotenv').config();
 
 // Tenant registry database connection (from TENANT_DATABASE_URL) - where tenant table lives
@@ -61,6 +62,7 @@ function initTenantRegistryPool() {
       }),
     );
     attachPoolErrorHandler(tenantRegistryPool, 'TENANT REGISTRY POOL');
+    attachIstSessionTimezone(tenantRegistryPool, 'TENANT REGISTRY POOL');
     // Ensure schema upgrades (grouped_org_id, org_name, email) exist
     ensureTenantsSchema(tenantRegistryPool).catch((err) => {
       logger.warn(`[TenantService] ensureTenantsSchema on init: ${err.message}`);
@@ -378,9 +380,11 @@ async function getTenantPool(orgId) {
     }),
   );
   attachPoolErrorHandler(pool, `TENANT POOL ${orgId}`);
+  attachIstSessionTimezone(pool, `TENANT POOL ${orgId}`);
 
   try {
     const testClient = await pool.connect();
+    await testClient.query(`SET TIME ZONE '${IST_TZ}'`);
     await testClient.query('SELECT 1');
     testClient.release();
   } catch (testError) {
@@ -407,6 +411,7 @@ async function getTenantClient(orgId) {
   });
 
   await client.connect();
+  await client.query(`SET TIME ZONE '${IST_TZ}'`);
   return client;
 }
 

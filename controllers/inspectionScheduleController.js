@@ -1,6 +1,7 @@
 const inspectionModel = require("../models/inspectionScheduleModel");
 const operationalCache = require("../utils/operationalCache");
 const { getEffectiveListContext } = require("../utils/acmAccess");
+const { toIstDateString, todayIstDate } = require("../utils/istTime");
 
 function resolveInspectionOrgId(req, fallback = null) {
   const acmCtx = getEffectiveListContext(req);
@@ -290,7 +291,7 @@ const processAssetInspection = async (
   results.stats.inspectionsCreated++;
   results.details.push({
     asset_id: asset.asset_id,
-    scheduled_date: nextInspectionDate.toISOString().split('T')[0],
+    scheduled_date: toIstDateString(nextInspectionDate),
     type: hasWorkflow ? 'workflow' : 'direct'
   });
 };
@@ -412,7 +413,7 @@ const createWorkflowInspection = async (
     asset_id: asset.asset_id,
     group_id: asset.group_id || null,
     vendor_id: asset.vendor_id || null,
-    pl_sch_date: scheduledDate,
+    pl_sch_date: toIstDateString(scheduledDate) || todayIstDate(),
     status: 'IN', // Initiated
     created_by,
     org_id,
@@ -499,7 +500,7 @@ const createDirectInspection = async (
     asset_id: asset.asset_id,
     vendor_id: asset.vendor_id || null,
     emp_int_id: frequency.emp_int_id || null,
-    act_insp_st_date: scheduledDate,
+    act_insp_st_date: toIstDateString(scheduledDate) || todayIstDate(),
     status: 'PN', // Pending
     created_by: 'SYSTEM',
     org_id,
@@ -552,7 +553,7 @@ const createManualInspectionSchedule = async (req, res) => {
       });
     }
     const frequency = freqResult.rows[0];
-    const scheduledDate = new Date();
+    const scheduledDate = todayIstDate();
 
     const workflowResult = await inspectionModel.checkWorkflowExists(asset.asset_type_id, org_id);
     const workflowSequences = workflowResult.rows;

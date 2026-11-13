@@ -1,30 +1,9 @@
-const { Pool, types } = require('pg');
+const { Pool } = require('pg');
 const { buildPoolConfig } = require('../utils/pgSsl');
+const { attachIstSessionTimezone } = require('../utils/istTime');
+// IST wall-clock parsers for timestamp / timestamp[]
+require('../utils/pgTimestampUtc');
 require('dotenv').config();
-
-// PostgreSQL stores many audit columns as "timestamp without time zone" in UTC wall clock.
-// Parse them as UTC so local display (e.g. IST) is correct on every app server.
-types.setTypeParser(1114, (value) => {
-  if (value == null) return null;
-  const normalized = String(value).trim().replace(' ', 'T');
-  const d = new Date(`${normalized}Z`);
-  return Number.isNaN(d.getTime()) ? null : d;
-});
-
-types.setTypeParser(1115, (value) => {
-  if (value == null) return null;
-  const body = String(value).trim();
-  if (!body || body === '{}') return [];
-  const inner = body.slice(1, -1);
-  if (!inner) return [];
-  return inner.split(',').map((part) => {
-    const clean = part.replace(/^"+|"+$/g, '').trim();
-    if (!clean || clean.toUpperCase() === 'NULL') return null;
-    const normalized = clean.replace(' ', 'T');
-    const d = new Date(`${normalized}Z`);
-    return Number.isNaN(d.getTime()) ? null : d;
-  });
-});
 
 if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
   module.exports = global.__ASSET_LIFECYCLE_DB_SINGLETON__;
@@ -50,6 +29,8 @@ if (global.__ASSET_LIFECYCLE_DB_SINGLETON__) {
     pool.on('error', (err) => {
       console.error('❌ [DB POOL] Unexpected error on idle client:', err.message);
     });
+
+    attachIstSessionTimezone(pool, 'DB POOL');
 
     pool.on('connect', () => {
       if (process.env.NODE_ENV !== 'production') {

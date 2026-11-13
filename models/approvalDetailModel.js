@@ -14,6 +14,7 @@ const {
 } = require('../utils/inhouseVendorUtils');
 const { SYSTEM_ADMIN_JOB_ROLE_ID, roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { formatDateLocal, formatTimeLocal, parseDbTimestamp } = require('../utils/dateTimeFormat');
+const { toIstDateString } = require('../utils/istTime');
 const {
   resolveTechnicianFromEmp,
   resolveVendorContactTech,
@@ -54,7 +55,7 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
     
     if (maintenanceDate !== null && maintenanceDate !== undefined) {
       updateFields.push(`pl_sch_date = $${paramIndex++}`);
-      updateValues.push(maintenanceDate);
+      updateValues.push(toIstDateString(maintenanceDate) || maintenanceDate);
     }
     
     if (technicianId !== null && technicianId !== undefined) {
@@ -136,10 +137,14 @@ const updateWorkflowHeader = async (wfamshId, vendorId = null, maintenanceDate =
       ]);
     }
     
+    const row = result.rows[0] || {};
     return {
       success: true,
       message: 'Workflow header updated successfully',
-      data: result.rows[0]
+      data: {
+        ...row,
+        pl_sch_date: toIstDateString(row.pl_sch_date) || row.pl_sch_date,
+      },
     };
   } catch (error) {
     console.error('Error updating workflow header:', error);
@@ -687,8 +692,9 @@ const approveMaintenance = async (assetOrWfamshId, empIntId, note = null, orgId 
       
       if (maintenanceDate !== null && maintenanceDate !== undefined) {
         updateFields.push(`pl_sch_date = $${paramIndex++}`);
-        updateValues.push(maintenanceDate);
-        console.log(`Updating pl_sch_date to: ${maintenanceDate}`);
+        const istMaintDate = toIstDateString(maintenanceDate) || maintenanceDate;
+        updateValues.push(istMaintDate);
+        console.log(`Updating pl_sch_date to: ${istMaintDate}`);
       }
       
       if (updateFields.length > 0) {
@@ -2857,11 +2863,11 @@ const getAllMaintenanceWorkflowsByAssetId = async (assetId, orgId = 'ORG001') =>
         vendorId: header.vendor_id,
         vendorName: header.vendor_name,
         
-        // Maintenance info
+        // Maintenance info (date-only IST strings — keeps approve/edit flows stable)
         maintenanceType: header.maint_type_name || 'Regular Maintenance',
-        dueDate: header.pl_sch_date,
-        cutoffDate: header.cutoff_date,
-        actualDate: header.act_sch_date,
+        dueDate: toIstDateString(header.pl_sch_date),
+        cutoffDate: toIstDateString(header.cutoff_date),
+        actualDate: toIstDateString(header.act_sch_date),
         
         // Status info
         headerStatus: header.header_status,
@@ -3294,8 +3300,8 @@ const getApprovalDetailByWfamshId = async (wfamshId, orgId = 'ORG001') => {
         vendorName: firstRecord.vendor_name || null,
         maintenanceType: firstRecord.maint_type_name || 'Maintenance',
         maint_type_id: firstRecord.maint_type_id || null,
-        dueDate: firstRecord.pl_sch_date || null,
-        cutoffDate: firstRecord.cutoff_date || null,
+        dueDate: toIstDateString(firstRecord.pl_sch_date) || null,
+        cutoffDate: toIstDateString(firstRecord.cutoff_date) || null,
         actionBy: firstRecord.user_name || null,
         userId: firstRecord.user_id || null,
         userEmail: firstRecord.email || null,

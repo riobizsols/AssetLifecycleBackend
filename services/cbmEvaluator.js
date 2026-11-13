@@ -9,6 +9,7 @@ const opcModel = require('../models/opcModel');
 const maintenanceModel = require('../models/maintenanceScheduleModel');
 const inspectionModel = require('../models/inspectionScheduleModel');
 const operationalCache = require('../utils/operationalCache');
+const { todayIstDate } = require('../utils/istTime');
 
 const getDb = () => getDbFromContext();
 
@@ -151,13 +152,27 @@ const createCbmInspection = async (rule, orgId, note) => {
     asset_id: asset.asset_id,
     vendor_id: asset.vendor_id || null,
     emp_int_id: frequency.emp_int_id || null,
-    act_insp_st_date: new Date(),
+    act_insp_st_date: todayIstDate(),
     status: 'PN',
     created_by: CREATED_BY,
     org_id: orgId,
     branch_code: asset.branch_code,
   });
   await getDb().query(`UPDATE "tblAAT_Insp_Sch" SET notes = $2 WHERE ais_id = $1`, [aisId, note]);
+
+  // Mobile push for assigned technician (same inspection_due path as cron/manual)
+  try {
+    const workflowNotificationService = require('./workflowNotificationService');
+    await workflowNotificationService.notifyInspectionDue({
+      ais_id: aisId,
+      emp_int_id: frequency.emp_int_id || null,
+      asset_id: asset.asset_id,
+      org_id: orgId,
+    });
+  } catch (notificationError) {
+    console.error(`[CBM] Inspection due push failed for ${aisId}:`, notificationError?.message || notificationError);
+  }
+
   return { status: 'created', message: `Inspection ${aisId} created`, ref: aisId };
 };
 

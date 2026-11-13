@@ -3,6 +3,7 @@ const operationalCache = require('../utils/operationalCache');
 const { v4: uuidv4 } = require("uuid");
 const { generateCustomId } = require("../utils/idGenerator");
 const { sanitizeVendorPayload } = require("../utils/vendorPayloadUtils");
+const { formatIstTimestamp } = require("../utils/istTime");
 
 function invalidateVendorCaches(req, orgId) {
   const oid = orgId || req.user?.org_id;
@@ -144,8 +145,8 @@ exports.createVendor = async (req, res) => {
     console.log('ACM org_id:', org_id);
     console.log('branch_code (org-level):', branch_code);
     
-    const changed_on = new Date();
-    const created_on = new Date();
+    const changed_on = formatIstTimestamp();
+    const created_on = formatIstTimestamp();
     const vendor_id = await generateCustomId("vendor", 3); // Generate vendor_id using idGenerator
 
     const vendorData = sanitizeVendorPayload({
@@ -218,9 +219,9 @@ exports.createVendor = async (req, res) => {
         vendor_id: newVendor.vendor_id,
         ...slaData,
         created_by: created_by || req.user.user_id,
-        created_on: new Date(),
+        created_on: formatIstTimestamp(),
         changed_by: changed_by || req.user.user_id,
-        changed_on: new Date(),
+        changed_on: formatIstTimestamp(),
         int_status: 1
       };
       
@@ -550,9 +551,9 @@ exports.updateVendor = async (req, res) => {
         vendor_id: vendor_id,
         ...slaData,
         created_by: existing ? existing.created_by : (changed_by || req.user.user_id),
-        created_on: existing ? existing.created_on : new Date(),
+        created_on: existing ? existing.created_on : formatIstTimestamp(),
         changed_by: changed_by || req.user.user_id,
-        changed_on: new Date(),
+        changed_on: formatIstTimestamp(),
         int_status: existing ? existing.int_status : 1
       };
       

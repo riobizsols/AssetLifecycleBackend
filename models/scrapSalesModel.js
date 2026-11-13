@@ -3,6 +3,7 @@ const { getDbFromContext } = require('../utils/dbContext');
 const { getStatusId } = require('../utils/workflowStatusCodes');
 const { generateCustomId } = require('../utils/idGenerator');
 const crypto = require('crypto');
+const { todayIstDate, formatIstTimestamp } = require('../utils/istTime');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -357,7 +358,7 @@ const updateScrapSale = async (ssh_id, saleData) => {
             : [Math.round(parseFloat(total_sale_value) || 0)];
         
         // Use provided sale_date or preserve existing one (required field)
-        const finalSaleDate = sale_date || currentHeader.sale_date || new Date().toISOString().split('T')[0];
+        const finalSaleDate = sale_date || currentHeader.sale_date || todayIstDate();
         
         const updateHeaderQuery = `
             UPDATE "tblScrapSales_H"

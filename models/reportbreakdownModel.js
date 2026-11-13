@@ -225,6 +225,7 @@ const reopenEmployeeReportBreakdown = async (abrId, orgId, userId, notes) => {
 const { getDb } = require("../utils/dbContext");
 const { peekNextId } = require("../utils/idGenerator");
 const msModel = require("./maintenanceScheduleModel");
+const { todayIstDate } = require("../utils/istTime");
 
 // Get all reports from reports-view
 // Supports super access users who can view all branches
@@ -365,7 +366,7 @@ const triggerBreakdownWorkflow = async (
   },
 ) => {
   const nowDate = new Date();
-  const nowISODateOnly = new Date().toISOString().split("T")[0];
+  const nowISODateOnly = todayIstDate();
   let maintenanceResult = null;
 
   // Determine if workflow applies (by asset type)

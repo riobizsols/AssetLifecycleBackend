@@ -2,6 +2,7 @@ const { getApprovalDetailByAssetId, getApprovalDetailByWfamshId, approveMaintena
 const operationalCache = require('../utils/operationalCache');
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const { getEffectiveListContext } = require('../utils/acmAccess');
+const { toIstDateString } = require('../utils/istTime');
 
 function resolveApprovalScope(req) {
   const acmCtx = getEffectiveListContext(req);
@@ -863,8 +864,9 @@ const getMaintenanceApprovalsController = async (req, res) => {
           asset_type_name: record.asset_type_name,
           serial_number: record.serial_number,
           asset_description: record.asset_description,
-          scheduled_date: record.scheduled_date,
-          actual_date: record.act_sch_date,
+          // Date-only as IST YYYY-MM-DD so approvals/UI don't UTC day-shift
+          scheduled_date: toIstDateString(record.scheduled_date),
+          actual_date: toIstDateString(record.act_sch_date),
           vendor: record.vendor_name || '-',
           department: record.department_name || '-',
           employee: record.employee_name || '-',
@@ -969,8 +971,8 @@ const getVendorRenewalApprovalsController = async (req, res) => {
       company_name: record.company_name || '-',
       contact_person_name: record.contact_person_name || '-',
       contact_person_email: record.contact_person_email || '-',
-      scheduled_date: record.scheduled_date,
-      actual_date: record.act_sch_date,
+      scheduled_date: toIstDateString(record.scheduled_date),
+      actual_date: toIstDateString(record.act_sch_date),
       maintenance_type: record.maintenance_type_name || 'Vendor Contract Renewal',
       status: record.header_status,
       days_until_due: record.days_until_due,

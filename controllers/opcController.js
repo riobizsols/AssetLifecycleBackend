@@ -130,7 +130,13 @@ exports.uploadBrowsedTags = withOrg(async (req, res, ctx) => {
   const pending = pendingUploads.get(key);
   if (!pending) return fail(res, new Error('Upload must start with batch 0'), 409);
 
-  const incoming = Array.isArray(req.body?.tags) ? req.body.tags : [];
+  // Windows PowerShell ConvertTo-Json unwraps a 1-element array into a bare object.
+  const rawTags = req.body?.tags;
+  const incoming = Array.isArray(rawTags)
+    ? rawTags
+    : rawTags && typeof rawTags === 'object'
+      ? [rawTags]
+      : [];
   for (const raw of incoming) {
     if (pending.tags.length >= MAX_BROWSED_TAGS) break;
     const tag = normalizeTag(raw);
@@ -239,7 +245,13 @@ exports.postReadings = withOrg(async (req, res, ctx) => {
   const server = await opcModel.getServer(serverId, ctx.org_id);
   if (!server) return fail(res, new Error('Server not found'), 404);
 
-  const readings = Array.isArray(req.body?.readings) ? req.body.readings : [];
+  // Same PowerShell 1-element array unwrap as browsed-tags.
+  const rawReadings = req.body?.readings;
+  const readings = Array.isArray(rawReadings)
+    ? rawReadings
+    : rawReadings && typeof rawReadings === 'object'
+      ? [rawReadings]
+      : [];
   const results = await cbmEvaluator.evaluateReadings(serverId, ctx.org_id, readings);
   await opcModel.touchServer(serverId, ctx.org_id);
   ok(res, { server_id: serverId, evaluated: results.length, results });

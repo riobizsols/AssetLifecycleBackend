@@ -40,11 +40,22 @@ class WorkflowNotificationService {
                 return { success: false, reason: 'Job role info not found' };
             }
 
-            // Prepare notification data
+            const createdBy = String(detailData.created_by || '').trim().toUpperCase();
+            const notesText = String(detailData.notes || '').toLowerCase();
+            const isCbm =
+                createdBy === 'CBM' ||
+                notesText.includes('cbm') ||
+                notesText.includes('condition based');
+
+            // Prepare notification data (CBM uses same mobile type: workflow_approval)
             const notificationData = {
                 jobRoleId: job_role_id,
-                title: 'New Maintenance Approval Required',
-                body: `Asset "${workflowInfo.asset_name}" requires maintenance approval. Please review and approve.`,
+                title: isCbm
+                    ? 'Condition Based Maintenance Approval'
+                    : 'New Maintenance Approval Required',
+                body: isCbm
+                    ? `Condition-based maintenance for "${workflowInfo.asset_name}" needs approval. Open the app to review.`
+                    : `Asset "${workflowInfo.asset_name}" requires maintenance approval. Please review and approve.`,
                 data: {
                     wfamsd_id: wfamsd_id || '',
                     wfamsh_id: wfamsh_id || '',
@@ -54,7 +65,8 @@ class WorkflowNotificationService {
                     planned_date: workflowInfo.pl_sch_date ? new Date(workflowInfo.pl_sch_date).toISOString() : '',
                     job_role: jobRoleInfo?.text || '',
                     sequence: sequence ? sequence.toString() : '',
-                    notification_type: 'workflow_approval'
+                    notification_type: 'workflow_approval',
+                    source: isCbm ? 'cbm' : 'maintenance',
                 },
                 notificationType: 'workflow_approval',
                 branchId: workflowInfo.branch_id || null
@@ -63,6 +75,52 @@ class WorkflowNotificationService {
             // Send notification to users with this job role in the asset's branch
             const result = await fcmService.sendNotificationToRole(notificationData);
 
+            // Also notify System Administrators (JR001): they can approve any AP step
+            // and typically hold the active mobile tokens (normal maintenance + CBM).
+            let adminResult = null;
+            if (org_id) {
+                try {
+                    const admins = await getDb().query(
+                        `SELECT DISTINCT u.user_id
+                           FROM "tblUsers" u
+                           JOIN "tblUserJobRoles" ujr ON ujr.user_id = u.user_id
+                          WHERE u.org_id = $1
+                            AND ujr.job_role_id = 'JR001'
+                            AND COALESCE(u.int_status, 1) = 1`,
+                        [org_id],
+                    );
+                    // Avoid double-send if the step role already is JR001
+                    const stepAlreadyAdmin = String(job_role_id || '').trim().toUpperCase() === 'JR001';
+                    const adminSends = [];
+                    for (const row of admins.rows) {
+                        if (!row.user_id) continue;
+                        if (stepAlreadyAdmin) continue;
+                        adminSends.push(
+                            fcmService.sendNotificationToUser({
+                                userId: row.user_id,
+                                title: notificationData.title,
+                                body: notificationData.body,
+                                data: {
+                                    ...notificationData.data,
+                                    source: notificationData.data.source || 'maintenance',
+                                },
+                                notificationType: notificationData.notificationType,
+                            }),
+                        );
+                    }
+                    const adminResponses = await Promise.all(adminSends);
+                    adminResult = {
+                        totalUsers: adminResponses.length,
+                        successCount: adminResponses.filter((r) => r?.success).length,
+                        failureCount: adminResponses.filter((r) => !r?.success).length,
+                        results: adminResponses,
+                    };
+                    console.log(`Admin notification for wfamsd_id ${wfamsd_id}:`, adminResult);
+                } catch (adminErr) {
+                    console.error('Admin workflow notification failed:', adminErr?.message || adminErr);
+                }
+            }
+
             console.log(`Workflow notification sent for wfamsd_id ${wfamsd_id}:`, {
                 jobRoleId: job_role_id,
                 jobRoleName: jobRoleInfo.text,
@@ -70,10 +128,11 @@ class WorkflowNotificationService {
                 branchId: workflowInfo.branch_id || null,
                 totalUsers: result.totalUsers,
                 successCount: result.successCount,
-                failureCount: result.failureCount
+                failureCount: result.failureCount,
+                adminResult,
             });
 
-            return result;
+            return { ...result, adminResult };
 
         } catch (error) {
             console.error('Error sending workflow notification:', error);

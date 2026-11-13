@@ -2,6 +2,7 @@ const { generateCustomId } = require('../utils/idGenerator');
 const { getDbFromContext } = require('../utils/dbContext');
 const { roleIdsIncludeSystemAdmin } = require('../utils/systemAdmin');
 const { enrichWorkflowActors } = require('../utils/workflowAdminActor');
+const { formatIstTimestamp, toIstDateString } = require('../utils/istTime');
 
 const getDb = () => getDbFromContext();
 
@@ -118,7 +119,11 @@ async function getPendingInspectionApprovals(orgId, jobRoles, { userBranchId = n
   `;
   try {
     const result = await getDb().query(query, values);
-    return result.rows;
+    // Keep scheduled date as IST YYYY-MM-DD for list/UI (no UTC day-shift)
+    return result.rows.map((row) => ({
+      ...row,
+      pl_sch_date: toIstDateString(row.pl_sch_date),
+    }));
   } catch (error) {
     console.error('Error getting pending inspection approvals:', error);
     throw error;
@@ -250,8 +255,12 @@ async function getInspectionApprovalDetail(orgId, inspSchHId) {
       return null;
     }
     
+    const header = {
+      ...headerResult.rows[0],
+      pl_sch_date: toIstDateString(headerResult.rows[0].pl_sch_date),
+    };
     return {
-      header: headerResult.rows[0],
+      header,
       approvalLevels: await enrichWorkflowActors(detailResult.rows),
       workflowConfiguration: [] // Empty for now to avoid table issues
     };
@@ -661,7 +670,7 @@ async function createCompletedInspectionRecord(orgId, wfaiishId, userId, technic
       header.aatif_id,
       finalTechnicianId, // inspected_by - either selected technician or emp_int_id from header
       empIntToSave, // emp_int_id - do not store for vendor-maintained inspections
-      new Date(), // act_insp_st_date — execution starts when workflow is approved
+      formatIstTimestamp(), // act_insp_st_date — IST wall-clock when workflow is approved
       header.created_by, // created_by (original creator)
       userId, // changed_by (approver)
       orgId,

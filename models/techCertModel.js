@@ -1,5 +1,6 @@
 const { getDbFromContext } = require('../utils/dbContext');
 const { generateCustomId } = require('../utils/idGenerator');
+const { formatIstTimestamp } = require('../utils/istTime');
 
 const columnCache = new Map();
 
@@ -142,8 +143,8 @@ class TechCertModel {
 
       if (columns.createdOn) {
         insertColumns.push(columns.createdOn);
-        // created_on is varchar on some tenants — store ISO string, not NOW()
-        values.push(new Date().toISOString());
+        // created_on is varchar on some tenants — store IST wall-clock string
+        values.push(formatIstTimestamp());
         valueTokens.push(`$${values.length}`);
       }
 

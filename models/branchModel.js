@@ -1,5 +1,6 @@
 const db = require("../config/db");
 const { getDbFromContext } = require('../utils/dbContext');
+const { formatIstTimestamp } = require('../utils/istTime');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -72,9 +73,9 @@ const addBranch = async (branch) => {
     city,
     branch_code,
     created_by: created_by || "SYSTEM",
-    created_on: new Date(),
+    created_on: formatIstTimestamp(),
     changed_by: created_by || "SYSTEM",
-    changed_on: new Date(),
+    changed_on: formatIstTimestamp(),
   };
 
   // Defensive check: ensure all NOT NULL columns without defaults are populated.

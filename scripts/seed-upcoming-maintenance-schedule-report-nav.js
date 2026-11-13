@@ -76,9 +76,10 @@ async function seedOrg(client, orgId, stats) {
       `
         SELECT 1 FROM "tblJobRoleNav"
          WHERE job_role_id = $1 AND app_id = $2
+           AND COALESCE(org_id, '') = COALESCE($3, '')
          LIMIT 1
       `,
-      [row.job_role_id, APP_ID],
+      [row.job_role_id, APP_ID, row.org_id || orgId],
     );
     if (exists.rows.length) {
       stats.navExisting += 1;
@@ -89,14 +90,49 @@ async function seedOrg(client, orgId, stats) {
       continue;
     }
 
-    const parentId = row.parent_id || 'JRN012';
+    const roleOrgId = row.org_id || orgId;
+    let parentId = row.parent_id || null;
+    // Never attach under another role's node; fall back to same-role Reports group or top-level.
+    if (parentId) {
+      const parent = await client.query(
+        `
+          SELECT job_role_id FROM "tblJobRoleNav"
+           WHERE job_role_nav_id = $1 LIMIT 1
+        `,
+        [parentId],
+      );
+      if (!parent.rows.length || parent.rows[0].job_role_id !== row.job_role_id) {
+        parentId = null;
+      }
+    }
+    if (!parentId) {
+      const reportsGroup = await client.query(
+        `
+          SELECT job_role_nav_id FROM "tblJobRoleNav"
+           WHERE job_role_id = $1
+             AND COALESCE(is_group, false) = true
+             AND LOWER(COALESCE(label, '')) = 'reports'
+             AND COALESCE(org_id, '') = COALESCE($2, '')
+           LIMIT 1
+        `,
+        [row.job_role_id, roleOrgId],
+      );
+      parentId = reportsGroup.rows[0]?.job_role_nav_id || null;
+    }
+
     const maxSeq = await client.query(
-      `
-        SELECT COALESCE(MAX(sequence), 0)::int AS s
-          FROM "tblJobRoleNav"
-         WHERE job_role_id = $1 AND parent_id = $2
-      `,
-      [row.job_role_id, parentId],
+      parentId
+        ? `
+            SELECT COALESCE(MAX(sequence), 0)::int AS s
+              FROM "tblJobRoleNav"
+             WHERE job_role_id = $1 AND parent_id = $2
+          `
+        : `
+            SELECT COALESCE(MAX(sequence), 0)::int AS s
+              FROM "tblJobRoleNav"
+             WHERE job_role_id = $1 AND parent_id IS NULL
+          `,
+      parentId ? [row.job_role_id, parentId] : [row.job_role_id],
     );
     const seq = (maxSeq.rows[0]?.s || 0) + 1;
     const jrnId = await getNextId(client, 'tblJobRoleNav', 'job_role_nav_id', 'JRN', 3);
@@ -116,7 +152,7 @@ async function seedOrg(client, orgId, stats) {
         APP_LABEL,
         seq,
         row.access_level || 'A',
-        row.org_id || orgId,
+        roleOrgId,
         row.mob_desk || 'D',
       ],
     );

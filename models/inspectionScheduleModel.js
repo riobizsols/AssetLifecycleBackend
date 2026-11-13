@@ -1,5 +1,6 @@
 const { generateCustomId } = require('../utils/idGenerator');
 const { getDb: getDbFromContext } = require("../utils/dbContext");
+const { toIstDateString } = require('../utils/istTime');
 
 const getDb = (dbConnection) => {
   if (dbConnection) return dbConnection;
@@ -313,7 +314,7 @@ const createWorkflowInspectionHeader = async (data) => {
     data.asset_id,
     data.group_id || null,
     data.vendor_id || null,
-    data.pl_sch_date,
+    toIstDateString(data.pl_sch_date) || data.pl_sch_date,
     data.status || 'IN', // IN = Initiated
     data.created_by || 'SYSTEM',
     data.org_id,
@@ -397,7 +398,7 @@ const createDirectInspectionSchedule = async (data) => {
     data.asset_id,
     data.vendor_id || null,
     empIntToSave,
-    data.act_insp_st_date,
+    toIstDateString(data.act_insp_st_date) || data.act_insp_st_date,
     data.status || 'PN', // PN = Pending
     data.created_by || 'SYSTEM',
     data.org_id,

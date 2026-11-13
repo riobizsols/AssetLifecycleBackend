@@ -26,14 +26,10 @@ const CONSUMPTION_TYPE = Object.freeze({
   QUANTITY: 'UTCTP002',
 });
 
-const IST_TZ = 'Asia/Kolkata';
+const { IST_TZ, todayIstDate } = require('./istTime');
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_ALREADY_RECORDED =
   'A reading already exists for this date. Delete it and re-enter if you need to change it.';
-
-function todayIstDate() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: IST_TZ });
-}
 
 function toIsoDate(value) {
   if (value == null || value === '') return null;

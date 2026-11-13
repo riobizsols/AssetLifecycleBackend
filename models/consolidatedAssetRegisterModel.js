@@ -258,15 +258,17 @@ async function getFilterOptions(filters = {}) {
     ),
     db.query(
       `
-        SELECT DISTINCT
+        SELECT DISTINCT ON (COALESCE(aa.dept_id, a.dept_id))
           COALESCE(aa.dept_id, a.dept_id) AS id,
           ${DEPT_NAME_SQL} AS label,
           a.org_id,
-          a.branch_id
+          -- Use the department's own campus, not the asset's, so the same dept
+          -- does not appear once per asset.branch_id in the filter dropdown.
+          COALESCE(d_assign.branch_id, d_asset.branch_id) AS branch_id
         ${BASE_JOINS}
         ${where}
         AND COALESCE(aa.dept_id, a.dept_id) IS NOT NULL
-        ORDER BY 2 ASC
+        ORDER BY COALESCE(aa.dept_id, a.dept_id), 2 ASC
       `,
       scope.params,
     ),

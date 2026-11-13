@@ -3,6 +3,7 @@ const { generateCustomIdForClient } = require('../utils/idGenerator');
 const fcmService = require('../services/fcmService');
 const { isInhouseMaintainedBy } = require('../utils/inhouseVendorUtils');
 const { ensureAssetTypeRequirementColumns } = require('./assetTypeModel');
+const { formatIstTimestamp, todayIstDate } = require('../utils/istTime');
 
 const getDb = () => getDbFromContext();
 
@@ -1685,10 +1686,10 @@ const convertSpcToSerialFormat = (spcId) => {
 };
 
 const buildSpareSerialNumber = (spcId, sequence) => {
-  const now = new Date();
-  const year = now.getFullYear().toString().slice(-2);
+  const today = todayIstDate(); // YYYY-MM-DD in IST
+  const year = today.slice(2, 4);
   const reversedYear = year.split('').reverse().join('');
-  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const month = today.slice(5, 7);
   const prefix = convertSpcToSerialFormat(spcId);
   return `${prefix}${reversedYear}${month}${String(sequence).padStart(5, '0')}`;
 };
@@ -3393,9 +3394,9 @@ const saveCategoryMappingsForAssetType = async ({
       addCol('model', null);
       addCol('branch_id', branch_id || null);
       addCol('created_by', created_by || null);
-      addCol('created_on', new Date());
+      addCol('created_on', formatIstTimestamp());
       addCol('changed_by', created_by || null);
-      addCol('changed_on', new Date());
+      addCol('changed_on', formatIstTimestamp());
 
       const placeholders = insertVals.map((_, i) => `$${i + 1}`).join(', ');
       const inserted = await client.query(

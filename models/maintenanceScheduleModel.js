@@ -2,6 +2,7 @@ const { generateCustomId, generateCustomIdForClient } = require('../utils/idGene
 const db = require("../config/db");
 const { getDbFromContext } = require("../utils/dbContext");
 const brHistModel = require("./assetMaintSchBrHistModel");
+const { todayIstDate } = require('../utils/istTime');
 
 // Helper function to get database connection (tenant pool or default)
 const getDb = () => getDbFromContext();
@@ -1050,7 +1051,7 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
         : notes;
 
   // Automatically set end date to current date when updating
-  const currentDate = new Date().toISOString().split("T")[0];
+  const currentDate = todayIstDate();
   const dbPool = getDb();
   await ensureActualDowntimeColumn(dbPool);
   const actualDowntimeHours = parseActualDowntime(actual_downtime);
@@ -1560,7 +1561,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
         atMainFreqId,
         maintainedBy,
         notesOverride,
-        new Date().toISOString().split("T")[0],
+        todayIstDate(),
         created_by,
         org_id,
         asset.branch_code,
@@ -1720,7 +1721,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       asset_id,
       null, // group_id
       scheduleVendorId,
-      new Date().toISOString().split("T")[0], // pl_sch_date
+      todayIstDate(), // pl_sch_date (IST)
       null, // act_sch_date
       "IN", // status
       created_by,
@@ -1747,6 +1748,8 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       ? Math.min(...sequencesWithRoles.map(({ seq }) => Number(seq.seqs_no)))
       : null;
     let detailCreated = 0;
+    // Notify after COMMIT so mobile open lands on committed approval rows
+    const pendingApprovalNotifications = [];
 
     for (const { seq, jobRoles } of sequencesWithRoles) {
       for (const jr of jobRoles) {
@@ -1826,6 +1829,19 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
           );
         }
 
+        if (status === "AP") {
+          pendingApprovalNotifications.push({
+            wfamsd_id: wfamsdId,
+            wfamsh_id: wfamshId,
+            job_role_id: jr.job_role_id,
+            status,
+            sequence: Number(seq.seqs_no),
+            org_id,
+            created_by,
+            notes: notesOverride,
+          });
+        }
+
         detailCreated++;
       }
     }
@@ -1869,7 +1885,7 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
       maintainedBy,
       notesOverride, // notes (CBM trigger note, etc.)
       "AP", // Status: Approval Pending
-      new Date().toISOString().split("T")[0], // act_maint_st_date
+      todayIstDate(), // act_maint_st_date (IST)
       created_by,
       org_id,
       asset.branch_code,
@@ -1882,6 +1898,31 @@ const createManualMaintenanceSchedule = async (scheduleData) => {
     );
 
     await client.query("COMMIT");
+
+    // Mobile FCM: same workflow_approval path as scheduled maintenance (CBM + manual)
+    if (pendingApprovalNotifications.length) {
+      try {
+        const workflowNotificationService = require("../services/workflowNotificationService");
+        for (const detailData of pendingApprovalNotifications) {
+          try {
+            await workflowNotificationService.notifyNewWorkflowDetail(detailData);
+            console.log(
+              `Push notification triggered for manual/CBM workflow detail ${detailData.wfamsd_id}`,
+            );
+          } catch (notificationError) {
+            console.error(
+              `Error sending push for workflow detail ${detailData.wfamsd_id}:`,
+              notificationError,
+            );
+          }
+        }
+      } catch (notificationError) {
+        console.error(
+          "Error loading workflow notification service after manual/CBM create:",
+          notificationError,
+        );
+      }
+    }
 
     return {
       success: true,
