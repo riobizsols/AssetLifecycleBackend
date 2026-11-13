@@ -288,6 +288,7 @@ app.use("/api/consolidated-asset-register", consolidatedAssetRegisterRoutes);
 app.use("/api/sla-vendor-performance", slaVendorPerformanceRoutes);
 app.use("/api/workforce-report", workforceReportRoutes);
 app.use("/api/maintenance-status-report", maintenanceStatusReportRoutes);
+app.use("/api/upcoming-maintenance-schedule-report", upcomingMaintenanceScheduleReportRoutes);
 app.use("/api/out-of-stock-report", outOfStockReportRoutes);
 app.use("/api/purchase-requirement-report", purchaseRequirementReportRoutes);
 app.use("/api/utilities", utilityRoutes);
