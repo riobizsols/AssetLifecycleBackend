@@ -968,14 +968,22 @@ async function getConsumptionMissNotificationsByUser({
     [empIntId, orgId || null, branchId || null, deptIds],
   );
 
+  const toYmd = (value) => {
+    if (value == null || value === '') return null;
+    if (value instanceof Date && !Number.isNaN(value.getTime())) {
+      return value.toISOString().slice(0, 10);
+    }
+    const match = String(value).match(/(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : null;
+  };
+
   const alerts = [];
   for (const row of rows) {
     const freqDays = Number(row.frequency_days) || 0;
     if (freqDays <= 0) continue;
 
-    const last = row.last_consumption_date
-      ? String(row.last_consumption_date).slice(0, 10)
-      : null;
+    // pg may return Date objects — never String(date).slice(0,10)
+    const last = toYmd(row.last_consumption_date);
 
     let isMissed = false;
     let dueDate = todayStr;
@@ -989,11 +997,16 @@ async function getConsumptionMissNotificationsByUser({
       dueDate = todayStr;
     } else {
       const lastDate = new Date(`${last}T00:00:00Z`);
-      const nextDue = new Date(lastDate);
-      nextDue.setUTCDate(nextDue.getUTCDate() + freqDays);
-      const nextDueStr = nextDue.toISOString().slice(0, 10);
-      isMissed = nextDueStr <= todayStr;
-      dueDate = nextDueStr;
+      if (Number.isNaN(lastDate.getTime())) {
+        isMissed = true;
+        dueDate = todayStr;
+      } else {
+        const nextDue = new Date(lastDate);
+        nextDue.setUTCDate(nextDue.getUTCDate() + freqDays);
+        const nextDueStr = nextDue.toISOString().slice(0, 10);
+        isMissed = nextDueStr <= todayStr;
+        dueDate = nextDueStr;
+      }
     }
 
     if (!isMissed) continue;

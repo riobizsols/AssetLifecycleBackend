@@ -56,7 +56,11 @@ const getAllNotifications = async (req, res) => {
       daysUntilCutoff: Math.floor(notification.days_until_cutoff || 0),
       isUrgent: notification.days_until_cutoff <= 0,
       isOverdue: notification.days_until_due <= 0,
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance', // Use actual maintenance type name from database
+      maintenanceType: notification.is_cbm
+        ? (notification.maint_type_name || 'Condition Based Maintenance')
+        : (notification.maint_type_name || 'Regular Maintenance'),
+      isCbm: !!notification.is_cbm,
+      source: notification.is_cbm ? 'cbm' : 'maintenance',
       // Group asset maintenance information
       groupId: notification.group_id || null,
       groupName: notification.group_name || null,
@@ -229,7 +233,11 @@ const getUserNotifications = async (req, res) => {
       isOverdue: Math.floor(notification.days_until_due || 0) <= 0,
 
       // Display labels
-      maintenanceType: notification.maint_type_name || 'Regular Maintenance',
+      maintenanceType: notification.is_cbm
+        ? (notification.maint_type_name || 'Condition Based Maintenance')
+        : (notification.maint_type_name || 'Regular Maintenance'),
+      isCbm: !!notification.is_cbm,
+      source: notification.is_cbm ? 'cbm' : 'maintenance',
       assetId: notification.asset_id,
       assetTypeName: notification.asset_type_name,
 

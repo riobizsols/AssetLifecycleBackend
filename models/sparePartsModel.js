@@ -44,7 +44,18 @@ const SPARE_ISSUE_STATUS = {
   REQUESTED: 'RQ',
   RESERVED: 'IS',
   ISSUED: 'IE',
+  REJECTED: 'RJ',
 };
+
+const SPARE_PENDING_STATUSES = [
+  SPARE_ISSUE_STATUS.REQUESTED,
+  SPARE_ISSUE_STATUS.RESERVED,
+];
+
+const SPARE_TERMINAL_STATUSES = [
+  SPARE_ISSUE_STATUS.ISSUED,
+  SPARE_ISSUE_STATUS.REJECTED,
+];
 
 const parseIssueRemarks = (remarks) => {
   if (!remarks) return {};
@@ -624,6 +635,221 @@ const assertInhouseMaintenance = async (client, amsId, orgId) => {
   }
 
   return result.rows[0];
+};
+
+/**
+ * Block maintenance completion (CO) for in-house jobs that require spare parts
+ * until every linked request is issued (IE) or rejected (RJ).
+ * Also blocks when no spare request was created yet (skipped spare-parts screen).
+ */
+const assertSparePartsResolvedForCompletion = async (amsId, orgId) => {
+  if (!amsId || !orgId) return;
+
+  const dbPool = getDb();
+  await ensureAssetTypeRequirementColumns(dbPool);
+
+  const maint = await dbPool.query(
+    `
+      SELECT
+        ams.ams_id,
+        a.asset_type_id,
+        at.required_maint,
+        at.required_spare_parts,
+        ${maintenanceProviderExpression()} AS maintenance_provider,
+        EXISTS (
+          SELECT 1
+            FROM "tblSPCatATMap" m
+           WHERE m.org_id = ams.org_id
+             AND m.asset_type_id = a.asset_type_id
+             AND COALESCE(m.int_status, 1) = 1
+        ) AS has_spare_mapping
+      FROM "tblAssetMaintSch" ams
+      INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
+      INNER JOIN "tblAssetTypes" at ON a.asset_type_id = at.asset_type_id
+      LEFT JOIN "tblATMaintFreq" mf
+        ON mf.at_main_freq_id = ams.at_main_freq_id
+       AND mf.org_id = ams.org_id
+      WHERE ams.ams_id = $1
+        AND ams.org_id = $2
+      LIMIT 1
+    `,
+    [amsId, orgId],
+  );
+
+  if (!maint.rows.length) {
+    const err = new Error('Maintenance schedule not found');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  const row = maint.rows[0];
+  const requiresSpareFlow =
+    isInhouseMaintainedBy(row.maintenance_provider) &&
+    row.required_maint === true &&
+    row.required_spare_parts === true &&
+    row.has_spare_mapping === true;
+
+  if (!requiresSpareFlow) return;
+
+  const issues = await dbPool.query(
+    `
+      SELECT si_id, status
+        FROM "tblSpareIssue"
+       WHERE assetmaintsch_id = $1
+         AND org_id = $2
+    `,
+    [amsId, orgId],
+  );
+
+  if (!issues.rows.length) {
+    const err = new Error(
+      'Cannot complete maintenance until spare parts are requested and then issued or rejected on the Spare Parts screen',
+    );
+    err.statusCode = 400;
+    err.code = 'SPARE_PARTS_REQUIRED';
+    throw err;
+  }
+
+  const pending = issues.rows.filter((r) =>
+    SPARE_PENDING_STATUSES.includes(String(r.status || '').toUpperCase()),
+  );
+  if (pending.length > 0) {
+    const err = new Error(
+      'Cannot complete maintenance while spare parts are pending approval or issue. Finish approval/issue or reject them first',
+    );
+    err.statusCode = 400;
+    err.code = 'SPARE_PARTS_PENDING';
+    throw err;
+  }
+
+  const unresolved = issues.rows.filter(
+    (r) => !SPARE_TERMINAL_STATUSES.includes(String(r.status || '').toUpperCase()),
+  );
+  if (unresolved.length > 0) {
+    const err = new Error(
+      'Cannot complete maintenance until all spare part requests are issued or rejected',
+    );
+    err.statusCode = 400;
+    err.code = 'SPARE_PARTS_UNRESOLVED';
+    throw err;
+  }
+};
+
+const rejectSpareIssue = async ({
+  si_id,
+  org_id,
+  branch_id = null,
+  rejected_by = null,
+  remarks = null,
+}) => {
+  const dbPool = getDb();
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const locked = await client.query(
+      `
+        SELECT *
+          FROM "tblSpareIssue"
+         WHERE si_id = $1
+           AND org_id = $2
+         FOR UPDATE
+      `,
+      [si_id, org_id],
+    );
+    if (!locked.rows.length) {
+      const err = new Error('Spare part request not found');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const issue = locked.rows[0];
+    await assertInhouseMaintenance(client, issue.assetmaintsch_id, org_id);
+
+    if (issue.status === SPARE_ISSUE_STATUS.REJECTED) {
+      const err = new Error('This spare part request has already been rejected');
+      err.statusCode = 409;
+      err.code = 'ALREADY_REJECTED';
+      throw err;
+    }
+    if (
+      issue.status === SPARE_ISSUE_STATUS.RESERVED ||
+      issue.status === SPARE_ISSUE_STATUS.ISSUED
+    ) {
+      const err = new Error(
+        'Approved or issued spare part requests cannot be rejected from approval. Cancel issue flow instead',
+      );
+      err.statusCode = 400;
+      throw err;
+    }
+    if (issue.status !== SPARE_ISSUE_STATUS.REQUESTED) {
+      const err = new Error('This spare part request is not pending approval');
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const note = remarks ? String(remarks).trim() : '';
+    const nextRemarks = JSON.stringify({
+      ...parseIssueRemarks(issue.remarks),
+      ...(note ? { rejection_note: note } : {}),
+    });
+
+    const updateResult = await client.query(
+      `
+        UPDATE "tblSpareIssue"
+           SET status = $1,
+               changed_by = $2,
+               remarks = $3,
+               changed_on = CURRENT_TIMESTAMP
+         WHERE si_id = $4
+           AND org_id = $5
+           AND status = $6
+         RETURNING *
+      `,
+      [
+        SPARE_ISSUE_STATUS.REJECTED,
+        rejected_by || null,
+        nextRemarks,
+        si_id,
+        org_id,
+        SPARE_ISSUE_STATUS.REQUESTED,
+      ],
+    );
+
+    if (!updateResult.rows.length) {
+      const err = new Error('Spare part request was already processed');
+      err.statusCode = 409;
+      throw err;
+    }
+
+    const sph_id = await generateCustomIdForClient(client, 'spare_history', 3);
+    await client.query(
+      `
+        INSERT INTO "tblSpareHistory" (
+          sph_id, si_id, status, remarks, org_id, branch_id, created_by, created_on
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP
+        )
+      `,
+      [
+        sph_id,
+        si_id,
+        SPARE_ISSUE_STATUS.REJECTED,
+        note || 'Spare part request rejected',
+        org_id,
+        branch_id || issue.branch_id || null,
+        rejected_by || null,
+      ],
+    );
+
+    await client.query('COMMIT');
+    return updateResult.rows[0];
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const createSpareIssueRequests = async ({
@@ -5726,6 +5952,8 @@ module.exports = {
   buildSpareSerialNumber,
   extractSequenceFromSerial,
   SPARE_ISSUE_STATUS,
+  SPARE_PENDING_STATUSES,
+  SPARE_TERMINAL_STATUSES,
   getCategoryMappingsByAssetType,
   getChecklistRequiredSpareCategories,
   getSparePartMaintenanceList,
@@ -5736,6 +5964,8 @@ module.exports = {
   getSpareIssueApprovals,
   getSpareIssueApprovalDetail,
   approveSpareIssue,
+  rejectSpareIssue,
+  assertSparePartsResolvedForCompletion,
   confirmSparePartIssue,
   getAvailableQuantity,
   resolveIssueSpcId,

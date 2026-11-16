@@ -986,6 +986,37 @@ const approveIssue = async (req, res) => {
   }
 };
 
+const rejectIssue = async (req, res) => {
+  try {
+    const org_id = req.user.org_id;
+    const branch_id = req.user.branch_id || null;
+    const rejected_by = req.user.user_id;
+    const { si_id } = req.params;
+
+    const row = await model.rejectSpareIssue({
+      si_id,
+      org_id,
+      branch_id,
+      rejected_by,
+      remarks: req.body?.remarks || req.body?.note || null,
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Spare part request rejected',
+      data: row,
+    });
+  } catch (error) {
+    console.error('Error rejecting spare issue:', error);
+    const status = error.statusCode || 500;
+    return res.status(status).json({
+      success: false,
+      error: error.message || 'Failed to reject spare part request',
+      code: error.code || undefined,
+    });
+  }
+};
+
 const confirmIssue = async (req, res) => {
   try {
     const org_id = req.user.org_id;
@@ -1331,6 +1362,7 @@ module.exports = {
   getIssueApprovals,
   getIssueApprovalDetail,
   approveIssue,
+  rejectIssue,
   confirmIssue,
   getAvailableQty,
   getLotVendors,

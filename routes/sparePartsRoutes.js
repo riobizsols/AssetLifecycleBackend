@@ -34,6 +34,7 @@ const {
   getIssueApprovals,
   getIssueApprovalDetail,
   approveIssue,
+  rejectIssue,
   confirmIssue,
   getAvailableQty,
   getLotVendors,
@@ -112,6 +113,7 @@ router.post('/issue-requests', createIssueRequests);
 router.get('/issue-approvals', getIssueApprovals);
 router.get('/issue-approvals/:si_id', getIssueApprovalDetail);
 router.post('/issue-approvals/:si_id/approve', approveIssue);
+router.post('/issue-approvals/:si_id/reject', rejectIssue);
 router.post('/maintenance-list/:ams_id/issue', confirmIssue);
 router.get('/available-quantity/:spc_id', getAvailableQty);
 

@@ -1,4 +1,5 @@
 const model = require("../models/maintenanceScheduleModel");
+const sparePartsModel = require("../models/sparePartsModel");
 const maintenanceSupervisorCache = require('../utils/maintenanceSupervisorCache');
 const operationalCache = require('../utils/operationalCache');
 const { getEffectiveListContext } = require('../utils/acmAccess');
@@ -1367,6 +1368,20 @@ const updateMaintenanceSchedule = async (req, res) => {
                         });
                     }
                 }
+            }
+        }
+
+        // In-house + require spare parts: block CO until spare requests are issued or rejected
+        if (String(updateData.status || '').toUpperCase() === 'CO') {
+            try {
+                await sparePartsModel.assertSparePartsResolvedForCompletion(id, orgId);
+            } catch (spareErr) {
+                const status = spareErr.statusCode || 400;
+                return res.status(status).json({
+                    success: false,
+                    message: spareErr.message || 'Spare parts must be resolved before completing maintenance',
+                    code: spareErr.code || 'SPARE_PARTS_BLOCKED',
+                });
             }
         }
 

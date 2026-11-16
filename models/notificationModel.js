@@ -24,6 +24,21 @@ const getMaintenanceNotifications = async (orgId = 'ORG001', branchId, hasSuperA
       (SELECT COUNT(*) FROM "tblAssetGroup_D" WHERE assetgroup_h_id = wfh.group_id) as group_asset_count,
       wfh.maint_type_id as maint_type_id,
       mt.text as maint_type_name,
+      (
+        UPPER(COALESCE(wfh.created_by, '')) = 'CBM'
+        OR LOWER(COALESCE(mt.text, '')) LIKE '%cbm%'
+        OR LOWER(COALESCE(mt.text, '')) LIKE '%condition based%'
+        OR EXISTS (
+          SELECT 1
+            FROM "tblAssetMaintSch" ams_cbm
+           WHERE ams_cbm.wfamsh_id = wfh.wfamsh_id
+             AND (
+               UPPER(COALESCE(ams_cbm.created_by, '')) = 'CBM'
+               OR LOWER(COALESCE(ams_cbm.notes, '')) LIKE '%cbm%'
+               OR LOWER(COALESCE(ams_cbm.notes, '')) LIKE '%condition based%'
+             )
+        )
+      ) AS is_cbm,
       jr.text as job_role_name,
       u.user_id,
       u.emp_int_id,
@@ -230,6 +245,22 @@ const getMaintenanceNotificationsByUser = async (
       END as asset_type_name,
       wfh.maint_type_id as maint_type_id,
       COALESCE(mt.text, 'Regular Maintenance') as maint_type_name,
+      -- CBM: created by evaluator, CBM maint type, or CBM note on AMS
+      (
+        UPPER(COALESCE(wfh.created_by, '')) = 'CBM'
+        OR LOWER(COALESCE(mt.text, '')) LIKE '%cbm%'
+        OR LOWER(COALESCE(mt.text, '')) LIKE '%condition based%'
+        OR EXISTS (
+          SELECT 1
+            FROM "tblAssetMaintSch" ams_cbm
+           WHERE ams_cbm.wfamsh_id = wfh.wfamsh_id
+             AND (
+               UPPER(COALESCE(ams_cbm.created_by, '')) = 'CBM'
+               OR LOWER(COALESCE(ams_cbm.notes, '')) LIKE '%cbm%'
+               OR LOWER(COALESCE(ams_cbm.notes, '')) LIKE '%condition based%'
+             )
+        )
+      ) AS is_cbm,
       -- Get the current action role and users
       COALESCE(current_action_role.job_role_name, 'Unknown Role') as current_action_role_name,
       current_action_role.job_role_id as current_action_role_id,

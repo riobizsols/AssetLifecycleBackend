@@ -99,19 +99,22 @@ const createEmployeeCertificate = [
         });
       }
 
-      let filePath = null;
-
-      if (req.file) {
-        const ext = path.extname(req.file.originalname);
-        const hash = crypto.randomBytes(8).toString('hex');
-        const objectName = `${orgId}/employee-tech-certificates/${empIntId}/${Date.now()}_${hash}${ext}`;
-
-        filePath = await uploadBuffer({
-          buffer: req.file.buffer,
-          objectName,
-          contentType: req.file.mimetype,
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "Certificate file is required",
         });
       }
+
+      const ext = path.extname(req.file.originalname);
+      const hash = crypto.randomBytes(8).toString('hex');
+      const objectName = `${orgId}/employee-tech-certificates/${empIntId}/${Date.now()}_${hash}${ext}`;
+
+      const filePath = await uploadBuffer({
+        buffer: req.file.buffer,
+        objectName,
+        contentType: req.file.mimetype,
+      });
 
       const created = await EmployeeTechCertModel.createEmployeeCertificate({
         empIntId,

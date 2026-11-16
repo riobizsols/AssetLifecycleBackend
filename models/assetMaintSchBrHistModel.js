@@ -127,7 +127,12 @@ async function getReopenedBreakdownsFromHistory({
       ams.ams_id,
       ams.asset_id,
       a.serial_number,
-      COALESCE(NULLIF(a.description, ''), a.text) AS asset_name,
+      COALESCE(
+        NULLIF(BTRIM(a.description), ''),
+        NULLIF(BTRIM(a.text), ''),
+        NULLIF(BTRIM(a.serial_number), ''),
+        ams.asset_id
+      ) AS asset_name,
       a.asset_type_id,
       at.text AS asset_type_name,
       rs.ro_count::int AS ro_count,
@@ -189,33 +194,76 @@ async function getReopenedBreakdownsFilterOptionsFromHistory({ org_id } = {}) {
 
   const dbPool = getDb();
 
-  // Asset IDs and Asset Types that currently have RO history rows.
+  // Prefer assets/types with RO history; if none, fall back to any reported breakdown
+  // (tblAssetBRDet / AMS) so filter dropdowns are not empty when breakdowns exist.
   const assetsRes = await dbPool.query(
     `
-    SELECT DISTINCT
-      ams.asset_id,
-      a.serial_number,
-      COALESCE(NULLIF(a.description, ''), a.text) AS asset_name
-    FROM "tblAssetMaintSch_BR_Hist" h
-    INNER JOIN "tblAssetMaintSch" ams ON ams.ams_id = h.ams_id
-    INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
-    WHERE ams.org_id = $1 AND h.status = 'RO'
-    ORDER BY ams.asset_id
+    WITH ro_assets AS (
+      SELECT DISTINCT
+        ams.asset_id,
+        a.serial_number,
+        COALESCE(
+          NULLIF(BTRIM(a.description), ''),
+          NULLIF(BTRIM(a.text), ''),
+          NULLIF(BTRIM(a.serial_number), ''),
+          ams.asset_id
+        ) AS asset_name
+      FROM "tblAssetMaintSch_BR_Hist" h
+      INNER JOIN "tblAssetMaintSch" ams ON ams.ams_id = h.ams_id
+      INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
+      WHERE ams.org_id = $1 AND h.status = 'RO'
+    ),
+    br_assets AS (
+      SELECT DISTINCT
+        br.asset_id,
+        a.serial_number,
+        COALESCE(
+          NULLIF(BTRIM(a.description), ''),
+          NULLIF(BTRIM(a.text), ''),
+          NULLIF(BTRIM(a.serial_number), ''),
+          br.asset_id
+        ) AS asset_name
+      FROM "tblAssetBRDet" br
+      INNER JOIN "tblAssets" a ON a.asset_id = br.asset_id
+      WHERE br.org_id = $1
+        AND br.asset_id IS NOT NULL
+    )
+    SELECT * FROM ro_assets
+    UNION
+    SELECT * FROM br_assets
+    WHERE NOT EXISTS (SELECT 1 FROM ro_assets)
+    ORDER BY asset_id
     `,
     [org_id],
   );
 
   const assetTypesRes = await dbPool.query(
     `
-    SELECT DISTINCT
-      a.asset_type_id,
-      at.text AS asset_type_name
-    FROM "tblAssetMaintSch_BR_Hist" h
-    INNER JOIN "tblAssetMaintSch" ams ON ams.ams_id = h.ams_id
-    INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
-    LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
-    WHERE ams.org_id = $1 AND h.status = 'RO'
-    ORDER BY a.asset_type_id
+    WITH ro_types AS (
+      SELECT DISTINCT
+        a.asset_type_id,
+        at.text AS asset_type_name
+      FROM "tblAssetMaintSch_BR_Hist" h
+      INNER JOIN "tblAssetMaintSch" ams ON ams.ams_id = h.ams_id
+      INNER JOIN "tblAssets" a ON a.asset_id = ams.asset_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      WHERE ams.org_id = $1 AND h.status = 'RO'
+    ),
+    br_types AS (
+      SELECT DISTINCT
+        a.asset_type_id,
+        at.text AS asset_type_name
+      FROM "tblAssetBRDet" br
+      INNER JOIN "tblAssets" a ON a.asset_id = br.asset_id
+      LEFT JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+      WHERE br.org_id = $1
+        AND a.asset_type_id IS NOT NULL
+    )
+    SELECT * FROM ro_types
+    UNION
+    SELECT * FROM br_types
+    WHERE NOT EXISTS (SELECT 1 FROM ro_types)
+    ORDER BY asset_type_id
     `,
     [org_id],
   );

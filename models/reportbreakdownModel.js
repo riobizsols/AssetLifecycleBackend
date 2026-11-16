@@ -237,9 +237,23 @@ const getAllReports = async (
   let query = `
     SELECT 
       brd.*,
-      a.asset_type_id
+      a.asset_type_id,
+      COALESCE(
+        NULLIF(BTRIM(a.description), ''),
+        NULLIF(BTRIM(a.text), ''),
+        NULLIF(BTRIM(a.serial_number), ''),
+        brd.asset_id
+      ) AS asset_name,
+      a.serial_number,
+      COALESCE(
+        NULLIF(BTRIM(u.full_name), ''),
+        NULLIF(BTRIM(d.text), ''),
+        brd.reported_by
+      ) AS reported_by_name
     FROM "tblAssetBRDet" brd
     LEFT JOIN "tblAssets" a ON brd.asset_id = a.asset_id
+    LEFT JOIN "tblUsers" u ON u.user_id = brd.reported_by
+    LEFT JOIN "tblDepartments" d ON d.dept_id = brd.reported_by
     WHERE brd.org_id = $1
   `;
 
