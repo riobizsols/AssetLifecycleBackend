@@ -267,7 +267,14 @@ async function getScheduleRows({
       AND ams.status IS DISTINCT FROM 'CA'
       AND ams.act_maint_st_date IS NOT NULL
       AND (
+        -- Scheduled in the selected window
         ams.act_maint_st_date::date BETWEEN $2::date AND $3::date
+        -- Calendar periods (year/month/custom): also include work completed/created
+        -- in-range even when the original schedule date is from a prior year
+        -- (common for overdue MRG vendor jobs planned in 2025, finished in 2026).
+        ${includeOverdue
+          ? ''
+          : `OR COALESCE(ams.act_main_end_date, ams.created_on)::date BETWEEN $2::date AND $3::date`}
         ${includeOverdue
           ? `OR (
                ams.status IS DISTINCT FROM 'CO'
@@ -287,7 +294,93 @@ async function getScheduleRows({
     ORDER BY ams.act_maint_st_date ASC NULLS LAST, at.text ASC, a.text ASC
   `;
 
-  const { rows } = await db.query(scoped.sql, scoped.params);
+  const { rows: amsRows } = await db.query(scoped.sql, scoped.params);
+
+  // Pending MRG / approval workflows that have no AMS yet still belong on this
+  // schedule report (otherwise regenerating schedules looks like "nothing exists").
+  const wfParams = [orgId, from, to];
+  let wfSql = `
+    SELECT
+      NULL::text AS ams_id,
+      NULL::text AS wo_id,
+      wfh.asset_id,
+      COALESCE(NULLIF(BTRIM(a.text), ''), NULLIF(BTRIM(a.description), ''), a.asset_id) AS asset_name,
+      a.serial_number,
+      a.asset_type_id,
+      at.text AS asset_type_name,
+      wfh.maint_type_id,
+      mt.text AS maintenance_type_raw,
+      wfh.pl_sch_date AS act_maint_st_date,
+      NULL::timestamp AS act_main_end_date,
+      wfh.status,
+      NULL::text AS notes,
+      NULL::text AS technician_name,
+      wfh.emp_int_id,
+      COALESCE(
+        NULLIF(BTRIM(e.name), ''),
+        NULLIF(BTRIM(CONCAT_WS(' ', e.first_name, e.last_name)), '')
+      ) AS assigned_technician,
+      COALESCE(v.vendor_name, sv.vendor_name) AS vendor_name,
+      wfh.vendor_id,
+      wfh.at_main_freq_id,
+      freq.frequency AS frequency_value,
+      freq.uom AS frequency_uom_id,
+      uom.uom AS frequency_uom_name,
+      wfh.pl_sch_date,
+      a.warranty_period,
+      a.amc_end_date,
+      a.cmc_end_date,
+      ${coverageStatusSql('a.warranty_period')} AS warranty_status,
+      ${coverageStatusSql('a.amc_end_date')} AS amc_status,
+      ${coverageStatusSql('a.cmc_end_date')} AS cmc_status,
+      (
+        SELECT COALESCE(prev.act_main_end_date, prev.act_maint_st_date)
+          FROM "tblAssetMaintSch" prev
+         WHERE prev.asset_id = wfh.asset_id
+           AND prev.org_id = wfh.org_id
+           AND prev.status = 'CO'
+         ORDER BY COALESCE(prev.act_main_end_date, prev.act_maint_st_date) DESC NULLS LAST
+         LIMIT 1
+      ) AS last_maintenance_date,
+      NULL::text AS breakdown_priority
+    FROM "tblWFAssetMaintSch_H" wfh
+    JOIN "tblAssets" a ON a.asset_id = wfh.asset_id
+    JOIN "tblAssetTypes" at ON at.asset_type_id = a.asset_type_id
+    LEFT JOIN "tblMaintTypes" mt ON mt.maint_type_id = wfh.maint_type_id
+    LEFT JOIN "tblVendors" v ON v.vendor_id = wfh.vendor_id
+    LEFT JOIN "tblVendors" sv ON sv.vendor_id = a.service_vendor_id
+    LEFT JOIN "tblATMaintFreq" freq ON freq.at_main_freq_id = wfh.at_main_freq_id
+    LEFT JOIN "tblUom" uom ON uom.uom_id = freq.uom
+    LEFT JOIN "tblEmployees" e ON e.emp_int_id = wfh.emp_int_id
+    WHERE a.org_id = $1
+      AND wfh.org_id = $1
+      AND wfh.status IN ('IN', 'IP')
+      AND wfh.pl_sch_date IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "tblAssetMaintSch" ams
+         WHERE ams.wfamsh_id = wfh.wfamsh_id
+           AND ams.org_id = wfh.org_id
+      )
+      AND (
+        wfh.pl_sch_date::date BETWEEN $2::date AND $3::date
+        ${includeOverdue
+          ? `OR wfh.pl_sch_date::date < $2::date`
+          : ''}
+      )
+  `;
+
+  if (assetTypeIds.length) {
+    wfParams.push(assetTypeIds);
+    wfSql += ` AND a.asset_type_id = ANY($${wfParams.length}::text[])`;
+  }
+
+  const wfScoped = applyBranchFilter(wfSql, wfParams, { branchId, hasSuperAccess });
+  wfScoped.sql += `
+    ORDER BY wfh.pl_sch_date ASC NULLS LAST, at.text ASC, a.text ASC
+  `;
+
+  const { rows: wfRows } = await db.query(wfScoped.sql, wfScoped.params);
+  const rows = [...amsRows, ...wfRows];
 
   const mapped = rows.map((row, index) => {
     const scheduleStatus = deriveScheduleStatus(row);

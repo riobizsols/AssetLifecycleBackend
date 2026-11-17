@@ -215,16 +215,24 @@ const getAllWorkOrders = async (orgId, userBranchId, hasSuperAccess = false) => 
         params.push(userBranchId);
     }
     
-    // Open work orders only — include both vendor AND in-house (Furnace etc.).
-    // Previously this filtered to maintained_by ILIKE 'vendor', which hid in-house jobs
-    // and made Upcoming Jobs / WO lists look vendor-only with blank technicians.
-    query += ` AND (
-            (COALESCE(ams.maint_type_id, '') = 'MT004' AND ams.status IN ('IN', 'IP')) 
-            OR 
-            (COALESCE(ams.maint_type_id, '') != 'MT004' AND ams.status = 'IN')
-          )
+    // Work orders with a wo_id for vendor AND in-house (Furnace etc.).
+    // Include IN/IP (active), CO (completed), and RO (reopened). Previously this
+    // was open-only (IN/IP for MT004, IN only otherwise), so vendor jobs that were
+    // approved then completed disappeared from Work Order Management and looked
+    // like they were never generated. Also include IP for non-breakdown so in-progress
+    // regular/vendor jobs do not vanish mid-work.
+    query += ` AND ams.status IN ('IN', 'IP', 'CO', 'RO')
           AND ams.wo_id IS NOT NULL
-        ORDER BY ams.created_on DESC, ams.ams_id DESC
+        ORDER BY
+          CASE ams.status
+            WHEN 'IN' THEN 0
+            WHEN 'IP' THEN 1
+            WHEN 'RO' THEN 2
+            WHEN 'CO' THEN 3
+            ELSE 4
+          END,
+          ams.created_on DESC,
+          ams.ams_id DESC
     `;
     
     const dbPool = getDb();
