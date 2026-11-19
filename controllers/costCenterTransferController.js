@@ -1,5 +1,8 @@
 const db = require("../config/db");
 const { generateCustomId } = require("../utils/idGenerator");
+const assetsDashboardCache = require("../utils/assetsDashboardCache");
+const operationalCache = require("../utils/operationalCache");
+const assignmentCache = require("../utils/assignmentCache");
 
 const costCenterTransferController = {
   // Get all asset types
@@ -257,6 +260,12 @@ const costCenterTransferController = {
             : { unchanged: oldCostCenter }
         }
       });
+
+      if (org_id) {
+        assetsDashboardCache.invalidateOrgApiCache(org_id).catch(() => {});
+        operationalCache.invalidateOrgCaches(org_id).catch(() => {});
+        assignmentCache.invalidateOrgCaches(org_id).catch(() => {});
+      }
 
     } catch (error) {
       await client.query('ROLLBACK');

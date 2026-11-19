@@ -1,5 +1,13 @@
 const model = require("../models/assetScrapModel");
 const scrapAssetsLogger = require("../eventLoggers/scrapAssetsEventLogger");
+const assetsDashboardCache = require("../utils/assetsDashboardCache");
+const operationalCache = require("../utils/operationalCache");
+
+function bustCachesAfterScrapMutation(orgId) {
+  if (!orgId) return;
+  assetsDashboardCache.invalidateOrgApiCache(orgId).catch(() => {});
+  operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+}
 
 // GET /api/scrap-assets - Get all scrap assets
 const getAllScrapAssets = async (req, res) => {
@@ -268,6 +276,7 @@ const addScrapAsset = async (req, res) => {
             message: "Scrap asset added successfully",
             scrap_asset: result.rows[0]
         });
+        bustCachesAfterScrapMutation(org_id || req.user?.org_id);
     } catch (err) {
         console.error("Error adding scrap asset:", err);
         scrapAssetsLogger.logScrapAssetCreationError({
@@ -387,6 +396,7 @@ const updateScrapAsset = async (req, res) => {
             message: "Scrap asset updated successfully",
             scrap_asset: result.rows[0]
         });
+        bustCachesAfterScrapMutation(org_id || req.user?.org_id);
     } catch (err) {
         console.error("Error updating scrap asset:", err);
         scrapAssetsLogger.logScrapAssetUpdateError({
@@ -466,6 +476,9 @@ const deleteScrapAsset = async (req, res) => {
             message: "Scrap asset deleted successfully",
             deleted_scrap_asset: result.rows[0]
         });
+        bustCachesAfterScrapMutation(
+          result.rows[0]?.org_id || exists.rows[0]?.org_id || req.user?.org_id,
+        );
     } catch (err) {
         console.error("Error deleting scrap asset:", err);
         scrapAssetsLogger.logScrapAssetDeletionError({

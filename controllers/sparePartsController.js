@@ -1,4 +1,10 @@
 const model = require('../models/sparePartsModel');
+const operationalCache = require('../utils/operationalCache');
+
+function bustSpareCaches(orgId) {
+  if (!orgId) return;
+  operationalCache.invalidateOrgCaches(orgId).catch(() => {});
+}
 
 const getCategories = async (req, res) => {
   try {
@@ -66,6 +72,7 @@ const createCategory = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Spare part category created successfully',
@@ -135,6 +142,7 @@ const updateCategory = async (req, res) => {
       changed_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part category updated successfully',
@@ -179,6 +187,7 @@ const createSpBrand = async (req, res) => {
       created_by: req.user.user_id,
     });
 
+    bustSpareCaches(req.user.org_id);
     return res.status(201).json({
       success: true,
       message: 'Brand created successfully',
@@ -229,6 +238,7 @@ const createSpModel = async (req, res) => {
       created_by: req.user.user_id,
     });
 
+    bustSpareCaches(req.user.org_id);
     return res.status(201).json({
       success: true,
       message: 'Model created successfully',
@@ -319,6 +329,7 @@ const createCategoryMapping = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Asset type mapping saved successfully',
@@ -356,6 +367,7 @@ const saveCategoryMappingsBulk = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Asset type mappings saved successfully',
@@ -541,6 +553,7 @@ const createSparePartLot = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Spare part lot saved successfully',
@@ -633,6 +646,7 @@ const updateSparePartLot = async (req, res) => {
       serial_numbers: Array.isArray(serial_numbers) ? serial_numbers : [],
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part lot updated successfully',
@@ -714,6 +728,7 @@ const createVendorSpareMappings = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Spare supply mappings saved successfully',
@@ -901,6 +916,7 @@ const createIssueRequests = async (req, res) => {
       created_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Spare part request submitted for approval',
@@ -970,6 +986,7 @@ const approveIssue = async (req, res) => {
       quantity_issued: req.body?.quantity_issued ?? req.body?.required_quantity ?? null,
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part request approved and reserved',
@@ -1001,6 +1018,7 @@ const rejectIssue = async (req, res) => {
       remarks: req.body?.remarks || req.body?.note || null,
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part request rejected',
@@ -1031,6 +1049,7 @@ const confirmIssue = async (req, res) => {
       issued_by,
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part issued successfully',
@@ -1232,6 +1251,7 @@ const createSparePartMaster = async (req, res) => {
       properties: Array.isArray(properties) ? properties : [],
     });
 
+    bustSpareCaches(org_id);
     return res.status(201).json({
       success: true,
       message: 'Spare part saved successfully',
@@ -1294,6 +1314,7 @@ const updateSparePartMaster = async (req, res) => {
       replace_part_number: originalPartNumber,
     });
 
+    bustSpareCaches(org_id);
     return res.status(200).json({
       success: true,
       message: 'Spare part updated successfully',

@@ -1,6 +1,9 @@
 const model = require("../models/assetModel");
 const { validateCsvOrgBranch } = require("../utils/validateCsvOrgBranch");
 const { validateEntityId } = require("../constants/tableIdConventions");
+const assetsDashboardCache = require("../utils/assetsDashboardCache");
+const operationalCache = require("../utils/operationalCache");
+const assignmentCache = require("../utils/assignmentCache");
 
 // Check existing asset IDs for bulk upload validation
 const checkExistingAssets = async (req, res) => {
@@ -323,6 +326,13 @@ const commitBulkUploadAssets = async (req, res) => {
                 errorDetails: results.errorDetails || [],
             }
         });
+
+        const oid = req.user?.org_id;
+        if (oid) {
+          assetsDashboardCache.invalidateOrgApiCache(oid).catch(() => {});
+          operationalCache.invalidateOrgCaches(oid).catch(() => {});
+          assignmentCache.invalidateOrgCaches(oid).catch(() => {});
+        }
     } catch (error) {
         console.error("Error committing bulk upload assets:", error);
         res.status(500).json({ 

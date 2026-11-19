@@ -55,6 +55,7 @@ exports.deleteUsers = async (req, res) => {
     try {
         const count = await userModel.deleteUsers(user_ids);
         res.json({ message: `${count} user(s) deleted` });
+        operationalCache.invalidateOrgCaches(req.user?.org_id).catch(() => {});
     } catch (error) {
         console.error('Delete users error:', error);
 
@@ -137,6 +138,7 @@ exports.updateUser = async (req, res) => {
             return res.status(404).json({ error: "User not found or nothing updated" });
         }
         res.json(updatedUser);
+        operationalCache.invalidateOrgCaches(req.user?.org_id || updatedUser?.org_id).catch(() => {});
     } catch (error) {
         if (error.code === 'EMAIL_MUST_BE_DOT_COM') {
             return res.status(400).json({ error: error.message, code: error.code });

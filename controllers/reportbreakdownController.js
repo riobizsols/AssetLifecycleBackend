@@ -390,6 +390,7 @@ const createBreakdownReport = async (req, res) => {
       message: 'Breakdown report created successfully',
       data: result
     });
+    operationalCache.invalidateOrgCaches(org_id || req.user?.org_id).catch(() => {});
   } catch (err) {
     console.error('Error creating breakdown report:', err);
     console.error('Error stack:', err.stack);
@@ -538,6 +539,7 @@ const updateBreakdownReport = async (req, res) => {
       message: 'Breakdown report updated successfully',
       data: result
     });
+    operationalCache.invalidateOrgCaches(req.user?.org_id || updateData?.org_id).catch(() => {});
   } catch (err) {
     console.error('Error updating breakdown report:', err);
 

@@ -1584,6 +1584,19 @@ const deleteMultipleAssets = async (req, res) => {
       message: `${result.rows.length} asset(s) deleted successfully`,
       deletedAssets: result.rows
     });
+
+    // Same as single-delete: bust org API caches so lists/dashboard/reports are not stale for TTL.
+    const orgIds = new Set(
+      (result.rows || [])
+        .map((row) => row?.org_id)
+        .filter(Boolean)
+        .concat(req.user?.org_id ? [req.user.org_id] : []),
+    );
+    for (const oid of orgIds) {
+      assetsDashboardCache.invalidateOrgApiCache(oid).catch(() => {});
+      operationalCache.invalidateOrgCaches(oid).catch(() => {});
+      assignmentCache.invalidateOrgCaches(oid).catch(() => {});
+    }
   } catch (err) {
     console.error("Error deleting assets:", err);
     
