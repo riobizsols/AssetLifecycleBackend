@@ -463,10 +463,12 @@ const generateMaintenanceSchedules = async (req, res) => {
                     continue;
                 }
                 
-                // Step 3b & 3c: Check for completed/cancelled schedules and get latest date
+                // Step 3b & 3c: Check for completed/cancelled schedules and get latest date.
+                // Prefer act_main_end_date (when work finished) over act_maint_st_date (often an
+                // overdue planned start from a prior year) so the next upcoming date is correct.
                 const completedSchedules = existingMaintenanceSchedules.rows.filter(s => s.status === 'CO' || s.status === 'CA');
                 if (completedSchedules.length > 0) {
-                    const latestMaintenanceDate = new Date(Math.max(...completedSchedules.map(s => new Date(s.act_maint_st_date))));
+                    const latestMaintenanceDate = new Date(Math.max(...completedSchedules.map(s => new Date(s.act_main_end_date || s.act_maint_st_date))));
                     dateToConsider = new Date(Math.max(dateToConsider.getTime(), latestMaintenanceDate.getTime()));
                     console.log(`Asset ${asset.asset_id} has completed maintenance, using latest date: ${dateToConsider}`);
                 }
@@ -824,10 +826,12 @@ const generateMaintenanceSchedulesWithWorkflowBypass = async (req, res) => {
                     continue;
                 }
                 
-                // Step 3b & 3c: Check for completed/cancelled schedules and get latest date
+                // Step 3b & 3c: Check for completed/cancelled schedules and get latest date.
+                // Prefer act_main_end_date (when work finished) over act_maint_st_date (often an
+                // overdue planned start from a prior year) so the next upcoming date is correct.
                 const completedSchedules = existingMaintenanceSchedules.rows.filter(s => s.status === 'CO' || s.status === 'CA');
                 if (completedSchedules.length > 0) {
-                    const latestMaintenanceDate = new Date(Math.max(...completedSchedules.map(s => new Date(s.act_maint_st_date))));
+                    const latestMaintenanceDate = new Date(Math.max(...completedSchedules.map(s => new Date(s.act_main_end_date || s.act_maint_st_date))));
                     dateToConsider = new Date(Math.max(dateToConsider.getTime(), latestMaintenanceDate.getTime()));
                     console.log(`Asset ${asset.asset_id} has completed maintenance, using latest date: ${dateToConsider}`);
                 }

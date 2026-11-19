@@ -16,7 +16,7 @@ const getScrapAssetsByAssetType = async (asset_type_id) => {
       asd.location,
       asd.notes,
       asd.org_id,
-      a.text as asset_name,
+      COALESCE(NULLIF(BTRIM(a.description), ''), NULLIF(BTRIM(a.text), ''), a.asset_id) AS asset_name,
       a.serial_number,
       a.description as asset_description,
       at.text as asset_type_name,

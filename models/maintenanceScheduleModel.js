@@ -268,7 +268,8 @@ const checkExistingMaintenanceSchedulesForGroup = async (group_id) => {
             ams.ams_id,
             ams.asset_id,
             ams.status,
-            ams.act_maint_st_date
+            ams.act_maint_st_date,
+            ams.act_main_end_date
         FROM "tblAssetMaintSch" ams
         INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
         WHERE a.group_id = $1
@@ -305,7 +306,7 @@ const getLatestMaintenanceDateForGroup = async (group_id) => {
             WHERE group_id = $1 AND status IN ('CO', 'CA')
         ) workflow_dates,
         (
-            SELECT MAX(ams.act_maint_st_date) as max_date
+            SELECT MAX(COALESCE(ams.act_main_end_date, ams.act_maint_st_date)) as max_date
             FROM "tblAssetMaintSch" ams
             INNER JOIN "tblAssets" a ON ams.asset_id = a.asset_id
             WHERE a.group_id = $1 AND ams.status IN ('CO', 'CA')
@@ -353,7 +354,8 @@ const checkExistingMaintenanceSchedules = async (asset_id) => {
             ams_id,
             asset_id,
             status,
-            act_maint_st_date
+            act_maint_st_date,
+            act_main_end_date
         FROM "tblAssetMaintSch"
         WHERE asset_id = $1
         ORDER BY created_on DESC
@@ -1050,8 +1052,9 @@ const updateMaintenanceSchedule = async (amsId, updateData, orgId) => {
         ? null
         : notes;
 
-  // Automatically set end date to current date when updating
-  const currentDate = todayIstDate();
+  // Calendar end date in IST at midday so UTC serialization does not shift the day
+  // (midnight IST == previous calendar day in UTC).
+  const currentDate = `${todayIstDate()} 12:00:00`;
   const dbPool = getDb();
   await ensureActualDowntimeColumn(dbPool);
   const actualDowntimeHours = parseActualDowntime(actual_downtime);

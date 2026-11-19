@@ -130,8 +130,9 @@ async function getMaintenanceRows({ orgId, assetTypeIds, from, to, branchId, has
       at.text AS asset_type_name,
       mt.text AS maintenance_type_name,
       ams.status,
-      ams.act_maint_st_date,
-      ams.act_main_end_date,
+      -- Return IST calendar YYYY-MM-DD (naive timestamps are wall-clock IST)
+      to_char(ams.act_maint_st_date, 'YYYY-MM-DD') AS act_maint_st_date,
+      to_char(ams.act_main_end_date, 'YYYY-MM-DD') AS act_main_end_date,
       ams.notes,
       v.vendor_name,
       ${complianceSql()} AS compliance_status

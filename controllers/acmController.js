@@ -58,7 +58,12 @@ const getAcmOptions = async (req, res) => {
     const rows = (req.user.acm?.rows?.length
       ? req.user.acm.rows
       : await getAcmRowsByUserId(req.user.user_id, db)
-    ).filter((r) => r.int_status === 1 || r.int_status === undefined);
+    ).filter((r) => {
+      if (!r) return false;
+      // Accept numeric/string 1, or missing status (rows from auth already active)
+      const st = r.int_status;
+      return st === undefined || st === null || Number(st) === 1;
+    });
 
     const defaultSelection = await resolveDefaultAcmSelection(rows, db);
 

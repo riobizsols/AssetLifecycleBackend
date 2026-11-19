@@ -6,33 +6,63 @@ const { getDbFromContext } = require('../utils/dbContext');
 const getDb = () => getDbFromContext();
 
 /**
- * Get all job roles for an organization
+ * Get all job roles available to an organization.
+ *
+ * tblJobRoles.job_role_id is the PRIMARY KEY (tenant-wide), not (org_id, job_role_id).
+ * Roles are therefore shared across orgs in the same DB; org_id is only a stamp for
+ * which org created them. Filtering strictly by org_id hides the catalog from orgs
+ * that reuse those IDs (e.g. KMCH ORG004 users assigned JR001 owned by NGP ORG003),
+ * which made Manage Roles show "No roles available".
  */
 const getJobRolesByOrg = async (org_id) => {
     const dbPool = getDb();
 
     const result = await dbPool.query(
-        `SELECT job_role_id, text, job_function, int_status, notif_warranty, notif_scrap
-         FROM "tblJobRoles" 
-         WHERE org_id = $1 AND int_status = 1
-         ORDER BY job_role_id DESC`,
+        `SELECT job_role_id, text, job_function, int_status, notif_warranty, notif_scrap, org_id
+         FROM "tblJobRoles"
+         WHERE COALESCE(int_status, 1) = 1
+           AND (
+             org_id = $1
+             OR EXISTS (
+               SELECT 1
+                 FROM "tblUserJobRoles" ujr
+                 JOIN "tblUsers" u ON u.user_id = ujr.user_id
+                WHERE ujr.job_role_id = "tblJobRoles".job_role_id
+                  AND u.org_id = $1
+             )
+             OR NOT EXISTS (
+               SELECT 1
+                 FROM "tblJobRoles" own
+                WHERE own.org_id = $1
+                  AND COALESCE(own.int_status, 1) = 1
+             )
+           )
+         ORDER BY job_role_id ASC`,
         [org_id]
     );
     return result.rows;
 };
 
 /**
- * Get specific job role by ID
+ * Get specific job role by ID (org_id preferred, then shared role by id).
  */
 const getJobRoleByIdFromDb = async (job_role_id, org_id) => {
     const dbPool = getDb();
 
-    const result = await dbPool.query(
-        `SELECT * FROM "tblJobRoles" 
-         WHERE job_role_id = $1 AND org_id = $2 AND int_status = 1`,
+    const preferred = await dbPool.query(
+        `SELECT * FROM "tblJobRoles"
+         WHERE job_role_id = $1 AND org_id = $2 AND COALESCE(int_status, 1) = 1`,
         [job_role_id, org_id]
     );
-    return result.rows[0];
+    if (preferred.rows[0]) return preferred.rows[0];
+
+    const shared = await dbPool.query(
+        `SELECT * FROM "tblJobRoles"
+         WHERE job_role_id = $1 AND COALESCE(int_status, 1) = 1
+         LIMIT 1`,
+        [job_role_id]
+    );
+    return shared.rows[0];
 };
 
 /**
